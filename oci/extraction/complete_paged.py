@@ -7,14 +7,11 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Mapping, Sequence
 
-from .llm_routing import validate_stage2_response_model
-
 COMPLETE_PAGED_VERSION = "complete_paged_v1"
 COMPLETE_PAGED_REQUEST_PLAN_SCHEMA = "complete_paged_request_plan_v1"
 COMPLETE_PAGED_RESPONSE_SCHEMA = "complete_paged_closed_response_v1"
 COMPLETE_PAGED_RECONCILIATION_SCHEMA = "complete_paged_reconciliation_v1"
 COMPLETE_PAGED_COVERAGE_LEDGER_SCHEMA = "complete_paged_terminal_coverage_ledger_v1"
-COMPLETE_PAGED_TRANSPORT_SCHEMA = "complete_paged_zero_retry_transport_v1"
 PAGE_RESPONSE_STATUSES = frozenset({"positive", "negative", "missing", "ambiguous"})
 
 
@@ -187,36 +184,6 @@ def validate_absolute_citations(
             raise ValueError("citation lies outside the page supplied to the model")
         unique[(start, end)] = {"start": start, "end": end, "text": quote, "sha256": _sha(quote)}
     return tuple(unique[key] for key in sorted(unique))
-
-
-def bounded_recursive_reconcile(
-    results: Sequence[Any], reducer: Callable[[Sequence[Any]], Any], *, fan_in: int,
-) -> tuple[Any, Mapping[str, Any]]:
-    if fan_in < 2 or not results:
-        raise ValueError("reconciliation needs at least one child and fan_in >= 2")
-    level = list(results)
-    ledger: list[dict[str, Any]] = []
-    depth = 0
-    while len(level) > 1:
-        next_level = []
-        for start in range(0, len(level), fan_in):
-            children = level[start:start + fan_in]
-            reduced = reducer(children)
-            ledger.append({
-                "depth": depth,
-                "child_start": start,
-                "child_count": len(children),
-                "child_sha256": [_value_sha(value) for value in children],
-                "result_sha256": _value_sha(reduced),
-            })
-            next_level.append(reduced)
-        level = next_level
-        depth += 1
-    return level[0], {
-        "schema_version": COMPLETE_PAGED_VERSION,
-        "leaf_count": len(results), "fan_in": fan_in, "reductions": ledger,
-        "every_child_accounted_for_exactly_once": True,
-    }
 
 
 @dataclass(frozen=True)
@@ -563,45 +530,6 @@ class CompletePageResponse:
         }
 
 
-def parse_complete_page_response(
-    content: str,
-    *,
-    text: str,
-    page: CompleteNotePage,
-) -> CompletePageResponse:
-    def reject_duplicates(
-        pairs: Sequence[tuple[str, Any]],
-    ) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(
-                    f"complete-page response contains duplicate key {key!r}"
-                )
-            result[key] = value
-        return result
-
-    try:
-        value = json.loads(
-            content,
-            object_pairs_hook=reject_duplicates,
-            parse_constant=lambda token: (_ for _ in ()).throw(
-                ValueError(
-                    f"complete-page response contains non-finite value {token}"
-                )
-            ),
-        )
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise ValueError("complete-page response is not valid JSON") from exc
-    return CompletePageResponse.validate(value, text=text, page=page)
-
-
-def _response_field(value: Any, name: str) -> Any:
-    if isinstance(value, Mapping):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
 def _validate_reconciled_response_payload(
     value: Mapping[str, Any],
     *,
@@ -705,90 +633,6 @@ def _validate_reconciled_response_payload(
         "reason": reason,
         "citations": citations,
     }
-
-
-def validate_response_envelope(
-    response: Any,
-    *,
-    configured_model: str,
-) -> str:
-    choices = _response_field(response, "choices")
-    if not isinstance(choices, Sequence) or isinstance(choices, (str, bytes)):
-        raise ValueError("complete-page transport response lacks choices")
-    if len(choices) != 1:
-        raise ValueError("complete-page transport requires exactly one choice")
-    choice = choices[0]
-    message = _response_field(choice, "message")
-    content = _response_field(message, "content")
-    validate_stage2_response_model(
-        _response_field(response, "model"),
-        requested_model=configured_model,
-    )
-    if _response_field(choice, "finish_reason") != "stop" or not isinstance(content, str):
-        raise ValueError(
-            "complete-page response has non-stop finish or invalid content"
-        )
-    return content
-
-
-def execute_zero_retry_with_one_schema_repair(
-    *,
-    call: Callable[[Mapping[str, Any]], Any],
-    initial_request: Mapping[str, Any],
-    repair_request: Mapping[str, Any],
-    configured_model: str,
-    validator: Callable[[str], Any],
-) -> tuple[Any, Mapping[str, Any]]:
-    """Call once, repairing only a schema failure with one fixed request.
-
-    Transport failures, wrong-model responses, and non-stop completions abort
-    immediately.  The caller must supply the fixed repair request in advance.
-    """
-
-    initial_response = call(initial_request)
-    initial_content = validate_response_envelope(
-        initial_response,
-        configured_model=configured_model,
-    )
-    initial_response_model = _response_field(initial_response, "model")
-    attempts = [
-        {
-            "kind": "initial",
-            "request_sha256": _value_sha(initial_request),
-            "response_sha256": _sha(initial_content),
-            "model": initial_response_model,
-            "finish_reason": "stop",
-        }
-    ]
-    try:
-        result = validator(initial_content)
-        repaired = False
-    except (TypeError, ValueError):
-        repair_response = call(repair_request)
-        repair_content = validate_response_envelope(
-            repair_response,
-            configured_model=configured_model,
-        )
-        repair_response_model = _response_field(repair_response, "model")
-        attempts.append(
-            {
-                "kind": "fixed_schema_repair",
-                "request_sha256": _value_sha(repair_request),
-                "response_sha256": _sha(repair_content),
-                "model": repair_response_model,
-                "finish_reason": "stop",
-            }
-        )
-        result = validator(repair_content)
-        repaired = True
-    body = {
-        "schema_version": COMPLETE_PAGED_TRANSPORT_SCHEMA,
-        "transport_retry_count": 0,
-        "schema_repair_count": int(repaired),
-        "configured_model": configured_model,
-        "attempts": attempts,
-    }
-    return result, {**body, "content_sha256": _value_sha(body)}
 
 
 def reconcile_complete_page_responses(
@@ -925,7 +769,6 @@ __all__ = [
     "COMPLETE_PAGED_RECONCILIATION_SCHEMA",
     "COMPLETE_PAGED_REQUEST_PLAN_SCHEMA",
     "COMPLETE_PAGED_RESPONSE_SCHEMA",
-    "COMPLETE_PAGED_TRANSPORT_SCHEMA",
     "COMPLETE_PAGED_VERSION",
     "CompleteFeatureContract",
     "CompleteNotePage",
@@ -933,16 +776,12 @@ __all__ = [
     "CompletePagingGeometry",
     "CompletePagedRequest",
     "CompletePagedRequestPlan",
-    "bounded_recursive_reconcile",
     "build_complete_page_prompt",
     "build_complete_paged_coverage_ledger",
-    "execute_zero_retry_with_one_schema_repair",
-    "parse_complete_page_response",
     "plan_complete_note_pages",
     "plan_complete_paged_requests",
     "reconcile_complete_page_responses",
     "validate_absolute_citations",
     "validate_complete_note_page_plan",
     "validate_complete_paged_request_plan",
-    "validate_response_envelope",
 ]

@@ -33,8 +33,6 @@ def prompt_inputs(messages):
 def install(monkeypatch):
     from oci.inference import plain_handoff_stage2 as workflow
     from oci.inference import plain_handoff_stage2_analysis as analysis
-    from oci.inference import stage2_clinical_prompts as clinical
-    from oci.inference import stage2_multi_model_adjudication as multi
     _LOCAL.records = {}
     _SHARED.clear()
 
@@ -77,35 +75,3 @@ def install(monkeypatch):
         "feature": a["feature"], "observed_training_representations": a["observations"], "prior_plan_to_extend_or_replace": a["prior_plan"]})
     spy(analysis, "_harmonization_delta_prompt", lambda a: {"job": "extend_stage2_harmonization_map_for_new_text_values",
         "feature": a["feature"], "frozen_harmonization_plan": a["prior_plan"], "new_observed_training_text_values": a["new_categorical_values"]})
-
-    # Modeling responders inspect the safe evidence object before its rendering.
-    evidence_input = clinical.evidence_input
-    @wraps(evidence_input)
-    def record_evidence(evidence, cards):
-        text = evidence_input(evidence, cards)
-        _records()[text] = {"candidates": list(cards), "role_evidence": {**evidence, "candidates": list(cards)}}
-        return text
-    monkeypatch.setattr(clinical, "evidence_input", record_evidence)
-    original_messages = clinical.messages
-    tasks = {"14_default_roles": "adjudicate_stage2_roles_from_all_evidence", "15_model_themes": "review_stage2_multi_model_themes",
-             "17_model_roles": "adjudicate_stage2_multi_model_roles", "18_rank_modifiers": "rank_stage2_modifiers",
-             "19_merge_rankings": "merge_stage2_modifier_ranking", "20_advisory_roles": "annotate_stage2_roles_only"}
-    @wraps(original_messages)
-    def record_messages(slug, text):
-        messages = original_messages(slug, text)
-        if slug in tasks:
-            core = text.split("\n\nRelated clinical themes\n")[0].split("\n\nRecorded decision\n")[0]
-            data = deepcopy(_records().get(core, {}))
-            data["task"] = tasks[slug]
-            if slug == "17_model_roles":
-                data["themes"] = text.split("Related clinical themes\n")[-1]
-            _records()[messages[1]["content"]] = data
-        return messages
-    monkeypatch.setattr(clinical, "messages", record_messages)
-
-
-def role_response(*, confounder=False, modifier=False):
-    return {role: {"assign": assign, "assessment": "plausible" if assign else "not_supported",
-        "stability": "insufficient", "rationale": "Exploratory support." if assign else "Insufficient supporting evidence.",
-        "evidence_comments": ["Compare the supplied validation evidence."]}
-        for role, assign in (("confounder", confounder), ("effect_modifier", modifier))}

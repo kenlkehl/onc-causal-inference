@@ -27,8 +27,7 @@ def inputs(values=None, *, repeats=3, folds=3):
 def run(path, data=None, **kwargs):
     definitions, report = data or inputs()
     return ranking.rank_modifier_candidates(definitions=definitions, statistical_report=report,
-        output_dir=path, maximum=kwargs.pop("maximum", 64),
-        request_json=lambda *a, **k: pytest.fail("unexpected LLM request"), **kwargs)
+        output_dir=path, maximum=kwargs.pop("maximum", 64), **kwargs)
 
 
 def by_id(result):
@@ -115,15 +114,15 @@ def test_disabled_dina_for_continuous_outcomes_is_not_a_missing_vote(tmp_path):
     assert set(result['criterion']['sources']) == {'univariable_rlearner', 'causal_forest'}
 
 
-def test_locks_budget_order_and_model_independence(tmp_path):
+def test_locks_budget_and_order_independence(tmp_path):
     data = inputs()
     data[0][0]['configured_explicit_feature'] = True
-    first = run(tmp_path, data, maximum=1, model_identity='gemma')
+    first = run(tmp_path, data, maximum=1)
     assert first['locked_feature_ids'] == ['individual']
     assert 'individual' not in by_id(first)
     data[0].reverse(); data[1]['cells'].reverse()
     for cell in data[1]['cells']: cell['records'].reverse()
-    second = run(tmp_path, data, maximum=1, model_identity='another-model')
+    second = run(tmp_path, data, maximum=1)
     assert first == second and len(first['ranking']) == 1
 
 

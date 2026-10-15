@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
-"""Run the simple, automatically resumable all-evidence workflow."""
+"""Run or resume the all-evidence workflow; see ``--help`` for options."""
 
-import os
-import tempfile
+import sys
 from pathlib import Path
 
-# Some modeling dependencies import plotting support. Give Matplotlib a
-# writable cache location when the workflow runs on a cluster.
-os.environ.setdefault(
-    "MPLCONFIGDIR",
-    str(Path(tempfile.gettempdir()) / "oci-matplotlib"),
-)
+# Use the checkout that contains this script, not another installed copy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from oci.inference.research_all_evidence_workflow import main
+from oci.inference.research_all_evidence_workflow import main  # noqa: E402
 
 if __name__ == "__main__":
     raise SystemExit(main())

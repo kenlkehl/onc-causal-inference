@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import os
-import shutil
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -32,50 +29,27 @@ def validate_selection_resume(config: workflow.ResearchStage1Config) -> None:
             raise RuntimeError(
                 "reselection preparation was interrupted; resume with --stage2-reselect"
             )
-    requested = config.stage2.statistical_selection.selection_mode
     saved_path = root / "config.json"
-    if saved_path.exists():
-        saved = _object(saved_path)
-        for name in ("min_propensity", "max_propensity"):
-            if saved.get(name) != getattr(config.stage2, name):
-                raise RuntimeError("Stage 2 propensity bounds changed; use guarded --stage2-reselect")
-        prior = (saved.get("statistical_selection") or {}).get("selection_mode", "llm_roles")
-        if requested != prior:
-            raise RuntimeError(
-                "Stage 2 selection mode changed; use guarded --stage2-reselect "
-                "for a completed run or preserve the partial Stage 2 tree first"
-            )
-        if requested == "multi_model":
-            from .stage2_elastic_net_selection import statistical_selection_config_from_mapping
-            from .stage2_multi_model_config import SCHEMA_VERSION
+    if not saved_path.exists():
+        return
+    saved = _object(saved_path)
+    for name in ("min_propensity", "max_propensity"):
+        if saved.get(name) != getattr(config.stage2, name):
+            raise RuntimeError("Stage 2 propensity bounds changed; use guarded --stage2-reselect")
+    from .stage2_elastic_net_selection import statistical_selection_config_from_mapping
+    from .stage2_multi_model_config import SCHEMA_VERSION
 
-            saved_multi = (saved.get("statistical_selection") or {}).get("multi_model") or {}
-            if saved_multi.get("schema_version") != SCHEMA_VERSION:
-                raise RuntimeError(
-                    "Stage 2 multi-model policy changed (predictive nuisance selection, adjusted interaction tests, and balanced modifier selection); "
-                    "use guarded --stage2-reselect"
-                )
-            saved_policy = statistical_selection_config_from_mapping(saved.get("statistical_selection"))
-            if saved_policy.public_dict() != config.stage2.statistical_selection.public_dict():
-                raise RuntimeError("Stage 2 multi-model policy changed; use guarded --stage2-reselect")
-            if (
-                config.stage2.statistical_selection.multi_model.modifier_count.enabled
-                and saved.get("estimation_trees") != config.stage2.estimation_trees
-            ):
-                raise RuntimeError(
-                    "Stage 2 modifier-count estimation_trees changed; "
-                    "use guarded --stage2-reselect"
-                )
-    for path in root.glob("outer_*/selection/elastic_net_selection.json"):
-        authority = _object(path).get("selection_authority", "llm_roles")
-        if authority != requested:
-            raise RuntimeError(
-                f"Stage 2 selection authority differs from requested mode: {path}; "
-                "use guarded --stage2-reselect"
-            )
-    if requested != "llm_roles" and (root / "complete.json").exists() and not saved_path.exists():
+    saved_multi = (saved.get("statistical_selection") or {}).get("multi_model") or {}
+    if saved_multi.get("schema_version") != SCHEMA_VERSION:
         raise RuntimeError(
-            "completed Stage 2 has no saved selection policy; cannot confirm authority"
+            "Stage 2 multi-model selection schema changed; use guarded --stage2-reselect"
+        )
+    saved_policy = statistical_selection_config_from_mapping(saved.get("statistical_selection"))
+    if saved_policy.public_dict() != config.stage2.statistical_selection.public_dict():
+        raise RuntimeError("Stage 2 multi-model policy changed; use guarded --stage2-reselect")
+    if saved.get("estimation_trees") != config.stage2.estimation_trees:
+        raise RuntimeError(
+            "Stage 2 modifier-count estimation_trees changed; use guarded --stage2-reselect"
         )
 
 
@@ -95,7 +69,6 @@ def preflight_stage2(
     config: workflow.ResearchStage1Config,
     *,
     reselect: bool = False,
-    source_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Validate without directory creation, fold resampling, fitting, or network calls."""
     if config.components != ("stage2",) or config.stage2 is None:
@@ -150,7 +123,8 @@ def preflight_stage2(
         if not path.is_file():
             raise FileNotFoundError(f"handoff source is missing: {path}")
     if not index.get("schema_version"):
-        # Legacy combined handoffs are envelopes around these exact component rows.
+        # Without an architecture selector the handoff is the raw format: each
+        # row is an envelope around one exact row of a component's evidence.
         iterators = {
             name: iter(workflow._iter_jsonl(handoff / ref))
             for name, ref in index.get("sources", {}).items()
@@ -245,9 +219,7 @@ def preflight_stage2(
         or Path(cache["semantic_metadata"]["dataset_path"]).resolve() != config.dataset
     ):
         raise RuntimeError("Stage 1 embedding cache dataset identity mismatch")
-    if source_dir is not None and not reselect:
-        raise ValueError("archived source requires guarded reselection")
-    stage2 = source_dir or root / "stage2"
+    stage2 = root / "stage2"
     for fold, split in splits.items():
         outer = stage2 / f"outer_{fold:03d}"
         selection_path = outer / "selection" / "input.json"
@@ -281,12 +253,9 @@ def preflight_stage2(
                 )
     migration = None
     if reselect:
-        migration = workflow.prepare_stage2_reselection(
-            config=config, dry_run=True, source_dir=source_dir
-        )
+        migration = workflow.prepare_stage2_reselection(config=config, dry_run=True)
     else:
         validate_selection_resume(config)
-    stage2 = source_dir or root / "stage2"
     extraction = config.stage2.extraction_llm
     if not config.stage2.model or extraction is None or not extraction.model:
         raise RuntimeError(
@@ -313,7 +282,6 @@ def preflight_stage2(
         "outer_folds": config.outer_folds,
         "inner_folds": config.inner_folds,
         "dataset_identity": identity,
-        "selection_mode": config.stage2.statistical_selection.selection_mode,
         "propensity_bounds": {"minimum": config.stage2.min_propensity,
                               "maximum": config.stage2.max_propensity,
                               "inclusive": True},
@@ -330,30 +298,3 @@ def preflight_stage2(
         "migration": migration,
         "live_endpoints_checked": False,
     }
-
-
-def restore_stage2_archive(config: workflow.ResearchStage1Config, source: Path) -> Path:
-    """Copy a verified completed archive without linking mutable output trees.
-
-    Publish only a complete copy. An interrupted copy remains in a uniquely named
-    sibling directory; a retry copies again and never adopts partial contents.
-    """
-    source = source.resolve(strict=True)
-    destination = config.output_dir / "stage2"
-    if destination.exists():
-        raise RuntimeError(
-            "stage2 already exists; omit OCI_STAGE2_SOURCE and resume the active run"
-        )
-    if source == destination or destination in source.parents or source in destination.parents:
-        raise ValueError("archive source and Stage 2 destination must be separate directories")
-    preflight_stage2(config, reselect=True, source_dir=source)
-    temporary = Path(tempfile.mkdtemp(prefix=".stage2-restore-", dir=config.output_dir))
-    staging = temporary / "stage2"
-    # copytree's default dereferences symlinks and copy2 creates independent files.
-    # No symlink or hardlink to a mutable archived output is published.
-    shutil.copytree(source, staging)
-    if destination.exists():
-        raise RuntimeError(f"stage2 appeared during copy; independent copy retained at {staging}")
-    staging.rename(destination)
-    temporary.rmdir()
-    return destination

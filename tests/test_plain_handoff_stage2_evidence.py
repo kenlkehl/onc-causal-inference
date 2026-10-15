@@ -351,18 +351,16 @@ def test_compiler_preserves_enabled_architectures_as_independent_interpretation_
                         "outcome": {"topics": []},
                         "effect": {"topics": []},
                     },
-                    "topic_score_tests": {
-                        "effect_orphan_ngram_branch": {
-                            "selected_cluster_ids": ["orphan_1"],
-                            "selected_clusters": [
-                                {
-                                    "cluster_id": "orphan_1",
-                                    "term_scores": [
-                                        {"term": "orphan residual wording", "fit_rank": 7}
-                                    ],
-                                }
-                            ],
-                        }
+                    "effect_orphan_ngram_branch": {
+                        "selected_cluster_ids": ["orphan_1"],
+                        "selected_clusters": [
+                            {
+                                "cluster_id": "orphan_1",
+                                "term_scores": [
+                                    {"term": "orphan residual wording", "fit_rank": 7}
+                                ],
+                            }
+                        ],
                     },
                 }
             },
@@ -397,7 +395,7 @@ def test_compiler_preserves_enabled_architectures_as_independent_interpretation_
         # an included-architecture filter hiding missing lanes.
         for contrast in rows[0]["evidence"]["embedding_contrast_evidence"]["contrasts"]:
             contrast.pop("tfidf_retrieval_terms")
-        rows[1]["evidence"]["discovery"]["topic_score_tests"]["effect_orphan_ngram_branch"] = {
+        rows[1]["evidence"]["discovery"]["effect_orphan_ngram_branch"] = {
             "status": "disabled", "clusters": [], "selected_clusters": [],
             "selected_cluster_ids": [], "selection_count": 0,
         }

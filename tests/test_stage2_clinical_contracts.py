@@ -4,8 +4,7 @@ from copy import deepcopy
 import pytest
 
 from oci.inference import plain_handoff_stage2_analysis as extraction
-from oci.inference import stage2_clinical_prompts as prompts
-from oci.inference.stage2_modifier_concepts import _concept_validator, infer_modifier_concepts
+from oci.inference.stage2_modifier_concepts import infer_modifier_concepts
 from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
 from oci.inference.stage2_value_interpretation import compile_value_interpretations
 
@@ -106,6 +105,7 @@ def test_concept_recurrence_and_representatives_stay_with_supplied_evidence(tmp_
         output_dir=tmp_path, role_policy=Stage2RoleAdjudicationConfig(), top_n=100, maximum=64,
         maximum_chars=100000, model_identity="test")
     assert len(rankings) == 3 and len(rankings[-1]["definitions"]) == 1
+    assert all(set(call) == {"definitions", "statistical_report", "output_dir", "maximum"} for call in rankings)
     assert result["concept_review"]["recurrence"] == {"a": 2, "b": 2}
     assert result["concept_review"]["confounders_changed"] is False
     assert result["ranking"][0]["feature_id"] == "a"

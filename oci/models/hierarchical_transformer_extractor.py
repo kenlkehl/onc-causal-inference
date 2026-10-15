@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .gated_attention_pooling import GatedAttentionPooling, MultiHeadGatedAttentionPooling
+from .gated_attention_pooling import GatedAttentionPooling
 from .lossless_tokenization import SemanticTruncationError
 
 logger = logging.getLogger(__name__)
@@ -29,34 +29,8 @@ _TRANSFORMERS_ENCODER_INIT_LOCK = threading.Lock()
 _SENTENCE_TRANSFORMER_INIT_LOCK = threading.Lock()
 _LEGACY_BERT_MODEL_PREFIXES = ("prajjwal1/bert-",)
 HTR_SENTENCE_ENCODER_TRAINING_AUDIT_SCHEMA = "htr_sentence_encoder_training_state_v1"
-_HTR_ENVIRONMENT_OVERRIDES = (
-    "OCI_HTR_ENCODER_BATCH_SIZE",
-    "OCI_HTR_CHUNK_CACHE_MAX_ENTRIES",
-    "OCI_HTR_TOKEN_CACHE_MAX_ENTRIES",
-)
-
-
-def _configured_activation(name: str) -> nn.Module:
-    """Return one closed activation implementation.
-
-    The exact GELU approximation is part of the name so a scientific
-    constructor never inherits a framework default that could later change.
-    """
-
-    implementations = {
-        "gelu_exact": lambda: nn.GELU(approximate="none"),
-        "gelu_tanh": lambda: nn.GELU(approximate="tanh"),
-        "relu": lambda: nn.ReLU(inplace=False),
-        "silu": lambda: nn.SiLU(inplace=False),
-        "tanh": nn.Tanh,
-    }
-    key = str(name)
-    if key not in implementations:
-        raise ValueError(
-            "HTR activation must be one of: "
-            + ", ".join(sorted(implementations))
-        )
-    return implementations[key]()
+_CHUNK_CACHE_MAX_ENTRIES = 100000
+_TOKENIZATION_CACHE_MAX_ENTRIES = 200000
 
 
 def split_text_into_word_chunks(
@@ -433,7 +407,7 @@ def _find_overlapping_word(
 
 
 class _InterpretableTransformerLayer(nn.Module):
-    """Transformer encoder layer that can return self-attention weights."""
+    """Post-norm transformer encoder layer that can return self-attention weights."""
 
     def __init__(
         self,
@@ -441,51 +415,23 @@ class _InterpretableTransformerLayer(nn.Module):
         d_model: int,
         nhead: int,
         dim_feedforward: int,
-        activation: str,
-        norm_style: str,
-        layer_norm_eps: float,
-        layer_norm_elementwise_affine: bool,
-        layer_norm_bias: bool,
-        attention_dropout: float,
-        residual_dropout: float,
-        feedforward_dropout: float,
-        attention_bias: bool,
-        feedforward_bias: bool,
+        dropout: float,
     ):
         super().__init__()
-        if norm_style not in {"pre_norm", "post_norm"}:
-            raise ValueError("HTR transformer norm_style must be pre_norm or post_norm")
-        self.norm_style = str(norm_style)
         self.self_attn = nn.MultiheadAttention(
             d_model,
             nhead,
-            dropout=attention_dropout,
-            bias=attention_bias,
+            dropout=dropout,
+            bias=True,
             batch_first=True,
         )
-        self.linear1 = nn.Linear(
-            d_model,
-            dim_feedforward,
-            bias=feedforward_bias,
-        )
-        self.linear2 = nn.Linear(
-            dim_feedforward,
-            d_model,
-            bias=feedforward_bias,
-        )
-        norm_kwargs = {
-            "eps": float(layer_norm_eps),
-            "elementwise_affine": bool(layer_norm_elementwise_affine),
-            "bias": bool(layer_norm_bias),
-        }
-        self.norm1 = nn.LayerNorm(d_model, **norm_kwargs)
-        self.norm2 = nn.LayerNorm(d_model, **norm_kwargs)
-        self.residual_dropout = nn.Dropout(residual_dropout, inplace=False)
-        self.feedforward_dropout = nn.Dropout(
-            feedforward_dropout,
-            inplace=False,
-        )
-        self.activation = _configured_activation(activation)
+        self.linear1 = nn.Linear(d_model, dim_feedforward, bias=True)
+        self.linear2 = nn.Linear(dim_feedforward, d_model, bias=True)
+        self.norm1 = nn.LayerNorm(d_model, eps=1e-5)
+        self.norm2 = nn.LayerNorm(d_model, eps=1e-5)
+        self.residual_dropout = nn.Dropout(dropout, inplace=False)
+        self.feedforward_dropout = nn.Dropout(dropout, inplace=False)
+        self.activation = nn.GELU(approximate="none")
 
     def forward(
         self,
@@ -493,38 +439,19 @@ class _InterpretableTransformerLayer(nn.Module):
         key_padding_mask: Optional[torch.Tensor] = None,
         return_attention: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        if self.norm_style == "pre_norm":
-            attention_input = self.norm1(x)
-            attn_output, attn_weights = self.self_attn(
-                attention_input,
-                attention_input,
-                attention_input,
-                key_padding_mask=key_padding_mask,
-                need_weights=return_attention,
-                average_attn_weights=True,
-            )
-            x = x + self.residual_dropout(attn_output)
-            feedforward_input = self.norm2(x)
-            ff_output = self.linear2(
-                self.feedforward_dropout(
-                    self.activation(self.linear1(feedforward_input))
-                )
-            )
-            x = x + self.residual_dropout(ff_output)
-        else:
-            attn_output, attn_weights = self.self_attn(
-                x,
-                x,
-                x,
-                key_padding_mask=key_padding_mask,
-                need_weights=return_attention,
-                average_attn_weights=True,
-            )
-            x = self.norm1(x + self.residual_dropout(attn_output))
-            ff_output = self.linear2(
-                self.feedforward_dropout(self.activation(self.linear1(x)))
-            )
-            x = self.norm2(x + self.residual_dropout(ff_output))
+        attn_output, attn_weights = self.self_attn(
+            x,
+            x,
+            x,
+            key_padding_mask=key_padding_mask,
+            need_weights=return_attention,
+            average_attn_weights=True,
+        )
+        x = self.norm1(x + self.residual_dropout(attn_output))
+        ff_output = self.linear2(
+            self.feedforward_dropout(self.activation(self.linear1(x)))
+        )
+        x = self.norm2(x + self.residual_dropout(ff_output))
         return x, attn_weights
 
 
@@ -566,30 +493,6 @@ class HierarchicalTransformerExtractor(nn.Module):
         sentence_pooling: str = "auto",
         normalize_sentence_embeddings: bool = True,
         trainable_sentence_encoder_layers: int = 0,
-        role_attention: bool = False,
-        w_attention_heads: int = 1,
-        x_attention_heads: int = 1,
-        transformer_feedforward_dim: Optional[int] = None,
-        transformer_activation: str = "gelu_exact",
-        transformer_norm_style: str = "post_norm",
-        transformer_layer_norm_eps: float = 1e-5,
-        transformer_layer_norm_elementwise_affine: bool = True,
-        transformer_layer_norm_bias: bool = True,
-        transformer_attention_dropout: Optional[float] = None,
-        transformer_residual_dropout: Optional[float] = None,
-        transformer_feedforward_dropout: Optional[float] = None,
-        transformer_attention_bias: bool = True,
-        transformer_feedforward_bias: bool = True,
-        output_projection_depth: int = 1,
-        output_projection_hidden_dim: Optional[int] = None,
-        output_projection_activation: str = "gelu_exact",
-        output_projection_dropout: Optional[float] = None,
-        output_projection_hidden_layer_norm: bool = True,
-        output_projection_final_layer_norm: bool = True,
-        output_projection_bias: bool = True,
-        pool_token_init_std: float = 0.02,
-        positional_encoding_base: float = 10_000.0,
-        environment_override_policy: str = "legacy_allow",
         device: Optional[torch.device] = None,
     ):
         super().__init__()
@@ -617,26 +520,6 @@ class HierarchicalTransformerExtractor(nn.Module):
         self._dropout = float(transformer_dropout)
         self._projection_dim = int(projection_dim)
         self._hash_embedding_dim = int(hash_embedding_dim)
-        environment_override_policy = str(environment_override_policy)
-        if environment_override_policy not in {"forbid", "legacy_allow"}:
-            raise ValueError(
-                "environment_override_policy must be forbid or legacy_allow"
-            )
-        observed_environment_overrides = tuple(
-            name for name in _HTR_ENVIRONMENT_OVERRIDES if name in os.environ
-        )
-        if (
-            environment_override_policy == "forbid"
-            and observed_environment_overrides
-        ):
-            raise RuntimeError(
-                "typed HTR execution forbids environment overrides; unset "
-                + ", ".join(observed_environment_overrides)
-            )
-        if environment_override_policy == "legacy_allow":
-            env_batch_size = os.environ.get("OCI_HTR_ENCODER_BATCH_SIZE")
-            if env_batch_size:
-                sentence_encoder_batch_size = int(env_batch_size)
         if sentence_encoder_batch_size <= 0:
             raise ValueError("sentence_encoder_batch_size must be positive")
         sentence_encoder_backend = str(sentence_encoder_backend or "auto").lower()
@@ -652,123 +535,15 @@ class HierarchicalTransformerExtractor(nn.Module):
             )
         if trainable_sentence_encoder_layers < 0:
             raise ValueError("trainable_sentence_encoder_layers must be >= 0")
-        if w_attention_heads < 1:
-            raise ValueError("w_attention_heads must be >= 1")
-        if x_attention_heads < 1:
-            raise ValueError("x_attention_heads must be >= 1")
-        feedforward_dim = (
-            int(transformer_dim) * 4
-            if transformer_feedforward_dim is None
-            else int(transformer_feedforward_dim)
-        )
-        output_hidden_dim = (
-            int(transformer_dim)
-            if output_projection_hidden_dim is None
-            else int(output_projection_hidden_dim)
-        )
-        attention_dropout = (
-            float(transformer_dropout)
-            if transformer_attention_dropout is None
-            else float(transformer_attention_dropout)
-        )
-        residual_dropout = (
-            float(transformer_dropout)
-            if transformer_residual_dropout is None
-            else float(transformer_residual_dropout)
-        )
-        feedforward_dropout = (
-            float(transformer_dropout)
-            if transformer_feedforward_dropout is None
-            else float(transformer_feedforward_dropout)
-        )
-        output_dropout = (
-            float(transformer_dropout)
-            if output_projection_dropout is None
-            else float(output_projection_dropout)
-        )
-        if feedforward_dim < 1 or output_hidden_dim < 1:
-            raise ValueError("HTR feedforward/output hidden dimensions must be positive")
-        if int(output_projection_depth) < 0:
-            raise ValueError("HTR output_projection_depth must be nonnegative")
-        if str(transformer_norm_style) not in {"pre_norm", "post_norm"}:
-            raise ValueError("HTR transformer norm style is unsupported")
-        _configured_activation(str(transformer_activation))
-        _configured_activation(str(output_projection_activation))
-        if (
-            not math.isfinite(float(transformer_layer_norm_eps))
-            or float(transformer_layer_norm_eps) <= 0.0
-        ):
-            raise ValueError("HTR layer-norm epsilon must be finite and positive")
-        for name, value in (
-            ("transformer_attention_dropout", attention_dropout),
-            ("transformer_residual_dropout", residual_dropout),
-            ("transformer_feedforward_dropout", feedforward_dropout),
-            ("output_projection_dropout", output_dropout),
-        ):
-            if not math.isfinite(value) or not 0.0 <= value < 1.0:
-                raise ValueError(f"HTR {name} must be in [0, 1)")
-        if (
-            not math.isfinite(float(pool_token_init_std))
-            or float(pool_token_init_std) < 0.0
-        ):
-            raise ValueError("HTR pool-token initialization std must be nonnegative")
-        if (
-            not math.isfinite(float(positional_encoding_base))
-            or float(positional_encoding_base) <= 1.0
-        ):
-            raise ValueError("HTR positional-encoding base must exceed one")
-        boolean_topology = {
-            "transformer_layer_norm_elementwise_affine": (
-                transformer_layer_norm_elementwise_affine
-            ),
-            "transformer_layer_norm_bias": transformer_layer_norm_bias,
-            "transformer_attention_bias": transformer_attention_bias,
-            "transformer_feedforward_bias": transformer_feedforward_bias,
-            "output_projection_hidden_layer_norm": (
-                output_projection_hidden_layer_norm
-            ),
-            "output_projection_final_layer_norm": (
-                output_projection_final_layer_norm
-            ),
-            "output_projection_bias": output_projection_bias,
-        }
-        if any(type(value) is not bool for value in boolean_topology.values()):
-            raise TypeError("HTR topology Boolean settings must be exact booleans")
+        if int(transformer_dim) < 1:
+            raise ValueError("HTR transformer_dim must be positive")
+        if not math.isfinite(self._dropout) or not 0.0 <= self._dropout < 1.0:
+            raise ValueError("HTR transformer_dropout must be in [0, 1)")
         self._sentence_encoder_batch_size = int(sentence_encoder_batch_size)
         self._sentence_encoder_backend = sentence_encoder_backend
         self._sentence_pooling = sentence_pooling
         self._normalize_sentence_embeddings = bool(normalize_sentence_embeddings)
         self._trainable_sentence_encoder_layers = int(trainable_sentence_encoder_layers)
-        self._role_attention = bool(role_attention)
-        self._w_attention_heads = int(w_attention_heads)
-        self._x_attention_heads = int(x_attention_heads)
-        self._transformer_feedforward_dim = feedforward_dim
-        self._transformer_activation = str(transformer_activation)
-        self._transformer_norm_style = str(transformer_norm_style)
-        self._transformer_layer_norm_eps = float(transformer_layer_norm_eps)
-        self._transformer_layer_norm_elementwise_affine = bool(
-            transformer_layer_norm_elementwise_affine
-        )
-        self._transformer_layer_norm_bias = bool(transformer_layer_norm_bias)
-        self._transformer_attention_dropout = attention_dropout
-        self._transformer_residual_dropout = residual_dropout
-        self._transformer_feedforward_dropout = feedforward_dropout
-        self._transformer_attention_bias = bool(transformer_attention_bias)
-        self._transformer_feedforward_bias = bool(transformer_feedforward_bias)
-        self._output_projection_depth = int(output_projection_depth)
-        self._output_projection_hidden_dim = output_hidden_dim
-        self._output_projection_activation = str(output_projection_activation)
-        self._output_projection_dropout = output_dropout
-        self._output_projection_hidden_layer_norm = bool(
-            output_projection_hidden_layer_norm
-        )
-        self._output_projection_final_layer_norm = bool(
-            output_projection_final_layer_norm
-        )
-        self._output_projection_bias = bool(output_projection_bias)
-        self._pool_token_init_std = float(pool_token_init_std)
-        self._positional_encoding_base = float(positional_encoding_base)
-        self._environment_override_policy = environment_override_policy
         self._encoder_has_trainable_params = False
         self._hash_backend = str(sentence_encoder_model).lower() in {
             "hash",
@@ -783,25 +558,13 @@ class HierarchicalTransformerExtractor(nn.Module):
         self._sentence_encoder = None
         self._sentence_transformer_encoder = None
         self._token_pooling: Optional[GatedAttentionPooling] = None
-        self._w_token_pooling: Optional[MultiHeadGatedAttentionPooling] = None
-        self._x_token_pooling: Optional[MultiHeadGatedAttentionPooling] = None
-        self._w_chunk_pooling: Optional[MultiHeadGatedAttentionPooling] = None
-        self._x_chunk_pooling: Optional[MultiHeadGatedAttentionPooling] = None
         self._resolved_sentence_encoder_path: Optional[str] = None
         self._sentence_dim = self._hash_embedding_dim if self._hash_backend else None
         self._encoder_initialized = self._hash_backend
         self._chunk_cache: Dict[str, List[str]] = {}
         self._tokenization_cache: Dict[str, Tuple[Tuple[int, ...], Tuple[int, ...]]] = {}
-        self._chunk_cache_max_entries = int(
-            os.environ.get("OCI_HTR_CHUNK_CACHE_MAX_ENTRIES", "100000")
-            if environment_override_policy == "legacy_allow"
-            else 100000
-        )
-        self._tokenization_cache_max_entries = int(
-            os.environ.get("OCI_HTR_TOKEN_CACHE_MAX_ENTRIES", "200000")
-            if environment_override_policy == "legacy_allow"
-            else 200000
-        )
+        self._chunk_cache_max_entries = _CHUNK_CACHE_MAX_ENTRIES
+        self._tokenization_cache_max_entries = _TOKENIZATION_CACHE_MAX_ENTRIES
 
         self._input_projection = nn.Linear(
             self._hash_embedding_dim if self._hash_backend else transformer_dim,
@@ -811,124 +574,48 @@ class HierarchicalTransformerExtractor(nn.Module):
             # Replaced lazily once the encoder hidden size is known.
             self._input_projection = None
 
-        self._pool_token = nn.Parameter(
-            torch.randn(1, transformer_dim) * self._pool_token_init_std
-        )
+        self._pool_token = nn.Parameter(torch.randn(1, transformer_dim) * 0.02)
         self.register_buffer(
             "_positional_encoding",
-            self._make_positional_encoding(
-                max_chunks + 1,
-                transformer_dim,
-                base=self._positional_encoding_base,
-            ),
+            self._make_positional_encoding(max_chunks + 1, transformer_dim),
         )
         self._transformer_layers = nn.ModuleList(
             [
                 _InterpretableTransformerLayer(
                     d_model=transformer_dim,
                     nhead=num_attention_heads,
-                    dim_feedforward=self._transformer_feedforward_dim,
-                    activation=self._transformer_activation,
-                    norm_style=self._transformer_norm_style,
-                    layer_norm_eps=self._transformer_layer_norm_eps,
-                    layer_norm_elementwise_affine=(
-                        self._transformer_layer_norm_elementwise_affine
-                    ),
-                    layer_norm_bias=self._transformer_layer_norm_bias,
-                    attention_dropout=self._transformer_attention_dropout,
-                    residual_dropout=self._transformer_residual_dropout,
-                    feedforward_dropout=self._transformer_feedforward_dropout,
-                    attention_bias=self._transformer_attention_bias,
-                    feedforward_bias=self._transformer_feedforward_bias,
+                    dim_feedforward=4 * int(transformer_dim),
+                    dropout=self._dropout,
                 )
                 for _ in range(num_transformer_layers)
             ]
         )
-        output_layers: List[nn.Module] = []
-        output_input_dim = int(transformer_dim)
-        output_norm_kwargs = {
-            "eps": self._transformer_layer_norm_eps,
-            "elementwise_affine": self._transformer_layer_norm_elementwise_affine,
-            "bias": self._transformer_layer_norm_bias,
-        }
-        for _ in range(self._output_projection_depth):
-            output_layers.append(
-                nn.Linear(
-                    output_input_dim,
-                    self._output_projection_hidden_dim,
-                    bias=self._output_projection_bias,
-                )
-            )
-            if self._output_projection_hidden_layer_norm:
-                output_layers.append(
-                    nn.LayerNorm(
-                        self._output_projection_hidden_dim,
-                        **output_norm_kwargs,
-                    )
-                )
-            output_layers.append(
-                _configured_activation(self._output_projection_activation)
-            )
-            output_layers.append(
-                nn.Dropout(
-                    self._output_projection_dropout,
-                    inplace=False,
-                )
-            )
-            output_input_dim = self._output_projection_hidden_dim
-        output_layers.append(
-            nn.Linear(
-                output_input_dim,
-                projection_dim,
-                bias=self._output_projection_bias,
-            )
+        self._output_projection = nn.Sequential(
+            nn.Linear(transformer_dim, transformer_dim, bias=True),
+            nn.LayerNorm(transformer_dim, eps=1e-5),
+            nn.GELU(approximate="none"),
+            nn.Dropout(self._dropout, inplace=False),
+            nn.Linear(transformer_dim, projection_dim, bias=True),
+            nn.LayerNorm(projection_dim, eps=1e-5),
         )
-        if self._output_projection_final_layer_norm:
-            output_layers.append(
-                nn.LayerNorm(projection_dim, **output_norm_kwargs)
-            )
-        self._output_projection = nn.Sequential(*output_layers)
-        if self._role_attention:
-            self._w_chunk_pooling = MultiHeadGatedAttentionPooling(
-                hidden_dim=transformer_dim,
-                attention_dim=transformer_dim,
-                num_heads=self._w_attention_heads,
-            )
-            self._x_chunk_pooling = MultiHeadGatedAttentionPooling(
-                hidden_dim=transformer_dim,
-                attention_dim=transformer_dim,
-                num_heads=self._x_attention_heads,
-            )
         self._last_chunks: List[List[str]] = []
         self._last_chunk_weights: Optional[torch.Tensor] = None
-        self._last_role_chunk_weights: Dict[str, torch.Tensor] = {}
         self._last_token_weights_by_chunk: List[torch.Tensor] = []
-        self._last_role_token_weights_by_chunk: Dict[str, List[torch.Tensor]] = {}
         self._capture_token_attention = False
         self._token_weight_capture_buffer: List[torch.Tensor] = []
-        self._role_token_weight_capture_buffer: Dict[str, List[torch.Tensor]] = {}
         self.to(self._device)
 
     @property
     def output_dim(self) -> int:
         return self._projection_dim
 
-    @property
-    def has_role_features(self) -> bool:
-        return self._role_attention
-
     @staticmethod
-    def _make_positional_encoding(
-        max_len: int,
-        d_model: int,
-        *,
-        base: float = 10_000.0,
-    ) -> torch.Tensor:
+    def _make_positional_encoding(max_len: int, d_model: int) -> torch.Tensor:
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(
             torch.arange(0, d_model, 2).float()
-            * (-math.log(float(base)) / d_model)
+            * (-math.log(10_000.0) / d_model)
         )
         pe[:, 0::2] = torch.sin(position * div_term)
         if d_model % 2:
@@ -1281,20 +968,6 @@ class HierarchicalTransformerExtractor(nn.Module):
             return
         if self._sentence_dim is None:
             raise RuntimeError("token_attention pooling requires an initialized encoder")
-        if self._role_attention:
-            if self._w_token_pooling is None:
-                self._w_token_pooling = MultiHeadGatedAttentionPooling(
-                    hidden_dim=int(self._sentence_dim),
-                    attention_dim=int(self._transformer_dim),
-                    num_heads=self._w_attention_heads,
-                ).to(self._device)
-            if self._x_token_pooling is None:
-                self._x_token_pooling = MultiHeadGatedAttentionPooling(
-                    hidden_dim=int(self._sentence_dim),
-                    attention_dim=int(self._transformer_dim),
-                    num_heads=self._x_attention_heads,
-                ).to(self._device)
-            return
         if self._token_pooling is None:
             self._token_pooling = GatedAttentionPooling(
                 hidden_dim=int(self._sentence_dim),
@@ -1429,37 +1102,6 @@ class HierarchicalTransformerExtractor(nn.Module):
         attention_mask: torch.Tensor,
     ):
         pooling = self._effective_sentence_pooling()
-        if self._role_attention and pooling == "token_attention":
-            self._ensure_token_pooling_initialized()
-            if self._w_token_pooling is None or self._x_token_pooling is None:
-                raise RuntimeError("role token_attention pooling was not initialized")
-            w_by_head, w_token_weights = self._w_token_pooling(
-                last_hidden_state,
-                attention_mask=attention_mask.to(last_hidden_state.dtype),
-            )
-            x_by_head, x_token_weights = self._x_token_pooling(
-                last_hidden_state,
-                attention_mask=attention_mask.to(last_hidden_state.dtype),
-            )
-            w_pooled = w_by_head.mean(dim=1)
-            x_pooled = x_by_head.mean(dim=1)
-            if self._normalize_sentence_embeddings:
-                w_pooled = F.normalize(w_pooled, p=2, dim=1)
-                x_pooled = F.normalize(x_pooled, p=2, dim=1)
-            shared = 0.5 * (w_pooled + x_pooled)
-            return (
-                {
-                    "features": shared,
-                    "w_features": w_pooled,
-                    "x_features": x_pooled,
-                },
-                {
-                    "w": w_token_weights.mean(dim=1),
-                    "x": x_token_weights.mean(dim=1),
-                    "w_heads": w_token_weights,
-                    "x_heads": x_token_weights,
-                },
-            )
         if pooling == "last":
             pooled = self._last_token_pool(last_hidden_state, attention_mask)
             token_weights = None
@@ -1480,15 +1122,6 @@ class HierarchicalTransformerExtractor(nn.Module):
             token_weights = None
         if self._normalize_sentence_embeddings:
             pooled = F.normalize(pooled, p=2, dim=1)
-        if self._role_attention:
-            return (
-                {
-                    "features": pooled,
-                    "w_features": pooled,
-                    "x_features": pooled,
-                },
-                None,
-            )
         return pooled, token_weights
 
     def _capture_token_weights(
@@ -1498,58 +1131,19 @@ class HierarchicalTransformerExtractor(nn.Module):
     ) -> None:
         if not self._capture_token_attention or token_weights is None:
             return
-        if isinstance(token_weights, dict):
-            mask_cpu = attention_mask.detach().cpu()
-            for role in ("w", "x"):
-                role_weights = token_weights.get(role)
-                if role_weights is None:
-                    continue
-                weights_cpu = role_weights.detach().cpu()
-                target = self._role_token_weight_capture_buffer.setdefault(role, [])
-                for row in range(weights_cpu.shape[0]):
-                    valid_len = int(mask_cpu[row].sum().item())
-                    target.append(weights_cpu[row, :valid_len].clone())
-            return
         weights_cpu = token_weights.detach().cpu()
         mask_cpu = attention_mask.detach().cpu()
         for row in range(weights_cpu.shape[0]):
             valid_len = int(mask_cpu[row].sum().item())
             self._token_weight_capture_buffer.append(weights_cpu[row, :valid_len].clone())
 
-    def _encode_chunks(
-        self,
-        chunks: Sequence[str],
-        *,
-        return_attention_tensors: bool = False,
-    ):
+    def _encode_chunks(self, chunks: Sequence[str]) -> torch.Tensor:
         self._ensure_encoder_initialized()
         if self._hash_backend:
-            embeddings = torch.stack([self._hash_chunk_embedding(chunk) for chunk in chunks])
-            if self._role_attention:
-                embeddings = {
-                    "features": embeddings,
-                    "w_features": embeddings,
-                    "x_features": embeddings,
-                }
-            if return_attention_tensors:
-                return embeddings, None
-            return embeddings
-
+            return torch.stack([self._hash_chunk_embedding(chunk) for chunk in chunks])
         if self._effective_sentence_encoder_backend() == "sentence_transformers":
-            embeddings = self._encode_chunks_with_sentence_transformer(chunks)
-            if self._role_attention:
-                embeddings = {
-                    "features": embeddings,
-                    "w_features": embeddings,
-                    "x_features": embeddings,
-                }
-            if return_attention_tensors:
-                return embeddings, None
-            return embeddings
-        return self._encode_chunks_with_transformers(
-            chunks,
-            return_attention_tensors=return_attention_tensors,
-        )
+            return self._encode_chunks_with_sentence_transformer(chunks)
+        return self._encode_chunks_with_transformers(chunks)
 
     def _encode_chunks_with_sentence_transformer(self, chunks: Sequence[str]) -> torch.Tensor:
         if self._sentence_transformer_encoder is None:
@@ -1569,31 +1163,12 @@ class HierarchicalTransformerExtractor(nn.Module):
         embeddings_np = np.concatenate(embeddings_by_batch, axis=0)
         return torch.as_tensor(embeddings_np, dtype=torch.float32, device=self._device)
 
-    def _encode_chunks_with_transformers(
-        self,
-        chunks: Sequence[str],
-        *,
-        return_attention_tensors: bool = False,
-    ):
+    def _encode_chunks_with_transformers(self, chunks: Sequence[str]) -> torch.Tensor:
         chunk_list = list(chunks)
         outputs_by_batch = []
-        role_outputs_by_batch: Dict[str, List[torch.Tensor]] = {
-            "features": [],
-            "w_features": [],
-            "x_features": [],
-        }
-        token_weights_by_batch: List[torch.Tensor] = []
-        role_token_weights_by_batch: Dict[str, List[torch.Tensor]] = {"w": [], "x": []}
-        input_ids_by_batch: List[torch.Tensor] = []
-        attention_mask_by_batch: List[torch.Tensor] = []
-        offset_mapping_by_batch: List[torch.Tensor] = []
         for start in range(0, len(chunk_list), self._sentence_encoder_batch_size):
             batch_chunks = chunk_list[start : start + self._sentence_encoder_batch_size]
-            encoded = self._tokenize_chunks_for_transformers(
-                batch_chunks,
-                return_offsets_mapping=return_attention_tensors,
-            )
-            offset_mapping = encoded.pop("offset_mapping", None)
+            encoded = self._tokenize_chunks_for_transformers(batch_chunks)
             input_ids = encoded["input_ids"].to(self._device)
             attention_mask = encoded["attention_mask"].to(self._device)
             if self._sentence_encoder is not None and not self._encoder_has_trainable_params:
@@ -1615,83 +1190,19 @@ class HierarchicalTransformerExtractor(nn.Module):
                 attention_mask,
             )
             self._capture_token_weights(token_weights, attention_mask)
-            if isinstance(pooled, dict):
-                for key, value in pooled.items():
-                    role_outputs_by_batch[key].append(value.float())
-            else:
-                outputs_by_batch.append(pooled.float())
-            if return_attention_tensors:
-                if isinstance(token_weights, dict):
-                    for role in ("w", "x"):
-                        role_weights = token_weights.get(role)
-                        if role_weights is not None:
-                            role_token_weights_by_batch[role].append(role_weights)
-                    if token_weights.get("w") is not None and token_weights.get("x") is not None:
-                        token_weights_by_batch.append(
-                            0.5 * (token_weights["w"] + token_weights["x"])
-                        )
-                elif token_weights is not None:
-                    token_weights_by_batch.append(token_weights)
-                input_ids_by_batch.append(input_ids)
-                attention_mask_by_batch.append(attention_mask)
-                if offset_mapping is None:
-                    offset_mapping = torch.full(
-                        (input_ids.shape[0], input_ids.shape[1], 2),
-                        -1,
-                        dtype=torch.long,
-                        device=self._device,
-                    )
-                else:
-                    offset_mapping = offset_mapping.to(self._device)
-                offset_mapping_by_batch.append(offset_mapping)
-        if role_outputs_by_batch["features"]:
-            embeddings = {
-                key: torch.cat(value, dim=0)
-                for key, value in role_outputs_by_batch.items()
-                if value
-            }
-        else:
-            embeddings = torch.cat(outputs_by_batch, dim=0)
-        if not return_attention_tensors:
-            return embeddings
-        token_info: Dict[str, Any] = {
-            "token_alpha": (
-                self._pad_and_cat_token_batches(token_weights_by_batch, pad_value=0.0)
-                if token_weights_by_batch
-                else None
-            ),
-            "token_alpha_sources": token_weights_by_batch,
-            "role_token_alpha": {
-                role: (self._pad_and_cat_token_batches(values, pad_value=0.0) if values else None)
-                for role, values in role_token_weights_by_batch.items()
-            },
-            "input_ids": self._pad_and_cat_token_batches(input_ids_by_batch, pad_value=0),
-            "attention_mask": self._pad_and_cat_token_batches(attention_mask_by_batch, pad_value=0),
-            "offset_mapping": self._pad_and_cat_offset_batches(offset_mapping_by_batch),
-        }
-        return embeddings, token_info
+            outputs_by_batch.append(pooled.float())
+        return torch.cat(outputs_by_batch, dim=0)
 
     def _encode_prepared_transformer_chunks(
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
-        *,
-        return_attention_tensors: bool = False,
-    ):
+    ) -> torch.Tensor:
         input_ids = input_ids.to(self._device, non_blocking=True)
         attention_mask = attention_mask.to(self._device, non_blocking=True)
         if self._sentence_encoder is not None and not self._encoder_has_trainable_params:
             self._sentence_encoder.eval()
         outputs_by_batch = []
-        role_outputs_by_batch: Dict[str, List[torch.Tensor]] = {
-            "features": [],
-            "w_features": [],
-            "x_features": [],
-        }
-        token_weights_by_batch: List[torch.Tensor] = []
-        role_token_weights_by_batch: Dict[str, List[torch.Tensor]] = {"w": [], "x": []}
-        input_ids_by_batch: List[torch.Tensor] = []
-        attention_mask_by_batch: List[torch.Tensor] = []
         for start in range(0, input_ids.shape[0], self._sentence_encoder_batch_size):
             batch_input_ids = input_ids[start : start + self._sentence_encoder_batch_size]
             batch_attention_mask = attention_mask[start : start + self._sentence_encoder_batch_size]
@@ -1712,122 +1223,26 @@ class HierarchicalTransformerExtractor(nn.Module):
                 batch_attention_mask,
             )
             self._capture_token_weights(token_weights, batch_attention_mask)
-            if isinstance(pooled, dict):
-                for key, value in pooled.items():
-                    role_outputs_by_batch[key].append(value.float())
-            else:
-                outputs_by_batch.append(pooled.float())
-            if return_attention_tensors:
-                if isinstance(token_weights, dict):
-                    for role in ("w", "x"):
-                        role_weights = token_weights.get(role)
-                        if role_weights is not None:
-                            role_token_weights_by_batch[role].append(role_weights)
-                    if token_weights.get("w") is not None and token_weights.get("x") is not None:
-                        token_weights_by_batch.append(
-                            0.5 * (token_weights["w"] + token_weights["x"])
-                        )
-                elif token_weights is not None:
-                    token_weights_by_batch.append(token_weights)
-                input_ids_by_batch.append(batch_input_ids)
-                attention_mask_by_batch.append(batch_attention_mask)
-        if role_outputs_by_batch["features"]:
-            embeddings = {
-                key: torch.cat(value, dim=0)
-                for key, value in role_outputs_by_batch.items()
-                if value
-            }
-        else:
-            embeddings = torch.cat(outputs_by_batch, dim=0)
-        if not return_attention_tensors:
-            return embeddings
-        token_info: Dict[str, Any] = {
-            "token_alpha": (
-                self._pad_and_cat_token_batches(token_weights_by_batch, pad_value=0.0)
-                if token_weights_by_batch
-                else None
-            ),
-            "token_alpha_sources": token_weights_by_batch,
-            "role_token_alpha": {
-                role: (self._pad_and_cat_token_batches(values, pad_value=0.0) if values else None)
-                for role, values in role_token_weights_by_batch.items()
-            },
-            "input_ids": self._pad_and_cat_token_batches(input_ids_by_batch, pad_value=0),
-            "attention_mask": self._pad_and_cat_token_batches(attention_mask_by_batch, pad_value=0),
-            "offset_mapping": torch.full(
-                (input_ids.shape[0], input_ids.shape[1], 2),
-                -1,
-                dtype=torch.long,
-                device=self._device,
-            ),
-        }
-        return embeddings, token_info
-
-    @staticmethod
-    def _pad_and_cat_token_batches(
-        batches: Sequence[torch.Tensor],
-        *,
-        pad_value: float,
-    ) -> torch.Tensor:
-        if not batches:
-            return torch.empty(0)
-        max_len = max(int(batch.shape[1]) for batch in batches)
-        padded = []
-        for batch in batches:
-            pad = max_len - int(batch.shape[1])
-            if pad > 0:
-                padded.append(F.pad(batch, (0, pad), value=pad_value))
-            else:
-                padded.append(batch)
-        return torch.cat(padded, dim=0)
-
-    @staticmethod
-    def _pad_and_cat_offset_batches(batches: Sequence[torch.Tensor]) -> torch.Tensor:
-        if not batches:
-            return torch.empty(0, 0, 2, dtype=torch.long)
-        max_len = max(int(batch.shape[1]) for batch in batches)
-        padded = []
-        for batch in batches:
-            pad = max_len - int(batch.shape[1])
-            if pad > 0:
-                padded.append(F.pad(batch, (0, 0, 0, pad), value=-1))
-            else:
-                padded.append(batch)
-        return torch.cat(padded, dim=0)
+            outputs_by_batch.append(pooled.float())
+        return torch.cat(outputs_by_batch, dim=0)
 
     def _tokenize_chunks_for_transformers(
         self,
         chunks: Sequence[str],
-        *,
-        return_offsets_mapping: bool = False,
     ) -> Dict[str, torch.Tensor]:
-        entries = [
-            self._tokenize_one_chunk_for_transformers(
-                chunk,
-                return_offsets_mapping=return_offsets_mapping,
-            )
-            for chunk in chunks
-        ]
-        return self._collate_tokenized_chunks(entries)
+        entries = [self._tokenize_one_chunk_for_transformers(chunk) for chunk in chunks]
+        return _collate_tokenized_chunks(self._tokenizer, entries)
 
     def _tokenize_one_chunk_for_transformers(
         self,
         chunk: str,
-        *,
-        return_offsets_mapping: bool = False,
-    ):
+    ) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
         key = str(chunk or "")
-        cached = None if return_offsets_mapping else self._tokenization_cache.get(key)
+        cached = self._tokenization_cache.get(key)
         if cached is not None:
             return cached
 
-        kwargs = {
-            "padding": False,
-            "truncation": False,
-        }
-        if return_offsets_mapping and bool(getattr(self._tokenizer, "is_fast", False)):
-            kwargs["return_offsets_mapping"] = True
-        encoded = self._tokenizer(key, **kwargs)
+        encoded = self._tokenizer(key, padding=False, truncation=False)
         input_ids = tuple(int(token_id) for token_id in encoded["input_ids"])
         attention_mask = tuple(int(mask_value) for mask_value in encoded["attention_mask"])
         if len(input_ids) > self._max_chunk_length:
@@ -1835,42 +1250,9 @@ class HierarchicalTransformerExtractor(nn.Module):
                 "HTR tokenizer input exceeds max_chunk_length; semantic truncation is forbidden "
                 f"({len(input_ids)} > {self._max_chunk_length})"
             )
-        if return_offsets_mapping:
-            offsets = encoded.get("offset_mapping")
-            if offsets is None:
-                offsets = [(-1, -1) for _ in input_ids]
-            offset_tuple = tuple((int(start), int(end)) for start, end in offsets)
-            return input_ids, attention_mask, offset_tuple
         if len(self._tokenization_cache) < self._tokenization_cache_max_entries:
             self._tokenization_cache[key] = (input_ids, attention_mask)
         return input_ids, attention_mask
-
-    def _collate_tokenized_chunks(
-        self,
-        entries: Sequence[Any],
-    ) -> Dict[str, torch.Tensor]:
-        if not entries:
-            return _collate_tokenized_chunks(self._tokenizer, entries)
-        has_offsets = len(entries[0]) == 3
-        if not has_offsets:
-            return _collate_tokenized_chunks(self._tokenizer, entries)
-        basic_entries = [(input_ids, attention_mask) for input_ids, attention_mask, _ in entries]
-        collated = _collate_tokenized_chunks(self._tokenizer, basic_entries)
-        max_length = int(collated["input_ids"].shape[1])
-        offsets_tensor = torch.full(
-            (len(entries), max_length, 2),
-            -1,
-            dtype=torch.long,
-        )
-        left_pad = getattr(self._tokenizer, "padding_side", "right") == "left"
-        for row, (_input_ids, _attention_mask, offsets) in enumerate(entries):
-            offset = max_length - len(offsets) if left_pad else 0
-            offsets_tensor[row, offset : offset + len(offsets)] = torch.as_tensor(
-                offsets,
-                dtype=torch.long,
-            )
-        collated["offset_mapping"] = offsets_tensor
-        return collated
 
     def _chunks_for_texts(self, texts: Sequence[str]) -> List[List[str]]:
         chunks_by_text: List[List[str]] = []
@@ -1916,20 +1298,6 @@ class HierarchicalTransformerExtractor(nn.Module):
             tokenization_cache_max_entries=self._tokenization_cache_max_entries,
         )
 
-    def prepare_batch(self, texts: Sequence[str]) -> Dict[str, Any]:
-        return self.make_batch_preprocessor()(texts)
-
-    def forward_role_features(self, texts_or_batch):
-        """Return shared, W-role, and X-role document features."""
-        if not self._role_attention:
-            features = self.forward(texts_or_batch)
-            return {
-                "features": features,
-                "w_features": features,
-                "x_features": features,
-            }
-        return self.forward(texts_or_batch, return_role_features=True)
-
     def _pack_chunk_tensor(
         self,
         flat_embeddings: torch.Tensor,
@@ -1956,16 +1324,11 @@ class HierarchicalTransformerExtractor(nn.Module):
         self,
         chunk_tensor: torch.Tensor,
         chunk_mask: torch.Tensor,
-        *,
-        return_attention_tensors: bool = False,
-    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         batch_size = chunk_tensor.shape[0]
         pool = self._pool_token.to(self._device).expand(batch_size, 1, -1)
         sequence = torch.cat([pool, chunk_tensor], dim=1)
         sequence = sequence + self._positional_encoding[: sequence.shape[1]].to(self._device)
-        sequence_input = sequence
-        if return_attention_tensors and sequence_input.requires_grad:
-            sequence_input.retain_grad()
 
         valid_mask = torch.cat(
             [
@@ -1982,68 +1345,9 @@ class HierarchicalTransformerExtractor(nn.Module):
                 key_padding_mask=key_padding_mask,
                 return_attention=True,
             )
-        return sequence, sequence_input, attn_weights
+        return sequence, attn_weights
 
-    def _role_document_features(
-        self,
-        flat_embeddings_by_role: Dict[str, torch.Tensor],
-        batch_chunks: Sequence[Sequence[str]],
-        *,
-        return_attention_tensors: bool = False,
-    ):
-        if self._w_chunk_pooling is None or self._x_chunk_pooling is None:
-            raise RuntimeError("role chunk attention pooling was not initialized")
-
-        role_outputs: Dict[str, torch.Tensor] = {}
-        role_chunk_alpha: Dict[str, torch.Tensor] = {}
-        role_sequence_inputs: Dict[str, torch.Tensor] = {}
-        chunk_mask = None
-        for feature_key, role, pooling in (
-            ("w_features", "w", self._w_chunk_pooling),
-            ("x_features", "x", self._x_chunk_pooling),
-        ):
-            flat_embeddings = self._input_projection(flat_embeddings_by_role[feature_key])
-            chunk_tensor, chunk_mask = self._pack_chunk_tensor(flat_embeddings, batch_chunks)
-            sequence, sequence_input, _ = self._run_chunk_transformer(
-                chunk_tensor,
-                chunk_mask,
-                return_attention_tensors=return_attention_tensors,
-            )
-            chunk_context = sequence[:, 1 : 1 + chunk_tensor.shape[1], :]
-            pooled_by_head, weights_by_head = pooling(
-                chunk_context,
-                attention_mask=chunk_mask,
-            )
-            role_hidden = pooled_by_head.mean(dim=1)
-            role_outputs[feature_key] = self._output_projection(role_hidden)
-            role_chunk_alpha[role] = weights_by_head.mean(dim=1)
-            role_sequence_inputs[role] = sequence_input
-
-        role_outputs["features"] = 0.5 * (role_outputs["w_features"] + role_outputs["x_features"])
-        self._last_role_chunk_weights = {
-            role: weights.detach() for role, weights in role_chunk_alpha.items()
-        }
-        self._last_chunk_weights = 0.5 * (
-            self._last_role_chunk_weights["w"] + self._last_role_chunk_weights["x"]
-        )
-        if not return_attention_tensors:
-            return role_outputs, chunk_mask, None
-        return (
-            role_outputs,
-            chunk_mask,
-            {
-                "role_chunk_alpha": role_chunk_alpha,
-                "role_sequence_input": role_sequence_inputs,
-            },
-        )
-
-    def forward(
-        self,
-        texts_or_batch,
-        *,
-        return_attention_tensors: bool = False,
-        return_role_features: bool = False,
-    ):
+    def forward(self, texts_or_batch) -> torch.Tensor:
         prepared_batch = texts_or_batch if isinstance(texts_or_batch, dict) else None
         if prepared_batch is not None:
             texts = prepared_batch.get("texts")
@@ -2068,29 +1372,11 @@ class HierarchicalTransformerExtractor(nn.Module):
                 self._ensure_encoder_initialized()
             batch_chunks = self._chunks_for_texts(texts)
         if not texts:
-            features = torch.zeros(0, self._projection_dim, device=self._device)
-            output = (
-                {"features": features, "w_features": features, "x_features": features}
-                if return_role_features
-                else features
-            )
-            if return_attention_tensors:
-                return output, {
-                    "token_alpha": None,
-                    "chunk_alpha": None,
-                    "input_ids": None,
-                    "attention_mask": None,
-                    "offset_mapping": None,
-                    "token_alpha_sources": [],
-                    "batch_chunks": [],
-                }
-            return output
+            return torch.zeros(0, self._projection_dim, device=self._device)
 
         flat_chunks = [chunk for chunks in batch_chunks for chunk in chunks]
         if self._capture_token_attention:
             self._token_weight_capture_buffer = []
-            self._role_token_weight_capture_buffer = {"w": [], "x": []}
-        token_info = None
         if (
             prepared_batch is not None
             and "chunk_input_ids" in prepared_batch
@@ -2099,118 +1385,41 @@ class HierarchicalTransformerExtractor(nn.Module):
             and self._effective_sentence_encoder_backend() == "transformers"
         ):
             self._ensure_encoder_initialized()
-            encoded_chunks = self._encode_prepared_transformer_chunks(
+            flat_embeddings = self._encode_prepared_transformer_chunks(
                 prepared_batch["chunk_input_ids"],
                 prepared_batch["chunk_attention_mask"],
-                return_attention_tensors=return_attention_tensors,
             )
         else:
-            encoded_chunks = self._encode_chunks(
-                flat_chunks,
-                return_attention_tensors=return_attention_tensors,
-            )
-        if return_attention_tensors:
-            flat_embeddings, token_info = encoded_chunks
-        else:
-            flat_embeddings = encoded_chunks
+            flat_embeddings = self._encode_chunks(flat_chunks)
         if self._capture_token_attention:
             self._last_token_weights_by_chunk = list(self._token_weight_capture_buffer)
-            self._last_role_token_weights_by_chunk = {
-                role: list(values)
-                for role, values in self._role_token_weight_capture_buffer.items()
-            }
         else:
             self._last_token_weights_by_chunk = []
-            self._last_role_token_weights_by_chunk = {}
 
-        if isinstance(flat_embeddings, dict):
-            role_outputs, chunk_mask, role_attention_info = self._role_document_features(
-                flat_embeddings,
-                batch_chunks,
-                return_attention_tensors=return_attention_tensors,
-            )
-            features = role_outputs["features"]
-            chunk_alpha = self._last_chunk_weights
-            sequence_input = None
-            output = role_outputs if return_role_features else features
+        flat_embeddings = self._input_projection(flat_embeddings)
+        chunk_tensor, chunk_mask = self._pack_chunk_tensor(flat_embeddings, batch_chunks)
+        sequence, attn_weights = self._run_chunk_transformer(chunk_tensor, chunk_mask)
+        pool_output = sequence[:, 0, :]
+        features = self._output_projection(pool_output)
+
+        if attn_weights is not None:
+            pool_attention = attn_weights[:, 0, 1 : 1 + chunk_tensor.shape[1]]
+            pool_attention = pool_attention.masked_fill(~chunk_mask, 0.0)
+            denom = pool_attention.sum(dim=1, keepdim=True).clamp_min(1e-9)
+            self._last_chunk_weights = (pool_attention / denom).detach()
         else:
-            flat_embeddings = self._input_projection(flat_embeddings)
-            chunk_tensor, chunk_mask = self._pack_chunk_tensor(flat_embeddings, batch_chunks)
-            sequence, sequence_input, attn_weights = self._run_chunk_transformer(
-                chunk_tensor,
-                chunk_mask,
-                return_attention_tensors=return_attention_tensors,
-            )
-            pool_output = sequence[:, 0, :]
-            features = self._output_projection(pool_output)
-
-            if attn_weights is not None:
-                pool_attention = attn_weights[:, 0, 1 : 1 + chunk_tensor.shape[1]]
-                pool_attention = pool_attention.masked_fill(~chunk_mask, 0.0)
-                denom = pool_attention.sum(dim=1, keepdim=True).clamp_min(1e-9)
-                chunk_alpha = pool_attention / denom
-                self._last_chunk_weights = chunk_alpha.detach()
-            else:
-                chunk_alpha = None
-                self._last_chunk_weights = None
-            self._last_role_chunk_weights = {}
-            role_attention_info = None
-            output = features
+            self._last_chunk_weights = None
         self._last_chunks = batch_chunks
-        if return_attention_tensors:
-            if token_info is None:
-                token_info = {
-                    "token_alpha": None,
-                    "input_ids": None,
-                    "attention_mask": None,
-                    "offset_mapping": None,
-                    "token_alpha_sources": [],
-                }
-            token_alpha = token_info.get("token_alpha")
-            for token_alpha_source in token_info.get("token_alpha_sources") or []:
-                if token_alpha_source is not None and token_alpha_source.requires_grad:
-                    token_alpha_source.retain_grad()
-            if token_alpha is not None and token_alpha.requires_grad:
-                token_alpha.retain_grad()
-            if chunk_alpha is not None and chunk_alpha.requires_grad:
-                chunk_alpha.retain_grad()
-            role_token_alpha = token_info.get("role_token_alpha", {})
-            for role_alpha in role_token_alpha.values():
-                if role_alpha is not None and role_alpha.requires_grad:
-                    role_alpha.retain_grad()
-            if role_attention_info is not None:
-                for role_alpha in role_attention_info.get("role_chunk_alpha", {}).values():
-                    if role_alpha is not None and role_alpha.requires_grad:
-                        role_alpha.retain_grad()
-            attention_payload = {
-                "token_alpha": token_alpha,
-                "chunk_alpha": chunk_alpha,
-                "input_ids": token_info.get("input_ids"),
-                "attention_mask": token_info.get("attention_mask"),
-                "offset_mapping": token_info.get("offset_mapping"),
-                "token_alpha_sources": token_info.get("token_alpha_sources") or [],
-                "role_token_alpha": role_token_alpha,
-                "batch_chunks": batch_chunks,
-                "sequence_input": sequence_input,
-                "chunk_mask": chunk_mask,
-            }
-            if role_attention_info is not None:
-                attention_payload.update(role_attention_info)
-            return output, attention_payload
-        return output
+        return features
 
     def fit_tokenizer(self, texts: List[str]) -> None:
         self._ensure_encoder_initialized()
         self._populate_chunk_cache(texts)
         logger.info(
-            "HierarchicalTransformerExtractor ready: backend=%s pooling=%s "
-            "role_attention=%s W_heads=%s X_heads=%s device=%s "
+            "HierarchicalTransformerExtractor ready: backend=%s pooling=%s device=%s "
             "trainable_params=%s chunk_cache=%s token_cache=%s",
             self._effective_sentence_encoder_backend(),
             self._effective_sentence_pooling(),
-            self._role_attention,
-            self._w_attention_heads,
-            self._x_attention_heads,
             self._device,
             self.get_num_parameters(),
             len(self._chunk_cache),
@@ -2230,7 +1439,6 @@ class HierarchicalTransformerExtractor(nn.Module):
         self,
         texts: List[str],
         top_k: int = 5,
-        role: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         self.eval()
         previous_capture = self._capture_token_attention
@@ -2240,16 +1448,8 @@ class HierarchicalTransformerExtractor(nn.Module):
                 self.forward(texts)
             finally:
                 self._capture_token_attention = previous_capture
-        role = self._attention_role_from_stage(role) or role
         weights = self._last_chunk_weights
         token_weights_by_chunk = self._last_token_weights_by_chunk
-        if role in {"w", "x"}:
-            role_weights = self._last_role_chunk_weights.get(role)
-            if role_weights is not None:
-                weights = role_weights
-            role_token_weights = self._last_role_token_weights_by_chunk.get(role, [])
-            if role_token_weights:
-                token_weights_by_chunk = role_token_weights
         results = []
         flat_offsets = []
         offset = 0
@@ -2295,253 +1495,6 @@ class HierarchicalTransformerExtractor(nn.Module):
             )
         return results
 
-    def complete_attention_inventory(
-        self,
-        texts: Sequence[str],
-        *,
-        role: Optional[str] = None,
-        normalization_tolerance: float = 1e-5,
-    ) -> Dict[str, Any]:
-        """Return every model-native token and chunk attention occurrence.
-
-        This is a lossless evidence boundary, not a post-hoc attribution
-        method.  It exposes the learned gated token-pooler weights and the
-        final document-transformer pool-token weights that were used by the
-        fitted model.  Padding is never part of the returned token domain;
-        special tokens remain present and are explicitly marked.
-        """
-
-        values = [str(text) for text in texts]
-        if not values:
-            raise ValueError("complete HTR attention requires at least one note")
-        if (
-            not math.isfinite(float(normalization_tolerance))
-            or float(normalization_tolerance) <= 0.0
-        ):
-            raise ValueError("attention normalization tolerance must be positive")
-        if self._effective_sentence_pooling() != "token_attention":
-            raise RuntimeError(
-                "complete token evidence requires effective token_attention pooling"
-            )
-        self.eval()
-        with torch.no_grad():
-            _features, raw = self.forward(
-                values,
-                return_attention_tensors=True,
-            )
-        selected_role = self._attention_role_from_stage(role) or role
-        token_alpha = raw.get("token_alpha")
-        chunk_alpha = raw.get("chunk_alpha")
-        if selected_role in {"w", "x"}:
-            selected_token = (raw.get("role_token_alpha") or {}).get(
-                selected_role
-            )
-            selected_chunk = (raw.get("role_chunk_alpha") or {}).get(
-                selected_role
-            )
-            if selected_token is not None:
-                token_alpha = selected_token
-            if selected_chunk is not None:
-                chunk_alpha = selected_chunk
-        input_ids = raw.get("input_ids")
-        attention_mask = raw.get("attention_mask")
-        offset_mapping = raw.get("offset_mapping")
-        batch_chunks = raw.get("batch_chunks")
-        if (
-            token_alpha is None
-            or chunk_alpha is None
-            or input_ids is None
-            or attention_mask is None
-            or offset_mapping is None
-            or not isinstance(batch_chunks, list)
-        ):
-            raise RuntimeError(
-                "token_attention extractor omitted a native attention tensor"
-            )
-        if (
-            token_alpha.ndim != 2
-            or input_ids.shape != token_alpha.shape
-            or attention_mask.shape != token_alpha.shape
-            or offset_mapping.shape
-            != (token_alpha.shape[0], token_alpha.shape[1], 2)
-            or chunk_alpha.ndim != 2
-        ):
-            raise RuntimeError("native HTR attention tensor shapes changed")
-
-        token_values = token_alpha.detach().cpu().to(torch.float64)
-        chunk_values = chunk_alpha.detach().cpu().to(torch.float64)
-        id_values = input_ids.detach().cpu().to(torch.int64)
-        mask_values = attention_mask.detach().cpu().to(torch.int64)
-        offset_values = offset_mapping.detach().cpu().to(torch.int64)
-        flat_chunk_count = sum(len(chunks) for chunks in batch_chunks)
-        if flat_chunk_count != int(token_values.shape[0]):
-            raise RuntimeError("HTR token tensors changed the flat chunk order")
-        if len(batch_chunks) != int(chunk_values.shape[0]):
-            raise RuntimeError("HTR chunk tensor changed the note order")
-
-        tokenizer = self._tokenizer
-        if tokenizer is None:
-            raise RuntimeError("token_attention evidence lacks its fitted tokenizer")
-        special_ids = frozenset(
-            int(value)
-            for value in (getattr(tokenizer, "all_special_ids", None) or ())
-        )
-        try:
-            vocabulary = tokenizer.get_vocab()
-        except Exception as exc:
-            raise RuntimeError(
-                "fitted HTR tokenizer does not expose its vocabulary"
-            ) from exc
-        vocabulary_rows = sorted(
-            (str(token), int(token_id))
-            for token, token_id in vocabulary.items()
-        )
-        tokenizer_identity = {
-            "tokenizer_class": type(tokenizer).__name__,
-            "is_fast": bool(getattr(tokenizer, "is_fast", False)),
-            "vocabulary_size": len(vocabulary_rows),
-            "vocabulary_sha256": hashlib.sha256(
-                json.dumps(
-                    vocabulary_rows,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest(),
-            "all_special_ids": sorted(special_ids),
-            "padding_side": str(getattr(tokenizer, "padding_side", "right")),
-            "pad_token_id": (
-                None
-                if getattr(tokenizer, "pad_token_id", None) is None
-                else int(tokenizer.pad_token_id)
-            ),
-        }
-
-        notes: List[Dict[str, Any]] = []
-        flat_index = 0
-        for note_index, chunks in enumerate(batch_chunks):
-            chunk_count = len(chunks)
-            note_chunk_weights = chunk_values[note_index, :chunk_count]
-            if (
-                chunk_count < 1
-                or not torch.isfinite(note_chunk_weights).all()
-                or torch.any(note_chunk_weights < 0)
-                or abs(float(note_chunk_weights.sum().item()) - 1.0)
-                > float(normalization_tolerance)
-            ):
-                raise RuntimeError(
-                    "document-pool-token attention is not finite and normalized"
-                )
-            chunk_rows: List[Dict[str, Any]] = []
-            for chunk_index, chunk in enumerate(chunks):
-                mask = mask_values[flat_index]
-                valid_positions = torch.nonzero(mask != 0, as_tuple=False).flatten()
-                padding_positions = torch.nonzero(mask == 0, as_tuple=False).flatten()
-                if valid_positions.numel() < 1:
-                    raise RuntimeError("HTR chunk has an empty token pooling domain")
-                weights = token_values[flat_index]
-                valid_weights = weights[valid_positions]
-                if (
-                    not torch.isfinite(valid_weights).all()
-                    or torch.any(valid_weights < 0)
-                    or abs(float(valid_weights.sum().item()) - 1.0)
-                    > float(normalization_tolerance)
-                    or (
-                        padding_positions.numel()
-                        and torch.any(
-                            torch.abs(weights[padding_positions])
-                            > float(normalization_tolerance)
-                        )
-                    )
-                ):
-                    raise RuntimeError(
-                        "learned token-pooler attention is not masked and normalized"
-                    )
-                token_rows: List[Dict[str, Any]] = []
-                token_ids = [
-                    int(id_values[flat_index, int(position)].item())
-                    for position in valid_positions
-                ]
-                decoded = tokenizer.convert_ids_to_tokens(token_ids)
-                if isinstance(decoded, str):
-                    decoded = [decoded]
-                if not isinstance(decoded, list) or len(decoded) != len(token_ids):
-                    raise RuntimeError(
-                        "fitted tokenizer did not losslessly decode token IDs"
-                    )
-                for local_token_position, (
-                    tensor_position,
-                    token_id,
-                    decoded_token,
-                ) in enumerate(
-                    zip(valid_positions.tolist(), token_ids, decoded, strict=True)
-                ):
-                    start = int(
-                        offset_values[flat_index, int(tensor_position), 0].item()
-                    )
-                    end = int(
-                        offset_values[flat_index, int(tensor_position), 1].item()
-                    )
-                    is_special = token_id in special_ids
-                    if is_special:
-                        if start < 0 or end < 0 or end < start:
-                            raise RuntimeError(
-                                "special-token offsets are not representable"
-                            )
-                    elif not (0 <= start < end <= len(chunk)):
-                        raise RuntimeError(
-                            "non-special token offsets do not align to the chunk"
-                        )
-                    token_rows.append(
-                        {
-                            "token_position": int(local_token_position),
-                            "tensor_position": int(tensor_position),
-                            "token_id": token_id,
-                            "decoded_token_text": str(decoded_token),
-                            "char_start": start,
-                            "char_end": end,
-                            "is_special_token": bool(is_special),
-                            "is_padding": False,
-                            "token_attention": float(
-                                weights[int(tensor_position)].item()
-                            ),
-                        }
-                    )
-                chunk_rows.append(
-                    {
-                        "chunk_index": int(chunk_index),
-                        "chunk_text": str(chunk),
-                        "chunk_attention": float(
-                            note_chunk_weights[chunk_index].item()
-                        ),
-                        "tokens": token_rows,
-                        "padding_positions_excluded": int(
-                            padding_positions.numel()
-                        ),
-                    }
-                )
-                flat_index += 1
-            notes.append(
-                {
-                    "note_index": int(note_index),
-                    "chunks": chunk_rows,
-                }
-            )
-        if flat_index != flat_chunk_count:
-            raise RuntimeError("HTR complete attention traversal omitted a chunk")
-        return {
-            "schema_version": "complete_htr_native_attention_inventory_v1",
-            "sentence_pooling": str(self._sentence_pooling),
-            "effective_sentence_pooling": self._effective_sentence_pooling(),
-            "attention_role": selected_role,
-            "normalization_tolerance": float(normalization_tolerance),
-            "tokenizer_identity": tokenizer_identity,
-            "notes": notes,
-            "padding_excluded_from_token_normalization": True,
-            "special_tokens_retained": True,
-            "raw_bert_self_attention_used": False,
-            "post_hoc_attribution_used": False,
-        }
-
     def get_attention_evidence(
         self,
         texts: List[str],
@@ -2552,7 +1505,7 @@ class HierarchicalTransformerExtractor(nn.Module):
         metadata: Optional[Sequence[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         role = self._attention_role_from_stage(stage)
-        interpretations = self.interpret_attention(texts, top_k=top_k, role=role)
+        interpretations = self.interpret_attention(texts, top_k=top_k)
         if row_ids is None:
             row_ids = list(range(len(texts)))
         if metadata is None:
@@ -2757,45 +1710,6 @@ class HierarchicalTransformerExtractor(nn.Module):
             cursor = end
         pieces.append(chunk[cursor:])
         return "".join(pieces)
-
-    def get_attention_weights(self, texts: List[str]) -> Dict[str, Any]:
-        return {
-            "interpretations": self.interpret_attention(texts, top_k=self._max_chunks),
-            "num_layers": self._num_layers,
-            "num_heads": self._num_heads,
-            "model": self._sentence_encoder_model,
-        }
-
-    def get_state(self) -> Dict[str, Any]:
-        return {
-            "extractor_type": "hierarchical_transformer",
-            "sentence_encoder_model": self._sentence_encoder_model,
-            "freeze_sentence_encoder": self._freeze,
-            "chunk_size_words": self._chunk_size_words,
-            "chunk_overlap_words": self._chunk_overlap_words,
-            "max_chunks": self._max_chunks,
-            "max_chunk_length": self._max_chunk_length,
-            "sentence_encoder_batch_size": self._sentence_encoder_batch_size,
-            "sentence_encoder_backend": self._sentence_encoder_backend,
-            "effective_sentence_encoder_backend": self._effective_sentence_encoder_backend(),
-            "sentence_pooling": self._sentence_pooling,
-            "effective_sentence_pooling": self._effective_sentence_pooling(),
-            "normalize_sentence_embeddings": self._normalize_sentence_embeddings,
-            "trainable_sentence_encoder_layers": self._trainable_sentence_encoder_layers,
-            "trainable_sentence_encoder_params": (
-                self._trainable_sentence_encoder_parameter_count()
-            ),
-            "num_transformer_layers": self._num_layers,
-            "num_attention_heads": self._num_heads,
-            "transformer_dim": self._transformer_dim,
-            "transformer_dropout": self._dropout,
-            "projection_dim": self._projection_dim,
-            "hash_embedding_dim": self._hash_embedding_dim,
-            "role_attention": self._role_attention,
-            "w_attention_heads": self._w_attention_heads,
-            "x_attention_heads": self._x_attention_heads,
-            "output_dim": self._projection_dim,
-        }
 
     def get_num_parameters(self) -> Dict[str, int]:
         total = sum(p.numel() for p in self.parameters())

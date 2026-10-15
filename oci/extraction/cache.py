@@ -67,7 +67,6 @@ def _compute_config_hash(config: Dict[str, Any]) -> str:
             'extraction_request_group_sha256', ''
         ),
         'extraction_context_strategy': config.get('extraction_context_strategy', 'full_record'),
-        'colbert': config.get('colbert'),
         'extraction_context_compactor_version': config.get(
             'extraction_context_compactor_version', ''
         ),
@@ -77,11 +76,6 @@ def _compute_config_hash(config: Dict[str, Any]) -> str:
             'max_variables_per_extraction_request', 10
         ),
         'extraction_batch_size': config.get('extraction_batch_size'),
-        'extraction_provider': config.get('extraction_provider', ''),
-        'codex_cli_executable': config.get('codex_cli_executable', ''),
-        'codex_cli_model_name': config.get('codex_cli_model_name', ''),
-        'codex_cli_reasoning_effort': config.get('codex_cli_reasoning_effort', ''),
-        'codex_cli_extra_args': config.get('codex_cli_extra_args', []),
         'complete_document': config.get('complete_document', False),
     }
     config_str = json.dumps(hash_dict, sort_keys=True)
@@ -453,20 +447,3 @@ class ExtractionCache:
             .drop(columns=[ROW_INDEX_COLUMN])
             .reset_index(drop=True)
         )
-
-    def invalidate(self, dataset_path: str, config: Dict[str, Any]) -> bool:
-        """Invalidate (delete) cached results.
-
-        Args:
-            dataset_path: Path to the original dataset
-            config: Extraction configuration dict
-
-        Returns:
-            True if cache was deleted, False if it didn't exist
-        """
-        cache_path = self._get_cache_path(dataset_path, config)
-        if cache_path.exists():
-            cache_path.unlink()
-            logger.info(f"Invalidated cache: {cache_path}")
-            return True
-        return False

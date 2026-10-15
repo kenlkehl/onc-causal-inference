@@ -1,4 +1,4 @@
-"""Small modeling and serialization helpers shared by active Stage 1 lanes.
+"""Small modeling helpers shared by active Stage 1 lanes.
 
 These functions used to live inside the retired all-in-one agentic runner. The
 research workflow depends on the computations, not that orchestration surface,
@@ -7,10 +7,8 @@ so they live here without importing extraction agents or model runtimes.
 
 from __future__ import annotations
 
-import json
 import unicodedata
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
@@ -18,22 +16,12 @@ import pandas as pd
 from sklearn.metrics import brier_score_loss, log_loss, mean_squared_error
 
 from ..config import BoWViewConfig
-from .causal_modeling_support import _safe_roc_auc
+from .causal_modeling_support import safe_roc_auc as _safe_roc_auc
 
 _DASH_TRANSLATION = dict.fromkeys(
     map(ord, "\u2010\u2011\u2012\u2013\u2014\u2212"),
     "-",
 )
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, np.floating):
-        return float(value)
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    return str(value)
 
 
 def _finite_or_none(value: Any) -> Optional[float]:
@@ -52,35 +40,6 @@ def _normalize_text(value: Any) -> str:
 
 def _normalize_texts(values: Sequence[Any]) -> List[str]:
     return [_normalize_text(value) for value in values]
-
-
-def _split_is_honest(train_idx: np.ndarray, test_idx: np.ndarray) -> bool:
-    train_ids = {int(idx) for idx in np.asarray(train_idx, dtype=int).tolist()}
-    test_ids = {int(idx) for idx in np.asarray(test_idx, dtype=int).tolist()}
-    return bool(test_ids) and train_ids.isdisjoint(test_ids)
-
-
-def _clinical_text_examples(
-    dataset: pd.DataFrame,
-    text_column: str,
-    *,
-    n_examples: int | None,
-    max_chars: int | None,
-) -> List[str]:
-    """Return complete sampled notes; the legacy character limit is nonbinding."""
-
-    del max_chars
-    if text_column not in dataset.columns or len(dataset) == 0:
-        return []
-    eligible = dataset.loc[dataset[text_column].fillna("").astype(str).str.strip().ne("")]
-    if n_examples == 0:
-        return []
-    if n_examples is not None:
-        eligible = eligible.sample(
-            n=min(int(n_examples), len(eligible)),
-            random_state=17,
-        )
-    return [str(text) for text in eligible[text_column].fillna("").tolist()]
 
 
 def _agentic_discovery_handoff_row(
@@ -102,7 +61,6 @@ def _agentic_discovery_handoff_row(
         "metrics": result.get("metrics") or {},
         "importance": result.get("importance") or {},
         "embedding_contrast_evidence": result.get("embedding_contrast_evidence") or {},
-        "context": result.get("context") or {},
     }
     htr_evidence = result.get("htr_evidence") or {}
     if htr_evidence:
@@ -407,30 +365,13 @@ def _multi_view_importance(
     }
 
 
-def _write_jsonl(path: Path, rows: Sequence[Dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, default=_json_default) + "\n")
-
-
-def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, default=_json_default)
-
-
 __all__ = [
     "_agent_visible_metrics",
     "_agentic_discovery_handoff_row",
     "_align_htr_prediction_frame",
-    "_clinical_text_examples",
     "_htr_effect_metrics",
     "_htr_nuisance_metrics",
     "_multi_view_importance",
     "_normalize_texts",
-    "_split_is_honest",
     "_top_phrase_feature_rows",
-    "_write_json",
-    "_write_jsonl",
 ]

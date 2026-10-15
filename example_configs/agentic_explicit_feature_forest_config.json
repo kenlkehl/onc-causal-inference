@@ -28,7 +28,6 @@
         "max_additions_per_iter": 4,
         "max_removals_per_iter": 2,
         "min_feature_coverage": 0.7,
-        "search_mode": "broad_screen",
         "broad_candidate_count": 80,
         "broad_screen_top_k": 20,
         "min_r_loss_improvement": 0.01,
@@ -65,16 +64,7 @@
       "extraction_context_strategy": "full_record",
       "extraction_max_text_length": 14000,
       "cache_enabled": true,
-      "cache_dir": null,
-      "colbert": {
-        "devices": [
-          "auto"
-        ],
-        "cache_dir": ".oci_cache/colbert",
-        "chunk_size": 64,
-        "chunk_overlap": 0,
-        "top_k": 20
-      }
+      "cache_dir": null
     }
   }
 }

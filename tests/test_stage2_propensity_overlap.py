@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import copy
 import json
 from dataclasses import replace
-from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -15,7 +13,6 @@ from oci.inference.nuisance_diagnostics import (
     propensity_eligibility,
     validate_propensity_bounds,
 )
-from oci.inference import stage2_elastic_net_selection as selection
 from oci.inference import plain_handoff_stage2_analysis as analysis
 from oci.inference.plain_handoff_stage2 import plain_stage2_config_from_mapping
 
@@ -103,48 +100,6 @@ def test_stage2_bound_config_roundtrip():
         )
 
 
-def modifier_context():
-    rng = np.random.default_rng(9)
-    x = rng.normal(size=60)
-    t = np.tile([0.0, 1.0], 30)
-    p = np.tile([0.05, 0.1, 0.3, 0.7, 0.9, 0.95], 10)
-    c = {}
-    for part, sl in [("train", slice(0, 40)), ("valid", slice(40, 60))]:
-        c[part] = pd.DataFrame({"x": x[sl]})
-        c["treatment_" + part] = t[sl]
-        c["outcome_" + part] = x[sl] * t[sl] + rng.normal(size=len(x[sl]))
-        c["base_e_" + part] = p[sl]
-        c["base_m_" + part] = np.zeros(len(x[sl]))
-    return c
-
-
-def test_joint_r_loss_ignores_excluded_patients_in_training_and_validation():
-    c = modifier_context()
-    defs = [{"feature_id": "x", "name": "x", "value_type": "continuous"}]
-    cfg = selection.Stage2ElasticNetSelectionConfig(
-        min_propensity=0.1, max_propensity=0.9, regularization_grid_size=3, max_iter=300
-    )
-    run = lambda context: selection._joint_modifier_elastic_net_fold(
-        context=context, definitions=defs, config=cfg, seed=11
-    )
-    result = run(c)
-    changed = copy.deepcopy(c)
-    for part in ("train", "valid"):
-        drop = ~propensity_eligibility(c["base_e_" + part], 0.1, 0.9)
-        changed["outcome_" + part][drop] = 1e9
-        changed[part].loc[drop, "x"] = -1e9
-    assert run(changed) == result
-    assert result["fit_rows"] == propensity_eligibility(c["base_e_train"], 0.1, 0.9).sum()
-    assert result["heldout_rows"] == propensity_eligibility(c["base_e_valid"], 0.1, 0.9).sum()
-    with pytest.raises(ValueError, match="insufficient"):
-        selection._joint_modifier_elastic_net_fold(
-            context=c,
-            definitions=defs,
-            config=replace(cfg, min_propensity=0.49, max_propensity=0.51),
-            seed=11,
-        )
-
-
 def final_fixture(monkeypatch, tmp_path):
     n = 24
     dataset = pd.DataFrame(
@@ -169,14 +124,10 @@ def final_fixture(monkeypatch, tmp_path):
         return {"rows": len(y), "seed": kw["seed"]}
 
     monkeypatch.setattr(analysis, "_fit_classifier", classifier)
-    monkeypatch.setattr(analysis, "_fit_outcome_models", lambda *a, **kw: object())
     monkeypatch.setattr(
         analysis, "_predict_probability",
         lambda model, x: heldp.copy() if model["rows"] == 18
         else np.full(len(x), 0.2 if model["seed"] == 10003 else 0.8),
-    )
-    monkeypatch.setattr(
-        analysis, "_predict_outcomes", lambda model, x: (np.full(len(x), 0.2), np.full(len(x), 0.8))
     )
 
     class Forest:
@@ -195,18 +146,22 @@ def final_fixture(monkeypatch, tmp_path):
             return {"outcome_model_contract": {}}
 
     monkeypatch.setattr(analysis, "CausalForestHead", Forest)
+    definitions = [
+        {
+            "feature_id": "x",
+            "name": "x",
+            "value_type": "continuous",
+            "roles": ["confounder", "effect_modifier"],
+            "nuisance_model_roles": ["treatment", "outcome"],
+        }
+    ]
     kwargs = dict(
         dataset=dataset,
         extracted_fit=extracted.iloc[:18],
         extracted_heldout=extracted.iloc[18:],
-        definitions=[
-            {
-                "feature_id": "x",
-                "name": "x",
-                "value_type": "continuous",
-                "roles": ["confounder", "effect_modifier"],
-            }
-        ],
+        definitions=definitions,
+        nuisance_candidate_definitions=definitions,
+        nuisance_candidate_fit=extracted.iloc[:18],
         split={"fit_row_ids": list(range(18)), "heldout_row_ids": list(range(18, 24))},
         unit_id_column="patient_id",
         treatment_column="treatment",
@@ -251,33 +206,6 @@ def test_final_empty_overlap_fails_without_untrimmed_fallback(monkeypatch, tmp_p
     assert not any(c[0] == "effect" for c in calls)
     assert (tmp_path / "propensity_overlap.json").exists()
     assert not (tmp_path / "complete.json").exists()
-
-
-def test_bounded_selector_records_calibration_and_uses_same_heldout_population():
-    from tests.test_stage2_independent_tasks import numerical_inputs
-
-    kw = numerical_inputs()
-    kw["policy"] = replace(kw["policy"], min_propensity=0.1, max_propensity=0.9)
-    _, report, _, _ = selection.select_stage2_features_elastic_net(**kw)
-    nuis = report["cross_fitted_nuisance_models"]
-    assert len(nuis["predictions"]) == 100
-    assert nuis["calibration"]["treatment"]["rows"] == 100
-    assert nuis["calibration"]["outcome"]["rows"] == 100
-    assert nuis["propensity_overlap"]["excluded_rows"] > 0
-    for fold, joint, candidates in zip(
-        nuis["folds"],
-        report["multivariable_modifier_elastic_net_screen"]["folds"],
-        report["effect_modifier_screen"]["folds"],
-    ):
-        assert fold["fit_rows"] == 50
-        assert fold["heldout_rows"] == 50
-        assert joint["heldout_rows"] == fold["propensity_overlap"]["eligible_rows"]
-        for candidate in candidates["tests"]:
-            if candidate["status"] == "ok":
-                assert (
-                    candidate["propensity_overlap"]["valid"] == joint["propensity_overlap"]["valid"]
-                )
-    json.dumps(report, allow_nan=False)
 
 
 def test_bounds_change_requires_reselection_and_changes_migration_fingerprint(tmp_path):

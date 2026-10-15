@@ -10,7 +10,7 @@ import logging
 import re
 import unicodedata
 from collections import Counter
-from dataclasses import asdict, fields
+from dataclasses import asdict
 from itertools import combinations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -21,12 +21,6 @@ import torch
 from scipy import sparse
 from scipy.stats import chi2_contingency
 from joblib import Parallel, delayed
-from sklearn.ensemble import (
-    ExtraTreesClassifier,
-    ExtraTreesRegressor,
-    RandomForestClassifier,
-    RandomForestRegressor,
-)
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
@@ -44,14 +38,12 @@ from ..config import (
     ExplicitFeatureSpec,
     MultiModelAgenticForestConfig,
     load_explicit_feature_specs_json,
-    TfidfVectorizerScientificConfig,
 )
 from ..models.explicit_feature_featurizer import get_raw_explicit_features
 from .agentic_explicit_feature_forest import (
     AgenticFeatureProposal,
     CausalForestExplicitEvaluator,
     SplitEvaluation,
-    StructuredInteractionExplicitEvaluator,
     VLLMExplicitFeatureExtractionProvider,
     _clinical_text_examples,
     _get_agent_response_trace,
@@ -72,6 +64,14 @@ from .embedding_contrast_discovery import (
     redact_embedding_contrast_evidence,
 )
 from .discovery_randomness import derive_discovery_seed
+from .sparse_text_modeling import (
+    bow_model_params as _bow_model_params,
+    bow_vectorizer_params as _bow_vectorizer_params,
+    fit_regressor as _fit_regressor,
+    make_bow_classifier as _make_bow_classifier,
+    make_bow_regressor as _make_bow_regressor,
+    make_bow_vectorizer as _make_bow_vectorizer,
+)
 from .agentic_attention_variable_forest import (
     AgenticAttentionVariableForestRunner,
     _attention_evidence_snippet,
@@ -116,33 +116,22 @@ def _make_configured_explicit_evaluator(
     config: AppliedInferenceConfig,
     cf_config: ExplicitFeatureForestConfig,
 ) -> Any:
-    """Select the configured structured head without changing legacy defaults.
+    """Return the structured causal-forest head.
 
-    Older/standalone configurations do not necessarily contain the Stage 1
-    ``multi_model_forest`` block.  Those continue to use the causal forest.
-    When the block is present, its validated estimator selector is authoritative
-    for both the ordinary and precomputed-discovery runners.
+    The causal forest is the only supported structured estimator.  A
+    ``multi_model_forest.structured_effect_estimator`` selector, when present,
+    must name it.
     """
     architecture = getattr(config, "architecture", None)
     stage1_config = getattr(architecture, "multi_model_forest", None)
-    if stage1_config is None:
-        return CausalForestExplicitEvaluator(config=config, cf_config=cf_config)
-
     estimator = getattr(stage1_config, "structured_effect_estimator", None)
-    if estimator is None:
-        return CausalForestExplicitEvaluator(config=config, cf_config=cf_config)
-    estimator = str(estimator).strip().lower().replace("-", "_")
-    if estimator in {"interaction", "s_learner", "interaction_s_learner"}:
-        return StructuredInteractionExplicitEvaluator(
-            config=config,
-            cf_config=cf_config,
-        )
-    if estimator in {"causal_forest", "forest"}:
-        return CausalForestExplicitEvaluator(config=config, cf_config=cf_config)
-    raise ValueError(
-        "multi_model_forest.structured_effect_estimator must be "
-        "'interaction_s_learner' or 'causal_forest'"
-    )
+    if estimator is not None:
+        estimator = str(estimator).strip().lower().replace("-", "_")
+        if estimator not in {"causal_forest", "forest"}:
+            raise ValueError(
+                "multi_model_forest.structured_effect_estimator must be 'causal_forest'"
+            )
+    return CausalForestExplicitEvaluator(config=config, cf_config=cf_config)
 
 
 def _without_oracle_columns(frame: pd.DataFrame) -> pd.DataFrame:
@@ -165,7 +154,6 @@ def run_multi_model_agentic_forest(
     proposal_agent: Optional[Any] = None,
     extraction_provider: Optional[Any] = None,
     evaluator: Optional[Any] = None,
-    embedding_provider: Optional[Any] = None,
     htr_evidence_provider: Optional[Any] = None,
 ) -> None:
     """Run BoW-guided agentic variable discovery and final explicit-feature forest."""
@@ -179,80 +167,7 @@ def run_multi_model_agentic_forest(
         proposal_agent=proposal_agent,
         extraction_provider=extraction_provider,
         evaluator=evaluator,
-        embedding_provider=embedding_provider,
         htr_evidence_provider=htr_evidence_provider,
-    )
-    runner.run()
-
-
-def build_multi_model_agentic_discovery_handoff(
-    dataset: pd.DataFrame,
-    config: AppliedInferenceConfig,
-    output_path: Path,
-    device=None,
-    gpu_ids: Optional[Sequence[int]] = None,
-    num_workers: int = 1,
-    *,
-    include_candidate_consistency: bool = True,
-) -> None:
-    """Precompute agent-visible discovery evidence without running LLM agents."""
-    runner = MultiModelAgenticForestRunner(
-        dataset=dataset,
-        config=config,
-        output_path=Path(output_path).with_suffix(".predictions.placeholder.parquet"),
-        device=device,
-        gpu_ids=gpu_ids,
-        num_workers=num_workers,
-    )
-    rows = runner.build_discovery_handoff_rows(
-        include_candidate_consistency=include_candidate_consistency
-    )
-    output_path = Path(output_path)
-    _write_jsonl(output_path, rows)
-    scopes = sorted({str(row.get("scope")) for row in rows})
-    _write_json(
-        output_path.with_suffix(".manifest.json"),
-        {
-            "schema_version": "multi_model_agentic_discovery_handoff_v1",
-            "path": str(output_path),
-            "n_rows": int(len(rows)),
-            "scopes": scopes,
-            "include_candidate_consistency": bool(include_candidate_consistency),
-        },
-    )
-    logger.info(
-        "Saved multi-model agentic discovery handoff rows=%s path=%s",
-        len(rows),
-        output_path,
-    )
-
-
-def run_multi_model_agentic_forest_from_handoff(
-    dataset: pd.DataFrame,
-    config: AppliedInferenceConfig,
-    output_path: Path,
-    handoff_path: Path,
-    device=None,
-    gpu_ids: Optional[Sequence[int]] = None,
-    num_workers: int = 1,
-    proposal_agent: Optional[Any] = None,
-    extraction_provider: Optional[Any] = None,
-    evaluator: Optional[Any] = None,
-    resume: bool = True,
-) -> None:
-    """Run the agentic explicit-feature branch from precomputed discovery evidence."""
-    runner = PrecomputedDiscoveryMultiModelAgenticForestRunner(
-        dataset=dataset,
-        config=config,
-        output_path=output_path,
-        handoff_path=handoff_path,
-        device=device,
-        gpu_ids=gpu_ids,
-        num_workers=num_workers,
-        proposal_agent=proposal_agent,
-        extraction_provider=extraction_provider,
-        evaluator=evaluator,
-        resume=resume,
     )
     runner.run()
 
@@ -320,7 +235,6 @@ class MultiModelAgenticForestRunner:
         proposal_agent: Optional[Any] = None,
         extraction_provider: Optional[Any] = None,
         evaluator: Optional[Any] = None,
-        embedding_provider: Optional[Any] = None,
         htr_evidence_provider: Optional[Any] = None,
         resume: bool = True,
     ) -> None:
@@ -337,7 +251,6 @@ class MultiModelAgenticForestRunner:
             proposal_agent is not None
             or extraction_provider is not None
             or evaluator is not None
-            or embedding_provider is not None
             or htr_evidence_provider is not None
         )
         self._has_external_proposal_agent = proposal_agent is not None
@@ -375,7 +288,6 @@ class MultiModelAgenticForestRunner:
                 cf_config=self.cf_config,
             )
         )
-        self.embedding_provider = embedding_provider
         self.htr_evidence_provider = htr_evidence_provider
         self.resume = bool(resume)
         self.embedding_evidence_generator: Optional[EmbeddingContrastEvidenceGenerator] = None
@@ -404,101 +316,6 @@ class MultiModelAgenticForestRunner:
         self.alias_reference_specs: List[ExplicitFeatureSpec] = self._initial_specs()
         self.low_coverage_review_candidates_by_outer: Dict[int, Dict[str, Dict[str, Any]]] = {}
 
-    def build_discovery_handoff_rows(
-        self,
-        *,
-        include_candidate_consistency: bool = True,
-    ) -> List[Dict[str, Any]]:
-        """Build fold-level discovery evidence rows for a later agent-only run."""
-        logger.info("=" * 80)
-        logger.info("MULTI-MODEL AGENTIC DISCOVERY HANDOFF")
-        logger.info("=" * 80)
-        self._validate_required_evidence_sources()
-        self._ensure_prespecified_features()
-
-        splits = self._analysis_splits()
-        if self._embedding_contrast_enabled() and self.embedding_provider is None:
-            self._embedding_contrast_generator().prepare(self.dataset)
-
-        rows: List[Dict[str, Any]] = []
-        for outer_fold, train_idx, _test_idx in splits:
-            discovery_df = self.dataset.iloc[train_idx].reset_index(drop=True)
-            logger.info(
-                "Precomputing agentic discovery handoff outer_fold=%s rows=%s",
-                outer_fold,
-                len(discovery_df),
-            )
-            result = self._fit_bow_discovery(discovery_df, int(outer_fold))
-            rows.append(
-                _agentic_discovery_handoff_row(
-                    result,
-                    fold_key=int(outer_fold),
-                    outer_fold=int(outer_fold),
-                    scope="full_outer_train",
-                    n_rows=len(discovery_df),
-                )
-            )
-            if include_candidate_consistency and bool(
-                getattr(self.nn_config, "candidate_consistency_enabled", True)
-            ):
-                rows.extend(
-                    self._build_inner_discovery_handoff_rows(
-                        outer_fold=int(outer_fold),
-                        discovery_df=discovery_df,
-                    )
-                )
-        return rows
-
-    def _build_inner_discovery_handoff_rows(
-        self,
-        *,
-        outer_fold: int,
-        discovery_df: pd.DataFrame,
-    ) -> List[Dict[str, Any]]:
-        try:
-            fold_count = _bounded_fold_count(
-                int(self.nn_config.candidate_consistency_inner_folds),
-                len(discovery_df),
-            )
-        except ValueError:
-            return []
-
-        splitter = KFold(
-            n_splits=fold_count,
-            shuffle=True,
-            random_state=51_000 + int(outer_fold),
-        )
-        rows: List[Dict[str, Any]] = []
-        for inner_fold, (fit_pos, heldout_pos) in enumerate(
-            splitter.split(discovery_df),
-            start=1,
-        ):
-            fit_pos = np.asarray(fit_pos, dtype=int)
-            heldout_pos = np.asarray(heldout_pos, dtype=int)
-            fold_key = 1000 * int(outer_fold) + int(inner_fold)
-            inner_df = discovery_df.iloc[fit_pos].reset_index(drop=True)
-            logger.info(
-                "Precomputing agentic discovery handoff outer_fold=%s "
-                "inner_fold=%s rows=%s heldout_rows=%s",
-                outer_fold,
-                inner_fold,
-                len(inner_df),
-                len(heldout_pos),
-            )
-            result = self._fit_bow_discovery(inner_df, outer_fold=fold_key)
-            rows.append(
-                _agentic_discovery_handoff_row(
-                    result,
-                    fold_key=fold_key,
-                    outer_fold=int(outer_fold),
-                    scope="candidate_consistency_inner_train",
-                    n_rows=len(inner_df),
-                    inner_fold=int(inner_fold),
-                    heldout_rows=len(heldout_pos),
-                )
-            )
-        return rows
-
     def run(self) -> None:
         try:
             self._run_impl()
@@ -514,7 +331,7 @@ class MultiModelAgenticForestRunner:
 
         splits = self._analysis_splits()
         self.split_provenance_rows = self._split_provenance_rows(splits)
-        if self._embedding_contrast_enabled() and self.embedding_provider is None:
+        if self._embedding_contrast_enabled():
             self._embedding_contrast_generator().prepare(self.dataset)
         prediction_frames: List[pd.DataFrame] = []
         pending_splits: List[Tuple[int, np.ndarray, np.ndarray]] = []
@@ -733,65 +550,6 @@ class MultiModelAgenticForestRunner:
             "feature_set_rows": selected_rows if isinstance(selected_rows, list) else [],
             "outer_metric_rows": metric_rows,
         }
-
-    def _run_one_analysis_split_isolated(
-        self,
-        outer_fold: int,
-        train_idx: np.ndarray,
-        test_idx: np.ndarray,
-        outer_n_jobs: int,
-    ) -> Dict[str, Any]:
-        logger.info(
-            "Multi-model agentic isolated fold %s: train=%s test=%s",
-            outer_fold,
-            len(train_idx),
-            len(test_idx),
-        )
-        fold_runner = MultiModelAgenticForestRunner(
-            dataset=self.dataset,
-            config=self.config,
-            output_path=(
-                self.artifact_dir / f"outer_fold_{int(outer_fold):03d}" / "predictions.parquet"
-            ),
-            num_workers=self._inner_workers_for_outer_job(outer_n_jobs),
-        )
-        try:
-            predictions = fold_runner._run_one_analysis_split(
-                outer_fold=outer_fold,
-                train_idx=train_idx,
-                test_idx=test_idx,
-            )
-            fold_runner._save_outer_fold_checkpoint(
-                outer_fold=int(outer_fold),
-                predictions=predictions,
-                target_dir=self.artifact_dir / f"outer_fold_{int(outer_fold):03d}",
-            )
-            return {
-                "outer_fold": int(outer_fold),
-                "predictions": predictions,
-                "bow_prediction_frames": fold_runner.bow_prediction_frames,
-                "htr_nuisance_prediction_frames": fold_runner.htr_nuisance_prediction_frames,
-                "htr_effect_prediction_frames": fold_runner.htr_effect_prediction_frames,
-                "ensemble_nuisance_prediction_frames": (
-                    fold_runner.ensemble_nuisance_prediction_frames
-                ),
-                "htr_attention_rows": fold_runner.htr_attention_rows,
-                "importance_rows": fold_runner.importance_rows,
-                "embedding_evidence_rows": fold_runner.embedding_evidence_rows,
-                "agent_rows": fold_runner.agent_rows,
-                "extracted_feature_diagnostic_rows": (
-                    fold_runner.extracted_feature_diagnostic_rows
-                ),
-                "candidate_signal_review_rows": fold_runner.candidate_signal_review_rows,
-                "parsimony_review_rows": fold_runner.parsimony_review_rows,
-                "parsimony_cluster_rows": fold_runner.parsimony_cluster_rows,
-                "parsimony_factor_rows": fold_runner.parsimony_factor_rows,
-                "parsimony_evaluation_rows": fold_runner.parsimony_evaluation_rows,
-                "feature_set_rows": fold_runner.feature_set_rows,
-                "outer_metric_rows": fold_runner.outer_metric_rows,
-            }
-        finally:
-            fold_runner._release_concept_cluster_embedding_encoder()
 
     def _analysis_splits(self) -> List[Tuple[int, np.ndarray, np.ndarray]]:
         if self.config.cv_folds > 1:
@@ -2098,7 +1856,6 @@ class MultiModelAgenticForestRunner:
             self.embedding_evidence_generator = EmbeddingContrastEvidenceGenerator(
                 config=self.config,
                 output_dir=self.artifact_dir,
-                embedding_provider=self.embedding_provider,
             )
         return self.embedding_evidence_generator
 
@@ -2827,20 +2584,6 @@ class MultiModelAgenticForestRunner:
         if not clean_texts:
             return None, "no_texts"
 
-        provider = self.embedding_provider
-        try:
-            if provider is not None and hasattr(provider, "encode_chunks"):
-                matrix = provider.encode_chunks(clean_texts)
-                return _coerce_concept_embedding_matrix(matrix, len(clean_texts)), None
-            if provider is not None and hasattr(provider, "encode"):
-                matrix = provider.encode(clean_texts)
-                return _coerce_concept_embedding_matrix(matrix, len(clean_texts)), None
-            if provider is not None and hasattr(provider, "encode_texts"):
-                matrix = provider.encode_texts(clean_texts)
-                return _coerce_concept_embedding_matrix(matrix, len(clean_texts)), None
-        except Exception as exc:
-            return None, f"embedding_provider_failed:{exc.__class__.__name__}: {exc}"
-
         if not self._embedding_contrast_enabled():
             return None, "embedding_contrast_disabled"
 
@@ -3338,35 +3081,6 @@ class MultiModelAgenticForestRunner:
                 self._inner_workers_for_nested_job(n_jobs),
             )
             for inner_fold, fit_pos, heldout_pos in split_items
-        )
-
-    def _build_inner_consistency_candidate_bundle_isolated(
-        self,
-        outer_fold: int,
-        discovery_df: pd.DataFrame,
-        inner_fold: int,
-        fit_pos: np.ndarray,
-        heldout_pos: np.ndarray,
-        total_inner_folds: int,
-        candidate_n_jobs: int,
-    ) -> Dict[str, Any]:
-        worker = MultiModelAgenticForestRunner(
-            dataset=self.dataset,
-            config=self.config,
-            output_path=(
-                self.artifact_dir
-                / f"outer_{int(outer_fold):03d}_candidate_inner_{int(inner_fold):03d}"
-                / "predictions.parquet"
-            ),
-            num_workers=self._inner_workers_for_nested_job(candidate_n_jobs),
-        )
-        return worker._build_inner_consistency_candidate_bundle(
-            outer_fold=outer_fold,
-            discovery_df=discovery_df,
-            inner_fold=inner_fold,
-            fit_pos=fit_pos,
-            heldout_pos=heldout_pos,
-            total_inner_folds=total_inner_folds,
         )
 
     def _build_inner_consistency_candidate_bundle(
@@ -4126,23 +3840,6 @@ class MultiModelAgenticForestRunner:
                 }
             )
             return {"selected_specs": before_specs, "summary": summary}
-
-        legacy_overrides = {
-            "parsimony_review_auc_tolerance": 0.01,
-            "parsimony_review_loss_relative_tolerance": 0.03,
-            "parsimony_review_corr_threshold": 0.75,
-            "parsimony_review_max_single_feature_ablations": 30,
-        }
-        changed_legacy = [
-            name
-            for name, default in legacy_overrides.items()
-            if getattr(self.nn_config, name, default) != default
-        ]
-        if changed_legacy:
-            logger.warning(
-                "Ignoring deprecated single-feature parsimony settings: %s",
-                changed_legacy,
-            )
 
         train_df = self.dataset.iloc[train_idx].copy()
         diagnostic_seed = 91_000 + 100 * int(outer_fold)
@@ -5051,26 +4748,6 @@ class MultiModelAgenticForestRunner:
     def _make_regressor(self, view: BoWViewConfig, random_state: int = 17):
         return _make_bow_regressor(self._model_params(view), random_state=random_state)
 
-    def _make_logistic_regression(
-        self,
-        view: BoWViewConfig,
-        random_state: int = 17,
-    ) -> LogisticRegression:
-        if view.bow_model != "linear":
-            raise ValueError("logistic helper requires a linear BoW view")
-        return _make_bow_classifier(
-            _bow_model_params(view),
-            random_state=random_state,
-        )
-
-    def _make_ridge(self, view: BoWViewConfig) -> Ridge:
-        if view.bow_model != "linear":
-            raise ValueError("ridge helper requires a linear BoW view")
-        return _make_bow_regressor(
-            _bow_model_params(view),
-            random_state=17,
-        )
-
     def _parallel_n_jobs(self, setting: Any, tasks: int, *, auto_workers: int) -> int:
         if tasks <= 0:
             return 1
@@ -5529,117 +5206,6 @@ def _required_applied_seed(config: AppliedInferenceConfig) -> int:
     return int(seed)
 
 
-def _agentic_discovery_handoff_row(
-    result: Dict[str, Any],
-    *,
-    fold_key: int,
-    outer_fold: int,
-    scope: str,
-    n_rows: int,
-    inner_fold: Optional[int] = None,
-    heldout_rows: Optional[int] = None,
-) -> Dict[str, Any]:
-    row: Dict[str, Any] = {
-        "schema_version": "multi_model_agentic_discovery_handoff_v1",
-        "fold_key": int(fold_key),
-        "outer_fold": int(outer_fold),
-        "scope": str(scope),
-        "n_rows": int(n_rows),
-        "metrics": result.get("metrics") or {},
-        "importance": result.get("importance") or {},
-        "embedding_contrast_evidence": result.get("embedding_contrast_evidence") or {},
-        "context": result.get("context") or {},
-    }
-    htr_evidence = result.get("htr_evidence") or {}
-    if htr_evidence:
-        row["htr_evidence"] = htr_evidence
-    if inner_fold is not None:
-        row["inner_fold"] = int(inner_fold)
-    if heldout_rows is not None:
-        row["heldout_rows"] = int(heldout_rows)
-    return row
-
-
-def _load_agentic_discovery_handoff(path: Path) -> Dict[int, Dict[str, Any]]:
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Precomputed agentic discovery handoff not found: {path}")
-    rows: Dict[int, Dict[str, Any]] = {}
-    with open(path, encoding="utf-8") as f:
-        for line_number, line in enumerate(f, start=1):
-            text = line.strip()
-            if not text:
-                continue
-            row = json.loads(text)
-            fold_key = int(row.get("fold_key", row.get("outer_fold")))
-            if fold_key in rows:
-                raise ValueError(
-                    f"Duplicate fold_key={fold_key} in agentic discovery handoff {path}"
-                )
-            rows[fold_key] = row
-            if row.get("schema_version") != "multi_model_agentic_discovery_handoff_v1":
-                raise ValueError(
-                    f"Unsupported agentic discovery handoff schema on line {line_number}: "
-                    f"{row.get('schema_version')!r}"
-                )
-    if not rows:
-        raise ValueError(f"Agentic discovery handoff is empty: {path}")
-    return rows
-
-
-class PrecomputedDiscoveryMultiModelAgenticForestRunner(MultiModelAgenticForestRunner):
-    """Agentic runner that consumes saved discovery evidence instead of refitting it."""
-
-    def __init__(
-        self,
-        *,
-        handoff_path: Path,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(
-            embedding_provider=object(),
-            htr_evidence_provider=object(),
-            **kwargs,
-        )
-        self.handoff_path = Path(handoff_path)
-        self._handoff_by_key = _load_agentic_discovery_handoff(self.handoff_path)
-
-    def _fit_bow_discovery(
-        self,
-        discovery_df: pd.DataFrame,
-        outer_fold: int,
-    ) -> Dict[str, Any]:
-        del discovery_df
-        fold_key = int(outer_fold)
-        row = self._handoff_by_key.get(fold_key)
-        if row is None:
-            raise RuntimeError(
-                "Missing precomputed agentic discovery handoff for fold_key="
-                f"{fold_key} in {self.handoff_path}. Rerun multi_model_forest "
-                "Stage 1 to regenerate the handoff."
-            )
-        logger.info(
-            "Using precomputed agentic discovery handoff fold_key=%s scope=%s path=%s",
-            fold_key,
-            row.get("scope"),
-            self.handoff_path,
-        )
-        return {
-            "predictions": pd.DataFrame(columns=["_oci_row_id", "outer_fold"]),
-            "metrics": copy.deepcopy(row.get("metrics") or {}),
-            "importance": copy.deepcopy(row.get("importance") or {}),
-            "embedding_contrast_evidence": copy.deepcopy(
-                row.get("embedding_contrast_evidence") or {}
-            ),
-            "htr_evidence": copy.deepcopy(row.get("htr_evidence") or {}),
-            "context": copy.deepcopy(row.get("context") or {}),
-        }
-
-    def _candidate_consistency_n_jobs(self, folds: int) -> int:
-        del folds
-        return 1
-
-
 def _run_multi_model_outer_fold_worker(
     dataset: pd.DataFrame,
     config: AppliedInferenceConfig,
@@ -6076,8 +5642,6 @@ def _collect_concept_inventory_documents(
         for chunk_key in [
             "positive_aligned_chunks",
             "negative_aligned_chunks",
-            "positive_external_chunks",
-            "negative_external_chunks",
         ]:
             for chunk in contrast.get(chunk_key) or []:
                 if not isinstance(chunk, dict):
@@ -6894,10 +6458,8 @@ def _columns_to_feature_dicts(
         item: Dict[str, Any] = {}
         for spec in specs:
             value_col = f"explicit_feat_{spec.name}"
-            legacy_col = f"explicit_conf_{spec.name}"
-            source_col = value_col if value_col in df.columns else legacy_col
-            value = row.get(source_col)
-            missing_col = f"{source_col}_missing"
+            value = row.get(value_col)
+            missing_col = f"{value_col}_missing"
             item[spec.name] = value
             item[f"{spec.name}_missing"] = bool(row.get(missing_col, pd.isna(value)))
         values.append(item)
@@ -7456,67 +7018,6 @@ def _summarize_multi_model_extractions(
     return summaries
 
 
-def _feature_redundancy_review(
-    *,
-    train_df: pd.DataFrame,
-    specs: Sequence[ExplicitFeatureSpec],
-    corr_threshold: float,
-) -> Dict[str, Any]:
-    specs = list(specs)
-    continuous_correlations: List[Dict[str, Any]] = []
-    categorical_contingency: List[Dict[str, Any]] = []
-    missingness_overlap: List[Dict[str, Any]] = []
-    for left, right in combinations(specs, 2):
-        left_values = _explicit_feature_series(train_df, left)
-        right_values = _explicit_feature_series(train_df, right)
-        left_missing = _explicit_feature_missing_mask(train_df, left, left_values)
-        right_missing = _explicit_feature_missing_mask(train_df, right, right_values)
-        missingness_overlap.append(
-            {
-                "a": left.name,
-                "b": right.name,
-                "both_missing": float(np.mean(left_missing & right_missing)),
-                "either_missing": float(np.mean(left_missing | right_missing)),
-            }
-        )
-        if left.type == "continuous" and right.type == "continuous":
-            x = pd.to_numeric(left_values, errors="coerce").to_numpy(dtype=float)
-            y = pd.to_numeric(right_values, errors="coerce").to_numpy(dtype=float)
-            mask = np.isfinite(x) & np.isfinite(y)
-            corr = None
-            if int(np.sum(mask)) >= 3 and np.std(x[mask]) > 0.0 and np.std(y[mask]) > 0.0:
-                corr = _finite_or_none(np.corrcoef(x[mask], y[mask])[0, 1])
-            if corr is not None and abs(corr) >= float(corr_threshold):
-                continuous_correlations.append(
-                    {
-                        "a": left.name,
-                        "b": right.name,
-                        "correlation": float(corr),
-                        "n_pairwise_complete": int(np.sum(mask)),
-                    }
-                )
-        elif left.type == "categorical" and right.type == "categorical":
-            left_cat = left_values.astype("object").where(~left_missing, "__MISSING__")
-            right_cat = right_values.astype("object").where(~right_missing, "__MISSING__")
-            table = pd.crosstab(left_cat, right_cat, dropna=False)
-            total = float(table.to_numpy().sum())
-            max_cell_fraction = None if total <= 0 else float(table.to_numpy().max() / total)
-            categorical_contingency.append(
-                {
-                    "a": left.name,
-                    "b": right.name,
-                    "shape": [int(table.shape[0]), int(table.shape[1])],
-                    "max_cell_fraction": max_cell_fraction,
-                }
-            )
-    return {
-        "continuous_correlations_abs_ge_threshold": continuous_correlations,
-        "categorical_contingency": categorical_contingency,
-        "missingness_overlap": missingness_overlap,
-        "corr_threshold": float(corr_threshold),
-    }
-
-
 def _parsimony_feature_contract_document(spec: ExplicitFeatureSpec) -> str:
     categories = " ".join(str(value) for value in (spec.categories or []))
     aliases = " ".join(
@@ -8053,11 +7554,8 @@ def _build_value_driven_feature_clusters(
 
 def _explicit_feature_series(df: pd.DataFrame, spec: ExplicitFeatureSpec) -> pd.Series:
     value_col = f"explicit_feat_{spec.name}"
-    legacy_col = f"explicit_conf_{spec.name}"
     if value_col in df.columns:
         return df[value_col]
-    if legacy_col in df.columns:
-        return df[legacy_col]
     return pd.Series([np.nan] * len(df), index=df.index, dtype="object")
 
 
@@ -8066,29 +7564,12 @@ def _explicit_feature_missing_mask(
     spec: ExplicitFeatureSpec,
     values: Optional[pd.Series] = None,
 ) -> np.ndarray:
-    value_col = f"explicit_feat_{spec.name}"
-    legacy_col = f"explicit_conf_{spec.name}"
-    source_col = value_col if value_col in df.columns else legacy_col
-    missing_col = f"{source_col}_missing"
+    missing_col = f"explicit_feat_{spec.name}_missing"
     if missing_col in df.columns:
         return df[missing_col].astype(bool).to_numpy()
     if values is None:
         values = _explicit_feature_series(df, spec)
     return values.isna().to_numpy()
-
-
-def _parsimony_role_guard(
-    current_specs: Sequence[ExplicitFeatureSpec],
-    trial_specs: Sequence[ExplicitFeatureSpec],
-) -> Optional[str]:
-    if not trial_specs:
-        return "would_remove_all_features"
-    for role in ["confounder", "effect_modifier"]:
-        had_role = any(role in spec.roles for spec in current_specs)
-        keeps_role = any(role in spec.roles for spec in trial_specs)
-        if had_role and not keeps_role:
-            return f"would_remove_all_{role}_features"
-    return None
 
 
 def _parsimony_metric_snapshot(diagnostic: Dict[str, Any]) -> Dict[str, Any]:
@@ -8487,47 +7968,6 @@ def _cluster_relevant_htr_evidence(
     return result
 
 
-def _parsimony_removal_decision(
-    *,
-    base_diagnostic: Dict[str, Any],
-    trial_diagnostic: Dict[str, Any],
-    base_gate: Dict[str, Any],
-    trial_gate: Dict[str, Any],
-    nn_config: MultiModelAgenticForestConfig,
-) -> Tuple[bool, List[str], Dict[str, Any]]:
-    base_metrics = base_diagnostic.get("metrics", {})
-    trial_metrics = trial_diagnostic.get("metrics", {})
-    auc_tolerance = float(getattr(nn_config, "parsimony_review_auc_tolerance", 0.01))
-    loss_tolerance = float(getattr(nn_config, "parsimony_review_loss_relative_tolerance", 0.03))
-    reasons: List[str] = []
-    base_failures = int(base_gate.get("n_failed_criteria", 0) or 0)
-    trial_failures = int(trial_gate.get("n_failed_criteria", 0) or 0)
-    if trial_failures > base_failures:
-        reasons.append("review_gate_would_worsen")
-    deltas: Dict[str, Any] = {}
-    for metric in ["treatment_auroc", "outcome_auroc"]:
-        base_value = _finite_or_none(base_metrics.get(metric))
-        trial_value = _finite_or_none(trial_metrics.get(metric))
-        if base_value is None or trial_value is None:
-            continue
-        delta = float(trial_value - base_value)
-        deltas[metric] = delta
-        if delta < -auc_tolerance:
-            reasons.append(f"{metric}_drop_exceeds_tolerance")
-    for metric in ["treatment_log_loss", "outcome_log_loss", "outcome_rmse", "r_loss_mean"]:
-        base_value = _finite_or_none(base_metrics.get(metric))
-        trial_value = _finite_or_none(trial_metrics.get(metric))
-        if base_value is None or trial_value is None or base_value <= 0.0:
-            continue
-        relative_change = float((trial_value - base_value) / base_value)
-        deltas[f"{metric}_relative_change"] = relative_change
-        if relative_change > loss_tolerance:
-            reasons.append(f"{metric}_increase_exceeds_tolerance")
-    if not reasons:
-        reasons.append("within_parsimony_tolerances")
-    return reasons == ["within_parsimony_tolerances"], reasons, deltas
-
-
 def _extracted_feature_review_benchmarks(
     bow_metrics: Dict[str, Any],
     embedding_evidence: Dict[str, Any],
@@ -8911,356 +8351,6 @@ def _fit_regression_bow_fold(
         ),
     )
     return heldout_pos, model.predict(x_heldout)
-
-
-def _fit_regressor(
-    model: Any,
-    x: Any,
-    y: np.ndarray,
-    *,
-    sample_weight: Optional[np.ndarray] = None,
-    unsupported_sample_weight_policy: str,
-) -> Any:
-    if unsupported_sample_weight_policy not in {
-        "fail_closed",
-        "unweighted_legacy_compatibility",
-    }:
-        raise ValueError("unsupported sample-weight policy")
-    if sample_weight is None:
-        return model.fit(x, y)
-    weights = np.asarray(sample_weight, dtype=float)
-    if weights.shape[0] != len(y):
-        raise ValueError("sample_weight must have one value per training row")
-    weights = np.where(np.isfinite(weights) & (weights > 0.0), weights, 0.0)
-    if float(np.sum(weights)) <= 0.0:
-        if unsupported_sample_weight_policy == "fail_closed":
-            raise ValueError("sample_weight has no positive finite mass")
-        return model.fit(x, y)
-    try:
-        return model.fit(x, y, sample_weight=weights)
-    except TypeError as exc:
-        if unsupported_sample_weight_policy == "fail_closed":
-            raise TypeError(
-                f"BoW regressor {type(model).__name__} does not accept configured "
-                "sample weights"
-            ) from exc
-        logger.warning(
-            "Legacy BoW compatibility: %s does not accept sample_weight; "
-            "fitting unweighted",
-            type(model).__name__,
-        )
-        return model.fit(x, y)
-
-
-_BOW_VECTORIZER_PARAMETER_KEYS = frozenset(
-    field.name for field in fields(TfidfVectorizerScientificConfig)
-)
-_BOW_MODEL_PARAMETER_KEYS = frozenset(
-    {
-        "bow_model",
-        "logistic_c",
-        "logistic_max_iter",
-        "ridge_alpha",
-        "logistic_scientific",
-        "ridge_scientific",
-        "forest_scientific",
-        "xgboost_scientific",
-        "single_class_policy",
-        "empty_vocabulary_policy",
-        "unsupported_sample_weight_policy",
-    }
-)
-
-
-def _require_exact_constructor_mapping(
-    params: Dict[str, Any],
-    *,
-    expected: frozenset[str],
-    label: str,
-) -> Dict[str, Any]:
-    if not isinstance(params, dict):
-        raise TypeError(f"{label} parameters must be a plain mapping")
-    missing = sorted(expected - set(params))
-    extra = sorted(set(params) - expected)
-    if missing or extra:
-        raise ValueError(
-            f"{label} parameter mapping is not closed; "
-            f"missing={missing}, extra={extra}"
-        )
-    return params
-
-
-def _bow_vectorizer_params(view: BoWViewConfig) -> Dict[str, Any]:
-    if type(view) is not BoWViewConfig:
-        raise TypeError("BoW vectorizer parameters require BoWViewConfig")
-    return asdict(view.vectorizer_scientific)
-
-
-def _bow_model_params(view: BoWViewConfig) -> Dict[str, Any]:
-    if type(view) is not BoWViewConfig:
-        raise TypeError("BoW model parameters require BoWViewConfig")
-    return {
-        "bow_model": str(view.bow_model),
-        "logistic_c": float(view.logistic_c),
-        "logistic_max_iter": int(view.logistic_max_iter),
-        "ridge_alpha": float(view.ridge_alpha),
-        "logistic_scientific": asdict(view.logistic_scientific),
-        "ridge_scientific": asdict(view.ridge_scientific),
-        "forest_scientific": asdict(view.forest_scientific),
-        "xgboost_scientific": asdict(view.xgboost_scientific),
-        "single_class_policy": str(view.single_class_policy),
-        "empty_vocabulary_policy": str(view.empty_vocabulary_policy),
-        "unsupported_sample_weight_policy": str(
-            view.unsupported_sample_weight_policy
-        ),
-    }
-
-
-def _make_bow_vectorizer(params: Dict[str, Any]) -> TfidfVectorizer:
-    params = _require_exact_constructor_mapping(
-        params,
-        expected=_BOW_VECTORIZER_PARAMETER_KEYS,
-        label="BoW TF-IDF vectorizer",
-    )
-    if params["input_text_case_policy"] != "vectorizer_controls_complete_text_case_v1":
-        raise ValueError("BoW vectorizer input text policy is unsupported")
-    if params["preprocessor_policy"] != "none":
-        raise ValueError("BoW vectorizer preprocessor policy is unsupported")
-    if params["tokenizer_policy"] != "token_pattern":
-        raise ValueError("BoW vectorizer tokenizer policy is unsupported")
-    if params["vocabulary_policy"] != "fit_scope_only":
-        raise ValueError("BoW vectorizer vocabulary policy is unsupported")
-    if params["feature_selection_rule"] != "sklearn_term_frequency_rank_v1":
-        raise ValueError("BoW vectorizer feature-selection rule is unsupported")
-    dtype = {
-        "float32": np.float32,
-        "float64": np.float64,
-    }[str(params["dtype"])]
-    return TfidfVectorizer(
-        input=str(params["input"]),
-        encoding=str(params["encoding"]),
-        decode_error=str(params["decode_error"]),
-        strip_accents=params["strip_accents"],
-        lowercase=bool(params["lowercase"]),
-        preprocessor=None,
-        tokenizer=None,
-        analyzer=str(params["analyzer"]),
-        stop_words=params["stop_words"],
-        token_pattern=params["token_pattern"],
-        ngram_range=(
-            int(params["ngram_range_min"]),
-            int(params["ngram_range_max"]),
-        ),
-        min_df=int(params["min_df"]),
-        max_df=float(params["max_df"]),
-        max_features=(
-            None
-            if params["max_features"] is None
-            else int(params["max_features"])
-        ),
-        vocabulary=None,
-        binary=bool(params["binary"]),
-        dtype=dtype,
-        norm=params["norm"],
-        use_idf=bool(params["use_idf"]),
-        smooth_idf=bool(params["smooth_idf"]),
-        sublinear_tf=bool(params["sublinear_tf"]),
-    )
-
-
-def _make_bow_classifier(params: Dict[str, Any], *, random_state: int = 17):
-    params = _require_exact_constructor_mapping(
-        params,
-        expected=_BOW_MODEL_PARAMETER_KEYS,
-        label="BoW classifier",
-    )
-    model_name = str(params["bow_model"]).strip().lower()
-    if model_name == "linear":
-        config = dict(params["logistic_scientific"])
-        return LogisticRegression(
-            penalty=config["penalty"],
-            dual=bool(config["dual"]),
-            tol=float(config["tol"]),
-            C=float(params["logistic_c"]),
-            fit_intercept=bool(config["fit_intercept"]),
-            intercept_scaling=float(config["intercept_scaling"]),
-            class_weight=config["class_weight"],
-            solver=str(config["solver"]),
-            max_iter=int(params["logistic_max_iter"]),
-            multi_class=str(config["multi_class"]),
-            verbose=0,
-            warm_start=bool(config["warm_start"]),
-            n_jobs=1,
-            l1_ratio=config["l1_ratio"],
-            random_state=random_state,
-        )
-    config = dict(params["forest_scientific"])
-    forest_kwargs = {
-        "n_estimators": int(config["n_estimators"]),
-        "criterion": str(config["classifier_criterion"]),
-        "max_depth": config["max_depth"],
-        "min_samples_split": config["min_samples_split"],
-        "min_samples_leaf": config["min_samples_leaf"],
-        "min_weight_fraction_leaf": float(config["min_weight_fraction_leaf"]),
-        "max_features": config["max_features"],
-        "max_leaf_nodes": config["max_leaf_nodes"],
-        "min_impurity_decrease": float(config["min_impurity_decrease"]),
-        "oob_score": bool(config["oob_score"]),
-        "n_jobs": 1,
-        "random_state": random_state,
-        "verbose": 0,
-        "warm_start": bool(config["warm_start"]),
-        "class_weight": config["class_weight"],
-        "ccp_alpha": float(config["ccp_alpha"]),
-        "max_samples": config["max_samples"],
-        "monotonic_cst": config["monotonic_cst"],
-    }
-    if model_name == "extratrees":
-        return ExtraTreesClassifier(
-            **forest_kwargs,
-            bootstrap=bool(config["extra_trees_bootstrap"]),
-        )
-    if model_name == "random_forest":
-        return RandomForestClassifier(
-            **forest_kwargs,
-            bootstrap=bool(config["random_forest_bootstrap"]),
-        )
-    if model_name == "xgboost":
-        try:
-            from xgboost import XGBClassifier
-        except ImportError as exc:
-            raise ImportError(
-                "bow_model='xgboost' requires xgboost; refusing learner substitution"
-            ) from exc
-        config = dict(params["xgboost_scientific"])
-        return XGBClassifier(
-            n_estimators=int(config["n_estimators"]),
-            max_depth=int(config["max_depth"]),
-            max_leaves=int(config["max_leaves"]),
-            max_bin=int(config["max_bin"]),
-            grow_policy=str(config["grow_policy"]),
-            learning_rate=float(config["learning_rate"]),
-            booster=str(config["booster"]),
-            tree_method=str(config["tree_method"]),
-            gamma=float(config["gamma"]),
-            min_child_weight=float(config["min_child_weight"]),
-            max_delta_step=float(config["max_delta_step"]),
-            subsample=float(config["subsample"]),
-            sampling_method=str(config["sampling_method"]),
-            colsample_bytree=float(config["colsample_bytree"]),
-            colsample_bylevel=float(config["colsample_bylevel"]),
-            colsample_bynode=float(config["colsample_bynode"]),
-            reg_alpha=float(config["reg_alpha"]),
-            reg_lambda=float(config["reg_lambda"]),
-            scale_pos_weight=float(config["scale_pos_weight"]),
-            base_score=float(config["base_score"]),
-            missing=np.nan,
-            num_parallel_tree=int(config["num_parallel_tree"]),
-            monotone_constraints=config["monotone_constraints"],
-            interaction_constraints=config["interaction_constraints"],
-            enable_categorical=bool(config["enable_categorical"]),
-            max_cat_to_onehot=int(config["max_cat_to_onehot"]),
-            max_cat_threshold=int(config["max_cat_threshold"]),
-            multi_strategy=str(config["multi_strategy"]),
-            objective=str(config["classifier_objective"]),
-            eval_metric=str(config["classifier_eval_metric"]),
-            random_state=random_state,
-            n_jobs=1,
-        )
-    raise ValueError(f"Unsupported bow_model: {model_name}")
-
-
-def _make_bow_regressor(params: Dict[str, Any], *, random_state: int = 17):
-    params = _require_exact_constructor_mapping(
-        params,
-        expected=_BOW_MODEL_PARAMETER_KEYS,
-        label="BoW regressor",
-    )
-    model_name = str(params["bow_model"]).strip().lower()
-    if model_name == "linear":
-        config = dict(params["ridge_scientific"])
-        return Ridge(
-            alpha=float(params["ridge_alpha"]),
-            fit_intercept=bool(config["fit_intercept"]),
-            copy_X=True,
-            max_iter=config["max_iter"],
-            tol=float(config["tol"]),
-            solver=str(config["solver"]),
-            positive=bool(config["positive"]),
-            random_state=random_state,
-        )
-    config = dict(params["forest_scientific"])
-    forest_kwargs = {
-        "n_estimators": int(config["n_estimators"]),
-        "criterion": str(config["regressor_criterion"]),
-        "max_depth": config["max_depth"],
-        "min_samples_split": config["min_samples_split"],
-        "min_samples_leaf": config["min_samples_leaf"],
-        "min_weight_fraction_leaf": float(config["min_weight_fraction_leaf"]),
-        "max_features": config["max_features"],
-        "max_leaf_nodes": config["max_leaf_nodes"],
-        "min_impurity_decrease": float(config["min_impurity_decrease"]),
-        "oob_score": bool(config["oob_score"]),
-        "n_jobs": 1,
-        "random_state": random_state,
-        "verbose": 0,
-        "warm_start": bool(config["warm_start"]),
-        "ccp_alpha": float(config["ccp_alpha"]),
-        "max_samples": config["max_samples"],
-        "monotonic_cst": config["monotonic_cst"],
-    }
-    if model_name == "extratrees":
-        return ExtraTreesRegressor(
-            **forest_kwargs,
-            bootstrap=bool(config["extra_trees_bootstrap"]),
-        )
-    if model_name == "random_forest":
-        return RandomForestRegressor(
-            **forest_kwargs,
-            bootstrap=bool(config["random_forest_bootstrap"]),
-        )
-    if model_name == "xgboost":
-        try:
-            from xgboost import XGBRegressor
-        except ImportError as exc:
-            raise ImportError(
-                "bow_model='xgboost' requires xgboost; refusing learner substitution"
-            ) from exc
-        config = dict(params["xgboost_scientific"])
-        return XGBRegressor(
-            n_estimators=int(config["n_estimators"]),
-            max_depth=int(config["max_depth"]),
-            max_leaves=int(config["max_leaves"]),
-            max_bin=int(config["max_bin"]),
-            grow_policy=str(config["grow_policy"]),
-            learning_rate=float(config["learning_rate"]),
-            booster=str(config["booster"]),
-            tree_method=str(config["tree_method"]),
-            gamma=float(config["gamma"]),
-            min_child_weight=float(config["min_child_weight"]),
-            max_delta_step=float(config["max_delta_step"]),
-            subsample=float(config["subsample"]),
-            sampling_method=str(config["sampling_method"]),
-            colsample_bytree=float(config["colsample_bytree"]),
-            colsample_bylevel=float(config["colsample_bylevel"]),
-            colsample_bynode=float(config["colsample_bynode"]),
-            reg_alpha=float(config["reg_alpha"]),
-            reg_lambda=float(config["reg_lambda"]),
-            base_score=float(config["base_score"]),
-            missing=np.nan,
-            num_parallel_tree=int(config["num_parallel_tree"]),
-            monotone_constraints=config["monotone_constraints"],
-            interaction_constraints=config["interaction_constraints"],
-            enable_categorical=bool(config["enable_categorical"]),
-            max_cat_to_onehot=int(config["max_cat_to_onehot"]),
-            max_cat_threshold=int(config["max_cat_threshold"]),
-            multi_strategy=str(config["multi_strategy"]),
-            objective=str(config["regressor_objective"]),
-            eval_metric=str(config["regressor_eval_metric"]),
-            random_state=random_state,
-            n_jobs=1,
-        )
-    raise ValueError(f"Unsupported bow_model: {model_name}")
 
 
 def _bounded_fold_count(requested: int, n_rows: int) -> int:
@@ -9830,8 +8920,6 @@ def _embedding_evidence_digest_groups(
         for chunk_key in [
             "positive_aligned_chunks",
             "negative_aligned_chunks",
-            "positive_external_chunks",
-            "negative_external_chunks",
         ]:
             chunks = contrast.get(chunk_key) or []
             if chunks:
@@ -9993,8 +9081,6 @@ def _evidence_digest_text_blurbs(role_evidence: Dict[str, Any]) -> List[str]:
         for chunk_key in [
             "positive_aligned_chunks",
             "negative_aligned_chunks",
-            "positive_external_chunks",
-            "negative_external_chunks",
         ]:
             for row in contrast.get(chunk_key, []) or []:
                 if not isinstance(row, dict):
@@ -10239,7 +9325,6 @@ def _compact_embedding_contrast_evidence(evidence: Dict[str, Any]) -> Dict[str, 
             "unit",
             "chunking",
             "residualized_columns",
-            "external_corpora",
             "cluster_contrast_vectors",
             "n_patients",
             "n_concept_phrases",
@@ -10296,12 +9381,6 @@ def _compact_embedding_contrast_evidence(evidence: Dict[str, Any]) -> Dict[str, 
         )
         compact_contrast["negative_aligned_chunks"] = _compact_embedding_chunks(
             contrast.get("negative_aligned_chunks", []) or []
-        )
-        compact_contrast["positive_external_chunks"] = _compact_embedding_chunks(
-            contrast.get("positive_external_chunks", []) or []
-        )
-        compact_contrast["negative_external_chunks"] = _compact_embedding_chunks(
-            contrast.get("negative_external_chunks", []) or []
         )
         compact_contrast["concept_probe_scores"] = _compact_concept_scores(
             contrast.get("concept_probe_scores", []) or []
@@ -10488,8 +9567,6 @@ def _redact_evidence_digest(digest: Dict[str, Any]) -> Dict[str, Any]:
             for chunk_key in [
                 "positive_aligned_chunks",
                 "negative_aligned_chunks",
-                "positive_external_chunks",
-                "negative_external_chunks",
             ]:
                 for row in contrast.get(chunk_key, []) or []:
                     if not isinstance(row, dict):

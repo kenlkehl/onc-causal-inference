@@ -1,15 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
-import os
 from dataclasses import replace
-from pathlib import Path
-import subprocess
-from types import SimpleNamespace
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -18,13 +12,6 @@ from oci.inference import stage2_preflight as preflight
 from oci.inference.tfidf_topic_stage1 import tfidf_topic_dataset_fingerprints
 from oci.inference.tfidf_topic_discovery import row_set_fingerprint
 from tests.test_research_all_evidence_workflow import _inputs, _completed_stage2_reselection_fixture
-
-ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location(
-    "saved_launcher", ROOT / "scripts/launch_saved_stage2.py"
-)
-launcher = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(launcher)
 
 
 def write(path, value):
@@ -158,46 +145,42 @@ def test_preflight_allows_extractor_change_only_after_measurement_cleanup(tmp_pa
     assert tree(tmp_path) == before
 
 
-def test_saved_launcher_accepts_pool_override_without_changing_science(tmp_path):
+def _saved_stage2_config(config, *extra):
+    """Compile the documented saved-run Stage 2-only command line."""
+    args = workflow.build_parser().parse_args(
+        ["--config", str(config.output_dir / "run_config.json"), "--stage2-only", *extra]
+    )
+    raw, directory = workflow._raw_config_from_args(args)
+    return workflow.compile_config(raw, config_dir=directory)
+
+
+def test_saved_config_accepts_pool_override_without_changing_science(tmp_path):
     config = saved_fixture(tmp_path)
     endpoints = [{"endpoint": "http://a.test/v1", "max_concurrency": 2},
                  {"endpoint": "http://b.test/v1", "max_concurrency": 3}]
-    args = launcher.command(config.dataset, str(config.output_dir), {
-        "OCI_RUN_CONFIG": str(config.output_dir / "run_config.json"),
-        "STAGE2_EXTRACTION_ENDPOINTS": json.dumps(endpoints),
-        "STAGE2_EXTRACTION_WORKERS": "5",
-    })
-    raw, directory = workflow._raw_config_from_args(workflow.build_parser().parse_args(args))
-    updated = workflow.compile_config(raw, config_dir=directory)
+    updated = _saved_stage2_config(
+        config,
+        "--stage2-extraction-endpoints", json.dumps(endpoints),
+        "--set", "stage2.extraction_llm.workers=5",
+    )
     assert updated.stage2.extraction_llm.model == config.stage2.extraction_llm.model
     assert updated.stage2.extraction_llm.workers == 5
+    assert updated.stage2.extraction_llm.endpoint == ""
     assert [server.public_dict() for server in updated.stage2.extraction_llm.endpoints] == endpoints
     assert replace(updated, stage2=config.stage2) == config
 
 
 @pytest.mark.parametrize("managed", [False, True])
-@pytest.mark.parametrize("mode", ["independent_tasks", "multi_model"])
 def test_preflight_and_saved_command_preserve_science_and_do_not_run_stage1(
-    tmp_path, monkeypatch, managed, mode
+    tmp_path, monkeypatch, managed
 ):
     config = saved_fixture(tmp_path, managed)
     before = tree(tmp_path)
-    args = launcher.command(
-        config.dataset,
-        str(config.output_dir),
-        {
-            "OCI_RUN_CONFIG": str(config.output_dir / "run_config.json"),
-            "STAGE2_SELECTION_MODE": mode,
-            "STAGE2_ONLY": "1",
-        },
-    )
-    parsed = workflow.build_parser().parse_args(args)
-    raw, directory = workflow._raw_config_from_args(parsed)
-    resolved = workflow.compile_config(raw, config_dir=directory)
+    resolved = _saved_stage2_config(config)
     assert resolved.seed == 7 and resolved.outer_folds == 2 and resolved.inner_folds == 2
     assert resolved.stage2.model == "preserved-primary"
-    assert resolved.stage2.statistical_selection.selection_mode == mode
     assert resolved.components == ("stage2",)
+    assert resolved.stage2 == config.stage2
     result = preflight.preflight_stage2(resolved)
     assert result["primary_serving"] == ("managed" if managed else "external")
     assert tree(tmp_path) == before
@@ -217,8 +200,7 @@ def test_preflight_and_saved_command_preserve_science_and_do_not_run_stage1(
     assert not (config.output_dir / "resolved_neural_query_config.json").exists()
 
 
-@pytest.mark.parametrize("mode", [None, "multi_model"])
-def test_saved_launcher_preserves_explicit_pre_dina_estimator_list(tmp_path, mode):
+def test_saved_command_preserves_explicit_pre_dina_estimator_list(tmp_path):
     config = saved_fixture(tmp_path)
     source = config.output_dir / "run_config.json"
     raw = json.loads(source.read_text())
@@ -226,16 +208,8 @@ def test_saved_launcher_preserves_explicit_pre_dina_estimator_list(tmp_path, mod
     count = raw["stage2"]["statistical_selection"]["multi_model"]["modifier_count"]
     count["estimators"] = estimators
     write(source, raw)
-    env = {"OCI_RUN_CONFIG": str(source)}
-    if mode:
-        env["STAGE2_SELECTION_MODE"] = mode
-    args = launcher.command(config.dataset, str(config.output_dir), env)
-    updated_raw, directory = workflow._raw_config_from_args(
-        workflow.build_parser().parse_args(args)
-    )
-    updated = workflow.compile_config(updated_raw, config_dir=directory)
+    updated = _saved_stage2_config(config)
     selection = updated.stage2.statistical_selection
-    assert selection.selection_mode == (mode or config.stage2.statistical_selection.selection_mode)
     assert selection.multi_model.modifier_count.estimators == tuple(estimators)
     assert json.loads(source.read_text()) == raw
 
@@ -277,145 +251,23 @@ def test_preflight_refuses_incompatible_inputs_without_writes(tmp_path, damage, 
     assert tree(tmp_path) == before
 
 
-def test_saved_command_rejects_cohort_and_output_mismatch(tmp_path):
-    config = saved_fixture(tmp_path)
-    env = {"OCI_RUN_CONFIG": str(config.output_dir / "run_config.json")}
-    with pytest.raises(ValueError, match="cohort"):
-        launcher.command(tmp_path / "wrong.parquet", "", env)
-    with pytest.raises(ValueError, match="output"):
-        launcher.command(config.dataset, str(tmp_path / "wrong"), env)
-    with pytest.raises(ValueError, match="runtime override"):
-        launcher.command(config.dataset, "", {**env, "STAGE2_CONSOLIDATION_MAX_ROUNDS": "1"})
-
-
-def test_saved_cpu_and_retrieval_worker_overrides_preserve_science_and_checkpoints(tmp_path):
+def test_saved_worker_overrides_preserve_science_and_checkpoints(tmp_path):
     config = saved_fixture(tmp_path)
     before = tree(tmp_path)
-    args = launcher.command(config.dataset, str(config.output_dir), {
-        "OCI_RUN_CONFIG": str(config.output_dir / "run_config.json"),
-        "STAGE2_COLBERT_WORKERS_PER_DEVICE": "4",
-        "STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES": "1048576",
-        "STAGE2_DECISION_PREPARATION_WORKERS": "16",
-        "STAGE2_MODELING_WORKERS": "32",
-    })
-    raw, directory = workflow._raw_config_from_args(workflow.build_parser().parse_args(args))
-    expanded = workflow.compile_config(raw, config_dir=directory)
-    assert expanded.stage2.colbert.workers_per_device == 4
-    assert expanded.stage2.colbert.query_cache_max_bytes == 1048576
-    assert expanded.stage2.decision_preparation_workers == 16
+    expanded = _saved_stage2_config(
+        config,
+        "--set", "stage2.workers=4",
+        "--set", "stage2.modeling_workers=32",
+    )
+    assert expanded.stage2.workers == 4
     assert expanded.stage2.modeling_workers == 32
     assert expanded.stage2.statistical_selection.public_dict() == config.stage2.statistical_selection.public_dict()
-    assert expanded.stage2.colbert.measurement_identity() == config.stage2.colbert.measurement_identity()
-    assert expanded.stage2.colbert.encoding_identity() == config.stage2.colbert.encoding_identity()
     preflight.preflight_stage2(expanded)
     assert tree(tmp_path) == before
 
 
-def test_saved_co_resident_override_preserves_science_and_checkpoints(tmp_path):
-    config = saved_fixture(tmp_path)
-    source = config.output_dir / "run_config.json"
-    raw = json.loads(source.read_text())
-    raw["stage2"]["endpoint"] = ""
-    raw["stage2"]["vllm"] = {"gpus": [0], "gpus_per_server": 1,
-        "extra_args": ["--gpu-memory-utilization", "0.50"]}
-    raw["stage2"]["extraction_llm"]["endpoint"] = ""
-    raw["stage2"]["extraction_llm"]["vllm"] = {"gpus": [0, 1], "gpus_per_server": 1,
-        "extra_args": ["--gpu-memory-utilization", "0.28"]}
-    write(source, raw)
-    before = tree(tmp_path)
-    args = launcher.command(config.dataset, str(config.output_dir), {
-        "OCI_RUN_CONFIG": str(source), "STAGE2_VLLM_CO_RESIDENT_ALL_GPUS": "1"})
-    parsed = workflow.build_parser().parse_args(args)
-    after_raw, directory = workflow._raw_config_from_args(parsed)
-    after = workflow.compile_config(after_raw, config_dir=directory)
-    assert after.stage2.vllm_co_resident_all_gpus is True
-    assert after.stage2.model == config.stage2.model
-    assert after.stage2.extraction_llm.model == config.stage2.extraction_llm.model
-    preflight.preflight_stage2(after)
-    assert tree(tmp_path) == before
-
-
-@pytest.mark.parametrize("wrapper", ["run_one_conf_one_mod.sh", "run_five_conf_five_mod.sh"])
-def test_wrappers_delegate_saved_config_without_injecting_defaults(tmp_path, wrapper):
-    fake = tmp_path / "python"
-    capture = tmp_path / "capture.json"
-    fake.write_text(
-        "#!/usr/bin/env python3\nimport os,json,sys\n"
-        'open(os.environ["CAPTURE"],"w").write(json.dumps({"args":sys.argv[1:],'
-        '"env":{k:v for k,v in os.environ.items() if k.startswith("STAGE2_")}}))\n'
-    )
-    fake.chmod(0o755)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("STAGE2_", "OCI_"))}
-    env.update(
-        OCI_PYTHON=str(fake),
-        OCI_RUN_CONFIG=str(tmp_path / "saved.json"),
-        STAGE2_ONLY="1",
-        STAGE2_SELECTION_MODE="independent_tasks",
-        OCI_PREFLIGHT_ONLY="1",
-        CAPTURE=str(capture),
-    )
-    subprocess.run(["bash", str(ROOT / wrapper)], env=env, check=True, capture_output=True)
-    result = json.loads(capture.read_text())
-    assert result["args"][0].endswith("launch_saved_stage2.py")
-    assert wrapper.split("_conf_")[0].removeprefix("run_") in result["args"][1]
-    assert set(result["env"]) == {"STAGE2_ONLY", "STAGE2_SELECTION_MODE"}
-
-
-@pytest.mark.parametrize(
-    "env",
-    [
-        {"STAGE2_ONLY": "true"},
-        {"STAGE2_RESELECT": "yes"},
-        {"OCI_PREFLIGHT_ONLY": "2"},
-        {"STAGE2_SELECTION_MODE": "typo"},
-        {"STAGE2_RESELECT": "1"},
-        {"STAGE2_ONLY": "1", "STAGE2_ENDPOINT": ""},
-        {"STAGE2_SELECTION_MODE": "independent_tasks", "STAGE2_ENDPOINT": ""},
-        {"OCI_PREFLIGHT_ONLY": "1"},
-    ],
-)
-def test_invalid_controls_fail_before_python(tmp_path, env):
-    process = subprocess.run(
-        ["bash", str(ROOT / "run_one_conf_one_mod.sh"), str(tmp_path)],
-        env={**os.environ, "OCI_PYTHON": "/nonexistent", **env},
-        text=True,
-        capture_output=True,
-    )
-    assert process.returncode != 0
-    assert "No such file" not in process.stderr
-
-
-def test_mode_switch_cannot_resume_legacy_completion(tmp_path):
-    config = saved_fixture(tmp_path)
-    write(config.output_dir / "stage2/config.json", {"statistical_selection": {}})
-    write(config.output_dir / "stage2/complete.json", {"status": "complete"})
-    preflight.validate_selection_resume(config)
-    new = replace(
-        config,
-        stage2=replace(
-            config.stage2,
-            statistical_selection=replace(
-                config.stage2.statistical_selection, selection_mode="independent_tasks"
-            ),
-        ),
-    )
-    before = tree(tmp_path)
-    with pytest.raises(RuntimeError, match="selection mode changed"):
-        workflow.ResearchAllEvidenceWorkflow(new).run()
-    assert tree(tmp_path) == before
-
-
-def test_guarded_dry_run_and_independent_migration_preserve_measurements(tmp_path):
+def test_guarded_dry_run_and_migration_preserve_measurements(tmp_path):
     config = _completed_stage2_reselection_fixture(tmp_path)
-    config = replace(
-        config,
-        stage2=replace(
-            config.stage2,
-            statistical_selection=replace(
-                config.stage2.statistical_selection, selection_mode="independent_tasks"
-            ),
-        ),
-    )
     before = tree(tmp_path)
     planned = workflow.prepare_stage2_reselection(config=config, dry_run=True)
     assert planned["status"] == "validated" and tree(tmp_path) == before
@@ -454,23 +306,6 @@ def test_interrupted_reselection_resumes_only_with_migration_flag(tmp_path, monk
     state = workflow.prepare_stage2_reselection(config=config)
     assert state["status"] == "prepared"
     assert len(list((config.output_dir / "stage2/reselection_archives").iterdir())) == 1
-
-
-def test_archive_restore_copies_and_refuses_existing_destination(tmp_path, monkeypatch):
-    config = _completed_stage2_reselection_fixture(tmp_path)
-    source = config.output_dir / "stage2_pre_roles_refactor"
-    (config.output_dir / "stage2").rename(source)
-    monkeypatch.setattr(preflight, "preflight_stage2", lambda *a, **k: None)
-    before = tree(source)
-    destination = preflight.restore_stage2_archive(config, source)
-    assert tree(source) == before
-    src = source / "config.json"
-    dst = destination / "config.json"
-    assert src.stat().st_ino != dst.stat().st_ino
-    dst.write_text("changed")
-    assert tree(source) == before
-    with pytest.raises(RuntimeError, match="already exists"):
-        preflight.restore_stage2_archive(config, source)
 
 
 def test_core_cli_preflight_returns_before_any_logging_or_execution(tmp_path, monkeypatch):
@@ -517,28 +352,3 @@ def test_normal_resume_finalizes_existing_migration_without_rearchival(tmp_path,
     assert persisted["status"] == "complete"
     assert persisted["reselection_id"] == state["reselection_id"]
     assert len(list((config.output_dir / "stage2/reselection_archives").iterdir())) == 1
-
-
-def test_interrupted_archive_copy_does_not_publish_partial_stage2(tmp_path, monkeypatch):
-    config = _completed_stage2_reselection_fixture(tmp_path)
-    source = config.output_dir / "stage2_pre_roles_refactor"
-    (config.output_dir / "stage2").rename(source)
-    monkeypatch.setattr(preflight, "preflight_stage2", lambda *a, **k: None)
-    original = preflight.shutil.copytree
-
-    def interrupted(src, dst):
-        dst.mkdir()
-        (dst / "partial").write_text("incomplete")
-        raise InterruptedError("copy interrupted")
-
-    monkeypatch.setattr(preflight.shutil, "copytree", interrupted)
-    before = tree(source)
-    with pytest.raises(InterruptedError):
-        preflight.restore_stage2_archive(config, source)
-    assert not (config.output_dir / "stage2").exists()
-    assert tree(source) == before
-    monkeypatch.setattr(preflight.shutil, "copytree", original)
-    restored = preflight.restore_stage2_archive(config, source)
-    assert (restored / "complete.json").is_file()
-    assert not (restored / "partial").exists()
-    assert tree(source) == before

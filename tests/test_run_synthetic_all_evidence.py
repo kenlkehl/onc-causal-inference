@@ -1,527 +1,335 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from oci.inference.research_all_evidence_workflow import (
+    _raw_config_from_args,
+    build_parser,
+    compile_config,
+)
 
-@pytest.mark.parametrize("launcher", [
-    "run_one_conf_one_mod.sh",
-    "run_five_conf_five_mod.sh",
-    "run_one_conf_one_mod_h100x8.sh",
-    "run_one_conf_one_mod_rtxpro6000x8.sh",
-    "run_five_conf_five_mod_rtxpro6000x8.sh",
-])
-@pytest.mark.parametrize("saved,overrides", [
-    (False, {}),
-    (False, {"STAGE2_SELECTION_MODE": "multi_model"}),
-    (False, {"STAGE2_SELECTION_MODE": "llm_roles"}),
-    (False, {"STAGE2_SELECTION_MODE": "independent_tasks"}),
-    (False, {"STAGE2_DECISION_EXTRACTION": "1"}),
-    (False, {"STAGE2_EXTRACTION_CONTEXT_STRATEGY": "colbert", "STAGE2_EXTRACTION_FEATURE_BATCH_SIZE": "3"}),
-    (False, {"STAGE2_COLBERT_WORKERS_PER_DEVICE": "4"}),
-    (False, {"STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES": "1048576"}),
-    (False, {"STAGE2_DECISION_PREPARATION_WORKERS": "16"}),
-    (False, {"STAGE2_VLLM_CO_RESIDENT_ALL_GPUS": "0"}),
-    (False, {
-        "STAGE2_DECISION_EXTRACTION": "0",
-        "STAGE2_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","196608"]',
-        "STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","131072"]',
-        "STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS": "131072",
-    }),
-    (False, {
-        "STAGE2_DECISION_EXTRACTION": "1",
-        "STAGE2_MODEL": "custom-gemma",
-        "STAGE2_EXTRACTION_MODEL": "custom-plumb",
-        "STAGE2_VLLM_GPUS": "cuda:0,cuda:1",
-        "STAGE2_EXTRACTION_VLLM_GPUS": "cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7",
-        "STAGE2_EXTRACTION_WORKERS": "24",
-        "STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","3072","--gpu-memory-utilization","0.35"]',
-    }),
-    (True, {}),
-    (True, {"STAGE2_SELECTION_MODE": "multi_model"}),
-])
-def test_wrappers_select_backend_and_preserve_saved_settings(
-    tmp_path: Path, launcher, saved, overrides,
-):
-    repo_root = Path(__file__).resolve().parents[1]
-    invocation_log = tmp_path / "invocations.jsonl"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+LAUNCHER = REPO_ROOT / "run_synthetic.sh"
+DATASETS = REPO_ROOT / "synthetic_data" / "example_synthetic_datasets"
+COHORT_DATASETS = {
+    "one_conf_one_mod": DATASETS
+    / "one_confounder_one_effect_modifier_nsclc_with_structured"
+    / "dataset.parquet",
+    "five_conf_five_mod": DATASETS
+    / "five_confounders_five_effect_modifiers_nsclc_with_structured"
+    / "dataset.parquet",
+}
+FAKE_PYTHON = f"""#!{sys.executable}
+import json, os, sys
+with open(os.environ["FAKE_PYTHON_INVOCATION_LOG"], "a") as log:
+    log.write(json.dumps(sys.argv[1:]) + "\\n")
+if sys.argv[1].endswith("detect_all_evidence_hardware.py"):
+    args = sys.argv[1:]
+    workers = args[args.index("--stage2-workers") + 1] if "--stage2-workers" in args else "32"
+    devices = ",".join(f"cuda:{{index}}" for index in range(8))
+    print(f"8\\t{{devices}}\\t12\\t{{workers}}\\t12\\teight eligible GPUs")
+"""
+
+
+def _launch(tmp_path: Path, *arguments: str, check: bool = True, **variables: str):
+    log = tmp_path / "invocations.jsonl"
+    log.unlink(missing_ok=True)
     fake_python = tmp_path / "python"
-    fake_python.write_text(
-        f"#!{sys.executable}\n"
-        "import json, os, sys\n"
-        "with open(os.environ['FAKE_PYTHON_INVOCATION_LOG'], 'a') as log:\n"
-        "    log.write(json.dumps({'args': sys.argv[1:], 'env': "
-        "{k: v for k, v in os.environ.items() if k.startswith('STAGE2_')}}) + '\\n')\n"
-        "if sys.argv[1].endswith('detect_all_evidence_hardware.py'):\n"
-        "    print('8\\tcuda:0,cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7"
-        "\\t12\\t32\\t12\\teight eligible GPUs')\n",
-        encoding="utf-8",
-    )
+    fake_python.write_text(FAKE_PYTHON, encoding="utf-8")
     fake_python.chmod(0o755)
     environment = {
-        k: v for k, v in os.environ.items()
-        if not k.startswith(("STAGE2_", "OCI_"))
-        and k not in {"GPU_COUNT", "PHYSICAL_GPUS", "DISABLE_HTR", "STAGE1_ARCHITECTURES"}
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("STAGE1_", "STAGE2_", "OCI_"))
+        and key not in {"PRESET", "GPU_COUNT", "PHYSICAL_GPUS", "DISABLE_HTR"}
     }
     environment.update(
         OCI_PYTHON=str(fake_python),
-        FAKE_PYTHON_INVOCATION_LOG=str(invocation_log),
-        **overrides,
+        FAKE_PYTHON_INVOCATION_LOG=str(log),
+        **variables,
     )
-    if saved:
-        environment.update(STAGE2_ONLY="1", OCI_RUN_CONFIG=str(tmp_path / "saved.json"))
     completed = subprocess.run(
-        ["bash", str(repo_root / launcher), str(tmp_path / "output")],
-        cwd=repo_root, env=environment, check=True, capture_output=True, text=True,
+        ["bash", str(LAUNCHER), *arguments],
+        cwd=REPO_ROOT,
+        env=environment,
+        check=check,
+        capture_output=True,
+        text=True,
     )
-    invocations = [json.loads(line) for line in invocation_log.read_text().splitlines()]
-    args = invocations[-1]["args"]
-    if saved:
-        assert len(invocations) == 1
-        assert args[0].endswith("launch_saved_stage2.py")
-        assert invocations[0]["env"] == {"STAGE2_ONLY": "1", **overrides}
-        return
+    invocations = (
+        [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        if log.is_file()
+        else []
+    )
+    return completed, invocations
 
-    assert "oci.inference.research_all_evidence_workflow" in args
-    expected_modeling_workers = overrides.get("STAGE2_MODELING_WORKERS", "128" if "rtxpro6000" in launcher else "1")
-    assert f"stage2.modeling_workers={expected_modeling_workers}" in args
-    decision = overrides.get("STAGE2_DECISION_EXTRACTION", "0") == "1"
-    rtx = "rtxpro6000" in launcher
-    h100 = "h100" in launcher
-    managed = rtx or h100
-    primary = (
-        "nvidia/Gemma-4-26B-A4B-NVFP4" if rtx else
-        "RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic" if h100 and decision else
-        "RedHatAI/gemma-4-31B-it-FP8-dynamic" if h100 else
-        "RedHatAI/Gemma-4-31B-IT-FP8-Dynamic"
+
+def _workflow_args(invocations):
+    workflow = invocations[-1]
+    assert workflow[:2] == ["-m", "oci.inference.research_all_evidence_workflow"]
+    return workflow[2:]
+
+
+def _compile(arguments):
+    raw, config_dir = _raw_config_from_args(build_parser().parse_args(arguments))
+    return compile_config(raw, config_dir=config_dir)
+
+
+@pytest.mark.parametrize("cohort", ["one_conf_one_mod", "five_conf_five_mod"])
+@pytest.mark.parametrize("preset", ["external", "h100x8", "rtxpro6000x8"])
+def test_launcher_emits_compilable_cohort_and_preset_defaults(tmp_path, cohort, preset):
+    completed, invocations = _launch(tmp_path, cohort, PRESET=preset)
+    arguments = _workflow_args(invocations)
+    config = _compile(arguments)
+
+    managed = preset != "external"
+    detect = invocations[-2]
+    assert detect[0].endswith("detect_all_evidence_hardware.py")
+    assert detect[detect.index("--min-free-vram-gib") + 1] == "0"
+    assert ("find_spec" in " ".join(invocations[1])) is managed
+    suffix = "" if preset == "external" else f"_{preset}"
+    assert config.output_dir == (
+        REPO_ROOT / "artifacts" / "research_all_evidence" / f"{cohort}_nsclc{suffix}_full"
     )
-    legacy = (
-        "nvidia/Gemma-4-26B-A4B-NVFP4" if rtx else
-        "RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic" if h100 else
-        "google/gemma-4-e4b-it"
-    )
-    assert args[args.index("--stage2-model") + 1] == overrides.get("STAGE2_MODEL", primary)
-    assert args[args.index("--stage2-extraction-model") + 1] == overrides.get(
-        "STAGE2_EXTRACTION_MODEL", "crh225/plumb-4b" if decision else legacy,
-    )
-    context_strategy = overrides.get("STAGE2_EXTRACTION_CONTEXT_STRATEGY", "colbert" if decision else "full_record")
-    assert args[args.index("--stage2-extraction-context-strategy") + 1] == context_strategy
-    assert args[args.index("--stage2-colbert-cache-dir") + 1] == str(repo_root / ".oci_cache/colbert")
-    settings = dict(args[i + 1].split("=", 1) for i, arg in enumerate(args) if arg == "--set")
-    assert json.loads(settings["stage2.decision_extraction.enabled"]) is decision
-    # Compile the actual shell-emitted CLI, catching invalid combinations of
-    # backend, retrieval, primary model, and extraction server settings.
-    from oci.inference.research_all_evidence_workflow import (
-        _raw_config_from_args, build_parser, compile_config,
-    )
-    raw, config_dir = _raw_config_from_args(build_parser().parse_args(args[2:]))
-    config = compile_config(raw, config_dir=config_dir)
-    # Validate the actual launcher -> CLI -> scientific-policy path, not just
-    # dataclass defaults: the ensemble mode is needed to activate both the
-    # additional DINA evidence family and the final architecture/count search.
-    assert config.outcome_type == "binary"
-    selection = config.stage2.statistical_selection
-    assert selection.selection_mode == overrides.get("STAGE2_SELECTION_MODE", "multi_model")
-    assert {"causal_forest", "dina"} <= set(
-        selection.multi_model.active_families(config.outcome_type)
-    )
-    assert selection.multi_model.modifier_count.enabled
-    assert selection.multi_model.modifier_count.estimators == (
-        "causal_forest", "linear_interactions", "dina",
-    )
-    assert config.stage2.decision_extraction.enabled is decision
-    assert config.stage2.decision_extraction.max_prompt_tokens == 3000
-    assert config.stage2.extraction_context_strategy == context_strategy
-    assert config.stage2.extraction_feature_batch_size == int(overrides.get("STAGE2_EXTRACTION_FEATURE_BATCH_SIZE", "10"))
-    assert config.stage2.colbert.workers_per_device == int(overrides.get("STAGE2_COLBERT_WORKERS_PER_DEVICE", "1"))
-    assert config.stage2.colbert.query_cache_max_bytes == int(overrides.get("STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES", str(1024**3)))
-    assert config.stage2.decision_preparation_workers == int(overrides.get("STAGE2_DECISION_PREPARATION_WORKERS", "0"))
-    assert config.stage2.vllm_co_resident_all_gpus == bool(int(overrides.get("STAGE2_VLLM_CO_RESIDENT_ALL_GPUS", "0")))
+    assert config.dataset == COHORT_DATASETS[cohort]
+    assert config.components[-1] == "stage2"
+    assert config.stage1_architectures is None
+    assert config.outer_folds == config.inner_folds == 5 and config.seed == 42
+    assert config.devices == tuple(f"cuda:{index}" for index in range(8))
+    assert config.workers == 12
+    stage2 = config.stage2
+    extraction = stage2.extraction_llm
+    assert stage2.consolidation_batch_size == 20
+    assert stage2.consolidation_max_rounds == 55
+    assert stage2.operationalization_max_prompt_chars == 640_000
+    assert stage2.ontology_refinement_min_failure_patients == 3
+    assert stage2.max_ontology_refinement_rounds == 2
+
+    one_conf_external = cohort == "one_conf_one_mod" and preset == "external"
+    expected_workers = 4 if one_conf_external else 32
+    assert stage2.workers == expected_workers
+    assert extraction.workers == expected_workers
+    assert stage2.modeling_workers == (128 if preset == "rtxpro6000x8" else 1)
+    if preset == "external":
+        assert stage2.endpoint == "http://127.0.0.1:8010/v1"
+        assert extraction.endpoint == "http://127.0.0.1:8020/v1"
+        assert stage2.model == "RedHatAI/Gemma-4-31B-IT-FP8-Dynamic"
+        assert extraction.model == "google/gemma-4-e4b-it"
+        assert stage2.vllm is None and extraction.vllm is None
+        assert "http://127.0.0.1:8010/v1" in completed.stdout
+    if one_conf_external or managed:
+        assert stage2.request_attempt_timeout == 1800
+        assert stage2.request_timeout == 6000
+        assert stage2.extraction_context_margin_tokens == 4096
+    window = {"external": 128_000, "h100x8": 128_000, "rtxpro6000x8": 262_144}[preset]
+    if one_conf_external or managed:
+        assert stage2.extraction_context_window_tokens == window
     if not managed:
-        assert config.stage2.extraction_llm.vllm is None
         return
 
-    assert ("separate resident primary and decision pools" in completed.stdout) is decision
-    primary_gpus = overrides.get(
-        "STAGE2_VLLM_GPUS", "cuda:0" if decision else "cuda:0,cuda:1,cuda:2,cuda:3",
-    ).split(",")
-    extraction_gpus = overrides.get(
-        "STAGE2_EXTRACTION_VLLM_GPUS",
-        ("cuda:0,cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7" if rtx else
-         "cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7") if decision else "cuda:4,cuda:5,cuda:6,cuda:7",
-    ).split(",")
-    for pool, gpus in ((config.stage2.vllm, primary_gpus), (config.stage2.extraction_llm.vllm, extraction_gpus)):
-        assert pool.server_count == len(gpus)
-        assert pool.gpu_groups() == tuple((gpu,) for gpu in gpus)
-    expected_overlap = {"cuda:0"} if rtx and decision and "STAGE2_EXTRACTION_VLLM_GPUS" not in overrides else set()
-    assert set(primary_gpus) & set(extraction_gpus) == expected_overlap
-    assert set(primary_gpus + extraction_gpus) == {f"cuda:{i}" for i in range(8)}
-    assert config.stage2.extraction_llm.workers == int(overrides.get(
-        "STAGE2_EXTRACTION_WORKERS", "128" if decision else "32",
-    ))
-    for variable, setting in (
-        ("STAGE2_VLLM_EXTRA_ARGS_JSON", "stage2.vllm.extra_args"),
-        ("STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON", "stage2.extraction_llm.vllm.extra_args"),
+    primary_model = {
+        "h100x8": "RedHatAI/gemma-4-31B-it-FP8-dynamic",
+        "rtxpro6000x8": "nvidia/Gemma-4-26B-A4B-NVFP4",
+    }[preset]
+    extraction_model = {
+        "h100x8": "RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic",
+        "rtxpro6000x8": "nvidia/Gemma-4-26B-A4B-NVFP4",
+    }[preset]
+    assert stage2.endpoint == "" and extraction.endpoint == ""
+    assert stage2.model == primary_model
+    assert extraction.model == extraction_model
+    assert stage2.vllm_rapid_switch_seconds == 900
+    for pool, gpus, port in (
+        (stage2.vllm, ("cuda:0", "cuda:1", "cuda:2", "cuda:3"), 8010),
+        (extraction.vllm, ("cuda:4", "cuda:5", "cuda:6", "cuda:7"), 8110),
     ):
-        extra_args = json.loads(settings[setting])
-        expected = json.loads(overrides[variable]) if variable in overrides else [
-            "--gpu-memory-utilization", "0.50" if rtx and decision else "0.90", "--max-model-len", "262144" if rtx else "128000",
+        assert pool.gpu_groups() == tuple((gpu,) for gpu in gpus)
+        assert pool.server_count == 4
+        assert pool.base_port == port
+        assert list(pool.extra_args) == [
+            "--gpu-memory-utilization", "0.90",
+            "--max-model-len", str(window),
             "--max-num-seqs", "32",
         ]
-        if decision and variable == "STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON" and variable not in overrides:
-            assert extra_args[extra_args.index("--max-model-len") + 1] == "3072"
-            assert extra_args[extra_args.index("--gpu-memory-utilization") + 1] == "0.28"
-            assert extra_args[extra_args.index("--revision") + 1] == config.stage2.decision_extraction.tokenizer_revision
-            assert "--enforce-eager" in extra_args
-            assert "--convert" not in extra_args  # Added by the backend, once.
-            continue
-        assert extra_args == expected
-    context_flag = args.index("--stage2-extraction-context-window-tokens")
-    assert args[context_flag + 1] == overrides.get(
-        "STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS", "262144" if rtx else "128000",
-    )
+    shared = "one shared pool" in completed.stdout
+    assert shared is (preset == "rtxpro6000x8")
 
 
-@pytest.mark.parametrize("value", ["true", "2", "invalid"])
-def test_invalid_decision_backend_flag_fails_before_setup(tmp_path, value):
-    repo_root = Path(__file__).resolve().parents[1]
-    environment = {k: v for k, v in os.environ.items() if not k.startswith(("STAGE2_", "OCI_"))}
-    environment.update(STAGE2_DECISION_EXTRACTION=value, OCI_PYTHON="/does/not/exist")
-    completed = subprocess.run(
-        ["bash", str(repo_root / "run_one_conf_one_mod.sh"), str(tmp_path / "output")],
-        env=environment, capture_output=True, text=True,
-    )
-    assert completed.returncode == 2
-    assert "STAGE2_DECISION_EXTRACTION must be 0 or 1" in completed.stderr
-    assert "Synchronizing" not in completed.stdout
-
-
-@pytest.mark.parametrize("runtime_overrides", [
-    {},
-    {"STAGE2_WORKERS": "8", "STAGE2_EXTRACTION_WORKERS": "12",
-     "STAGE2_REQUEST_TIMEOUT": "3600",
-     "STAGE2_REQUEST_ATTEMPT_TIMEOUT": "1200"},
-    {"STAGE2_EXTRACTION_ENDPOINTS": json.dumps([
+def test_endpoint_overrides_extraction_pool_and_passthrough_options(tmp_path):
+    endpoints = [
         {"endpoint": "http://a.test/v1", "max_concurrency": 64},
         {"endpoint": "http://b.test/v1", "max_concurrency": 32},
-    ]), "STAGE2_EXTRACTION_WORKERS": "96"},
-])
-def test_example_wrappers_run_both_stages_by_default(tmp_path: Path, runtime_overrides):
-    repo_root = Path(__file__).resolve().parents[1]
-
-    for launcher in ("run_one_conf_one_mod.sh", "run_five_conf_five_mod.sh"):
-        output_dir = tmp_path / launcher.removesuffix(".sh")
-        invocation_log = tmp_path / f"{launcher}.invocations"
-        fake_python = tmp_path / f"{launcher}.python"
-        fake_python.write_text(
-            """#!/usr/bin/env bash
-set -euo pipefail
-printf '%q ' "$@" >> "${FAKE_PYTHON_INVOCATION_LOG}"
-printf '\n' >> "${FAKE_PYTHON_INVOCATION_LOG}"
-if [[ "${1:-}" == *detect_all_evidence_hardware.py ]]; then
-    printf '2\tcuda:0,cuda:1\t12\t32\t12\ttwo eligible GPUs\n'
-fi
-""",
-            encoding="utf-8",
-        )
-        fake_python.chmod(0o755)
-
-        environment = os.environ.copy()
-        for key in tuple(environment):
-            if key.startswith("STAGE2_"):
-                environment.pop(key)
-        environment.update(
-            {
-                "FAKE_PYTHON_INVOCATION_LOG": str(invocation_log),
-                "GPU_COUNT": "2",
-                "OCI_PYTHON": str(fake_python),
-                "PHYSICAL_GPUS": "",
-            }
-        )
-        environment.update(runtime_overrides)
-        completed = subprocess.run(
-            ["bash", str(repo_root / launcher), str(output_dir)],
-            cwd=repo_root,
-            env=environment,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
-        invocations = invocation_log.read_text(encoding="utf-8").splitlines()
-        workflow = invocations[-1]
-        if "STAGE2_EXTRACTION_ENDPOINTS" in runtime_overrides:
-            assert "--stage2-extraction-endpoints" in workflow
-            assert "--stage2-extraction-workers 96" in workflow
-            assert "--stage2-extraction-endpoint " not in workflow
-            assert "load-aware external extractor pool" in completed.stdout
-        elif runtime_overrides:
-            assert "--stage2-workers 8" in invocations[-2]
-            assert "--stage2-extraction-workers 12" in workflow
-            assert "stage2.request_attempt_timeout=1200" in workflow
-            assert "stage2.request_timeout=3600" in workflow
-        elif launcher == "run_one_conf_one_mod.sh":
-            assert "--stage2-workers 4" in invocations[-2]
-            assert "--stage2-extraction-workers 4" in workflow
-            assert "stage2.request_attempt_timeout=1800" in workflow
-            assert "stage2.request_timeout=6000" in workflow
-        assert "research_all_evidence_workflow" in workflow
-        assert "--stage2-endpoint http://127.0.0.1:8010/v1" in workflow
-        if "STAGE2_EXTRACTION_ENDPOINTS" not in runtime_overrides:
-            assert "--stage2-extraction-endpoint http://127.0.0.1:8020/v1" in workflow
-            assert "extractor http://127.0.0.1:8020/v1" in completed.stdout
-        assert "--stage1-only" not in workflow
-        assert "Stage 2:        http://127.0.0.1:8010/v1" in completed.stdout
-
-
-def test_completed_handoff_uses_stage2_only_without_gpu_probe(tmp_path: Path):
-    repo_root = Path(__file__).resolve().parents[1]
-    output_dir = tmp_path / "output"
-    handoff_dir = output_dir / "handoff"
-    handoff_dir.mkdir(parents=True)
-    (handoff_dir / "evidence.jsonl").write_text("{}\n", encoding="utf-8")
-    (handoff_dir / "complete.json").write_text("{}\n", encoding="utf-8")
-
-    invocation_log = tmp_path / "python_invocations.txt"
-    fake_python = tmp_path / "python"
-    fake_python.write_text(
-        """#!/usr/bin/env bash
-set -euo pipefail
-printf '%q ' "$@" >> "${FAKE_PYTHON_INVOCATION_LOG}"
-printf '\n' >> "${FAKE_PYTHON_INVOCATION_LOG}"
-if [[ "${1:-}" == *detect_all_evidence_hardware.py ]]; then
-    printf '0\tcpu\t12\t32\t12\tnot inspected (endpoint-backed Stage 2 only)\n'
-fi
-""",
-        encoding="utf-8",
+    ]
+    _completed, invocations = _launch(
+        tmp_path,
+        "five_conf_five_mod",
+        str(tmp_path / "custom_output"),
+        "--set",
+        "stage2.consolidation_max_rounds=12",
+        STAGE2_ENDPOINT="http://primary.test/v1",
+        STAGE2_MODEL="custom-primary",
+        STAGE2_EXTRACTION_ENDPOINTS=json.dumps(endpoints),
+        STAGE2_EXTRACTION_MODEL="custom-extractor",
+        STAGE2_WORKERS="8",
+        STAGE2_REQUEST_TIMEOUT="3600",
+        STAGE1_ARCHITECTURES="bow_nuisance,tfidf_topics",
     )
-    fake_python.chmod(0o755)
+    arguments = _workflow_args(invocations)
+    assert arguments[-2:] == ["--set", "stage2.consolidation_max_rounds=12"]
+    assert "--stage2-extraction-endpoint" not in arguments
+    config = _compile(arguments)
 
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "FAKE_PYTHON_INVOCATION_LOG": str(invocation_log),
-            "GPU_COUNT": "not-a-number",
-            "OCI_PYTHON": str(fake_python),
-            "PHYSICAL_GPUS": "also-not-a-number",
-            "STAGE2_ENDPOINT": "http://stage2.test/v1",
-            "STAGE2_EXTRACTION_ENDPOINT": "http://small-stage2.test/v1",
-            "STAGE2_EXTRACTION_FEATURE_BATCH_SIZE": "7",
-            "STAGE2_CLUSTER_SIMILARITY_THRESHOLD": "0.7",
-            "STAGE2_CLUSTER_CONSENSUS_FRACTION": "0.8",
-            "STAGE2_MAX_TOKENS": "150000",
-            "STAGE2_REQUEST_TIMEOUT": "3600",
-            "STAGE2_REQUEST_ATTEMPT_TIMEOUT": "1200",
-            "STAGE2_EXTRACTION_MAX_TOKENS": "70000",
-            "STAGE2_WORKERS": "",
-            "STAGE2_VLLM_SERVERS": "0",
-        }
+    assert config.output_dir == tmp_path / "custom_output"
+    assert config.stage1_architectures == ("bow_nuisance", "tfidf_topics")
+    assert config.stage2.endpoint == "http://primary.test/v1"
+    assert config.stage2.model == "custom-primary"
+    assert config.stage2.workers == 8
+    assert config.stage2.request_timeout == 3600
+    assert config.stage2.consolidation_max_rounds == 12
+    extraction = config.stage2.extraction_llm
+    assert extraction.model == "custom-extractor"
+    assert [server.public_dict() for server in extraction.endpoints] == endpoints
+    # Without an explicit limit the pool uses the sum of its per-server caps.
+    assert "stage2.extraction_llm.workers=8" not in arguments
+
+
+def test_managed_primary_from_environment_uses_detected_gpus(tmp_path):
+    completed, invocations = _launch(
+        tmp_path,
+        "five_conf_five_mod",
+        STAGE2_VLLM_SERVERS="2",
+        STAGE2_MODEL="Qwen/Qwen3.8-27B",
+        STAGE2_EXTRACTION_ENDPOINT="http://small.test/v1",
+        STAGE2_EXTRACTION_MODEL="small-extractor",
     )
-    completed = subprocess.run(
-        [
-            "bash",
-            str(repo_root / "scripts" / "run_synthetic_all_evidence.sh"),
-            (
-                "synthetic_data/example_synthetic_datasets/"
-                "five_confounders_five_effect_modifiers_nsclc_with_structured/"
-                "dataset.parquet"
-            ),
-            "test_output",
-            str(output_dir),
-        ],
-        cwd=repo_root,
-        env=environment,
-        check=True,
-        capture_output=True,
-        text=True,
+    config = _compile(_workflow_args(invocations))
+
+    assert any("find_spec" in " ".join(invocation) for invocation in invocations)
+    assert config.stage2.endpoint == ""
+    assert config.stage2.vllm.server_count == 2
+    assert config.stage2.vllm.gpus == tuple(f"cuda:{index}" for index in range(8))
+    assert config.stage2.extraction_llm.endpoint == "http://small.test/v1"
+    assert config.stage2.extraction_llm.vllm is None
+    assert "managed vLLM Qwen/Qwen3.8-27B" in completed.stdout
+
+
+def test_empty_stage2_endpoint_runs_stage1_only(tmp_path):
+    completed, invocations = _launch(
+        tmp_path, "one_conf_one_mod", STAGE2_ENDPOINT="", DISABLE_HTR="1"
+    )
+    arguments = _workflow_args(invocations)
+    config = _compile(arguments)
+
+    assert "--stage1-only" in arguments
+    assert not any(value.startswith("stage2.") for value in arguments)
+    assert config.mode == "stage1" and config.stage2 is None
+    assert config.htr_enabled is False
+    assert config.output_dir.name == "one_conf_one_mod_nsclc_full_no_htr"
+    assert "disabled (STAGE2_ENDPOINT is empty)" in completed.stdout
+
+
+@pytest.fixture
+def saved_run(tmp_path):
+    output_dir = tmp_path / "saved_output"
+    raw = {
+        "dataset": str(COHORT_DATASETS["one_conf_one_mod"]),
+        "output_dir": str(output_dir),
+        "stage2": {
+            "endpoint": "http://saved.test/v1",
+            "model": "saved-primary",
+            "workers": 3,
+            "extraction_llm": {"endpoint": "http://saved-small.test/v1", "model": "saved-small"},
+        },
+    }
+    config = compile_config(raw, config_dir=tmp_path)
+    output_dir.mkdir()
+    (output_dir / "run_config.json").write_text(
+        json.dumps(config.as_dict(), default=str), encoding="utf-8"
+    )
+    return config
+
+
+def test_saved_run_relaunch_preflights_then_runs_with_runtime_overrides_only(
+    tmp_path, saved_run
+):
+    endpoints = [{"endpoint": "http://pool.test/v1", "max_concurrency": 4}]
+    completed, invocations = _launch(
+        tmp_path,
+        "one_conf_one_mod",
+        str(saved_run.output_dir),
+        STAGE2_ONLY="1",
+        PRESET="rtxpro6000x8",
+        STAGE2_WORKERS="8",
+        STAGE2_EXTRACTION_ENDPOINTS=json.dumps(endpoints),
     )
 
-    invocations = invocation_log.read_text(encoding="utf-8").splitlines()
     assert len(invocations) == 2
-    assert "detect_all_evidence_hardware.py" in invocations[0]
-    assert "--stage2-only" in invocations[0]
-    assert "--stage2-workers 32" in invocations[0]
-    assert "-c" not in invocations[0].split()
-    assert "research_all_evidence_workflow" in invocations[1]
-    assert "--stage2-only" in invocations[1]
-    assert "--devices cpu" in invocations[1]
-    assert "stage2.workers=32" in invocations[1]
-    assert "--stage2-extraction-endpoint http://small-stage2.test/v1" in invocations[1]
-    assert "--stage2-extraction-feature-batch-size 7" in invocations[1]
-    assert "--stage2-cluster-similarity-threshold 0.7" in invocations[1]
-    assert "--stage2-cluster-consensus-fraction 0.8" in invocations[1]
-    assert "--stage2-max-tokens 150000" in invocations[1]
-    assert "stage2.request_timeout=3600" in invocations[1]
-    assert "stage2.request_attempt_timeout=1200" in invocations[1]
-    assert "--stage2-extraction-max-tokens 70000" in invocations[1]
-    assert (
-        "CUDA devices:   not required for endpoint-backed Stage 2" in completed.stdout
-    )
-    assert "HTR modeling:   not run during Stage 2-only resume" in completed.stdout
+    preflight, run = invocations
+    assert preflight == [*run, "--preflight-only"]
+    arguments = _workflow_args([run])
+    assert arguments[:3] == [
+        "--config", str(saved_run.output_dir / "run_config.json"), "--stage2-only",
+    ]
+    config = _compile(arguments)
+    assert config.components == ("stage2",)
+    # Presets and cohort defaults never override the saved run's settings.
+    assert config.stage2.model == "saved-primary"
+    assert config.stage2.vllm is None
+    assert config.stage2.workers == 8
+    extraction = config.stage2.extraction_llm
+    assert extraction.model == "saved-small"
+    assert extraction.endpoint == ""
+    assert [server.public_dict() for server in extraction.endpoints] == endpoints
+    assert "Saved run:" in completed.stdout
 
 
-def test_managed_vllm_keeps_gpu_detection_and_pool_arguments(tmp_path: Path):
-    repo_root = Path(__file__).resolve().parents[1]
-    output_dir = tmp_path / "output"
-    invocation_log = tmp_path / "python_invocations.txt"
-    fake_python = tmp_path / "python"
-    fake_python.write_text(
-        """#!/usr/bin/env bash
-set -euo pipefail
-printf '%q ' "$@" >> "${FAKE_PYTHON_INVOCATION_LOG}"
-printf '\n' >> "${FAKE_PYTHON_INVOCATION_LOG}"
-if [[ "${1:-}" == *detect_all_evidence_hardware.py ]]; then
-    printf '2\tcuda:0,cuda:1\t12\t32\t12\ttwo eligible GPUs\n'
-fi
-""",
-        encoding="utf-8",
-    )
-    fake_python.chmod(0o755)
-
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "FAKE_PYTHON_INVOCATION_LOG": str(invocation_log),
-            "GPU_COUNT": "2",
-            "OCI_PYTHON": str(fake_python),
-            "PHYSICAL_GPUS": "",
-            "STAGE2_ENDPOINT": "",
-            "STAGE2_EXTRACTION_ENDPOINT": "http://small-stage2.test/v1",
-            "STAGE2_EXTRACTION_MODEL": "small-extractor",
-            "STAGE2_EXTRACTION_FEATURE_BATCH_SIZE": "",
-            "STAGE2_MODEL": "Qwen/Qwen3.8-27B",
-            "STAGE2_VLLM_DOWNLOAD_DIR": "",
-            "STAGE2_VLLM_EXTRA_ARGS_JSON": "",
-            "STAGE2_VLLM_GPUS": "",
-            "STAGE2_VLLM_SERVERS": "2",
-            "STAGE2_WORKERS": "",
-        }
-    )
-    completed = subprocess.run(
-        [
-            "bash",
-            str(repo_root / "scripts" / "run_synthetic_all_evidence.sh"),
-            (
-                "synthetic_data/example_synthetic_datasets/"
-                "five_confounders_five_effect_modifiers_nsclc_with_structured/"
-                "dataset.parquet"
-            ),
-            "test_output",
-            str(output_dir),
-        ],
-        cwd=repo_root,
-        env=environment,
-        check=True,
-        capture_output=True,
-        text=True,
+def test_saved_run_preflight_only_reselection_and_explicit_config(tmp_path, saved_run):
+    _completed, invocations = _launch(
+        tmp_path,
+        "one_conf_one_mod",
+        STAGE2_ONLY="1",
+        STAGE2_RESELECT="1",
+        OCI_PREFLIGHT_ONLY="1",
+        OCI_RUN_CONFIG=str(saved_run.output_dir / "run_config.json"),
     )
 
-    invocations = invocation_log.read_text(encoding="utf-8").splitlines()
-    assert len(invocations) == 4
-    assert "sentence_transformers" in invocations[0]
-    assert "find_spec" in invocations[1] and "vllm" in invocations[1]
-    assert "detect_all_evidence_hardware.py" in invocations[2]
-    assert "--gpu-count 2" in invocations[2]
-    assert "--stage2-workers 32" in invocations[2]
-    assert "--stage2-only" not in invocations[2]
-    assert "research_all_evidence_workflow" in invocations[3]
-    assert "--stage2-vllm-servers 2" in invocations[3]
-    assert r"--stage2-vllm-gpus cuda:0\,cuda:1" in invocations[3]
-    assert "--stage2-model Qwen/Qwen3.8-27B" in invocations[3]
-    assert "--stage2-extraction-endpoint http://small-stage2.test/v1" in invocations[3]
-    assert "--stage2-extraction-model small-extractor" in invocations[3]
-    assert "stage2.workers=32" in invocations[3]
-    assert "--stage2-only" not in invocations[3]
-    assert (
-        "Stage 2:        managed orchestrator vLLM: 2 servers on cuda:0,cuda:1"
-        in completed.stdout
-    )
-    assert "extractor http://small-stage2.test/v1" in completed.stdout
+    assert len(invocations) == 1
+    arguments = _workflow_args(invocations)
+    assert arguments == [
+        "--config", str(saved_run.output_dir / "run_config.json"),
+        "--stage2-only", "--stage2-reselect", "--preflight-only",
+    ]
 
 
-def test_dual_managed_vllm_pools_receive_independent_gpu_layouts(tmp_path: Path):
-    repo_root = Path(__file__).resolve().parents[1]
-    output_dir = tmp_path / "output"
-    invocation_log = tmp_path / "python_invocations.txt"
-    fake_python = tmp_path / "python"
-    fake_python.write_text(
-        """#!/usr/bin/env bash
-set -euo pipefail
-printf '%q ' "$@" >> "${FAKE_PYTHON_INVOCATION_LOG}"
-printf '\n' >> "${FAKE_PYTHON_INVOCATION_LOG}"
-if [[ "${1:-}" == *detect_all_evidence_hardware.py ]]; then
-    printf '4\tcuda:0,cuda:1,cuda:2,cuda:3\t12\t32\t12\tfour eligible GPUs\n'
-fi
-""",
-        encoding="utf-8",
-    )
-    fake_python.chmod(0o755)
+@pytest.mark.parametrize(
+    "arguments,variables,message",
+    [
+        (["three_conf"], {}, "Usage:"),
+        (["one_conf_one_mod"], {"PRESET": "a100"}, "Unknown PRESET=a100"),
+        (["one_conf_one_mod"], {"STAGE2_SELECTION_MODE": "multi_model"}, "STAGE2_SELECTION_MODE"),
+        (["one_conf_one_mod"], {"STAGE2_RESELECT": "1"}, "requires STAGE2_ONLY=1"),
+        (["one_conf_one_mod"], {"OCI_PREFLIGHT_ONLY": "1"}, "requires STAGE2_ONLY=1"),
+        (
+            ["one_conf_one_mod"],
+            {"STAGE2_ONLY": "1", "STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS": "1"},
+            "STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS",
+        ),
+        (
+            ["one_conf_one_mod", "/tmp/output"],
+            {"STAGE2_ONLY": "1", "OCI_RUN_CONFIG": "/tmp/run_config.json"},
+            "either OCI_RUN_CONFIG or OUTPUT_DIR",
+        ),
+    ],
+)
+def test_launcher_rejects_invalid_requests_before_python(tmp_path, arguments, variables, message):
+    completed, invocations = _launch(tmp_path, *arguments, check=False, **variables)
 
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "FAKE_PYTHON_INVOCATION_LOG": str(invocation_log),
-            "GPU_COUNT": "4",
-            "OCI_PYTHON": str(fake_python),
-            "PHYSICAL_GPUS": "",
-            "STAGE2_MODEL": "Qwen/Qwen3.8-27B",
-            "STAGE2_VLLM_SERVERS": "1",
-            "STAGE2_VLLM_GPUS": "cuda:0,cuda:1",
-            "STAGE2_VLLM_GPUS_PER_SERVER": "2",
-            "STAGE2_VLLM_RAPID_SWITCH_SECONDS": "1200",
-            "STAGE2_VLLM_BASE_PORT": "9010",
-            "STAGE2_EXTRACTION_MODEL": "LiquidAI/LFM2.5-2.6B",
-            "STAGE2_EXTRACTION_VLLM_SERVERS": "2",
-            "STAGE2_EXTRACTION_VLLM_GPUS": "cuda:2,cuda:3",
-            "STAGE2_EXTRACTION_VLLM_GPUS_PER_SERVER": "1",
-            "STAGE2_EXTRACTION_VLLM_BASE_PORT": "9020",
-            "STAGE2_EXTRACTION_WORKERS": "64",
-            "STAGE2_VLLM_DOWNLOAD_DIR": "",
-            "STAGE2_VLLM_EXTRA_ARGS_JSON": "",
-            "STAGE2_EXTRACTION_VLLM_DOWNLOAD_DIR": "",
-            "STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON": "",
-            "STAGE2_WORKERS": "32",
-        }
-    )
-    environment.pop("STAGE2_ENDPOINT", None)
-    environment.pop("STAGE2_EXTRACTION_ENDPOINT", None)
-    subprocess.run(
-        [
-            "bash",
-            str(repo_root / "scripts" / "run_synthetic_all_evidence.sh"),
-            (
-                "synthetic_data/example_synthetic_datasets/"
-                "five_confounders_five_effect_modifiers_nsclc_with_structured/"
-                "dataset.parquet"
-            ),
-            "test_output",
-            str(output_dir),
-        ],
-        cwd=repo_root,
-        env=environment,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    invocations = invocation_log.read_text(encoding="utf-8").splitlines()
-    workflow = invocations[-1]
-    assert "--stage2-endpoint" not in workflow
-    assert "--stage2-model Qwen/Qwen3.8-27B" in workflow
-    assert "--stage2-vllm-servers 1" in workflow
-    assert r"--stage2-vllm-gpus cuda:0\,cuda:1" in workflow
-    assert "--stage2-vllm-gpus-per-server 2" in workflow
-    assert "--stage2-vllm-rapid-switch-seconds 1200" in workflow
-    assert "--stage2-vllm-base-port 9010" in workflow
-    assert "--stage2-extraction-model LiquidAI/LFM2.5-2.6B" in workflow
-    assert "--stage2-extraction-vllm-servers 2" in workflow
-    assert r"--stage2-extraction-vllm-gpus cuda:2\,cuda:3" in workflow
-    assert "--stage2-extraction-vllm-gpus-per-server 1" in workflow
-    assert "--stage2-extraction-vllm-base-port 9020" in workflow
-    assert "--stage2-extraction-workers 64" in workflow
-    assert "--stage2-extraction-endpoint" not in workflow
+    assert completed.returncode == 2
+    assert message in completed.stderr
+    assert invocations == []

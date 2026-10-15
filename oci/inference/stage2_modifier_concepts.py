@@ -5,7 +5,6 @@ full outer-training evidence. No dataset, patient values, oracle truth, or
 outer-test information enters this interface.
 """
 from collections import Counter
-from copy import deepcopy
 from pathlib import Path
 
 from . import stage2_clinical_prompts as clinical_prompts
@@ -97,8 +96,7 @@ def infer_modifier_concepts(*, definitions, statistical_report, request_json, ou
             "study_context": clinical_prompts.study_context(statistical_report),
             "multi_model_evidence": aggregate_evidence(fold_cells, ids)}
         ranked = rank_modifier_candidates(definitions=definitions, statistical_report=fold_report,
-            request_json=request_json, output_dir=directory / f"fold_{fold:03d}" / "ranking",
-            role_policy=role_policy, maximum=top_n, maximum_chars=maximum_chars, model_identity=model_identity)
+            output_dir=directory / f"fold_{fold:03d}" / "ranking", maximum=top_n)
         rankings.append({"inner_fold": fold, **ranked})
     recurrence = Counter(key for ranked in rankings for key in {r["feature_id"] for r in ranked["ranking"]})
     evidence = build_multi_model_role_evidence(definitions=definitions, statistical_report=statistical_report, policy=role_policy)
@@ -121,8 +119,7 @@ def infer_modifier_concepts(*, definitions, statistical_report, request_json, ou
         "study_context": clinical_prompts.study_context(statistical_report),
         "multi_model_evidence": {key: statistical_report["multi_model_evidence"][key] for key in representatives}}
     ordered = rank_modifier_candidates(definitions=reduced, statistical_report=reduced_report,
-        request_json=request_json, output_dir=directory / "representative_ranking", role_policy=role_policy,
-        maximum=maximum, maximum_chars=maximum_chars, model_identity=model_identity)
+        output_dir=directory / "representative_ranking", maximum=maximum)
     result = {**ordered, "concept_review": {"schema_version": SCHEMA_VERSION, "identity": identity,
         "top_n_per_inner_fold": top_n, "candidate_union_count": len(cards),
         "recurrence": dict(recurrence), "concepts": response["concepts"],

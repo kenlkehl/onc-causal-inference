@@ -53,18 +53,11 @@ from .plain_handoff_stage2_analysis import (
     _PageObservationValidationError,
     Stage2RequestExhaustedError,
     Stage2ResponseValidationError,
-    infrastructure_failure_audit_paths,
     _token_id_count,
     prompt_token_count,
     run_fold_analysis,
 )
-from .stage2_agentic_selection import (
-    DEFAULT_PAIRWISE_CHUNK_SIZE,
-    Stage2AgenticSelectionConfig,
-    agentic_selection_config_from_mapping,
-)
 from .stage2_elastic_net_selection import (
-    TEMPORAL_SCOPE,
     Stage2ElasticNetSelectionConfig,
     statistical_selection_config_from_mapping,
 )
@@ -77,7 +70,6 @@ from .stage2_sampling import (
     is_qwen_flash_next, sampling_provenance,
 )
 from .stage2_endpoint_pool import ExtractionEndpoint, EndpointPool, endpoints_from_mapping
-from .stage2_decision_config import DecisionExtractionConfig, decision_config_from_mapping
 from .stage2_discovery_prompt import DISCOVERY_PROMPT_VERSION, DISCOVERY_SYSTEM_PROMPT
 from .stage2_candidate_consolidation import (
     MIXED_SCHEMA, CandidateConsolidationPolicy, CandidateEmbeddingCache,
@@ -86,12 +78,6 @@ from .stage2_candidate_consolidation import (
 )
 from . import stage2_clinical_prompts as clinical_prompts
 from . import stage2_request_audit as request_audit
-from ..colbert_config import ColBERTConfig, colbert_config_from_mapping
-from .stage2_note_search import (
-    NoteSearchConfig,
-    config_from_mapping as note_search_config_from_mapping,
-    preflight as note_search_preflight,
-)
 from .stage2_sequential_consolidation import (
     Stage2SequentialConsolidationConfig,
     sequential_consolidation_config_from_mapping,
@@ -102,7 +88,6 @@ from .stage2_estimand_ontology_config import (
 )
 from .vllm_server_pool import (
     ManagedVLLMConfig,
-    co_resident_vllm_configs,
     launch_managed_vllm_servers,
     managed_argument,
     managed_vllm_config_from_mapping,
@@ -146,7 +131,7 @@ DEFAULT_EXTRACTION_REASONING_EFFORT = "none"
 STAGE2_REQUEST_KINDS = frozenset({"interpretation", "extraction"})
 MANAGED_MODEL_PHASE_SCHEMA_VERSION = "stage2_managed_model_phase_v1"
 DEFAULT_VLLM_RAPID_SWITCH_SECONDS = 15 * 60.0
-MANAGED_VLLM_ALLOCATION_MODES = frozenset({"all_gpus", "configured_split", "co_resident_all_gpus"})
+MANAGED_VLLM_ALLOCATION_MODES = frozenset({"all_gpus", "configured_split"})
 SUPPORTED_REASONING_EFFORTS = frozenset(
     {"auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
 )
@@ -158,11 +143,7 @@ DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS = 1_024
 DEFAULT_CONSOLIDATION_MAX_PROMPT_CHARS = 640_000
 DEFAULT_OPERATIONALIZATION_MAX_PROMPT_CHARS = 640_000
 DEFAULT_CONSOLIDATION_BATCH_SIZE = 20
-DEFAULT_CONSOLIDATION_ALPHABETICAL_ROUNDS = 5
-DEFAULT_CONSOLIDATION_SHUFFLE_ROUNDS = 50
-DEFAULT_CONSOLIDATION_MAX_ROUNDS = (
-    DEFAULT_CONSOLIDATION_ALPHABETICAL_ROUNDS + DEFAULT_CONSOLIDATION_SHUFFLE_ROUNDS
-)
+DEFAULT_CONSOLIDATION_MAX_ROUNDS = 55
 DEFAULT_ONTOLOGY_REFINEMENT_MIN_FAILURE_PATIENTS = 3
 DEFAULT_MAX_ONTOLOGY_REFINEMENT_ROUNDS = 2
 DEFAULT_EXTRACTION_VLLM_BASE_PORT = 8110
@@ -171,16 +152,8 @@ MODEL_IDENTITY_SCHEMA_VERSION = "stage2_endpoint_model_identity_v1"
 FEATURE_DEFINITION_INPUT_SCHEMA_VERSION = (
     "stage2_feature_definition_inputs_v2_primary_model_only"
 )
-# Kept only so historical, non-exported candidate-funnel helpers remain
-# importable while old checkpoints can be inspected. The Stage 2 execution
-# path never calls them.
-DEFAULT_CANDIDATE_SELECTION_HIERARCHY_TOP_COMMUNITIES = 3
-CANDIDATE_SELECTION_SCHEMA_VERSION = "retired_colbert_candidate_selection"
 _CANDIDATE_SELECTION_ENCODING_LOCK = threading.Lock()
 CONSOLIDATION_SCHEMA_VERSION = "global_candidate_pool_v16_exhaustive_cards"
-GLOBAL_CANDIDATE_POOL_SCHEMA_VERSION = (
-    "alphabetical_then_seeded_shuffle_candidate_batches_v10_no_prefilter"
-)
 EXTRACTION_ONTOLOGY_FEEDBACK_SCHEMA_VERSION = (
     "training_failure_ontology_refinement_v1_explicit_feature_invariants"
 )
@@ -192,124 +165,6 @@ INTERPRETATION_AUDIT_SCHEMA_VERSION = (
     "rejected_packet_text_only_ordinals_v7_exhaustive_decomposition"
 )
 CONFIGURED_EXPLICIT_FEATURE_ARCHITECTURE = "configured_explicit_feature"
-
-_CONCEPT_IDENTITY_STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "assessment",
-    "at",
-    "baseline",
-    "be",
-    "biomarker",
-    "by",
-    "clinical",
-    "confounder",
-    "diagnosis",
-    "disease",
-    "documentation",
-    "effect",
-    "evidence",
-    "expression",
-    "feature",
-    "for",
-    "from",
-    "has",
-    "have",
-    "history",
-    "in",
-    "information",
-    "is",
-    "level",
-    "measurement",
-    "metastasis",
-    "modifier",
-    "mutation",
-    "outcome",
-    "of",
-    "on",
-    "or",
-    "patient",
-    "presence",
-    "pretreatment",
-    "prognostic",
-    "record",
-    "residual",
-    "score",
-    "specific",
-    "status",
-    "that",
-    "the",
-    "this",
-    "to",
-    "treatment",
-    "use",
-    "value",
-    "variable",
-    "was",
-    "were",
-    "with",
-    "without",
-}
-
-
-def _concept_identity_tokens(*values: Any) -> set[str]:
-    """Return conservative lexical anchors for one patient-level measurement."""
-
-    text = " ".join(str(value) for value in values if value is not None).lower()
-    tokens: set[str] = set()
-    for raw_token in re.findall(r"[a-z]+[a-z0-9]*", text):
-        if raw_token in _CONCEPT_IDENTITY_STOPWORDS:
-            continue
-        token = raw_token
-        if token.endswith("ies") and len(token) > 4:
-            token = token[:-3] + "y"
-        elif token.endswith("s") and len(token) > 4 and not token.endswith(("ss", "us", "is")):
-            token = token[:-1]
-        if len(token) > 1 and token not in _CONCEPT_IDENTITY_STOPWORDS:
-            tokens.add(token)
-
-    # Add compact variants for separator-delimited identifier fragments without
-    # knowing anything about the clinical domain. This makes forms such as
-    # ``ab_c1`` and ``ab-c1`` comparable while remaining conservative for words.
-    for compound in re.findall(r"[a-z0-9]+(?:[_-][a-z0-9]+)+", text):
-        parts = re.split(r"[_-]", compound)
-        for start in range(len(parts) - 1):
-            for stop in range(start + 2, len(parts) + 1):
-                segment = parts[start:stop]
-                has_digit = any(any(char.isdigit() for char in part) for part in segment)
-                all_short = all(len(part) <= 3 for part in segment)
-                if not (has_digit or all_short):
-                    continue
-                compact = "".join(segment)
-                if len(compact) > 2:
-                    tokens.add(compact)
-    return tokens
-
-
-def _consolidation_route_is_semantically_compatible(
-    candidate: Mapping[str, Any],
-    feature: Mapping[str, Any],
-) -> bool:
-    """Require a shared measurement anchor before two concepts may be routed together."""
-
-    candidate_tokens = _concept_identity_tokens(
-        candidate.get("name"),
-        candidate.get("description"),
-    )
-    feature_tokens = _concept_identity_tokens(
-        feature.get("name"),
-        feature.get("description"),
-        feature.get("measurement_definition"),
-    )
-    # Old/custom candidate producers may not supply concept text. In that case
-    # packet grounding remains the only available check.
-    if not candidate_tokens or not feature_tokens:
-        return True
-    return bool(candidate_tokens.intersection(feature_tokens))
-
 
 def _canonical_evidence_axes(value: Any) -> list[str]:
     raw_axes = [value] if isinstance(value, str) else list(value or [])
@@ -570,7 +425,6 @@ class Stage2ExplicitFeature:
     stability_summary: str = ""
     caveats: str = ""
     conflict_resolution: Mapping[str, Any] | str | None = None
-    decision_ontology: Mapping[str, float] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str):
@@ -669,10 +523,6 @@ class Stage2ExplicitFeature:
         )
         object.__setattr__(self, "stability_summary", str(self.stability_summary or "").strip())
         object.__setattr__(self, "caveats", str(self.caveats or "").strip())
-        if self.decision_ontology is not None:
-            from .stage2_decision import validate_ontology
-
-            validate_ontology(self.as_definition())
 
     def as_definition(self) -> dict[str, Any]:
         return {
@@ -686,7 +536,6 @@ class Stage2ExplicitFeature:
             "roles": list(self.roles),
             "stability_summary": self.stability_summary,
             "caveats": self.caveats,
-            **({"decision_ontology": dict(self.decision_ontology)} if self.decision_ontology is not None else {}),
         }
 
 
@@ -736,7 +585,6 @@ def _stage2_explicit_feature_from_mapping(
         missing_value_rule=required_value("missing_value_rule"),
         roles=tuple(role for role in raw_roles if role is not None),
         conflict_resolution=combined.get("conflict_resolution"),
-        decision_ontology=combined.get("decision_ontology"),
         stability_summary=str(combined.get("stability_summary") or ""),
         caveats=str(combined.get("caveats") or ""),
     )
@@ -930,7 +778,6 @@ class PlainHandoffStage2Config:
     # interpretation batch. Pack that evidence under an independent allowance.
     operationalization_max_prompt_chars: int = DEFAULT_OPERATIONALIZATION_MAX_PROMPT_CHARS
     consolidation_batch_size: int = DEFAULT_CONSOLIDATION_BATCH_SIZE
-    consolidation_alphabetical_rounds: int = DEFAULT_CONSOLIDATION_ALPHABETICAL_ROUNDS
     consolidation_max_rounds: int = DEFAULT_CONSOLIDATION_MAX_ROUNDS
     consolidation_policy: CandidateConsolidationPolicy = field(default_factory=CandidateConsolidationPolicy)
     # Extraction keeps patients isolated and slices the frozen ontology across
@@ -938,19 +785,12 @@ class PlainHandoffStage2Config:
     # so discovery batching and its evidence-compilation fingerprints remain stable.
     extraction_max_prompt_chars: int = DEFAULT_EXTRACTION_MAX_PROMPT_CHARS
     extraction_feature_batch_size: int = DEFAULT_EXTRACTION_FEATURE_BATCH_SIZE
-    extraction_note_search: NoteSearchConfig = field(default_factory=NoteSearchConfig)
-    extraction_context_strategy: str = "full_record"
-    colbert: ColBERTConfig = field(default_factory=ColBERTConfig)
-    decision_extraction: DecisionExtractionConfig = field(default_factory=DecisionExtractionConfig)
-    # Runtime throughput only; excluded from ontology and measurement identities.
-    decision_preparation_workers: int = 0
     # Long records are processed in ordered, lossless source chunks. This is a
     # token cap rather than a target: the planner shrinks a chunk when feature
     # definitions and carried-forward state need more of the context window.
     extraction_chunk_size_tokens: int = DEFAULT_EXTRACTION_CHUNK_SIZE_TOKENS
     extraction_context_window_tokens: int = DEFAULT_EXTRACTION_CONTEXT_WINDOW_TOKENS
     extraction_context_margin_tokens: int = DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS
-    evidence_compiler: str = EVIDENCE_COMPILER_VERSION
     # Require the default lanes while retaining support for explicit selections
     # and saved handoffs containing either optional lexical architecture.
     required_architectures: tuple[str, ...] = DEFAULT_STAGE1_ARCHITECTURES
@@ -968,18 +808,8 @@ class PlainHandoffStage2Config:
     ontology_refinement_min_failure_patients: int = DEFAULT_ONTOLOGY_REFINEMENT_MIN_FAILURE_PATIENTS
     max_ontology_refinement_rounds: int = DEFAULT_MAX_ONTOLOGY_REFINEMENT_ROUNDS
     estimand_ontology: EstimandOntologyConfig = field(default_factory=EstimandOntologyConfig)
-    # This is a hard upstream invariant. Historical treatments remain valid;
-    # Stage 2 never guesses timepoints from feature semantics.
-    input_temporal_scope: str = TEMPORAL_SCOPE
-    agentic_selection: Stage2AgenticSelectionConfig = field(
-        default_factory=Stage2AgenticSelectionConfig
-    )
-    # Operational tuning only: deterministic pair chunks are checkpointed and
-    # produce identical evidence regardless of this size.
-    agentic_evidence_pair_chunk_size: int = DEFAULT_PAIRWISE_CHUNK_SIZE
     # Optional outer-training-only semantic/association consolidation runs
-    # immediately before supervised role selection.  The older global agentic
-    # policy remains parseable only for historical checkpoint inspection.
+    # immediately before supervised role selection.
     selection_consolidation: Stage2SequentialConsolidationConfig = field(
         default_factory=Stage2SequentialConsolidationConfig
     )
@@ -1010,9 +840,6 @@ class PlainHandoffStage2Config:
     repetition_penalty: float | None = None
     explicit_features: tuple[Stage2ExplicitFeature, ...] = ()
     vllm: ManagedVLLMConfig | None = None
-    # Runtime serving allocation only. Both managed models stay resident across
-    # their configured GPU union, with explicit memory budgets for each role.
-    vllm_co_resident_all_gpus: bool = False
     # When two pipeline-managed models request each other again within this
     # interval, keep both resident on their configured GPU splits for the rest
     # of the run. Zero retains all-GPU alternation unconditionally.
@@ -1102,27 +929,6 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.outer_fold_recovery_backoff must be finite and nonnegative")
         if not isinstance(self.extraction_stream, bool):
             raise ValueError("stage2.extraction_stream must be a boolean")
-        if not isinstance(self.extraction_note_search, NoteSearchConfig):
-            raise ValueError("stage2.extraction_note_search must be a NoteSearchConfig")
-        self.extraction_note_search.validate()
-        if self.extraction_context_strategy not in {"colbert", "full_record"}:
-            raise ValueError("stage2.extraction_context_strategy must be colbert or full_record")
-        if not isinstance(self.colbert, ColBERTConfig):
-            raise ValueError("stage2.colbert must be a ColBERTConfig")
-        if not isinstance(self.decision_extraction, DecisionExtractionConfig):
-            raise ValueError("stage2.decision_extraction must be a DecisionExtractionConfig")
-        self.decision_extraction.validate()
-        if type(self.decision_preparation_workers) is not int or self.decision_preparation_workers < 0:
-            raise ValueError("stage2.decision_preparation_workers must be a nonnegative integer")
-        if self.decision_extraction.enabled:
-            if self.extraction_context_strategy != "colbert" or self.extraction_note_search.enabled:
-                raise ValueError("decision extraction requires ColBERT retrieval without note_search")
-            if self.runtime_disable_extraction:
-                raise ValueError("decision extraction cannot use runtime_disable_extraction")
-            if self.extraction_llm is not None and self.extraction_llm.runtime_endpoint:
-                raise ValueError("decision extraction cannot use a runtime_endpoint continuation")
-            if self.estimand_ontology.enabled:
-                raise ValueError("decision extraction currently requires estimand_ontology.enabled=false")
         if (isinstance(self.extraction_deferred_retry_passes, bool)
                 or not isinstance(self.extraction_deferred_retry_passes, int)
                 or self.extraction_deferred_retry_passes < 0):
@@ -1222,8 +1028,6 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.operationalization_max_prompt_chars must be at least 4000")
         if self.consolidation_batch_size < 2:
             raise ValueError("stage2.consolidation_batch_size must be at least 2")
-        if self.consolidation_alphabetical_rounds < 0:
-            raise ValueError("stage2.consolidation_alphabetical_rounds must be nonnegative")
         if self.consolidation_max_rounds < 1:
             raise ValueError("stage2.consolidation_max_rounds must be positive")
         if not isinstance(self.consolidation_policy, CandidateConsolidationPolicy):
@@ -1261,12 +1065,6 @@ class PlainHandoffStage2Config:
                 "stage2 extraction context window must exceed extraction_max_tokens "
                 "and extraction_reasoning_max_tokens "
                 "plus extraction_context_margin_tokens"
-            )
-        if self.evidence_compiler != EVIDENCE_COMPILER_VERSION:
-            raise ValueError(
-                f"stage2.evidence_compiler must be {EVIDENCE_COMPILER_VERSION}; "
-                "raw_packets_v1 was retired because it merged distinct scientific "
-                "architectures"
             )
         required = tuple(self.required_architectures)
         if len(required) != len(set(required)):
@@ -1309,36 +1107,12 @@ class PlainHandoffStage2Config:
                     "stage2.extraction_llm must be a Stage2ExtractionLLMConfig object"
                 )
             self.extraction_llm.validate(require_model=require_model)
-        if type(self.vllm_co_resident_all_gpus) is not bool:
-            raise ValueError("stage2.vllm_co_resident_all_gpus must be true or false")
-        if self.vllm_co_resident_all_gpus:
-            if self.vllm is None or self.extraction_llm is None or self.extraction_llm.vllm is None:
-                raise ValueError("co-resident all-GPU serving requires two managed model pools")
-            co_resident_vllm_configs(self.vllm, self.extraction_llm.vllm)
         if self.max_review_rounds < 1:
             raise ValueError("stage2.max_review_rounds must be positive")
         if self.ontology_refinement_min_failure_patients < 2:
             raise ValueError("stage2.ontology_refinement_min_failure_patients must be at least 2")
         if self.max_ontology_refinement_rounds < 0:
             raise ValueError("stage2.max_ontology_refinement_rounds must be nonnegative")
-        if self.input_temporal_scope != TEMPORAL_SCOPE:
-            raise ValueError(
-                f"stage2.input_temporal_scope must be {TEMPORAL_SCOPE!r}; Stage 2 "
-                "does not perform semantic temporal filtering"
-            )
-        if not isinstance(self.agentic_selection, Stage2AgenticSelectionConfig):
-            raise ValueError(
-                "stage2.agentic_selection must be a Stage2AgenticSelectionConfig object"
-            )
-        self.agentic_selection.validate()
-        if (
-            isinstance(self.agentic_evidence_pair_chunk_size, bool)
-            or not isinstance(self.agentic_evidence_pair_chunk_size, int)
-            or self.agentic_evidence_pair_chunk_size < 1
-        ):
-            raise ValueError(
-                "stage2.agentic_evidence_pair_chunk_size must be a positive integer"
-            )
         if not isinstance(
             self.selection_consolidation, Stage2SequentialConsolidationConfig
         ):
@@ -1440,7 +1214,6 @@ class PlainHandoffStage2Config:
         values["explicit_features"] = [
             feature.as_definition() for feature in self.explicit_features
         ]
-        values["agentic_selection"] = self.agentic_selection.public_dict()
         values["selection_consolidation"] = (
             self.selection_consolidation.public_dict()
         )
@@ -1455,23 +1228,6 @@ def plain_stage2_config_from_mapping(
     *,
     default_workers: int,
 ) -> PlainHandoffStage2Config | None:
-    legacy_screen_keys = sorted(
-        set(raw).intersection(
-            {
-                "selection_workers",
-                "confounder_p_value_threshold",
-                "confounder_min_inner_fold_fraction",
-                "effect_modifier_p_value_threshold",
-                "effect_modifier_min_inner_fold_fraction",
-            }
-        )
-    )
-    if legacy_screen_keys:
-        LOGGER.warning(
-            "migrating legacy Stage 2 screen settings to the group-elastic-net selector "
-            "where possible; raw p-value thresholds and selection_workers are ignored: %s",
-            ", ".join(f"stage2.{key}" for key in legacy_screen_keys),
-        )
     if raw.get("command"):
         raise ValueError(
             "stage2.command is not used by the plain workflow; configure stage2.endpoint"
@@ -1489,13 +1245,6 @@ def plain_stage2_config_from_mapping(
     if not endpoint and managed_vllm is None:
         raise ValueError("stage2.endpoint is required when stage2.model is specified")
     api_key = str(raw.get("api_key") or os.environ.get("OCI_STAGE2_API_KEY") or "EMPTY")
-    legacy_extraction_batch_size = raw.get("extraction_batch_size")
-    if legacy_extraction_batch_size is not None and int(legacy_extraction_batch_size) != 1:
-        LOGGER.warning(
-            "stage2.extraction_batch_size=%s is ignored; Stage 2 extraction is permanently "
-            "isolated to one patient per prompt",
-            legacy_extraction_batch_size,
-        )
 
     def architecture_names(value: Any) -> tuple[str, ...]:
         if isinstance(value, str):
@@ -1504,22 +1253,16 @@ def plain_stage2_config_from_mapping(
             return tuple(part.strip() for part in value.split(",") if part.strip())
         return tuple(value)
 
-    if "interpretation_reasoning_effort" in raw:
-        interpretation_reasoning_effort = (
-            str(raw["interpretation_reasoning_effort"]).strip().lower()
+    interpretation_reasoning_effort = (
+        str(
+            raw.get(
+                "interpretation_reasoning_effort",
+                DEFAULT_INTERPRETATION_REASONING_EFFORT,
+            )
         )
-    elif "enable_thinking" in raw:
-        legacy_enable_thinking = raw["enable_thinking"]
-        if not isinstance(legacy_enable_thinking, bool):
-            raise ValueError("stage2.enable_thinking must be true or false")
-        interpretation_reasoning_effort = "high" if legacy_enable_thinking else "none"
-        LOGGER.warning(
-            "stage2.enable_thinking is deprecated; use "
-            "stage2.interpretation_reasoning_effort. Extraction reasoning is "
-            "controlled independently."
-        )
-    else:
-        interpretation_reasoning_effort = DEFAULT_INTERPRETATION_REASONING_EFFORT
+        .strip()
+        .lower()
+    )
     extraction_reasoning_effort = (
         str(
             raw.get(
@@ -1530,26 +1273,6 @@ def plain_stage2_config_from_mapping(
         .strip()
         .lower()
     )
-
-    retired_keys = sorted(
-        key
-        for key in raw
-        if key == "candidate_discovery_source"
-        or key == "max_candidates_per_fold"
-        or key == "consolidation_oversample_factor"
-        or key == "screening_trees"
-        or key == "max_evaluation_rounds"
-        or key.startswith("evidence_community_")
-        or key.startswith("candidate_registry_")
-        or key.startswith("candidate_selection_")
-        or key.startswith("stability_selection_")
-        or key.startswith("effect_modifier_negative_")
-    )
-    if retired_keys:
-        LOGGER.warning(
-            "ignoring retired Stage 2 ColBERT/forest-screening settings: %s",
-            ", ".join(f"stage2.{key}" for key in retired_keys),
-        )
 
     raw_extraction_llm = raw.get("extraction_llm")
     if raw_extraction_llm is None:
@@ -1614,14 +1337,6 @@ def plain_stage2_config_from_mapping(
         1,
         int(raw.get("workers", min(4, max(1, default_workers)))),
     )
-    raw_pair_chunk_size = raw.get(
-        "agentic_evidence_pair_chunk_size",
-        DEFAULT_PAIRWISE_CHUNK_SIZE,
-    )
-    if isinstance(raw_pair_chunk_size, bool):
-        raise ValueError(
-            "stage2.agentic_evidence_pair_chunk_size must be a positive integer"
-        )
     raw_statistical_selection = raw.get("statistical_selection")
     if raw_statistical_selection is None:
         statistical_selection_value: dict[str, Any] = {}
@@ -1663,15 +1378,6 @@ def plain_stage2_config_from_mapping(
         extraction_reasoning_max_tokens=raw.get("extraction_reasoning_max_tokens"),
         extraction_stream=raw.get("extraction_stream", False),
         extraction_deferred_retry_passes=raw.get("extraction_deferred_retry_passes", 1),
-        extraction_note_search=note_search_config_from_mapping(raw.get("extraction_note_search")),
-        extraction_context_strategy=raw.get(
-            "extraction_context_strategy",
-            "colbert" if decision_config_from_mapping(raw.get("decision_extraction")).enabled
-            else "full_record",
-        ),
-        colbert=colbert_config_from_mapping(raw.get("colbert")),
-        decision_extraction=decision_config_from_mapping(raw.get("decision_extraction")),
-        decision_preparation_workers=raw.get("decision_preparation_workers", 0),
         interpretation_reasoning_effort=interpretation_reasoning_effort,
         extraction_reasoning_effort=extraction_reasoning_effort,
         max_prompt_chars=int(raw.get("max_prompt_chars", 100_000)),
@@ -1689,12 +1395,6 @@ def plain_stage2_config_from_mapping(
         ),
         consolidation_batch_size=int(
             raw.get("consolidation_batch_size", DEFAULT_CONSOLIDATION_BATCH_SIZE)
-        ),
-        consolidation_alphabetical_rounds=int(
-            raw.get(
-                "consolidation_alphabetical_rounds",
-                DEFAULT_CONSOLIDATION_ALPHABETICAL_ROUNDS,
-            )
         ),
         consolidation_max_rounds=int(
             raw.get("consolidation_max_rounds", DEFAULT_CONSOLIDATION_MAX_ROUNDS)
@@ -1730,7 +1430,6 @@ def plain_stage2_config_from_mapping(
                 DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
             )
         ),
-        evidence_compiler=str(raw.get("evidence_compiler", EVIDENCE_COMPILER_VERSION)).strip(),
         required_architectures=architecture_names(
             raw.get("required_architectures", DEFAULT_STAGE1_ARCHITECTURES)
         ),
@@ -1758,9 +1457,6 @@ def plain_stage2_config_from_mapping(
                 DEFAULT_MAX_ONTOLOGY_REFINEMENT_ROUNDS,
             )
         ),
-        input_temporal_scope=str(raw.get("input_temporal_scope", TEMPORAL_SCOPE)).strip(),
-        agentic_selection=agentic_selection_config_from_mapping(raw.get("agentic_selection")),
-        agentic_evidence_pair_chunk_size=int(raw_pair_chunk_size),
         selection_consolidation=sequential_consolidation_config_from_mapping(
             raw.get("selection_consolidation")
         ),
@@ -1778,7 +1474,6 @@ def plain_stage2_config_from_mapping(
         **{name: raw.get(name) for name in SAMPLING_FIELDS},
         explicit_features=explicit_features,
         vllm=managed_vllm,
-        vllm_co_resident_all_gpus=raw.get("vllm_co_resident_all_gpus", False),
         vllm_rapid_switch_seconds=float(
             raw.get(
                 "vllm_rapid_switch_seconds",
@@ -1896,7 +1591,6 @@ def _resolve_extraction_llm_model(
         workers=extraction.workers,
         extraction_llm=None,
         vllm=None,
-        vllm_co_resident_all_gpus=False,
         runtime_endpoints=(),
     )
     resolved = _resolve_stage2_model(transport_config)
@@ -2111,399 +1805,6 @@ def _has_extraction_dependent_checkpoints(output_dir: Path) -> bool:
             if completion.get("phase") == "causal_estimation":
                 return True
     return False
-
-
-_DROP_KEYS = {
-    "artifacts",
-    "artifact_inventory",
-    "common_vocabulary",
-    "config",
-    "fit_row_ids",
-    "heldout_row_ids",
-    "metrics",
-    "model_diagnostics",
-    "predictions",
-    "run_config",
-    "schema_version",
-    "train_activations",
-}
-
-
-def _is_operational_key(key: str) -> bool:
-    lowered = key.lower()
-    return (
-        lowered in _DROP_KEYS
-        or lowered.endswith(("_sha256", "_hash", "_fingerprint", "_path"))
-        or lowered.startswith(("authenticated_", "attestation_", "immutable_"))
-    )
-
-
-def _scientific_projection(value: Any) -> Any:
-    """Remove old control-plane fields while retaining readable evidence."""
-
-    if isinstance(value, Mapping):
-        return {
-            str(key): _scientific_projection(child)
-            for key, child in value.items()
-            if not _is_operational_key(str(key))
-        }
-    if isinstance(value, (list, tuple)):
-        return [_scientific_projection(child) for child in value]
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return value
-    return str(value)
-
-
-def _infer_evidence_axes(value: Any) -> list[str]:
-    """Infer statistical axes from ordinary Stage 1 field names and labels."""
-
-    tokens: list[str] = []
-    axis_value_keys = {
-        "architecture",
-        "axis",
-        "axes",
-        "bank",
-        "contrast_family",
-        "evidence_type",
-        "json_path",
-        "meaning",
-        "mechanical_role",
-        "objective",
-        "observable_axes",
-        "role",
-        "signal",
-        "target",
-        "target_source",
-    }
-
-    def visit(child: Any) -> None:
-        if isinstance(child, Mapping):
-            for key, nested in child.items():
-                lowered = str(key).lower()
-                tokens.append(lowered)
-                if lowered in axis_value_keys and isinstance(nested, (str, list, tuple)):
-                    if isinstance(nested, str):
-                        tokens.append(nested.lower())
-                    else:
-                        tokens.extend(str(item).lower() for item in nested)
-                visit(nested)
-        elif isinstance(child, (list, tuple)):
-            for nested in child:
-                visit(nested)
-
-    visit(value)
-    joined = " ".join(tokens)
-    axes: set[str] = {"semantic"}
-    if "treatment" in joined or "propensity" in joined:
-        axes.add("treatment")
-    if "outcome" in joined or "prognostic" in joined:
-        axes.add("outcome")
-    if any(
-        token in joined
-        for token in (
-            "residual_effect",
-            "residual effect",
-            "pseudo_target",
-            "r_loss",
-            "r-loss",
-            "heterogeneity",
-            "interaction",
-            "uplift",
-            "effect_modifier",
-            "effect modifier",
-        )
-    ) or any(token in {"effect", "effect_bank", "r"} for token in tokens):
-        axes.add("residual_effect")
-    if "matched_pair" in joined or "matched pair" in joined:
-        axes.add("matched_pair")
-    return sorted(axes)
-
-
-def _row_sections(row: Mapping[str, Any]) -> list[tuple[str, Any, str]]:
-    """Expose natural scientific sections without requiring one input schema."""
-
-    source = str(row.get("source") or "unknown")
-    payload = row.get("evidence")
-    if not isinstance(payload, Mapping):
-        return [(source, payload, "evidence")]
-    architecture = payload.get("architecture")
-    if isinstance(architecture, str) and architecture.strip():
-        return [(architecture.strip(), payload, "evidence")]
-
-    sections: list[tuple[str, Any, str]] = []
-    if source == "text_models":
-        importance = payload.get("importance")
-        if importance:
-            sections.append(("sparse_and_matched_pair_models", importance, "importance"))
-        embedding = payload.get("embedding_contrast_evidence")
-        if isinstance(embedding, Mapping) and embedding.get("contrasts"):
-            for index, contrast in enumerate(embedding["contrasts"], start=1):
-                sections.append(
-                    (
-                        "embedding_contrasts_and_retrieval_terms",
-                        contrast,
-                        f"embedding_contrast_evidence.contrasts[{index - 1}]",
-                    )
-                )
-        elif embedding:
-            sections.append(
-                (
-                    "embedding_contrasts_and_retrieval_terms",
-                    embedding,
-                    "embedding_contrast_evidence",
-                )
-            )
-        htr = payload.get("htr_evidence")
-        if isinstance(htr, Mapping):
-            for key, value in htr.items():
-                if value:
-                    sections.append(("hierarchical_neural_text", value, f"htr_evidence.{key}"))
-        elif htr:
-            sections.append(("hierarchical_neural_text", htr, "htr_evidence"))
-    elif source == "tfidf":
-        discovery = payload.get("discovery")
-        if isinstance(discovery, Mapping):
-            topic_banks = discovery.get("topic_banks")
-            if isinstance(topic_banks, Mapping):
-                for bank, value in topic_banks.items():
-                    if value:
-                        sections.append(("tfidf_topics", value, f"discovery.topic_banks.{bank}"))
-            score_tests = discovery.get("topic_score_tests")
-            if isinstance(score_tests, Mapping) and score_tests.get("effect_orphan_ngram_branch"):
-                sections.append(
-                    (
-                        "tfidf_orphan_ngrams",
-                        score_tests["effect_orphan_ngram_branch"],
-                        "discovery.topic_score_tests.effect_orphan_ngram_branch",
-                    )
-                )
-            elif score_tests:
-                sections.append(("tfidf_orphan_ngrams", score_tests, "discovery.topic_score_tests"))
-    elif source == "neural_queries":
-        query_evidence = payload.get("evidence")
-        if isinstance(query_evidence, list):
-            by_bank: dict[str, list[Any]] = defaultdict(list)
-            for row_value in query_evidence:
-                bank = (
-                    str(row_value.get("bank") or "unspecified")
-                    if isinstance(row_value, Mapping)
-                    else "unspecified"
-                )
-                by_bank[bank].append(row_value)
-            for bank, values in by_bank.items():
-                sections.append(("neural_query_moments", values, f"evidence.{bank}"))
-        elif query_evidence:
-            sections.append(("neural_query_moments", query_evidence, "evidence"))
-    return sections or [(source, payload, "evidence")]
-
-
-def _json_chars(value: Any) -> int:
-    return len(json.dumps(value, separators=(",", ":"), sort_keys=True))
-
-
-def _split_value(
-    value: Any,
-    *,
-    max_chars: int,
-    path: str,
-    path_budget: Callable[[str], int] | None = None,
-) -> list[tuple[str, Any]]:
-    def fragment_budget(fragment_path: str) -> int:
-        if path_budget is None:
-            return int(max_chars)
-        return min(int(max_chars), int(path_budget(fragment_path)))
-
-    def fragment_fits(fragment_path: str, fragment: Any) -> bool:
-        return _json_chars(fragment) <= fragment_budget(fragment_path)
-
-    if fragment_fits(path, value):
-        return [(path, value)]
-    if isinstance(value, Mapping):
-        fragments: list[tuple[str, Any]] = []
-        scalars: dict[str, Any] = {}
-        for key, child in value.items():
-            child_path = f"{path}.{key}"
-            if isinstance(child, (Mapping, list, tuple)):
-                fragments.extend(
-                    _split_value(
-                        child,
-                        max_chars=max_chars,
-                        path=child_path,
-                        path_budget=path_budget,
-                    )
-                )
-            else:
-                scalars[str(key)] = child
-        if scalars:
-            if fragment_fits(path, scalars):
-                fragments.insert(0, (path, scalars))
-            else:
-                for key, child in scalars.items():
-                    fragments.extend(
-                        _split_value(
-                            child,
-                            max_chars=max_chars,
-                            path=f"{path}.{key}",
-                            path_budget=path_budget,
-                        )
-                    )
-        return fragments
-    if isinstance(value, (list, tuple)):
-        output: list[tuple[str, Any]] = []
-        batch: list[Any] = []
-        batch_chars = 2  # Opening and closing brackets in compact JSON.
-        batch_start = 0
-        for index, child in enumerate(value):
-            child_chars = _json_chars(child)
-            if batch:
-                candidate_path = f"{path}[{batch_start}:{index + 1}]"
-                candidate_chars = batch_chars + 1 + child_chars
-                if candidate_chars <= fragment_budget(candidate_path):
-                    batch.append(child)
-                    batch_chars = candidate_chars
-                    continue
-                output.append((f"{path}[{batch_start}:{index}]", batch))
-                batch = []
-                batch_chars = 2
-            singleton_path = f"{path}[{index}:{index + 1}]"
-            singleton_chars = 2 + child_chars
-            if singleton_chars <= fragment_budget(singleton_path):
-                batch = [child]
-                batch_chars = singleton_chars
-                batch_start = index
-            else:
-                output.extend(
-                    _split_value(
-                        child,
-                        max_chars=max_chars,
-                        path=f"{path}[{index}]",
-                        path_budget=path_budget,
-                    )
-                )
-                batch_start = index + 1
-        if batch:
-            output.append((f"{path}[{batch_start}:{len(value)}]", batch))
-        return output
-    text = str(value)
-    segments: list[tuple[str, Any]] = []
-    cursor = 0
-    while cursor < len(text):
-        segment_path = f"{path}.text_segment_{len(segments) + 1:03d}"
-        low, high = cursor + 1, len(text)
-        best = cursor
-        while low <= high:
-            end = (low + high) // 2
-            if fragment_fits(segment_path, text[cursor:end]):
-                best = end
-                low = end + 1
-            else:
-                high = end - 1
-        if best == cursor:
-            raise ValueError(
-                f"max_packet_chars cannot encode one source character at {segment_path}"
-            )
-        segments.append((segment_path, text[cursor:best]))
-        cursor = best
-    if "".join(str(segment) for _path, segment in segments) != text:
-        raise RuntimeError("Stage 2 scalar packetization changed source text")
-    return segments
-
-
-def packetize_handoff(
-    rows: Sequence[Mapping[str, Any]],
-    *,
-    max_packet_chars: int,
-) -> list[dict[str, Any]]:
-    packets: list[dict[str, Any]] = []
-    for row_index, row in enumerate(rows, start=1):
-        try:
-            outer_fold = int(row["outer_fold"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"handoff row {row_index} has no integer outer_fold") from exc
-        for section_index, (architecture, raw_section, section_path) in enumerate(
-            _row_sections(row), start=1
-        ):
-            section = _scientific_projection(raw_section)
-            prototype = {
-                "packet_id": (
-                    f"outer_{outer_fold:03d}_row_{row_index:04d}_"
-                    f"section_{section_index:02d}_part_000000000000"
-                ),
-                "source": str(row.get("source") or "unknown"),
-                "architecture": str(architecture),
-                "outer_fold": outer_fold,
-                "inner_fold": row.get("inner_fold"),
-                "scope": str(row.get("scope") or "unspecified"),
-                "json_path": section_path,
-                "observable_axes": [
-                    "matched_pair",
-                    "outcome",
-                    "residual_effect",
-                    "semantic",
-                    "treatment",
-                    "unclear",
-                ],
-                "content": "",
-            }
-
-            def packet_content_budget(json_path: str) -> int:
-                envelope = {**prototype, "json_path": json_path}
-                envelope_chars = _json_chars(envelope) - _json_chars("")
-                return int(max_packet_chars) - envelope_chars
-
-            if packet_content_budget(section_path) < 1:
-                raise ValueError("max_packet_chars is too small for the Stage 2 packet envelope")
-            fragments = _split_value(
-                section,
-                max_chars=int(max_packet_chars),
-                path=section_path,
-                path_budget=packet_content_budget,
-            )
-            for fragment_index, (json_path, content) in enumerate(fragments, start=1):
-                packet = {
-                    "packet_id": (
-                        f"outer_{outer_fold:03d}_row_{row_index:04d}_"
-                        f"section_{section_index:02d}_part_{fragment_index:03d}"
-                    ),
-                    "source": str(row.get("source") or "unknown"),
-                    "architecture": str(architecture),
-                    "outer_fold": outer_fold,
-                    "inner_fold": row.get("inner_fold"),
-                    "scope": str(row.get("scope") or "unspecified"),
-                    "json_path": json_path,
-                    "observable_axes": _infer_evidence_axes(
-                        {
-                            "architecture": architecture,
-                            "json_path": json_path,
-                            "content": content,
-                        }
-                    ),
-                    "content": content,
-                }
-                if _json_chars(packet) > int(max_packet_chars):
-                    raise RuntimeError("Stage 2 packet planner emitted an oversized packet")
-                packets.append(packet)
-    if not packets:
-        raise ValueError("the Stage 1 handoff contains no evidence packets")
-    return packets
-
-
-def _partition_packets(
-    packets: Sequence[Mapping[str, Any]],
-    *,
-    max_chars: int,
-) -> list[list[Mapping[str, Any]]]:
-    batches: list[list[Mapping[str, Any]]] = []
-    current: list[Mapping[str, Any]] = []
-    for packet in packets:
-        candidate = [*current, packet]
-        if current and _json_chars(candidate) > max_chars:
-            batches.append(current)
-            current = []
-        current.append(packet)
-    if current:
-        batches.append(current)
-    return batches
 
 
 CompletionFunction = Callable[[Sequence[Mapping[str, str]], PlainHandoffStage2Config], str]
@@ -2763,7 +2064,7 @@ def _feature_definition_input_value(
         "prompt_catalog_version": clinical_prompts.PROMPT_VERSION,
         "alias_merge_prompt_version": clinical_prompts.ALIAS_MERGE_PROMPT_VERSION,
         "outer_fold": int(outer_fold),
-        "compiler": config.evidence_compiler,
+        "compiler": EVIDENCE_COMPILER_VERSION,
         "candidate_discovery_source": "all_semantic_evidence_cards",
         "interpretation_schema": INTERPRETATION_SCHEMA_VERSION,
         "primary_llm": {
@@ -2774,13 +2075,10 @@ def _feature_definition_input_value(
             "interpretation",
         ),
         "consolidation_schema": CONSOLIDATION_SCHEMA_VERSION,
-        "global_candidate_pool_schema": GLOBAL_CANDIDATE_POOL_SCHEMA_VERSION,
+        "global_candidate_pool_schema": MIXED_SCHEMA,
         "consolidation_batch_size": int(config.consolidation_batch_size),
-        "consolidation_alphabetical_rounds": int(config.consolidation_alphabetical_rounds),
         "consolidation_max_rounds": int(config.consolidation_max_rounds),
-        **({"consolidation_policy": config.consolidation_policy.public_dict(),
-            "mixed_consolidation_schema": MIXED_SCHEMA}
-           if config.consolidation_policy.strategy == "mixed" else {}),
+        "consolidation_policy": config.consolidation_policy.public_dict(),
         "consolidation_seed": int(seed),
         "extraction_ontology_feedback_schema": EXTRACTION_ONTOLOGY_FEEDBACK_SCHEMA_VERSION,
         "ontology_refinement_min_failure_patients": int(
@@ -4124,64 +3422,6 @@ def _checkpointed_request_json(
     return result
 
 
-def _interpretation_response_contract() -> dict[str, Any]:
-    """Return the shared response contract for interpretation passes."""
-
-    return {
-        "candidates": [
-            {
-                "name": "snake_case_clinical_feature_name",
-                "description": (
-                    "exactly one atomic, reusable patient-level clinical measurement or "
-                    "attribute with one coherent value domain"
-                ),
-                "supporting_items": [1],
-                "evidence_rationale": (
-                    "how the cited words, phrases, or clinical context could arise from this "
-                    "feature, including whether the feature is explicit or inferred"
-                ),
-                "caveats": "limitations, ambiguity, or competing clinical explanations",
-            }
-        ],
-    }
-
-
-def _atomic_feature_interpretation_rules() -> list[str]:
-    """Return shared rules that keep discovered variables specific and scalar."""
-
-    return [
-        "Exhaustively enumerate every distinct atomic patient-level clinical feature explicitly stated or unambiguously encoded anywhere in each evidence item's text. Do not restrict candidates to the item's apparent topic, dominant concept, or consensus theme.",
-        "Read every string in an evidence item's text array. Treat both consensus phrases and every representative excerpt as evidence; consensus phrases are not an exhaustive label for the variables present in the excerpts.",
-        "Do not stop after finding the most salient feature, and do not limit an evidence item to one candidate. Inspect demographic clauses, headers, timepoint labels, laboratory lines, biomarker statements, diagnoses, symptoms, and other embedded fields separately.",
-        "When one clause, header, or line explicitly states multiple independently varying patient attributes, return a separate atomic candidate for each attribute.",
-        "Attribute each feature to the correct subject. Attributes belonging to relatives, specimens, clinicians, or other people do not support the corresponding patient feature.",
-        "When an item contains multiple exemplar patients with different observed values of the same field, treat that as support for one reusable patient-level feature. Do not encode exemplar values or patient identities in the candidate name.",
-        "Prefer atomic clinical variables.",
-        "A candidate is atomic only when a downstream extractor could assign exactly one patient-level value under one coherent ontology. It must not require returning a list, set, tuple, mapping, concatenated code, profile, inventory, or ad hoc aggregation of independently varying values. Collapsing whether any member of an open-ended family is present into one indicator does not make that family atomic.",
-        "Use the narrowest stable and reusable clinical construct directly supported by the cited evidence. Do not use a parent domain, umbrella label, or catch-all concept when the evidence supports separately measurable attributes.",
-        "When evidence explicitly states or unambiguously encodes multiple independently meaningful components, return those components as separate candidates. Do not also return their umbrella or composite representation.",
-        "Do not split a variable merely because its evidence contains different values, categories, thresholds, units, synonyms, or reporting formats. Those may be representations of one underlying measurement rather than distinct variables.",
-        "An established construct that is conventionally reported as one scalar or category under one ontology remains one candidate even if that value is derived from multiple inputs. This exception does not apply to concatenated or multi-field encodings that preserve separately varying component values.",
-        "Specificity concerns the measured clinical dimension, not a particular patient, observed value, document, or wording. Do not encode instance-specific details in a candidate name.",
-        "Do not invent components that are not directly stated or unambiguously encoded in the evidence. If an atomic reusable variable cannot be identified, return no candidate rather than a vague catch-all.",
-        "Each candidate name must identify its exact extraction target. A broad name cannot be repaired by placing a more specific target only in its description.",
-    ]
-
-
-def _interpretation_evidence_items(
-    packets: Sequence[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    """Expose only readable text under prompt-local ordinal labels."""
-
-    items: list[dict[str, Any]] = []
-    for item_number, packet in enumerate(packets, start=1):
-        texts = _readable_supporting_text([packet])
-        if not texts:
-            raise ValueError(f"interpretation evidence item {item_number} has no readable text")
-        items.append({"item": item_number, "text": texts})
-    return items
-
-
 def _interpretation_prompt(
     *,
     architecture: str,
@@ -4274,140 +3514,6 @@ def _rejected_packet_audit_prompt(*, architecture: str, packets: Sequence[Mappin
 
 
 
-def _validate_interpretation(
-    value: Mapping[str, Any],
-    *,
-    packet_ids: Sequence[str],
-    packet_evidence_axes: Mapping[str, Sequence[str]] | None = None,
-) -> dict[str, Any]:
-    if set(value) == {"candidates"} and len(packet_ids) == 1 and (
-        not value["candidates"] or set(value["candidates"][0]) == {"name", "description", "basis", "uncertainty"}
-    ):
-        return _validate_discovery(value, packet_id=str(packet_ids[0]), evidence_axes=(packet_evidence_axes or {}).get(str(packet_ids[0]), ()))
-    ordered_packet_ids = list(map(str, packet_ids))
-    if len(ordered_packet_ids) != len(set(ordered_packet_ids)):
-        raise ValueError("interpretation input contains duplicate packet IDs")
-    packet_id_by_item = {
-        item_number: packet_id for item_number, packet_id in enumerate(ordered_packet_ids, start=1)
-    }
-    payload = value
-    if not isinstance(payload.get("concepts"), list):
-        for key in ("result", "response", "interpretation"):
-            nested = payload.get(key)
-            if isinstance(nested, Mapping):
-                payload = nested
-                break
-    concepts = next(
-        (
-            payload.get(key)
-            for key in ("concepts", "features", "variables", "candidates")
-            if isinstance(payload.get(key), list)
-        ),
-        None,
-    )
-    if not isinstance(concepts, list):
-        raise ValueError("interpretation requires a concepts list")
-    clean_concepts: list[dict[str, Any]] = []
-    for concept_index, concept in enumerate(concepts, start=1):
-        if not isinstance(concept, Mapping):
-            raise ValueError("each interpreted concept must be an object")
-        name = str(concept.get("name") or concept.get("feature_name") or "").strip()
-        if not name:
-            LOGGER.warning(
-                "Stage 2 interpretation ignored unnamed candidate at position=%s; "
-                "its citations were not used",
-                concept_index,
-            )
-            continue
-        raw_supports = concept.get("supporting_items") or []
-        if isinstance(raw_supports, (str, int)):
-            raw_supports = [raw_supports]
-        elif not isinstance(raw_supports, Sequence):
-            raw_supports = []
-        cited_items: list[int] = []
-        invalid_items: list[Any] = []
-        for raw_item in raw_supports:
-            if isinstance(raw_item, bool):
-                invalid_items.append(raw_item)
-                continue
-            try:
-                item_number = int(raw_item)
-            except (TypeError, ValueError):
-                invalid_items.append(raw_item)
-                continue
-            if str(raw_item).strip() not in {str(item_number), f"{item_number}.0"}:
-                invalid_items.append(raw_item)
-                continue
-            if item_number not in packet_id_by_item:
-                invalid_items.append(raw_item)
-                continue
-            cited_items.append(item_number)
-        cited_items = list(dict.fromkeys(cited_items))
-        supports = [packet_id_by_item[item_number] for item_number in cited_items]
-        if invalid_items:
-            LOGGER.warning(
-                "Stage 2 interpretation concept=%s ignored %s invalid supporting item(s): %s",
-                name,
-                len(invalid_items),
-                invalid_items[:8],
-            )
-        if not supports:
-            LOGGER.warning(
-                "Stage 2 interpretation dropped ungrounded concept=%s; no supplied "
-                "evidence item cited it",
-                name,
-            )
-            continue
-        if packet_evidence_axes is not None:
-            axes = sorted(
-                {
-                    axis
-                    for packet_id in supports
-                    for axis in _canonical_evidence_axes(packet_evidence_axes.get(packet_id))
-                }
-            )
-        else:
-            axes = []
-        evidence_rationale = str(
-            concept.get("evidence_rationale")
-            or concept.get("pattern_rationale")
-            or concept.get("rationale")
-            or ""
-        ).strip()
-        if not evidence_rationale:
-            raise ValueError(
-                f"interpreted candidate {name!r} has no evidence_rationale explaining "
-                "how the cited text evidence could arise from it"
-            )
-        clean_concepts.append(
-            {
-                "name": name,
-                "description": str(concept.get("description") or name),
-                "supporting_packet_ids": supports,
-                "evidence_axes": axes,
-                "evidence_rationale": evidence_rationale,
-                "caveats": str(concept.get("caveats") or ""),
-            }
-        )
-    clean_dispositions: dict[str, Any] = {}
-    for packet_id in ordered_packet_ids:
-        names = sorted(
-            concept["name"]
-            for concept in clean_concepts
-            if packet_id in concept["supporting_packet_ids"]
-        )
-        clean_dispositions[packet_id] = {
-            "status": "supports_concept" if names else "reviewed_no_specific_concept",
-            "concept_names": names,
-            "reason": (
-                "Derived from the candidates' evidence-item citations."
-                if names
-                else "No returned candidate cited this evidence item."
-            ),
-        }
-    return {"concepts": clean_concepts, "packet_dispositions": clean_dispositions}
-
-
 def _cached_interpretation_matches_packets(
     value: Any,
     *,
@@ -4436,37 +3542,6 @@ def _cached_interpretation_matches_packets(
     return True
 
 
-def _partition_packets_for_prompt(
-    packets: Sequence[Mapping[str, Any]],
-    *,
-    render_prompt: Callable[[Sequence[Mapping[str, Any]]], Sequence[Mapping[str, str]]],
-    max_prompt_chars: int,
-) -> list[list[Mapping[str, Any]]]:
-    """Pack evidence using the exact rendered prompt supplied by the caller."""
-
-    batches: list[list[Mapping[str, Any]]] = []
-    current: list[Mapping[str, Any]] = []
-    for packet in packets:
-        candidate = [*current, packet]
-        messages = render_prompt(candidate)
-        prompt_chars = sum(len(str(message.get("content") or "")) for message in messages)
-        if not current and prompt_chars > int(max_prompt_chars):
-            raise ValueError("one Stage 2 evidence packet cannot fit the rendered prompt budget")
-        if current and prompt_chars > int(max_prompt_chars):
-            batches.append(current)
-            current = [packet]
-            singleton = render_prompt(current)
-            if sum(len(message["content"]) for message in singleton) > int(max_prompt_chars):
-                raise ValueError(
-                    "one Stage 2 evidence packet cannot fit the rendered prompt budget"
-                )
-        else:
-            current = candidate
-    if current:
-        batches.append(current)
-    return batches
-
-
 def _partition_interpretation_packets(
     packets: Sequence[Mapping[str, Any]],
     *,
@@ -4482,24 +3557,6 @@ def _partition_interpretation_packets(
             raise ValueError("one Stage 2 evidence card cannot fit the rendered prompt budget")
         batches.append([packet])
     return batches
-
-
-def _partition_rejected_packet_audit(
-    packets: Sequence[Mapping[str, Any]],
-    *,
-    architecture: str,
-    max_prompt_chars: int,
-) -> list[list[Mapping[str, Any]]]:
-    """Pack rejected packets using the exact rendered audit prompt."""
-
-    return _partition_packets_for_prompt(
-        packets,
-        render_prompt=lambda batch: _rejected_packet_audit_prompt(
-            architecture=architecture,
-            packets=batch,
-        ),
-        max_prompt_chars=max_prompt_chars,
-    )
 
 
 def _merge_interpretation_audit(
@@ -4563,375 +3620,6 @@ def _merge_interpretation_audit(
             "audit_batches": len(audits),
         },
     }
-
-
-def _consolidation_prompt(
-    *,
-    clinical_question: str,
-    outer_fold: int,
-    candidates: Sequence[Mapping[str, Any]],
-    max_candidates: int,
-) -> list[dict[str, str]]:
-    del clinical_question, outer_fold, candidates, max_candidates
-    raise RuntimeError(
-        "the monolithic Stage 2 consolidation prompt is retired; use candidate-ID "
-        "alias grouping and per-group operationalization"
-    )
-
-
-def _validate_consolidation(
-    value: Mapping[str, Any],
-    *,
-    candidates: Sequence[Mapping[str, Any]],
-    max_candidates: int,
-) -> dict[str, Any]:
-    # Retained only for validating historical monolithic-consolidation
-    # responses. The former feature-count limit is intentionally ignored.
-    del max_candidates
-    features = value.get("features")
-    dispositions = value.get("candidate_dispositions")
-    if not isinstance(features, list):
-        raise ValueError("consolidation requires a features list")
-    if not isinstance(dispositions, Mapping):
-        raise ValueError(
-            "consolidation requires candidate_dispositions for every supplied candidate"
-        )
-    dispositions = {str(candidate_id): row for candidate_id, row in dispositions.items()}
-
-    def feature_name_key(name: Any) -> str:
-        return re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_")
-
-    def string_list(raw: Any) -> list[str]:
-        if raw is None:
-            return []
-        if isinstance(raw, (str, int, float, bool)):
-            return [str(raw)]
-        if not isinstance(raw, Sequence):
-            return []
-        return list(dict.fromkeys(str(item) for item in raw if item is not None))
-
-    candidate_ids = {str(candidate["candidate_id"]) for candidate in candidates}
-    candidate_by_id = {str(candidate["candidate_id"]): candidate for candidate in candidates}
-    missing_disposition_ids = sorted(candidate_ids - set(dispositions))
-    if missing_disposition_ids:
-        raise ValueError(
-            "consolidation omitted candidate disposition(s): " f"{missing_disposition_ids[:8]}"
-        )
-    extra_disposition_ids = sorted(set(dispositions) - candidate_ids)
-    if extra_disposition_ids:
-        LOGGER.warning(
-            "Stage 2 consolidation ignored %s unknown candidate disposition(s): %s",
-            len(extra_disposition_ids),
-            extra_disposition_ids[:8],
-        )
-    status_aliases = {
-        "keep": "retained",
-        "kept": "retained",
-        "retain": "retained",
-        "combine": "merged",
-        "combined": "merged",
-        "merge": "merged",
-        "drop": "excluded",
-        "dropped": "excluded",
-        "exclude": "excluded",
-    }
-    normalized_dispositions: dict[str, dict[str, str]] = {}
-    for candidate_id in sorted(candidate_ids):
-        raw_disposition = dispositions[candidate_id]
-        if not isinstance(raw_disposition, Mapping):
-            raise ValueError(f"candidate disposition {candidate_id!r} must be an object")
-        status = str(raw_disposition.get("status") or "").strip().lower()
-        status = status_aliases.get(status, status)
-        if status not in {"retained", "merged", "excluded"}:
-            raise ValueError(
-                f"candidate disposition {candidate_id!r} has unsupported status {status!r}"
-            )
-        feature_name = str(raw_disposition.get("feature_name") or "").strip()
-        if status != "excluded" and not feature_name:
-            raise ValueError(
-                f"candidate disposition {candidate_id!r} with status={status!r} "
-                "must name a returned feature"
-            )
-        normalized_dispositions[candidate_id] = {
-            "status": status,
-            "feature_name": feature_name,
-            "reason": str(raw_disposition.get("reason") or "").strip(),
-        }
-    allowed_packets = {
-        str(packet_id)
-        for candidate in candidates
-        for packet_id in string_list(candidate.get("supporting_packet_ids"))
-    }
-    allowed_architectures = {
-        str(architecture)
-        for candidate in candidates
-        for architecture in [
-            candidate["architecture"],
-            *string_list(candidate.get("supporting_architectures")),
-        ]
-    }
-    packet_axes: dict[str, set[str]] = defaultdict(set)
-    for candidate in candidates:
-        for packet_id in string_list(candidate.get("supporting_packet_ids")):
-            per_packet = candidate.get("packet_evidence_axes") or {}
-            packet_axes[str(packet_id)].update(
-                str(axis)
-                for axis in per_packet.get(
-                    str(packet_id),
-                    candidate["evidence_axes"],
-                )
-            )
-    clean_features: list[dict[str, Any]] = []
-    for feature_index, feature in enumerate(features, start=1):
-        if not isinstance(feature, Mapping):
-            raise ValueError(f"consolidation feature at position={feature_index} must be an object")
-        name = str(feature.get("name") or feature.get("feature_name") or "").strip()
-        if not name:
-            raise ValueError(f"consolidation feature at position={feature_index} has no name")
-        name_key = feature_name_key(name)
-        matched_candidate_ids = {
-            candidate_id
-            for candidate_id, disposition in normalized_dispositions.items()
-            if disposition["status"] != "excluded"
-            and feature_name_key(disposition["feature_name"]) == name_key
-        }
-        if not matched_candidate_ids:
-            raise ValueError(
-                f"returned feature {name!r} is not referenced by any retained or merged "
-                "candidate disposition"
-            )
-        incompatible_candidate_ids = [
-            candidate_id
-            for candidate_id in sorted(matched_candidate_ids)
-            if not _consolidation_route_is_semantically_compatible(
-                candidate_by_id[candidate_id], feature
-            )
-        ]
-        if incompatible_candidate_ids:
-            incompatible_names = [
-                str(candidate_by_id[candidate_id].get("name") or candidate_id)
-                for candidate_id in incompatible_candidate_ids
-            ]
-            raise ValueError(
-                f"returned feature {name!r} has semantically incompatible candidate "
-                f"route(s): {incompatible_names[:8]}. Distinct measurements must not "
-                "be merged merely because packet evidence overlaps"
-            )
-
-        cited_packets = string_list(
-            feature.get("supporting_packet_ids") or feature.get("packet_ids")
-        )
-        unknown_packets = [
-            packet_id for packet_id in cited_packets if packet_id not in allowed_packets
-        ]
-        if unknown_packets:
-            raise ValueError(
-                f"returned feature {name!r} cites unknown packet ID(s): " f"{unknown_packets[:8]}"
-            )
-        routed_packets = {
-            str(packet_id)
-            for candidate_id in matched_candidate_ids
-            for packet_id in string_list(candidate_by_id[candidate_id].get("supporting_packet_ids"))
-        }
-        unrelated_packets = sorted(set(cited_packets) - routed_packets)
-        if unrelated_packets:
-            LOGGER.warning(
-                "Stage 2 consolidation feature=%s discarded %s known packet citation(s) "
-                "not carried by candidates routed to that feature: %s",
-                name,
-                len(unrelated_packets),
-                unrelated_packets[:8],
-            )
-        packets = [packet_id for packet_id in cited_packets if packet_id in routed_packets]
-        for candidate_id in sorted(matched_candidate_ids):
-            packets.extend(string_list(candidate_by_id[candidate_id].get("supporting_packet_ids")))
-        packets = list(
-            dict.fromkeys(packet_id for packet_id in packets if packet_id in allowed_packets)
-        )
-        if not packets:
-            raise ValueError(f"returned feature {name!r} has no supplied candidate evidence")
-
-        raw_categories = feature.get("categories_or_unit")
-        if isinstance(raw_categories, Mapping):
-            raw_categories = (
-                raw_categories.get("categories")
-                or raw_categories.get("values")
-                or raw_categories.get("unit")
-            )
-        if raw_categories is None:
-            raw_categories = feature.get("categories") or feature.get("unit")
-        categories = string_list(raw_categories)
-
-        value_type = str(feature.get("value_type") or "ambiguous").strip().lower()
-        value_type = {
-            "bool": "binary",
-            "boolean": "binary",
-            "category": "categorical",
-            "numeric": "continuous",
-            "number": "continuous",
-            "unknown": "ambiguous",
-        }.get(value_type, value_type)
-        if value_type not in ALLOWED_VALUE_TYPES:
-            value_type = "ambiguous"
-        if value_type in {"binary", "categorical", "ordinal"}:
-            # Models sometimes serialize an enumeration as one delimited string
-            # or an ordinal ontology as an integer range such as ``0-4``.
-            from .plain_handoff_stage2_analysis import _validated_closed_category_values
-
-            categories = _validated_closed_category_values(
-                value_type=value_type,
-                values=categories,
-                source=f"returned feature {name!r}",
-            )
-
-        architectures = [
-            architecture
-            for architecture in string_list(feature.get("supporting_architectures"))
-            if architecture in allowed_architectures
-        ]
-        if not architectures:
-            architectures = list(
-                dict.fromkeys(
-                    str(architecture)
-                    for candidate_id, candidate in candidate_by_id.items()
-                    if candidate_id in matched_candidate_ids
-                    or set(string_list(candidate.get("supporting_packet_ids"))).intersection(
-                        packets
-                    )
-                    for architecture in [
-                        candidate["architecture"],
-                        *string_list(candidate.get("supporting_architectures")),
-                    ]
-                    if str(architecture) in allowed_architectures
-                )
-            )
-
-        description = str(feature.get("description") or name).strip()
-        clean_features.append(
-            {
-                "name": name,
-                "description": description,
-                "value_type": value_type,
-                "categories_or_unit": categories,
-                "roles": [
-                    role for role in string_list(feature.get("roles")) if role in ALLOWED_ROLES
-                ],
-                "measurement_definition": str(
-                    feature.get("measurement_definition") or description
-                ).strip(),
-                "missing_value_rule": str(
-                    feature.get("missing_value_rule")
-                    or "Return null when not documented in the pretreatment record."
-                ).strip(),
-                "supporting_packet_ids": packets,
-                "supporting_architectures": architectures,
-                "stability_summary": str(feature.get("stability_summary") or ""),
-                "caveats": str(feature.get("caveats") or ""),
-            }
-        )
-    deduplicated_features: dict[str, dict[str, Any]] = {}
-    for feature in clean_features:
-        key = feature_name_key(feature["name"])
-        existing = deduplicated_features.get(key)
-        if existing is None:
-            deduplicated_features[key] = feature
-            continue
-        raise ValueError(f"consolidation returned duplicate feature name {feature['name']!r}")
-    clean_features = list(deduplicated_features.values())
-    clean_dispositions: dict[str, dict[str, str]] = {}
-    features_by_name = {feature["name"]: feature for feature in clean_features}
-    features_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for feature in clean_features:
-        key = feature_name_key(feature["name"])
-        features_by_key[key].append(feature)
-    for candidate_id in sorted(candidate_ids):
-        raw_disposition = normalized_dispositions[candidate_id]
-        candidate_packets = {
-            str(packet_id)
-            for packet_id in string_list(candidate_by_id[candidate_id].get("supporting_packet_ids"))
-        }
-        status = raw_disposition["status"]
-        feature_name = raw_disposition["feature_name"]
-        reason = raw_disposition["reason"]
-        if status == "excluded":
-            clean_dispositions[candidate_id] = {
-                "status": "excluded",
-                "feature_name": "",
-                "reason": reason or "Candidate was excluded by consolidation.",
-            }
-            continue
-        feature = features_by_name.get(feature_name)
-        if feature is None and feature_name:
-            key = feature_name_key(feature_name)
-            matches = features_by_key.get(key, [])
-            if len(matches) == 1:
-                feature = matches[0]
-        if feature is None:
-            raise ValueError(
-                f"candidate disposition {candidate_id!r} references missing returned "
-                f"feature {feature_name!r}"
-            )
-        if not _consolidation_route_is_semantically_compatible(
-            candidate_by_id[candidate_id], feature
-        ):
-            raise ValueError(
-                f"candidate {candidate_id!r} "
-                f"({candidate_by_id[candidate_id].get('name')!r}) cannot be merged "
-                f"into semantically incompatible feature {feature['name']!r}"
-            )
-        if not candidate_packets <= set(feature["supporting_packet_ids"]):
-            raise ValueError(
-                f"returned feature {feature['name']!r} did not preserve all packet "
-                f"evidence for candidate {candidate_id!r}"
-            )
-        clean_dispositions[candidate_id] = {
-            "status": status,
-            "feature_name": str(feature["name"]),
-            "reason": reason or "Candidate was reconciled to the returned grounded feature.",
-        }
-
-    routed_features: list[dict[str, Any]] = []
-    for feature in clean_features:
-        axes = {
-            axis
-            for packet_id in feature["supporting_packet_ids"]
-            for axis in packet_axes.get(packet_id, set())
-        }
-        derived_roles: list[str] = []
-        if {"treatment", "outcome"} <= axes:
-            derived_roles.append("confounder")
-        elif "outcome" in axes:
-            derived_roles.append("prognostic")
-        if axes.intersection({"residual_effect", "matched_pair"}):
-            derived_roles.append("effect_modifier")
-        if not derived_roles:
-            raise ValueError(
-                f"returned feature {feature['name']!r} has no supported Stage 2 causal role"
-            )
-        feature["roles"] = derived_roles
-        routed_features.append(feature)
-
-    routed_names = {feature["name"] for feature in routed_features}
-    for disposition in clean_dispositions.values():
-        if disposition["status"] != "excluded" and disposition["feature_name"] not in routed_names:
-            raise ValueError(
-                "candidate disposition references unrouted feature "
-                f"{disposition['feature_name']!r}"
-            )
-    used_names = {
-        disposition["feature_name"]
-        for disposition in clean_dispositions.values()
-        if disposition["status"] != "excluded"
-    }
-    unused_features = [
-        feature["name"] for feature in routed_features if feature["name"] not in used_names
-    ]
-    if unused_features:
-        raise ValueError(
-            "returned feature(s) have no retained or merged candidate route: "
-            f"{unused_features[:8]}"
-        )
-    return {"features": routed_features, "candidate_dispositions": clean_dispositions}
 
 
 def _string_values(raw: Any) -> list[str]:
@@ -4999,60 +3687,6 @@ def _configured_feature_definitions(
         definitions.append(definition)
         seen.add(name)
     return definitions
-
-
-def _group_roles(group: Mapping[str, Any]) -> list[str]:
-    configured = _configured_feature_definitions(group)
-    if configured:
-        if len(configured) != 1:
-            raise ValueError(
-                "Stage 2 consolidation attempted to merge multiple investigator-configured "
-                f"features: {[feature['name'] for feature in configured]}"
-            )
-        return [
-            role for role in _string_values(configured[0].get("roles")) if role in ALLOWED_ROLES
-        ]
-    return _derive_roles(group.get("evidence_axes") or [])
-
-
-def _filter_candidate_groups_by_causal_role(
-    groups: Sequence[Mapping[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, str], list[dict[str, Any]]]:
-    """Apply the auditable causal-role filter after lossless alias consolidation."""
-
-    retained: list[dict[str, Any]] = []
-    exclusions: dict[str, str] = {}
-    decisions: list[dict[str, Any]] = []
-    exclusion_reason = (
-        "Excluded because its Stage 1 evidence does not support a Stage 2 "
-        "confounder, prognostic, or effect-modifier role."
-    )
-    for group in groups:
-        roles = _group_roles(group)
-        origin_candidate_ids = _string_values(group.get("origin_candidate_ids"))
-        if roles:
-            retained.append(dict(group))
-            decisions.append(
-                {
-                    "name": str(group["name"]),
-                    "status": "retained",
-                    "roles": roles,
-                    "origin_candidate_ids": origin_candidate_ids,
-                }
-            )
-            continue
-        for origin in origin_candidate_ids:
-            exclusions[origin] = exclusion_reason
-        decisions.append(
-            {
-                "name": str(group["name"]),
-                "status": "excluded",
-                "roles": [],
-                "origin_candidate_ids": origin_candidate_ids,
-                "reason": exclusion_reason,
-            }
-        )
-    return retained, exclusions, decisions
 
 
 def _flatten_member_measurements(
@@ -5253,104 +3887,6 @@ def _candidate_group_sort_key(group: Mapping[str, Any]) -> tuple[str, str, str]:
     )
 
 
-def _alphabetical_candidate_batches(
-    groups: Sequence[Mapping[str, Any]],
-    *,
-    batch_size: int,
-    round_number: int,
-) -> tuple[int, list[list[dict[str, Any]]]]:
-    """Sort groups and shift nonoverlapping batch boundaries between rounds."""
-
-    if batch_size < 2:
-        raise ValueError("candidate consolidation batch_size must be at least 2")
-    if round_number < 1:
-        raise ValueError("candidate consolidation round_number must be positive")
-    ordered = [dict(group) for group in sorted(groups, key=_candidate_group_sort_key)]
-    if not ordered:
-        return 0, []
-    if len(ordered) <= batch_size:
-        return 0, [ordered]
-
-    shift_step = max(1, batch_size // 2)
-    while math.gcd(shift_step, batch_size) != 1:
-        shift_step += 1
-    boundary_offset = ((round_number - 1) * shift_step) % batch_size
-    batches: list[list[dict[str, Any]]] = []
-    cursor = 0
-    if boundary_offset:
-        batches.append(ordered[:boundary_offset])
-        cursor = boundary_offset
-    while cursor < len(ordered):
-        batches.append(ordered[cursor : cursor + batch_size])
-        cursor += batch_size
-    return boundary_offset, batches
-
-
-def _seeded_shuffle_candidate_batches(
-    groups: Sequence[Mapping[str, Any]],
-    *,
-    batch_size: int,
-    seed: int,
-    shuffle_round: int,
-) -> list[list[dict[str, Any]]]:
-    """Deterministically shuffle a sorted pool before forming bounded batches."""
-
-    if batch_size < 2:
-        raise ValueError("candidate consolidation batch_size must be at least 2")
-    if shuffle_round < 1:
-        raise ValueError("candidate consolidation shuffle_round must be positive")
-    ordered = [dict(group) for group in sorted(groups, key=_candidate_group_sort_key)]
-
-    def shuffled_key(group: Mapping[str, Any]) -> tuple[str, tuple[str, str, str]]:
-        identity = "\0".join(
-            (
-                str(int(seed)),
-                str(int(shuffle_round)),
-                str(group.get("name") or ""),
-                str(group.get("candidate_id") or ""),
-            )
-        )
-        return hashlib.sha256(identity.encode("utf-8")).hexdigest(), _candidate_group_sort_key(
-            group
-        )
-
-    shuffled = sorted(ordered, key=shuffled_key)
-    return [shuffled[start : start + batch_size] for start in range(0, len(shuffled), batch_size)]
-
-
-def _candidate_consolidation_batches(
-    groups: Sequence[Mapping[str, Any]],
-    *,
-    batch_size: int,
-    round_number: int,
-    alphabetical_rounds: int,
-    seed: int,
-) -> tuple[str, int | None, int | None, list[list[dict[str, Any]]]]:
-    """Use shifted alphabetical partitions, then seeded shuffled partitions."""
-
-    if alphabetical_rounds < 0:
-        raise ValueError("candidate consolidation alphabetical_rounds must be nonnegative")
-    if round_number <= alphabetical_rounds:
-        boundary_offset, batches = _alphabetical_candidate_batches(
-            groups,
-            batch_size=batch_size,
-            round_number=round_number,
-        )
-        return "alphabetical_shift", boundary_offset, None, batches
-    shuffle_round = round_number - alphabetical_rounds
-    return (
-        "seeded_shuffle",
-        None,
-        shuffle_round,
-        _seeded_shuffle_candidate_batches(
-            groups,
-            batch_size=batch_size,
-            seed=seed,
-            shuffle_round=shuffle_round,
-        ),
-    )
-
-
 def _coalesce_exact_candidate_group_names(
     groups: Sequence[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], int]:
@@ -5403,18 +3939,6 @@ def _candidate_pool_feature_view(group: Mapping[str, Any]) -> dict[str, Any]:
         "name": str(group.get("name") or ""),
         "descriptions": descriptions,
     }
-
-
-def _derive_roles(evidence_axes: Sequence[str]) -> list[str]:
-    axes = set(_canonical_evidence_axes(evidence_axes))
-    roles: list[str] = []
-    if {"treatment", "outcome"} <= axes:
-        roles.append("confounder")
-    elif "outcome" in axes:
-        roles.append("prognostic")
-    if axes.intersection({"residual_effect", "matched_pair"}):
-        roles.append("effect_modifier")
-    return roles
 
 
 def _global_candidate_pool_prompt(*, groups: Sequence[Mapping[str, Any]], configured_feature_names: Sequence[str] = (), batch_ordering: str = "alphabetical_shift") -> list[dict[str, str]]:
@@ -5690,17 +4214,6 @@ def _readable_supporting_text(
     return list(dict.fromkeys(texts))
 
 
-def _colbert_supporting_text(packet: Mapping[str, Any]) -> str:
-    """Return the lossless router document or the packet's readable excerpts."""
-
-    content = packet.get("content")
-    if isinstance(content, Mapping):
-        hierarchy_document = str(content.get("colbert_document") or "").strip()
-        if hierarchy_document:
-            return hierarchy_document
-    return "\n\n".join(_readable_supporting_text([packet]))
-
-
 def _natural_language_feature_name(value: Any) -> str:
     """Render an identifier as a short natural-language embedding query."""
 
@@ -5789,770 +4302,12 @@ def _candidate_registry_text(candidate: Mapping[str, Any]) -> str:
     return ". ".join([name, *descriptions[:4]])
 
 
-def _normalized_embedding_matrix(
-    texts: Sequence[str],
-    *,
-    model_name: str,
-    device: str,
-    embedding_function: Callable[[Sequence[str], str, str], np.ndarray] | None,
-) -> np.ndarray:
-    encode = embedding_function or _encode_candidate_selection_texts
-    matrix = np.asarray(encode(texts, model_name, device), dtype=np.float32)
-    if matrix.ndim == 1:
-        matrix = matrix.reshape(1, -1)
-    if matrix.ndim != 2 or matrix.shape[0] != len(texts) or matrix.shape[1] < 1:
-        raise RuntimeError(
-            "candidate registry embedding function returned unexpected shape "
-            f"{matrix.shape} for {len(texts)} texts"
-        )
-    if not np.isfinite(matrix).all():
-        raise RuntimeError("candidate registry embedding function returned non-finite values")
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    if np.any(norms <= 0.0):
-        raise RuntimeError("candidate registry embedding function returned a zero vector")
-    return matrix / norms
-
-
-def _build_candidate_registry(
-    *,
-    candidates: Sequence[Mapping[str, Any]],
-    embedding_model: str,
-    embedding_device: str,
-    similarity_threshold: float,
-    embedding_function: Callable[[Sequence[str], str, str], np.ndarray] | None = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Collapse exact names, then conservatively merge anchored semantic aliases."""
-
-    if (
-        isinstance(similarity_threshold, bool)
-        or not isinstance(similarity_threshold, (int, float))
-        or not math.isfinite(float(similarity_threshold))
-        or not 0.0 < float(similarity_threshold) <= 1.0
-    ):
-        raise ValueError("candidate registry similarity_threshold must be between 0 and 1")
-    candidate_ids = [str(candidate.get("candidate_id") or "") for candidate in candidates]
-    if any(not candidate_id for candidate_id in candidate_ids):
-        raise ValueError("candidate registry inputs must have candidate_id values")
-    if len(candidate_ids) != len(set(candidate_ids)):
-        raise ValueError("candidate registry received duplicate candidate IDs")
-    exact_groups = _materialize_exact_name_groups(candidates)
-    texts = [_candidate_registry_text(group) for group in exact_groups]
-    anchors = [
-        _concept_identity_tokens(
-            group.get("name"),
-            group.get("description"),
-            *(member.get("description") for member in group.get("member_measurements") or []),
-        )
-        for group in exact_groups
-    ]
-    anchor_counts = Counter(anchor for values in anchors for anchor in values)
-    max_anchor_frequency = max(
-        8,
-        min(128, int(math.ceil(math.sqrt(max(1, len(exact_groups)))))),
-    )
-    informative_anchors = {
-        anchor
-        for anchor, count in anchor_counts.items()
-        if 1 < count <= max_anchor_frequency
-    }
-    routing_anchors = [values.intersection(informative_anchors) for values in anchors]
-    comparison_indexes = {
-        index
-        for index, values in enumerate(routing_anchors)
-        if values
-    }
-    embedding_invoked = len(comparison_indexes) > 1
-    matrix = (
-        _normalized_embedding_matrix(
-            texts,
-            model_name=str(embedding_model).strip(),
-            device=str(embedding_device).strip(),
-            embedding_function=embedding_function,
-        )
-        if embedding_invoked
-        else None
-    )
-
-    clusters: list[dict[str, Any]] = []
-    cluster_ids_by_anchor: dict[str, set[int]] = defaultdict(set)
-    assignments: list[dict[str, Any]] = []
-    for index, group in enumerate(exact_groups):
-        eligible_cluster_ids = sorted(
-            {
-                cluster_id
-                for anchor in routing_anchors[index]
-                for cluster_id in cluster_ids_by_anchor.get(anchor, set())
-            }
-        )
-        best_cluster_id: int | None = None
-        best_similarity: float | None = None
-        if matrix is not None and index in comparison_indexes:
-            for cluster_id in eligible_cluster_ids:
-                similarity = float(np.dot(matrix[index], clusters[cluster_id]["centroid"]))
-                if similarity < float(similarity_threshold):
-                    continue
-                if best_similarity is None or similarity > best_similarity:
-                    best_cluster_id = cluster_id
-                    best_similarity = similarity
-        if best_cluster_id is None:
-            cluster_id = len(clusters)
-            clusters.append(
-                {
-                    "members": [group],
-                    "member_indexes": [index],
-                    "anchors": set(routing_anchors[index]),
-                    "centroid": matrix[index].copy() if matrix is not None else None,
-                }
-            )
-            for anchor in routing_anchors[index]:
-                cluster_ids_by_anchor[anchor].add(cluster_id)
-            assignments.append(
-                {
-                    "exact_group_id": str(group["candidate_id"]),
-                    "registry_cluster": cluster_id + 1,
-                    "action": "new_cluster",
-                    "cosine_similarity": None,
-                }
-            )
-            continue
-        cluster = clusters[best_cluster_id]
-        cluster["members"].append(group)
-        cluster["member_indexes"].append(index)
-        cluster["anchors"].update(routing_anchors[index])
-        centroid = matrix[cluster["member_indexes"]].mean(axis=0)
-        centroid_norm = float(np.linalg.norm(centroid))
-        cluster["centroid"] = centroid / centroid_norm
-        for anchor in routing_anchors[index]:
-            cluster_ids_by_anchor[anchor].add(best_cluster_id)
-        assignments.append(
-            {
-                "exact_group_id": str(group["candidate_id"]),
-                "registry_cluster": best_cluster_id + 1,
-                "action": "semantic_merge",
-                "cosine_similarity": best_similarity,
-            }
-        )
-
-    registry: list[dict[str, Any]] = []
-    cluster_rows: list[dict[str, Any]] = []
-    for cluster_index, cluster in enumerate(clusters, start=1):
-        members = list(cluster["members"])
-        canonical = _canonical_cluster_member(members)
-        canonical_name = _snake_case_name(
-            canonical.get("name"),
-            fallback=f"measurement_{cluster_index:03d}",
-        )
-        registry_group = _materialize_candidate_group(
-            candidate_id=f"candidate_registry_{cluster_index:04d}",
-            members=members,
-            canonical_name=canonical_name,
-            canonical_description=_short_text(
-                canonical.get("description") or canonical_name,
-                max_chars=2_000,
-            ),
-        )
-        registry.append(registry_group)
-        cluster_rows.append(
-            {
-                "candidate_id": registry_group["candidate_id"],
-                "canonical_name": registry_group["name"],
-                "exact_group_names": [str(member["name"]) for member in members],
-                "origin_candidate_ids": list(registry_group["origin_candidate_ids"]),
-                "supporting_packet_ids": list(registry_group["supporting_packet_ids"]),
-            }
-        )
-    return registry, {
-        "raw_candidates": len(candidates),
-        "exact_name_groups": len(exact_groups),
-        "registry_candidates": len(registry),
-        "exact_name_merges": len(candidates) - len(exact_groups),
-        "semantic_merges": len(exact_groups) - len(registry),
-        "semantic_embedding_invoked": embedding_invoked,
-        "semantic_embedding_model": str(embedding_model).strip(),
-        "semantic_embedding_device": str(embedding_device).strip(),
-        "semantic_similarity_threshold": float(similarity_threshold),
-        "semantic_comparison_candidates": len(comparison_indexes),
-        "semantic_anchor_max_frequency": max_anchor_frequency,
-        "semantic_ignored_high_frequency_anchors": sorted(
-            anchor
-            for anchor, count in anchor_counts.items()
-            if count > max_anchor_frequency
-        ),
-        "assignments": assignments,
-        "clusters": cluster_rows,
-    }
-
-
 def _packet_support_architectures(packet: Mapping[str, Any]) -> list[str]:
     content = packet.get("content")
     architectures = content.get("source_architectures") if isinstance(content, Mapping) else None
     if not architectures and packet.get("architecture"):
         architectures = [packet["architecture"]]
     return list(dict.fromkeys(_string_values(architectures)))
-
-
-def _packet_support_inner_folds(packet: Mapping[str, Any]) -> list[int]:
-    content = packet.get("content")
-    support = content.get("support") if isinstance(content, Mapping) else None
-    raw_folds = support.get("inner_folds") if isinstance(support, Mapping) else None
-    folds: list[int] = []
-    for value in raw_folds or []:
-        try:
-            fold = int(value)
-        except (TypeError, ValueError):
-            continue
-        if fold not in folds:
-            folds.append(fold)
-    return folds
-
-
-def _dense_candidate_packet_scores(
-    queries: Sequence[str],
-    documents: Sequence[str],
-    *,
-    embedding_model: str,
-    embedding_device: str,
-    embedding_function: Callable[[Sequence[str], str, str], np.ndarray] | None,
-) -> np.ndarray:
-    texts = list(dict.fromkeys([*queries, *documents]))
-    matrix = _normalized_embedding_matrix(
-        texts,
-        model_name=embedding_model,
-        device=embedding_device,
-        embedding_function=embedding_function,
-    )
-    index = {text: position for position, text in enumerate(texts)}
-    return np.asarray(
-        [
-            float(np.dot(matrix[index[query]], matrix[index[document]]))
-            for query, document in zip(queries, documents)
-        ],
-        dtype=np.float32,
-    )
-
-
-def _candidate_selection_sort_key(row: Mapping[str, Any]) -> tuple[Any, ...]:
-    return (
-        -float(row["aggregate_support_score"]),
-        -float(row["top_evidence_mean_score"]),
-        -float(row["best_evidence_score"]),
-        -float(row["architecture_coverage"]),
-        -float(row["inner_fold_coverage"]),
-        -int(row["supporting_packet_count"]),
-        str(row["feature_name"]).casefold(),
-        str(row["candidate_id"]),
-    )
-
-
-def _select_candidates_from_registry(
-    *,
-    candidates: Sequence[Mapping[str, Any]],
-    packet_by_id: Mapping[str, Mapping[str, Any]],
-    hierarchy_packet_by_id: Mapping[str, Mapping[str, Any]] | None = None,
-    top_n_per_axis: int,
-    max_candidates: int,
-    scoring_method: str,
-    late_interaction_model: str,
-    late_interaction_device: str,
-    dense_embedding_model: str,
-    dense_embedding_device: str,
-    top_evidence_packets: int,
-    document_chunk_overlap_tokens: int,
-    hierarchy_top_communities: int = DEFAULT_CANDIDATE_SELECTION_HIERARCHY_TOP_COMMUNITIES,
-    embedding_function: Callable[[Sequence[str], str, str], np.ndarray] | None = None,
-    late_interaction_scoring_function: (
-        Callable[[Sequence[str], Sequence[str], str, str], np.ndarray] | None
-    ) = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Rank canonical candidates by evidence support and enforce fold-level caps."""
-
-    if (
-        top_n_per_axis < 1
-        or max_candidates < 1
-        or top_evidence_packets < 1
-        or hierarchy_top_communities < 1
-    ):
-        raise ValueError("candidate selection limits must be positive")
-    if scoring_method not in {"late_interaction", "dense_cosine"}:
-        raise ValueError(f"unsupported candidate selection scoring method {scoring_method!r}")
-    if not candidates:
-        scoring_model = (
-            late_interaction_model
-            if scoring_method == "late_interaction"
-            else dense_embedding_model
-        )
-        scoring_device = (
-            late_interaction_device
-            if scoring_method == "late_interaction"
-            else dense_embedding_device
-        )
-        return [], {
-            "scoring_method": scoring_method,
-            "scoring_model": scoring_model,
-            "scoring_device": scoring_device,
-            "top_n_per_evidence_axis": top_n_per_axis,
-            "max_candidates_per_fold": max_candidates,
-            "top_evidence_packets_per_candidate": top_evidence_packets,
-            "hierarchy_top_communities_per_candidate": hierarchy_top_communities,
-            "hierarchy_packets": len(hierarchy_packet_by_id or {}),
-            "document_chunk_overlap_tokens": document_chunk_overlap_tokens,
-            "registry_candidates": 0,
-            "candidate_packet_associations_scored": 0,
-            "candidate_hierarchy_associations_scored": 0,
-            "shortlisted_candidates_before_fold_cap": 0,
-            "hard_cap_applied": False,
-            "retained_candidates": 0,
-            "dropped_registry_candidate_ids": [],
-            "dropped_origin_candidate_ids": [],
-            "score_aggregation": {
-                "top_evidence_mean_count": top_evidence_packets,
-                "relevance_weight": 0.75,
-                "architecture_coverage_weight": 0.125,
-                "inner_fold_coverage_weight": 0.125,
-                "relevance_normalization": "clip((mean_maxsim + 1) / 2, 0, 1)",
-            },
-            "axis_rankings": {},
-            "candidate_rankings": [],
-        }
-    ordered_packets = {str(packet_id): packet for packet_id, packet in packet_by_id.items()}
-    ordered_hierarchy_packets = {
-        str(packet_id): packet
-        for packet_id, packet in (hierarchy_packet_by_id or {}).items()
-    }
-    candidate_by_id: dict[str, Mapping[str, Any]] = {}
-    support_ids_by_candidate: dict[str, list[str]] = {}
-    query_by_candidate: dict[str, str] = {}
-    for position, candidate in enumerate(candidates, start=1):
-        candidate_id = str(candidate.get("candidate_id") or "").strip()
-        if not candidate_id or candidate_id in candidate_by_id:
-            raise ValueError(
-                "candidate selection requires unique candidate IDs; invalid value at "
-                f"position {position}: {candidate_id!r}"
-            )
-        support_ids = list(dict.fromkeys(_string_values(candidate.get("supporting_packet_ids"))))
-        if not support_ids:
-            raise ValueError(f"candidate selection input {candidate_id!r} has no supporting packet")
-        unknown = sorted(set(support_ids) - set(ordered_packets))
-        if unknown:
-            raise ValueError(
-                f"candidate selection input {candidate_id!r} cites unknown packets: {unknown[:8]}"
-            )
-        query = _natural_language_feature_name(candidate.get("name"))
-        if not query:
-            raise ValueError(f"candidate selection input {candidate_id!r} has no readable name")
-        candidate_by_id[candidate_id] = candidate
-        support_ids_by_candidate[candidate_id] = support_ids
-        query_by_candidate[candidate_id] = query
-
-    scoring_model = (
-        late_interaction_model
-        if scoring_method == "late_interaction"
-        else dense_embedding_model
-    )
-    scoring_device = (
-        late_interaction_device
-        if scoring_method == "late_interaction"
-        else dense_embedding_device
-    )
-
-    def score_associations(
-        association_keys: Sequence[tuple[str, str]],
-        *,
-        packets_for_scoring: Mapping[str, Mapping[str, Any]],
-    ) -> dict[tuple[str, str], float]:
-        if not association_keys:
-            return {}
-        text_by_packet_id: dict[str, str] = {}
-        queries: list[str] = []
-        documents: list[str] = []
-        for candidate_id, packet_id in association_keys:
-            if packet_id not in text_by_packet_id:
-                text = _colbert_supporting_text(packets_for_scoring[packet_id])
-                if not text:
-                    raise ValueError(
-                        f"candidate selection packet {packet_id!r} has no readable "
-                        "evidence text"
-                    )
-                text_by_packet_id[packet_id] = text
-            queries.append(query_by_candidate[candidate_id])
-            documents.append(text_by_packet_id[packet_id])
-        if scoring_method == "late_interaction":
-            if late_interaction_scoring_function is None:
-                from ..models.late_interaction import score_late_interaction_pairs
-
-                raw_scores = score_late_interaction_pairs(
-                    queries,
-                    documents,
-                    late_interaction_model,
-                    late_interaction_device,
-                    document_chunk_overlap_tokens=document_chunk_overlap_tokens,
-                )
-            else:
-                raw_scores = late_interaction_scoring_function(
-                    queries,
-                    documents,
-                    late_interaction_model,
-                    late_interaction_device,
-                )
-        else:
-            raw_scores = _dense_candidate_packet_scores(
-                queries,
-                documents,
-                embedding_model=dense_embedding_model,
-                embedding_device=dense_embedding_device,
-                embedding_function=embedding_function,
-            )
-        scores = np.asarray(raw_scores, dtype=np.float32)
-        if scores.ndim != 1 or scores.shape[0] != len(association_keys):
-            raise RuntimeError(
-                "candidate support scorer returned unexpected shape "
-                f"{scores.shape} for {len(association_keys)} associations"
-            )
-        if not np.isfinite(scores).all():
-            raise RuntimeError("candidate support scorer returned non-finite scores")
-        return {
-            key: float(score)
-            for key, score in zip(association_keys, scores.tolist())
-        }
-
-    hierarchy_association_keys = [
-        (candidate_id, packet_id)
-        for candidate_id in candidate_by_id
-        for packet_id in sorted(ordered_hierarchy_packets)
-    ]
-    hierarchy_score_by_association = score_associations(
-        hierarchy_association_keys,
-        packets_for_scoring=ordered_hierarchy_packets,
-    )
-    top_hierarchy_ids_by_candidate: dict[str, list[str]] = {}
-    retrieval_ids_by_candidate: dict[str, list[str]] = {}
-    for candidate_id in candidate_by_id:
-        ranked_hierarchy_ids = sorted(
-            ordered_hierarchy_packets,
-            key=lambda packet_id: (
-                -hierarchy_score_by_association[(candidate_id, packet_id)],
-                packet_id,
-            ),
-        )
-        top_hierarchy_ids = ranked_hierarchy_ids[
-            : min(hierarchy_top_communities, len(ranked_hierarchy_ids))
-        ]
-        top_hierarchy_ids_by_candidate[candidate_id] = top_hierarchy_ids
-        routed_ids: list[str] = list(support_ids_by_candidate[candidate_id])
-        for hierarchy_id in top_hierarchy_ids:
-            content = ordered_hierarchy_packets[hierarchy_id].get("content")
-            source_packet_ids = (
-                _string_values(content.get("source_packet_ids"))
-                if isinstance(content, Mapping)
-                else []
-            )
-            routed_ids.extend(
-                packet_id
-                for packet_id in source_packet_ids
-                if packet_id in ordered_packets
-            )
-        retrieval_ids_by_candidate[candidate_id] = list(dict.fromkeys(routed_ids))
-
-    association_keys = [
-        (candidate_id, packet_id)
-        for candidate_id in candidate_by_id
-        for packet_id in retrieval_ids_by_candidate[candidate_id]
-    ]
-    score_by_association = score_associations(
-        association_keys,
-        packets_for_scoring=ordered_packets,
-    )
-
-    fold_architectures = {
-        architecture
-        for packet in ordered_packets.values()
-        for architecture in _packet_support_architectures(packet)
-    }
-    fold_inner_folds = {
-        fold
-        for packet in ordered_packets.values()
-        for fold in _packet_support_inner_folds(packet)
-    }
-    rows: list[dict[str, Any]] = []
-    for candidate_id, candidate in candidate_by_id.items():
-        support_ids = support_ids_by_candidate[candidate_id]
-        retrieval_ids = retrieval_ids_by_candidate[candidate_id]
-        ranked_packets = sorted(
-            retrieval_ids,
-            key=lambda packet_id: (
-                -score_by_association[(candidate_id, packet_id)],
-                packet_id,
-            ),
-        )
-        top_packet_ids = ranked_packets[: min(top_evidence_packets, len(ranked_packets))]
-        top_scores = [
-            score_by_association[(candidate_id, packet_id)] for packet_id in top_packet_ids
-        ]
-        top_mean = float(np.mean(top_scores))
-        best_score = float(top_scores[0])
-        candidate_architectures = {
-            architecture
-            for packet_id in support_ids
-            for architecture in _packet_support_architectures(ordered_packets[packet_id])
-        }
-        candidate_inner_folds = {
-            fold
-            for packet_id in support_ids
-            for fold in _packet_support_inner_folds(ordered_packets[packet_id])
-        }
-        architecture_coverage = (
-            len(candidate_architectures) / len(fold_architectures)
-            if fold_architectures
-            else 1.0
-        )
-        inner_fold_coverage = (
-            len(candidate_inner_folds) / len(fold_inner_folds)
-            if fold_inner_folds
-            else 1.0
-        )
-        normalized_relevance = min(1.0, max(0.0, (top_mean + 1.0) / 2.0))
-        aggregate = (
-            0.75 * normalized_relevance
-            + 0.125 * architecture_coverage
-            + 0.125 * inner_fold_coverage
-        )
-        axes = _canonical_evidence_axes(candidate.get("evidence_axes")) or ["unclear"]
-        rows.append(
-            {
-                "candidate_id": candidate_id,
-                "feature_name": str(candidate.get("name") or ""),
-                "natural_language_query": query_by_candidate[candidate_id],
-                "evidence_axes": axes,
-                "supporting_packet_count": len(support_ids),
-                "retrieved_packet_count": len(retrieval_ids),
-                "supporting_architectures": sorted(candidate_architectures),
-                "supporting_inner_folds": sorted(candidate_inner_folds),
-                "architecture_coverage": float(architecture_coverage),
-                "inner_fold_coverage": float(inner_fold_coverage),
-                "best_evidence_score": best_score,
-                "top_evidence_mean_score": top_mean,
-                "aggregate_support_score": float(aggregate),
-                "ranked_packet_scores": [
-                    {
-                        "packet_id": packet_id,
-                        "score": score_by_association[(candidate_id, packet_id)],
-                        "directly_cited": packet_id in support_ids,
-                        "ontology_evidence": packet_id in top_packet_ids,
-                    }
-                    for packet_id in ranked_packets
-                ],
-                "ontology_packet_ids": top_packet_ids,
-                "ranked_hierarchy_packet_scores": [
-                    {
-                        "packet_id": packet_id,
-                        "score": hierarchy_score_by_association[
-                            (candidate_id, packet_id)
-                        ],
-                        "selected_for_descent": packet_id
-                        in top_hierarchy_ids_by_candidate[candidate_id],
-                    }
-                    for packet_id in sorted(
-                        ordered_hierarchy_packets,
-                        key=lambda packet_id: (
-                            -hierarchy_score_by_association[
-                                (candidate_id, packet_id)
-                            ],
-                            packet_id,
-                        ),
-                    )
-                ],
-            }
-        )
-
-    axis_order = [
-        "treatment",
-        "outcome",
-        "residual_effect",
-        "matched_pair",
-        "semantic",
-        "unclear",
-    ]
-    axis_ranked_rows: dict[str, list[dict[str, Any]]] = {}
-    axis_rank_by_candidate: dict[str, dict[str, int]] = defaultdict(dict)
-    for axis in axis_order:
-        ranked = sorted(
-            [row for row in rows if axis in row["evidence_axes"]],
-            key=_candidate_selection_sort_key,
-        )
-        axis_ranked_rows[axis] = ranked
-        for rank, row in enumerate(ranked, start=1):
-            axis_rank_by_candidate[row["candidate_id"]][axis] = rank
-
-    # Round-robin over the axis top-N lists so a restrictive overall cap does
-    # not fill entirely from the first or largest stratum.
-    selected_ids: list[str] = []
-    selected_set: set[str] = set()
-    for rank_index in range(top_n_per_axis):
-        for axis in axis_order:
-            ranked = axis_ranked_rows[axis]
-            if rank_index >= len(ranked):
-                continue
-            candidate_id = str(ranked[rank_index]["candidate_id"])
-            if candidate_id in selected_set:
-                continue
-            selected_ids.append(candidate_id)
-            selected_set.add(candidate_id)
-            if len(selected_ids) >= max_candidates:
-                break
-        if len(selected_ids) >= max_candidates:
-            break
-
-    row_by_id = {str(row["candidate_id"]): row for row in rows}
-    retained: list[dict[str, Any]] = []
-    for candidate_id in selected_ids:
-        candidate = dict(candidate_by_id[candidate_id])
-        row = row_by_id[candidate_id]
-        retained.append(
-            {
-                **candidate,
-                "ontology_packet_ids": list(row["ontology_packet_ids"]),
-                "candidate_selection": {
-                    "schema_version": CANDIDATE_SELECTION_SCHEMA_VERSION,
-                    "scoring_method": scoring_method,
-                    "scoring_model": scoring_model,
-                    "natural_language_query": row["natural_language_query"],
-                    "aggregate_support_score": row["aggregate_support_score"],
-                    "best_evidence_score": row["best_evidence_score"],
-                    "top_evidence_mean_score": row["top_evidence_mean_score"],
-                    "architecture_coverage": row["architecture_coverage"],
-                    "inner_fold_coverage": row["inner_fold_coverage"],
-                    "axis_ranks": axis_rank_by_candidate[candidate_id],
-                    "score_by_packet": {
-                        item["packet_id"]: item["score"]
-                        for item in row["ranked_packet_scores"]
-                    },
-                    "hierarchy_packet_ids": list(
-                        top_hierarchy_ids_by_candidate[candidate_id]
-                    ),
-                    "score_by_hierarchy_packet": {
-                        item["packet_id"]: item["score"]
-                        for item in row["ranked_hierarchy_packet_scores"]
-                    },
-                },
-            }
-        )
-
-    shortlisted_without_hard_cap = {
-        str(row["candidate_id"])
-        for axis in axis_order
-        for row in axis_ranked_rows[axis][:top_n_per_axis]
-    }
-    for row in rows:
-        candidate_id = str(row["candidate_id"])
-        row["axis_ranks"] = axis_rank_by_candidate[candidate_id]
-        row["selected"] = candidate_id in selected_set
-        row["selection_reason"] = (
-            "selected_axis_top_n"
-            if candidate_id in selected_set
-            else (
-                "removed_by_overall_fold_cap"
-                if candidate_id in shortlisted_without_hard_cap
-                else "outside_axis_top_n"
-            )
-        )
-    dropped_origin_ids = list(
-        dict.fromkeys(
-            origin
-            for candidate_id, candidate in candidate_by_id.items()
-            if candidate_id not in selected_set
-            for origin in (
-                _string_values(candidate.get("origin_candidate_ids")) or [candidate_id]
-            )
-        )
-    )
-    audit = {
-        "scoring_method": scoring_method,
-        "scoring_model": scoring_model,
-        "scoring_device": scoring_device,
-        "top_n_per_evidence_axis": top_n_per_axis,
-        "max_candidates_per_fold": max_candidates,
-        "top_evidence_packets_per_candidate": top_evidence_packets,
-        "hierarchy_top_communities_per_candidate": hierarchy_top_communities,
-        "hierarchy_packets": len(ordered_hierarchy_packets),
-        "document_chunk_overlap_tokens": document_chunk_overlap_tokens,
-        "registry_candidates": len(candidates),
-        "candidate_packet_associations_scored": len(association_keys),
-        "candidate_hierarchy_associations_scored": len(
-            hierarchy_association_keys
-        ),
-        "shortlisted_candidates_before_fold_cap": len(shortlisted_without_hard_cap),
-        "hard_cap_applied": len(shortlisted_without_hard_cap) > max_candidates,
-        "retained_candidates": len(retained),
-        "dropped_registry_candidate_ids": [
-            candidate_id for candidate_id in candidate_by_id if candidate_id not in selected_set
-        ],
-        "dropped_origin_candidate_ids": dropped_origin_ids,
-        "score_aggregation": {
-            "top_evidence_mean_count": top_evidence_packets,
-            "relevance_weight": 0.75,
-            "architecture_coverage_weight": 0.125,
-            "inner_fold_coverage_weight": 0.125,
-            "relevance_normalization": "clip((mean_maxsim + 1) / 2, 0, 1)",
-        },
-        "axis_rankings": {
-            axis: [str(row["candidate_id"]) for row in ranked]
-            for axis, ranked in axis_ranked_rows.items()
-        },
-        "candidate_rankings": sorted(rows, key=_candidate_selection_sort_key),
-    }
-    return retained, audit
-
-
-def _build_and_select_candidate_registry(
-    *,
-    candidates: Sequence[Mapping[str, Any]],
-    packet_by_id: Mapping[str, Mapping[str, Any]],
-    hierarchy_packet_by_id: Mapping[str, Mapping[str, Any]] | None = None,
-    top_n_per_axis: int,
-    max_candidates: int,
-    registry_embedding_model: str,
-    registry_embedding_device: str,
-    registry_similarity_threshold: float,
-    scoring_method: str,
-    late_interaction_model: str,
-    late_interaction_device: str,
-    top_evidence_packets: int,
-    document_chunk_overlap_tokens: int,
-    hierarchy_top_communities: int = DEFAULT_CANDIDATE_SELECTION_HIERARCHY_TOP_COMMUNITIES,
-    embedding_function: Callable[[Sequence[str], str, str], np.ndarray] | None = None,
-    late_interaction_scoring_function: (
-        Callable[[Sequence[str], Sequence[str], str, str], np.ndarray] | None
-    ) = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    registry, registry_audit = _build_candidate_registry(
-        candidates=candidates,
-        embedding_model=registry_embedding_model,
-        embedding_device=registry_embedding_device,
-        similarity_threshold=registry_similarity_threshold,
-        embedding_function=embedding_function,
-    )
-    retained, selection_audit = _select_candidates_from_registry(
-        candidates=registry,
-        packet_by_id=packet_by_id,
-        hierarchy_packet_by_id=hierarchy_packet_by_id,
-        top_n_per_axis=top_n_per_axis,
-        max_candidates=max_candidates,
-        scoring_method=scoring_method,
-        late_interaction_model=late_interaction_model,
-        late_interaction_device=late_interaction_device,
-        dense_embedding_model=registry_embedding_model,
-        dense_embedding_device=registry_embedding_device,
-        top_evidence_packets=top_evidence_packets,
-        document_chunk_overlap_tokens=document_chunk_overlap_tokens,
-        hierarchy_top_communities=hierarchy_top_communities,
-        embedding_function=embedding_function,
-        late_interaction_scoring_function=late_interaction_scoring_function,
-    )
-    return retained, {
-        "schema_version": CANDIDATE_SELECTION_SCHEMA_VERSION,
-        "registry": registry_audit,
-        "selection": selection_audit,
-    }
 
 
 def _pack_operationalization_supporting_evidence(
@@ -6944,8 +4699,6 @@ class PlainHandoffStage2:
         config = _resolve_stage2_model(config)
         config = _resolve_extraction_llm_model(config)
         config.validate()
-        if config.extraction_note_search.enabled and not config.runtime_disable_extraction:
-            note_search_preflight(config.extraction_note_search)
         endpoints = config.runtime_endpoints or (config.endpoint,)
         primary_identity = _endpoint_model_identity(
             config,
@@ -6992,7 +4745,6 @@ class PlainHandoffStage2:
                 ),
                 extraction_llm=None,
                 vllm=None,
-                vllm_co_resident_all_gpus=False,
                 runtime_endpoints=(),
                 runtime_model_family="",
                 runtime_sampling_model="",
@@ -7048,7 +4800,6 @@ class PlainHandoffStage2:
                 workers=extraction.workers,
                 extraction_llm=None,
                 vllm=None,
-                vllm_co_resident_all_gpus=False,
                 runtime_endpoints=(),
                 runtime_model_family="",
                 runtime_sampling_model="",
@@ -7114,13 +4865,6 @@ class PlainHandoffStage2:
         else:
             extraction_identity = None
             extraction_runtime_identity = None
-        self.decision_client = None
-        if config.decision_extraction.enabled and not isinstance(
-            extraction_completion, _DisabledExtractionCompletion
-        ):
-            from .stage2_decision_client import VLLMDecisionClient
-
-            self.decision_client = VLLMDecisionClient.from_config(config)
         self.model_identity = {
             "schema_version": MODEL_IDENTITY_SCHEMA_VERSION,
             "feature_definition_model": config.frozen_feature_definition_model or config.model,
@@ -7131,13 +4875,8 @@ class PlainHandoffStage2:
             "endpoint_urls_are_transport_only": True,
             "effective_request_policies": {
                 "interpretation": _stage2_request_policy(self.config, "interpretation"),
-                "extraction": (
-                    {"mode": "next_token_decision", "readout": "LAST/raw_A_to_P_logits",
-                     "temperature": config.decision_extraction.temperature,
-                     "max_prompt_tokens": config.decision_extraction.max_prompt_tokens,
-                     "generated_tokens": 0}
-                    if config.decision_extraction.enabled else
-                    _stage2_request_policy(self.extraction_request_config or self.config, "extraction")
+                "extraction": _stage2_request_policy(
+                    self.extraction_request_config or self.config, "extraction"
                 ),
             },
         }
@@ -7152,37 +4891,6 @@ class PlainHandoffStage2:
         if identity_path.is_file():
             previous_identity = json.loads(identity_path.read_text(encoding="utf-8"))
             previous_scientific = _scientific_model_identity(previous_identity)
-        else:
-            # Adopt pre-manifest Stage 2 output only when its persisted resolved
-            # model IDs agree. Endpoint URLs intentionally do not participate.
-            config_path = output_dir / "config.json"
-            if config_path.is_file():
-                previous_config = json.loads(config_path.read_text(encoding="utf-8"))
-                primary_model = str(previous_config.get("model") or "").strip()
-                raw_extraction = previous_config.get("extraction_llm")
-                extraction_model = (
-                    str(raw_extraction.get("model") or "").strip()
-                    if isinstance(raw_extraction, Mapping)
-                    else ""
-                )
-                previous_scientific = {
-                    "primary": (
-                        {
-                            "selected_model": primary_model,
-                            "model_family": _stage2_model_family(primary_model),
-                        }
-                        if primary_model
-                        else None
-                    ),
-                    "extraction": (
-                        {
-                            "selected_model": extraction_model,
-                            "model_family": _stage2_model_family(extraction_model),
-                        }
-                        if extraction_model
-                        else None
-                    ),
-                }
         if previous_scientific is not None:
             if not _model_role_identity_compatible(
                 previous_scientific,
@@ -7273,8 +4981,7 @@ class PlainHandoffStage2:
             handoff_path
         )
         signature = {
-            "compiler": self.config.evidence_compiler,
-            "compiler_version": EVIDENCE_COMPILER_VERSION,
+            "compiler": EVIDENCE_COMPILER_VERSION,
             "required_architectures": list(self.config.required_architectures),
             "included_architectures": (
                 None
@@ -7382,7 +5089,7 @@ class PlainHandoffStage2:
         )
         LOGGER.info(
             "compiled Stage 1 evidence compiler=%s packets=%s seconds=%.2f path=%s",
-            self.config.evidence_compiler,
+            EVIDENCE_COMPILER_VERSION,
             len(packets),
             elapsed,
             compilation_dir,
@@ -7407,32 +5114,21 @@ class PlainHandoffStage2:
             "packets": list(packets),
         }
         input_fingerprint = _value_fingerprint(input_value)
-        packet_ids = [str(packet["packet_id"]) for packet in packets]
-        packet_id_set = set(packet_ids)
-        if len(packet_ids) != len(packet_id_set):
-            raise ValueError("Stage 2 interpretation batch contains duplicate packet IDs")
+        packet = packets[0]
+        packet_id = str(packet["packet_id"])
         complete_path = output_dir / "complete.json"
         result_path = output_dir / "result.json"
         input_path = output_dir / "input.json"
         cached_files = _read_checkpoint_jsons([input_path, complete_path, result_path])
         if cached_files is not None:
             previous, completion_state, cached_result = cached_files
-            previous_fingerprint = previous.get("input_fingerprint")
-            if previous_fingerprint is None:
-                previous_fingerprint = _value_fingerprint(
-                    {
-                        "interpretation_schema": previous.get("interpretation_schema"),
-                        "architecture": previous.get("architecture"),
-                        "packets": previous.get("packets") or [],
-                    }
-                )
             if (
-                previous_fingerprint == input_fingerprint
+                previous.get("input_fingerprint") == input_fingerprint
                 and completion_state.get("input_fingerprint") == input_fingerprint
             ):
                 if _cached_interpretation_matches_packets(
                     cached_result,
-                    packet_ids=packet_id_set,
+                    packet_ids={packet_id},
                 ) and (
                     cached_result.get("rejected_packet_audit", {}).get("schema_version")
                     == INTERPRETATION_AUDIT_SCHEMA_VERSION
@@ -7442,10 +5138,7 @@ class PlainHandoffStage2:
             LOGGER.info("rerun stale or inconsistent Stage 2 interpretation: %s", output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         _write_json(input_path, {**input_value, "input_fingerprint": input_fingerprint})
-        packet_evidence_axes: dict[str, list[str]] = {}
-        for packet in packets:
-            packet_id = str(packet["packet_id"])
-            packet_evidence_axes[packet_id] = _packet_observable_axes(packet)
+        evidence_axes = _packet_observable_axes(packet)
         initial = _checkpointed_request_json(
             output_dir=output_dir / "initial",
             input_value={
@@ -7460,60 +5153,49 @@ class PlainHandoffStage2:
             completion=self.completion,
             validate=lambda value: _validate_discovery(
                 value,
-                packet_id=packet_ids[0],
-                evidence_axes=packet_evidence_axes[packet_ids[0]],
+                packet_id=packet_id,
+                evidence_axes=evidence_axes,
             ),
         )
 
-        packet_by_id = {str(packet["packet_id"]): packet for packet in packets}
-        rejected_packets = [
-            packet_by_id[packet_id]
-            for packet_id, disposition in initial["packet_dispositions"].items()
-            if disposition.get("status") == "reviewed_no_specific_concept"
-        ]
+        rejected = (
+            initial["packet_dispositions"][packet_id].get("status")
+            == "reviewed_no_specific_concept"
+        )
         audit_results: list[Mapping[str, Any]] = []
-        if rejected_packets:
-            audit_batches = _partition_rejected_packet_audit(
-                rejected_packets,
-                architecture=architecture,
-                max_prompt_chars=self.config.max_prompt_chars,
-            )
+        if rejected:
             LOGGER.info(
-                "Stage 2 rejected-packet audit architecture=%s rejected_packets=%s " "batches=%s",
+                "Stage 2 rejected-packet audit architecture=%s packet=%s",
                 architecture,
-                len(rejected_packets),
-                len(audit_batches),
+                packet_id,
             )
-            for batch_index, batch in enumerate(audit_batches, start=1):
-                batch_ids = [str(packet["packet_id"]) for packet in batch]
-                audit_results.append(
-                    _checkpointed_request_json(
-                        output_dir=(
-                            output_dir / "rejected_packet_audit" / f"batch_{batch_index:03d}"
-                        ),
-                        input_value={
-                            "phase": "rejected_packet_audit",
-                            "audit_schema": INTERPRETATION_AUDIT_SCHEMA_VERSION,
-                            "interpretation_schema": INTERPRETATION_SCHEMA_VERSION,
-                            "architecture": architecture,
-                            "packets": list(batch),
-                        },
-                        messages=_rejected_packet_audit_prompt(
-                            architecture=architecture,
-                            packets=batch,
-                        ),
-                        config=self.config,
-                        completion=self.completion,
-                        validate=lambda value, batch_ids=batch_ids: _validate_interpretation(
-                            value,
-                            packet_ids=batch_ids,
-                            packet_evidence_axes=packet_evidence_axes,
-                        ),
-                    )
+            # The audit prompt returns the same candidate contract as discovery.
+            audit_results.append(
+                _checkpointed_request_json(
+                    output_dir=output_dir / "rejected_packet_audit" / "batch_001",
+                    input_value={
+                        "phase": "rejected_packet_audit",
+                        "audit_schema": INTERPRETATION_AUDIT_SCHEMA_VERSION,
+                        "interpretation_schema": INTERPRETATION_SCHEMA_VERSION,
+                        "architecture": architecture,
+                        "packets": list(packets),
+                    },
+                    messages=_rejected_packet_audit_prompt(
+                        architecture=architecture,
+                        packets=packets,
+                    ),
+                    config=self.config,
+                    completion=self.completion,
+                    validate=lambda value: _validate_discovery(
+                        value,
+                        packet_id=packet_id,
+                        evidence_axes=evidence_axes,
+                    ),
                 )
+            )
 
         result = _merge_interpretation_audit(
-            packet_ids=packet_id_set,
+            packet_ids={packet_id},
             initial=initial,
             audits=audit_results,
         )
@@ -7524,7 +5206,7 @@ class PlainHandoffStage2:
                 "status": "complete",
                 "completed_at": _now(),
                 "input_fingerprint": input_fingerprint,
-                "initially_rejected_packets": len(rejected_packets),
+                "initially_rejected_packets": int(rejected),
                 "recovered_packets": len(result["rejected_packet_audit"]["recovered_packet_ids"]),
                 "audit_batches": len(audit_results),
             },
@@ -7678,22 +5360,19 @@ class PlainHandoffStage2:
             return current
         prompt_limit = int(self.config.consolidation_max_prompt_chars)
         request_config = replace(self.config, max_prompt_chars=prompt_limit)
-        no_change_partitions: set[tuple[tuple[str, ...], ...]] = set()
         round_summaries: list[dict[str, Any]] = []
         stopped_reason = "maximum_rounds_reached"
         policy = self.config.consolidation_policy
-        is_mixed = policy.strategy == "mixed"
-        pool_schema = MIXED_SCHEMA if is_mixed else GLOBAL_CANDIDATE_POOL_SCHEMA_VERSION
+        pool_schema = MIXED_SCHEMA
         embedding_cache = None
         process_input = {
             "phase": "iterative_candidate_pool_merge_only_consolidation",
             "alias_merge_prompt_version": clinical_prompts.ALIAS_MERGE_PROMPT_VERSION,
             "consolidation_schema": CONSOLIDATION_SCHEMA_VERSION,
             "global_candidate_pool_schema": pool_schema,
-            **({"consolidation_policy": policy.public_dict()} if is_mixed else {}),
+            "consolidation_policy": policy.public_dict(),
             "outer_fold": int(outer_fold),
             "consolidation_batch_size": int(self.config.consolidation_batch_size),
-            "consolidation_alphabetical_rounds": int(self.config.consolidation_alphabetical_rounds),
             "consolidation_max_rounds": int(self.config.consolidation_max_rounds),
             "consolidation_seed": int(seed),
             "features": [_candidate_pool_feature_view(group) for group in current],
@@ -7717,42 +5396,20 @@ class PlainHandoffStage2:
             if all(_configured_feature_definitions(group) for group in current):
                 stopped_reason = "only_explicit_features_remain"
                 break
-            if is_mixed:
-                matrix = None
-                if len(current) > self.config.consolidation_batch_size and policy.semantic_fraction:
-                    if embedding_cache is None:
-                        embedding_cache = CandidateEmbeddingCache(
-                            output_dir / "semantic_embeddings.npz" if output_dir is not None else None,
-                            policy, _encode_candidate_selection_texts,
-                        )
-                    LOGGER.info("Stage 2 semantic grouping fold=%s round=%s candidates=%s", outer_fold, round_number, len(current))
-                    matrix = embedding_cache.matrix([_candidate_registry_text(group) for group in current])
-                batches, batch_orderings = mixed_batches(
-                    current, batch_size=self.config.consolidation_batch_size,
-                    round_number=round_number, seed=int(seed) + 1_000_003 * int(outer_fold),
-                    policy=policy, embeddings=matrix,
-                )
-                ordering, boundary_offset, shuffle_round = "mixed", None, None
-            else:
-                ordering, boundary_offset, shuffle_round, batches = _candidate_consolidation_batches(
-                    current,
-                    batch_size=int(self.config.consolidation_batch_size),
-                    round_number=round_number,
-                    alphabetical_rounds=int(self.config.consolidation_alphabetical_rounds),
-                    seed=int(seed) + 1_000_003 * int(outer_fold),
-                )
-                batch_orderings = [ordering] * len(batches)
-            partition_signature = tuple(
-                tuple(str(group["name"]) for group in batch) for batch in batches
+            matrix = None
+            if len(current) > self.config.consolidation_batch_size and policy.semantic_fraction:
+                if embedding_cache is None:
+                    embedding_cache = CandidateEmbeddingCache(
+                        output_dir / "semantic_embeddings.npz" if output_dir is not None else None,
+                        policy, _encode_candidate_selection_texts,
+                    )
+                LOGGER.info("Stage 2 semantic grouping fold=%s round=%s candidates=%s", outer_fold, round_number, len(current))
+                matrix = embedding_cache.matrix([_candidate_registry_text(group) for group in current])
+            batches, batch_orderings = mixed_batches(
+                current, batch_size=self.config.consolidation_batch_size,
+                round_number=round_number, seed=int(seed) + 1_000_003 * int(outer_fold),
+                policy=policy, embeddings=matrix,
             )
-            if not is_mixed and partition_signature in no_change_partitions:
-                stopped_reason = "repeated_no_change_partition"
-                LOGGER.info(
-                    "Stage 2 iterative consolidation converged before round=%s; "
-                    "the unchanged candidate pool already used this partition",
-                    round_number,
-                )
-                break
 
             batch_responses: dict[int, dict[str, Any]] = {}
             jobs: list[dict[str, Any]] = []
@@ -7794,17 +5451,12 @@ class PlainHandoffStage2:
                         "input_value": {
                             "phase": "iterative_candidate_pool_batch_consolidation",
                             "global_candidate_pool_schema": pool_schema,
-                            **({"consolidation_policy": policy.public_dict()} if is_mixed else {}),
+                            "consolidation_policy": policy.public_dict(),
                             "outer_fold": int(outer_fold),
                             "round": round_number,
                             "batch": batch_number,
                             "ordering": batch_orderings[batch_number - 1],
-                            "boundary_offset": boundary_offset,
-                            "shuffle_round": shuffle_round,
                             "consolidation_batch_size": int(self.config.consolidation_batch_size),
-                            "consolidation_alphabetical_rounds": int(
-                                self.config.consolidation_alphabetical_rounds
-                            ),
                             "consolidation_max_rounds": int(self.config.consolidation_max_rounds),
                             "consolidation_seed": int(seed),
                             "features": feature_views,
@@ -7920,9 +5572,6 @@ class PlainHandoffStage2:
             changed = bool(merged_input_count or cross_batch_exact_merges)
             round_summary = {
                 "round": round_number,
-                "ordering": ordering,
-                "boundary_offset": boundary_offset,
-                "shuffle_round": shuffle_round,
                 "input_groups": len(current),
                 "batches": len(batches),
                 "model_requested_batches": len(jobs),
@@ -7934,8 +5583,8 @@ class PlainHandoffStage2:
                 "validation_fallback_batch_numbers": sorted(validation_fallbacks),
                 "output_groups": len(next_groups),
                 "changed": changed,
-                **({"grouping_batches": dict(Counter(batch_orderings)),
-                    "relative_reduction": (len(current) - len(next_groups)) / len(current)} if is_mixed else {}),
+                "grouping_batches": dict(Counter(batch_orderings)),
+                "relative_reduction": (len(current) - len(next_groups)) / len(current),
             }
             round_summaries.append(round_summary)
             if round_dir is not None:
@@ -7949,13 +5598,12 @@ class PlainHandoffStage2:
                     },
                 )
             LOGGER.info(
-                "Stage 2 iterative consolidation round=%s offset=%s input_groups=%s "
-                "ordering=%s batches=%s merge_directives=%s "
+                "Stage 2 iterative consolidation round=%s input_groups=%s "
+                "grouping=%s batches=%s merge_directives=%s "
                 "cross_batch_exact_merges=%s output_groups=%s changed=%s",
                 round_number,
-                boundary_offset,
                 len(current),
-                ordering,
+                dict(Counter(batch_orderings)),
                 len(batches),
                 directive_count,
                 cross_batch_exact_merges,
@@ -7963,7 +5611,7 @@ class PlainHandoffStage2:
                 changed,
             )
             current = next_groups
-            if is_mixed and diminishing_returns(round_summaries, policy):
+            if diminishing_returns(round_summaries, policy):
                 stopped_reason = "diminishing_returns"
                 LOGGER.info("Stage 2 mixed consolidation stopped fold=%s round=%s: last %s successful rounds each removed <%.3f%%",
                             outer_fold, round_number, policy.early_stop_patience, 100 * policy.early_stop_min_reduction)
@@ -7974,15 +5622,12 @@ class PlainHandoffStage2:
             if all(_configured_feature_definitions(group) for group in current):
                 stopped_reason = "only_explicit_features_remain"
                 break
-            if changed:
-                no_change_partitions.clear()
-            elif not validation_fallbacks:
-                no_change_partitions.add(partition_signature)
-                if len(batches) == 1:
-                    stopped_reason = "single_batch_no_change"
-                    break
-            elif len(batches) == 1:
-                stopped_reason = "single_batch_validation_fallback"
+            if not changed and len(batches) == 1:
+                stopped_reason = (
+                    "single_batch_validation_fallback"
+                    if validation_fallbacks
+                    else "single_batch_no_change"
+                )
                 break
 
         if output_dir is not None:
@@ -8000,7 +5645,7 @@ class PlainHandoffStage2:
                     "completed_at": _now(),
                     "input_fingerprint": process_fingerprint,
                     "global_candidate_pool_schema": pool_schema,
-                    **({"consolidation_policy": policy.public_dict()} if is_mixed else {}),
+                    "consolidation_policy": policy.public_dict(),
                     "rounds_executed": len(round_summaries),
                     "stopped_reason": stopped_reason,
                     "output_groups": len(current),
@@ -8071,12 +5716,11 @@ class PlainHandoffStage2:
             len(all_candidates),
             len(groups),
         )
-        is_mixed = self.config.consolidation_policy.strategy == "mixed"
         retained_groups = self._consolidate_candidate_pool(
             outer_fold=outer_fold,
             groups=groups,
             output_dir=(
-                output_dir / ("candidate_pool_consolidation_mixed" if is_mixed else "candidate_pool_consolidation")
+                output_dir / "candidate_pool_consolidation_mixed"
                 if output_dir is not None else None
             ),
             seed=seed,
@@ -8200,7 +5844,6 @@ class PlainHandoffStage2:
         outcome_type: str = "binary",
         inner_folds: int = 5,
         seed: int = 42,
-        decision_ontology_preparation_only: bool = False,
     ) -> Mapping[str, Any]:
         discovery_packets = list(packets)
         complete_path = output_dir / "complete.json"
@@ -8227,23 +5870,7 @@ class PlainHandoffStage2:
             if definitions_complete_path.is_file()
             else {}
         )
-        infrastructure_audits = (
-            infrastructure_failure_audit_paths(output_dir)
-            if complete_path.is_file()
-            else ()
-        )
-        if infrastructure_audits and complete_path.is_file():
-            LOGGER.warning(
-                "rerun completed Stage 2 outer fold=%s because %s legacy "
-                "infrastructure failure(s) were checkpointed as scientific missingness",
-                outer_fold,
-                len(infrastructure_audits),
-            )
-            os.replace(
-                complete_path,
-                complete_path.with_name("superseded_infrastructure_complete.json"),
-            )
-        elif complete_path.is_file() and dataset is not None:
+        if complete_path.is_file() and dataset is not None:
             # Do not trust the coarse outer marker as a science checkpoint.
             # The analysis layer reconstructs the current selection and
             # estimation fingerprints before reusing those artifacts.
@@ -8257,7 +5884,6 @@ class PlainHandoffStage2:
         by_architecture: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
         for packet in discovery_packets:
             by_architecture[str(packet["architecture"])].append(packet)
-        candidates: list[dict[str, Any]] | None = None
         if features_path.is_file():
             if definitions_state.get("evidence_input_fingerprint") == evidence_input_fingerprint:
                 final = json.loads(features_path.read_text(encoding="utf-8"))
@@ -8268,7 +5894,7 @@ class PlainHandoffStage2:
                     "configuration. Preserve the old output for audit and use a fresh "
                     "Stage 2 output directory."
                 )
-        elif candidates is None:
+        else:
             jobs: list[tuple[str, int, list[Mapping[str, Any]], Path]] = []
             for architecture_index, architecture in enumerate(sorted(by_architecture), start=1):
                 batches = _partition_interpretation_packets(
@@ -8317,7 +5943,7 @@ class PlainHandoffStage2:
             }
             if len(packet_by_id) != len(discovery_packets):
                 raise ValueError("Stage 2 feature discovery received duplicate packet IDs")
-            candidates = []
+            candidates: list[dict[str, Any]] = []
             for architecture, _batch_index, result in sorted(
                 results,
                 key=lambda item: (item[0], item[1]),
@@ -8365,7 +5991,6 @@ class PlainHandoffStage2:
                 len(candidates),
             )
 
-        if candidates is not None:
             if not candidates and not self.config.explicit_features:
                 final = {
                     "outer_fold": outer_fold,
@@ -8404,12 +6029,9 @@ class PlainHandoffStage2:
                         FEATURE_DEFINITION_INPUT_SCHEMA_VERSION
                     ),
                     "consolidation_schema": CONSOLIDATION_SCHEMA_VERSION,
-                    "global_candidate_pool_schema": GLOBAL_CANDIDATE_POOL_SCHEMA_VERSION,
+                    "global_candidate_pool_schema": MIXED_SCHEMA,
                     "candidate_selection": "none_exhaustive_discovery",
                     "consolidation_batch_size": int(self.config.consolidation_batch_size),
-                    "consolidation_alphabetical_rounds": int(
-                        self.config.consolidation_alphabetical_rounds
-                    ),
                     "consolidation_max_rounds": int(self.config.consolidation_max_rounds),
                     "consolidation_policy": self.config.consolidation_policy.public_dict(),
                     "extraction_ontology_feedback_schema": (
@@ -8427,28 +6049,6 @@ class PlainHandoffStage2:
                     "features": len(final["features"]),
                 },
             )
-
-        if decision_ontology_preparation_only:
-            from .plain_handoff_stage2_analysis import initial_feature_modeling_definitions
-            from .stage2_decision import claim_output_method
-            from .stage2_decision_ontology import prepare_ontologies
-
-            claim_output_method(output_dir, self.config.decision_extraction,
-                                self.config.colbert, fold_root=True)
-            definitions = initial_feature_modeling_definitions(final["features"])
-            round_dir = output_dir / "ontology_supervision" / "round_001"
-            _write_json(round_dir / "definitions_before_extraction.json", {"features": definitions})
-
-            def request_ontology_json(messages, validate, *, request_kind="interpretation"):
-                if request_kind != "interpretation":
-                    raise RuntimeError("Ontology preparation accepts only primary-model requests")
-                return _request_json(messages=messages, validate=validate,
-                    config=self.config, completion=self.completion, request_kind=request_kind)
-
-            prepare_ontologies(definitions,
-                output_dir=round_dir / "failure_ontology_refinement",
-                request_json=request_ontology_json, workers=self.config.workers)
-            return final
 
         if dataset is None:
             _write_json(
@@ -8498,8 +6098,6 @@ class PlainHandoffStage2:
             fallback_after_same_error: int = 3,
         ) -> dict[str, Any]:
             if request_kind == "extraction":
-                if self.config.decision_extraction.enabled:
-                    raise RuntimeError("Decision extraction must use the classifier client, not JSON generation")
                 if (
                     extraction_analysis_request_config is None
                     or self.extraction_completion is None
@@ -8609,7 +6207,6 @@ class PlainHandoffStage2:
             ),
             config=self.config,
             extraction_tokenizer=self.extraction_tokenizer,
-            decision_client=self.decision_client,
             stage1_packets=discovery_packets,
         )
         completed = {
@@ -8661,12 +6258,7 @@ class PlainHandoffStage2:
         outcome_type: str = "binary",
         inner_folds: int = 5,
         seed: int = 42,
-        decision_ontology_preparation_only: bool = False,
     ) -> Mapping[str, Any]:
-        if decision_ontology_preparation_only and (
-            dataset is not None or not self.config.decision_extraction.enabled
-        ):
-            raise ValueError("Decision ontology preparation requires decision extraction and no patient dataset")
         handoff_path = Path(handoff_path)
         output_dir = Path(output_dir)
         if dataset is not None and (
@@ -8754,7 +6346,6 @@ class PlainHandoffStage2:
                         outcome_type=outcome_type,
                         inner_folds=inner_folds,
                         seed=seed,
-                        decision_ontology_preparation_only=decision_ontology_preparation_only,
                     ): outer_fold
                     for outer_fold in outer_fold_ids
                 }
@@ -8772,8 +6363,6 @@ class PlainHandoffStage2:
                         raise
                     LOGGER.info("Stage 2 completed outer_fold=%s", outer_fold)
         fold_results = [fold_results_by_id[outer_fold] for outer_fold in outer_fold_ids]
-        if decision_ontology_preparation_only:
-            return {"phase": "decision_ontology_preparation", "outer_folds": len(fold_results)}
         _write_jsonl(output_dir / "features_by_outer_fold.jsonl", fold_results)
         name_counts: Counter[str] = Counter()
         for result in fold_results:
@@ -8788,7 +6377,7 @@ class PlainHandoffStage2:
             "evidence_packets": len(discovery_packets),
             "candidate_discovery_packets": len(discovery_packets),
             "compiled_evidence_packets": len(compiled_packets),
-            "evidence_compiler": self.config.evidence_compiler,
+            "evidence_compiler": EVIDENCE_COMPILER_VERSION,
             "evidence_compilation_path": str(output_dir / "evidence_compilation"),
             "evidence_compilation": compilation_summary,
             "features_by_fold": {
@@ -9043,7 +6632,6 @@ def run_plain_handoff_stage2(
         runtime_dataset: pd.DataFrame | None,
         runtime_primary_completion: CompletionFunction | None,
         runtime_extraction_completion: CompletionFunction | None,
-        runtime_decision_ontology_preparation_only: bool = False,
     ) -> Mapping[str, Any]:
         runner = PlainHandoffStage2(
             config=runtime_config,
@@ -9052,31 +6640,22 @@ def run_plain_handoff_stage2(
             extraction_completion=runtime_extraction_completion,
             extraction_tokenizer=extraction_tokenizer,
         )
-        try:
-            return runner.run(
-                handoff_path=handoff_path,
-                output_dir=output_dir,
-                dataset=runtime_dataset,
-                split_provenance_path=split_provenance_path,
-                unit_id_column=unit_id_column,
-                text_column=text_column,
-                treatment_column=treatment_column,
-                outcome_column=outcome_column,
-                outcome_type=outcome_type,
-                inner_folds=inner_folds,
-                seed=seed,
-                decision_ontology_preparation_only=runtime_decision_ontology_preparation_only,
-            )
-        finally:
-            if runner.decision_client is not None:
-                runner.decision_client.close()
+        return runner.run(
+            handoff_path=handoff_path,
+            output_dir=output_dir,
+            dataset=runtime_dataset,
+            split_provenance_path=split_provenance_path,
+            unit_id_column=unit_id_column,
+            text_column=text_column,
+            treatment_column=treatment_column,
+            outcome_column=outcome_column,
+            outcome_type=outcome_type,
+            inner_folds=inner_folds,
+            seed=seed,
+        )
 
     extraction = config.extraction_llm
     extraction_vllm = extraction.vllm if extraction is not None else None
-    if config.decision_extraction.enabled and extraction_vllm is not None:
-        from .stage2_decision_config import classifier_vllm_config
-
-        extraction_vllm = classifier_vllm_config(extraction_vllm)
     if extraction is not None and str(extraction.runtime_endpoint).strip():
         # An explicit continuation route replaces only the live transport. The
         # configured pool remains in the persisted checkpoint identity and must
@@ -9094,15 +6673,6 @@ def run_plain_handoff_stage2(
             "Stage 2 extraction is runtime-disabled; preserving extractor model "
             "identity without launching its managed vLLM pool"
         )
-    co_resident = config.vllm_co_resident_all_gpus
-    if co_resident:
-        primary_vllm, expanded_extraction = co_resident_vllm_configs(config.vllm, extraction_vllm or extraction.vllm)
-        if extraction_vllm is not None:
-            extraction_vllm = expanded_extraction
-        extraction = replace(extraction, vllm=expanded_extraction)
-        config = replace(config, vllm=primary_vllm, extraction_llm=extraction)
-        LOGGER.info("Stage 2 co-resident managed models gpus=%s primary_replicas=%s extractor_replicas=%s",
-                    list(primary_vllm.gpus), primary_vllm.server_count, expanded_extraction.server_count if extraction_vllm is not None else 0)
     if config.vllm is None and extraction_vllm is None:
         return run_with_config(
             config,
@@ -9112,59 +6682,6 @@ def run_plain_handoff_stage2(
         )
 
     managed_root = Path(output_dir) / "vllm_servers"
-
-    def decision_preparation_complete() -> bool:
-        from .plain_handoff_stage2_analysis import initial_feature_modeling_definitions
-        from .stage2_decision_ontology import preparation_complete
-
-        packets_path = Path(output_dir) / "evidence_compilation" / "packets.jsonl"
-        if not packets_path.is_file():
-            packets_path = Path(handoff_path)
-        if not packets_path.is_file():
-            return False
-        fold_ids = {int(json.loads(line)["outer_fold"])
-                    for line in packets_path.read_text().splitlines() if line.strip()}
-        if not fold_ids:
-            return False
-        for fold_id in sorted(fold_ids):
-            fold = Path(output_dir) / f"outer_{fold_id:03d}"
-            path = fold / "feature_definitions.json"
-            if not path.is_file():
-                return False
-            definitions = initial_feature_modeling_definitions(json.loads(path.read_text())["features"])
-            if not preparation_complete(definitions,
-                    output_dir=fold / "ontology_supervision/round_001/failure_ontology_refinement"):
-                return False
-        return True
-
-    prepare_decisions = bool(config.decision_extraction.enabled
-        and config.vllm is not None and extraction_vllm is not None
-        and (dataset is None or not decision_preparation_complete()))
-
-    def record_decision_phase(status, phase, gpus, *, allocation_mode):
-        _write_json(managed_root / "model_phase.json", {
-            "schema_version": MANAGED_MODEL_PHASE_SCHEMA_VERSION,
-            "status": status, "phase": phase, "active_role": "concurrent" if co_resident else "interpretation",
-            "allocation_mode": allocation_mode, "model": config.model,
-            "gpus": list(gpus), "configured_gpu_allocations": {
-                "interpretation": list(config.vllm.gpus),
-                "extraction": list(extraction_vllm.gpus),
-            }, "recorded_at": _now(),
-        })
-
-    def run_decision_preparation(runtime_config):
-        LOGGER.info("Stage 2 decision ontology preparation replicas=%s request_workers=%s; "
-                    "Plumb starts only after all folds finish preparation",
-                    len(runtime_config.runtime_endpoints), runtime_config.workers)
-        record_decision_phase("running", "decision_ontology_preparation",
-            tuple(dict.fromkeys((*config.vllm.gpus, *extraction_vllm.gpus))), allocation_mode="all_gpus")
-        result = run_with_config(runtime_config, runtime_dataset=None,
-            runtime_primary_completion=completion,
-            runtime_extraction_completion=_DisabledExtractionCompletion(),
-            runtime_decision_ontology_preparation_only=dataset is not None)
-        record_decision_phase("preparation_complete", "decision_ontology_preparation",
-            tuple(dict.fromkeys((*config.vllm.gpus, *extraction_vllm.gpus))), allocation_mode="all_gpus")
-        return result
 
     def run_configured_managed_pools() -> Mapping[str, Any]:
         """Run with each managed model on its exact configured allocation."""
@@ -9190,35 +6707,7 @@ def run_plain_handoff_stage2(
                     endpoint=primary_endpoints[0],
                     runtime_endpoints=tuple(primary_endpoints),
                 )
-                if prepare_decisions:
-                    expanded = _all_gpu_interpretation_vllm_config(config.vllm, extraction_vllm)
-                    extra_gpus = tuple(gpu for gpu in expanded.gpus if gpu not in config.vllm.gpus)
-                    width = config.vllm.effective_gpus_per_server()
-                    if extra_gpus:
-                        temporary = replace(config.vllm,
-                            gpus=extra_gpus, server_count=len(extra_gpus) // width,
-                            gpus_per_server=width,
-                            ports=expanded.effective_ports()[config.vllm.server_count:],
-                            internal_port_base=extraction_vllm.internal_port_base)
-                        validate_managed_vllm_pool_isolation(config.vllm, temporary)
-                        with launch_managed_vllm_servers(config=temporary,
-                                model=config.model, api_key=config.api_key,
-                                output_dir=managed_root / "ontology_preparation") as extra_endpoints:
-                            preparation_config = replace(runtime_config,
-                                workers=max(config.workers, expanded.server_count * 4),
-                                runtime_endpoints=(*primary_endpoints, *extra_endpoints))
-                            preparation_result = run_decision_preparation(preparation_config)
-                    else:
-                        preparation_result = run_decision_preparation(runtime_config)
-                    if dataset is None:
-                        return preparation_result
-                    LOGGER.info("Stage 2 ontology preparation barrier complete; retaining primary "
-                                "gpus=%s and freeing gpus=%s for Plumb",
-                                list(config.vllm.gpus), list(extra_gpus))
             if extraction is not None and extraction_vllm is not None:
-                if (config.decision_extraction.enabled or co_resident) and config.vllm is not None:
-                    record_decision_phase("starting", "decision_extraction" if config.decision_extraction.enabled else "concurrent_roles",
-                        config.vllm.gpus, allocation_mode="co_resident_all_gpus" if co_resident else "configured_split")
                 extraction_endpoints = stack.enter_context(
                     launch_managed_vllm_servers(
                         config=extraction_vllm,
@@ -9236,37 +6725,12 @@ def run_plain_handoff_stage2(
                     runtime_config,
                     extraction_llm=runtime_extraction,
                 )
-            if (config.decision_extraction.enabled or co_resident) and config.vllm is not None and extraction_vllm is not None:
-                record_decision_phase("running", "decision_extraction" if config.decision_extraction.enabled else "concurrent_roles",
-                    config.vllm.gpus, allocation_mode="co_resident_all_gpus" if co_resident else "configured_split")
-            result = run_with_config(
+            return run_with_config(
                 runtime_config,
                 runtime_dataset=dataset,
                 runtime_primary_completion=completion,
                 runtime_extraction_completion=extraction_completion,
             )
-            if (config.decision_extraction.enabled or co_resident) and config.vllm is not None and extraction_vllm is not None:
-                record_decision_phase("complete", "decision_extraction" if config.decision_extraction.enabled else "concurrent_roles",
-                    config.vllm.gpus, allocation_mode="co_resident_all_gpus" if co_resident else "configured_split")
-            return result
-
-    # Prepare every fold on the GPU union before starting the classifier pool.
-    # Later ontology revisions use the retained configured primary allocation.
-    if config.decision_extraction.enabled or co_resident:
-        if prepare_decisions:
-            expanded = _all_gpu_interpretation_vllm_config(config.vllm, extraction_vllm)
-            if expanded.effective_gpus_per_server() != config.vllm.effective_gpus_per_server():
-                # Unequal tensor-parallel layouts cannot retain a subset of the
-                # preparation pool. Release it before loading the exact split.
-                with launch_managed_vllm_servers(config=expanded, model=config.model,
-                        api_key=config.api_key, output_dir=managed_root / "ontology_preparation") as endpoints:
-                    preparation_result = run_decision_preparation(replace(config,
-                        endpoint=endpoints[0], runtime_endpoints=tuple(endpoints),
-                        workers=max(config.workers, expanded.server_count * 4)))
-                if dataset is None:
-                    return preparation_result
-                prepare_decisions = False
-        return run_configured_managed_pools()
 
     primary_vllm = config.vllm
     if (
@@ -9704,7 +7168,6 @@ __all__ = [
     "ExtractionEndpoint",
     "Stage2ExtractionLLMConfig",
     "Stage2ExplicitFeature",
-    "packetize_handoff",
     "plain_stage2_config_from_mapping",
     "run_plain_handoff_stage2",
 ]

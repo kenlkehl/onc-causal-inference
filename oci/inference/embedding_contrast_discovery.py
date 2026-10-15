@@ -27,9 +27,14 @@ from ..models.concept_embedding_cache import (
     clear_sentence_transformer_cache,
     load_sentence_transformer,
 )
-from ..models.concept_embedding_utils import chunk_text_words
 
 logger = logging.getLogger(__name__)
+
+# The embedding cache key and metadata historically recorded a
+# ``chunk_selection`` value.  Chunking is lossless (overflow fails closed), so
+# the value has no effect; the literal token is kept so existing caches remain
+# valid.
+_CACHE_CHUNK_SELECTION_TOKEN = "last"
 
 
 class ClusterLocalEmbeddingFeasibilityError(ValueError):
@@ -198,7 +203,6 @@ class EmbeddingContrastEvidenceGenerator:
         *,
         config: AppliedInferenceConfig,
         output_dir: Path,
-        embedding_provider: Optional[Any] = None,
         precompute_devices: Optional[Sequence[Any]] = None,
     ) -> None:
         self.config = config
@@ -210,7 +214,6 @@ class EmbeddingContrastEvidenceGenerator:
             model_config.embedding_contrast
         )
         self.output_dir = Path(output_dir)
-        self.embedding_provider = embedding_provider
         self.precompute_devices = list(precompute_devices or [])
         self._prepared = False
         self._row_ids: List[Any] = []
@@ -222,7 +225,6 @@ class EmbeddingContrastEvidenceGenerator:
         self._cache_dir: Optional[Path] = None
         self._chunk_cache_reused = False
         self._concept_probe_skip_reason: Optional[str] = None
-        self._external_corpora: List[Dict[str, Any]] = []
         self._cluster_fit_row_ids: tuple[int, ...] | None = None
         self._cluster_group_seed: int | None = None
 
@@ -245,21 +247,7 @@ class EmbeddingContrastEvidenceGenerator:
         self._row_id_to_position = {
             _row_key(row_id): idx for idx, row_id in enumerate(self._row_ids)
         }
-        if self.embedding_provider is not None:
-            self._chunks_by_position = [
-                chunk_text_words(
-                    text,
-                    int(self.embedding_config.chunk_size_words),
-                    int(self.embedding_config.chunk_overlap_words),
-                    int(self.embedding_config.max_chunks),
-                    str(self.embedding_config.chunk_selection),
-                )
-                for text in texts
-            ]
-            self._prepare_from_provider()
-        else:
-            self._prepare_from_sentence_transformer_cache(texts)
-        self._external_corpora = self._load_external_corpora()
+        self._prepare_from_sentence_transformer_cache(texts)
         self._prepared = True
 
     def bind_cluster_fit_context(
@@ -297,65 +285,6 @@ class EmbeddingContrastEvidenceGenerator:
                 "cluster-local embedding fit lacks its ordered rows and seed"
             )
         return rows, int(self._cluster_group_seed)
-
-    def build_cluster_only_evidence(
-        self,
-        *,
-        discovery_df: pd.DataFrame,
-        y: np.ndarray,
-        t: np.ndarray,
-    ) -> Dict[str, Any]:
-        """Fit only KMeans plus the two configured cluster-local SVD families.
-
-        This is the readiness-preflight entry point.  It deliberately cannot
-        construct whole-cohort contrasts, concept probes, or any supervised
-        logistic model.
-        """
-
-        if not self.enabled or not bool(
-            self.embedding_config.include_cluster_contrast_vectors
-        ):
-            raise ValueError("cluster-only embedding evidence is disabled")
-        if not self._prepared:
-            self.prepare(discovery_df)
-        positions = self._positions_for_frame(discovery_df)
-        if len(positions) != len(discovery_df):
-            raise ValueError("cluster-only evidence lost an ordered discovery row")
-        self._cluster_fit_context(positions)
-        patient_embeddings = self._patient_embeddings(positions)
-        patient_embeddings = _residualize_embeddings(
-            patient_embeddings,
-            discovery_df,
-            self.embedding_config.residualize_columns,
-        )
-        config = _cluster_local_scientific_config(self.embedding_config)
-        patient_embeddings = _normalize_rows_configured(
-            patient_embeddings,
-            normalize=bool(config.normalize_patient_embeddings),
-            epsilon=float(config.normalization_epsilon),
-            zero_vector_policy=config.zero_vector_policy,
-            dtype=config.computation_dtype,
-        )
-        contrasts, summary = self._build_cluster_contrast_vectors(
-            positions=positions,
-            patient_embeddings=patient_embeddings,
-            y=np.asarray(y, dtype=float),
-            t=np.asarray(t, dtype=float),
-            concept_phrases=(),
-            concept_embeddings=None,
-        )
-        evidence: Dict[str, Any] = {
-            "enabled": True,
-            "execution_mode": "cluster_only_no_probe_or_whole_cohort_v1",
-            "model_name": self.embedding_config.model_name,
-            "unit": "patient_row",
-            "n_patients": len(positions),
-            "n_concept_phrases": 0,
-            "external_corpora": [],
-            "contrasts": contrasts,
-            "cluster_contrast_vectors": summary,
-        }
-        return evidence
 
     def build_evidence(
         self,
@@ -472,7 +401,7 @@ class EmbeddingContrastEvidenceGenerator:
                     else int(self.embedding_config.max_seq_length)
                 ),
                 "max_chunks": int(self.embedding_config.max_chunks),
-                "chunk_selection": str(self.embedding_config.chunk_selection),
+                "chunk_selection": _CACHE_CHUNK_SELECTION_TOKEN,
             },
             "residualized_columns": [
                 col
@@ -481,14 +410,6 @@ class EmbeddingContrastEvidenceGenerator:
             ],
             "n_patients": int(len(positions)),
             "n_concept_phrases": int(len(concept_phrases)),
-            "external_corpora": [
-                {
-                    "name": str(corpus["name"]),
-                    "cache_path": str(corpus["cache_path"]),
-                    "n_chunks": int(corpus["embeddings"].shape[0]),
-                }
-                for corpus in self._external_corpora
-            ],
             "contrasts": contrasts,
         }
         if cluster_contrast_summary:
@@ -496,20 +417,6 @@ class EmbeddingContrastEvidenceGenerator:
         if self._concept_probe_skip_reason:
             evidence["concept_probe_skipped"] = self._concept_probe_skip_reason
         return evidence
-
-    def _prepare_from_provider(self) -> None:
-        flat_chunks = [chunk for chunks in self._chunks_by_position for chunk in chunks]
-        offsets = np.zeros(len(self._chunks_by_position) + 1, dtype=np.int64)
-        cursor = 0
-        for idx, chunks in enumerate(self._chunks_by_position):
-            cursor += len(chunks)
-            offsets[idx + 1] = cursor
-        embeddings = self._encode_with_provider(flat_chunks)
-        embeddings = _coerce_embedding_matrix(embeddings, expected_rows=len(flat_chunks))
-        if bool(self.embedding_config.normalize_embeddings):
-            embeddings = _normalize_rows(embeddings)
-        self._flat_embeddings = embeddings.astype(np.float32, copy=False)
-        self._offsets = offsets
 
     def _prepare_from_sentence_transformer_cache(self, texts: Sequence[str]) -> None:
         dataset_path = self.config.dataset_path or str(self.output_dir / "in_memory_dataset")
@@ -532,7 +439,7 @@ class EmbeddingContrastEvidenceGenerator:
             chunk_overlap_words=int(self.embedding_config.chunk_overlap_words),
             max_chunks=int(self.embedding_config.max_chunks),
             normalize_embeddings=bool(self.embedding_config.normalize_embeddings),
-            chunk_selection=str(self.embedding_config.chunk_selection),
+            chunk_selection=_CACHE_CHUNK_SELECTION_TOKEN,
             max_seq_length=self.embedding_config.max_seq_length,
         )
         logger.info("Embedding contrast chunk cache: %s", cache.cache_path)
@@ -569,27 +476,6 @@ class EmbeddingContrastEvidenceGenerator:
         self._flat_embeddings = cache.hidden_states_array.flat
         self._offsets = cache.hidden_states_array.offsets
         self._chunks_by_position = cache.load_chunks(expected_num_samples=len(texts))
-
-    def _load_external_corpora(self) -> List[Dict[str, Any]]:
-        corpora: List[Dict[str, Any]] = []
-        for raw_path in self.embedding_config.external_corpus_cache_dirs:
-            for cache_path in _resolve_external_cache_paths(raw_path):
-                try:
-                    corpus = _load_external_corpus_cache(cache_path)
-                except Exception as exc:
-                    logger.warning(
-                        "Skipping external embedding corpus cache %s: %s",
-                        cache_path,
-                        exc,
-                    )
-                    continue
-                corpora.append(corpus)
-                logger.info(
-                    "Loaded external embedding corpus %s: %d chunks",
-                    corpus["name"],
-                    int(corpus["embeddings"].shape[0]),
-                )
-        return corpora
 
     def _positions_for_frame(self, frame: pd.DataFrame) -> List[int]:
         if "_oci_row_id" in frame.columns:
@@ -1146,7 +1032,6 @@ class EmbeddingContrastEvidenceGenerator:
             "execution_mode": "cluster_only_native_geometry_v1",
             "n_clusters_requested": requested_clusters,
             "n_clusters": n_clusters,
-            "cluster_count_policy": config.cluster_count_policy,
             "min_cluster_size": min_cluster_size,
             "min_group_size": int(config.minimum_group_size),
             "min_cell_size": int(config.minimum_cell_size),
@@ -1602,7 +1487,7 @@ class EmbeddingContrastEvidenceGenerator:
         mean_norm = float(np.linalg.norm(mean_direction))
         record["mean_difference_norm"] = _finite_or_none(mean_norm)
 
-        probe_auc, _probe_direction = _linear_probe_direction(
+        probe_auc = _linear_probe_auc(
             patient_embeddings[usable],
             labels[usable],
         )
@@ -1686,15 +1571,6 @@ class EmbeddingContrastEvidenceGenerator:
                 ),
                 "selected_terms": len(record["tfidf_retrieval_terms"]),
             }
-        if self._external_corpora:
-            record["positive_external_chunks"] = self._retrieve_external_chunks(
-                direction,
-                descending=True,
-            )
-            record["negative_external_chunks"] = self._retrieve_external_chunks(
-                direction,
-                descending=False,
-            )
         record["concept_probe_scores"] = self._score_concepts(
             concept_phrases,
             concept_embeddings,
@@ -1746,62 +1622,6 @@ class EmbeddingContrastEvidenceGenerator:
                 break
         return rows
 
-    def _retrieve_external_chunks(
-        self,
-        direction: np.ndarray,
-        *,
-        descending: bool,
-    ) -> List[Dict[str, Any]]:
-        rows: List[Dict[str, Any]] = []
-        limit = int(self.embedding_config.external_top_k_chunks_per_tail)
-        for corpus in self._external_corpora:
-            embeddings = corpus["embeddings"]
-            if embeddings.ndim != 2 or embeddings.shape[1] != len(direction):
-                logger.warning(
-                    "Skipping external corpus %s due to embedding dimension %s; "
-                    "contrast direction has dimension %s",
-                    corpus["name"],
-                    embeddings.shape[1] if embeddings.ndim == 2 else embeddings.shape,
-                    len(direction),
-                )
-                continue
-            candidates = _top_scored_flat_indices(
-                embeddings,
-                direction,
-                limit=limit,
-                descending=descending,
-            )
-            offsets = corpus["offsets"]
-            chunks_by_sample = corpus["chunks_by_sample"]
-            row_metadata = corpus["row_metadata"]
-            for score, flat_index in candidates:
-                sample_index = int(np.searchsorted(offsets, flat_index, side="right") - 1)
-                if sample_index < 0 or sample_index >= len(chunks_by_sample):
-                    continue
-                chunk_index = int(flat_index - int(offsets[sample_index]))
-                chunks = chunks_by_sample[sample_index]
-                text = chunks[chunk_index] if chunk_index < len(chunks) else ""
-                if not _informative_chunk_text(text):
-                    continue
-                metadata = (
-                    row_metadata[sample_index]
-                    if sample_index < len(row_metadata)
-                    else {"row_index": sample_index}
-                )
-                rows.append(
-                    {
-                        "corpus": str(corpus["name"]),
-                        "cache_path": str(corpus["cache_path"]),
-                        "row_index": int(sample_index),
-                        "chunk_index": int(chunk_index),
-                        "score": _finite_or_none(float(score)),
-                        "text": text,
-                        "metadata": _jsonable_value(metadata),
-                    }
-                )
-        rows.sort(key=lambda item: float(item.get("score") or 0.0), reverse=descending)
-        return rows[:limit]
-
     def _concept_phrases(self, importance: Dict[str, Any]) -> List[str]:
         phrases: List[str] = list(self.embedding_config.concept_phrases)
         if bool(self.embedding_config.include_bow_phrases_as_concepts):
@@ -1836,41 +1656,37 @@ class EmbeddingContrastEvidenceGenerator:
 
     def _encode_concepts(self, phrases: Sequence[str]) -> Optional[np.ndarray]:
         phrase_list = [str(phrase) for phrase in phrases]
-        if self.embedding_provider is not None:
-            embeddings = self._encode_with_provider(phrase_list)
-        else:
-            cached = self._load_concept_embedding_cache(phrase_list)
-            if cached is not None:
-                return cached
-            if self._chunk_cache_reused:
-                self._concept_probe_skip_reason = "concept_phrase_cache_miss_on_warm_chunk_cache"
-                logger.info(
-                    "Skipping embedding concept probes because chunk embeddings "
-                    "were reused from cache and concept phrase embeddings are not "
-                    "cached; avoiding a sentence-transformer load."
-                )
-                return None
-            try:
-                encoder = load_sentence_transformer(
-                    str(self.embedding_config.model_name),
-                    device=_torch_device_or_none(self.embedding_config.device),
-                    max_seq_length=self.embedding_config.max_seq_length,
-                )
-                embeddings = encoder.encode(
-                    phrase_list,
-                    batch_size=max(
-                        1,
-                        min(int(self.embedding_config.batch_size), len(phrase_list)),
-                    ),
-                    convert_to_numpy=True,
-                    normalize_embeddings=bool(self.embedding_config.normalize_embeddings),
-                    show_progress_bar=False,
-                )
-            finally:
-                _release_sentence_transformer_model(str(self.embedding_config.model_name))
+        cached = self._load_concept_embedding_cache(phrase_list)
+        if cached is not None:
+            return cached
+        if self._chunk_cache_reused:
+            self._concept_probe_skip_reason = "concept_phrase_cache_miss_on_warm_chunk_cache"
+            logger.info(
+                "Skipping embedding concept probes because chunk embeddings "
+                "were reused from cache and concept phrase embeddings are not "
+                "cached; avoiding a sentence-transformer load."
+            )
+            return None
+        try:
+            encoder = load_sentence_transformer(
+                str(self.embedding_config.model_name),
+                device=_torch_device_or_none(self.embedding_config.device),
+                max_seq_length=self.embedding_config.max_seq_length,
+            )
+            embeddings = encoder.encode(
+                phrase_list,
+                batch_size=max(
+                    1,
+                    min(int(self.embedding_config.batch_size), len(phrase_list)),
+                ),
+                convert_to_numpy=True,
+                normalize_embeddings=bool(self.embedding_config.normalize_embeddings),
+                show_progress_bar=False,
+            )
+        finally:
+            _release_sentence_transformer_model(str(self.embedding_config.model_name))
         matrix = _coerce_embedding_matrix(embeddings, expected_rows=len(phrase_list))
-        if self.embedding_provider is None:
-            self._write_concept_embedding_cache(phrase_list, matrix)
+        self._write_concept_embedding_cache(phrase_list, matrix)
         return matrix
 
     def _concept_embedding_cache_path(self, phrases: Sequence[str]) -> Optional[Path]:
@@ -1937,17 +1753,6 @@ class EmbeddingContrastEvidenceGenerator:
                 tmp_path.unlink(missing_ok=True)
             except OSError:
                 pass
-
-    def _encode_with_provider(self, texts: Sequence[str]) -> np.ndarray:
-        provider = self.embedding_provider
-        if hasattr(provider, "encode_chunks"):
-            return provider.encode_chunks(list(texts))
-        if hasattr(provider, "encode_texts"):
-            return provider.encode_texts(list(texts))
-        if hasattr(provider, "encode"):
-            return provider.encode(list(texts))
-        raise TypeError("embedding_provider must implement encode_chunks, encode_texts, or encode")
-
 
 def redact_embedding_contrast_evidence(evidence: Any) -> Any:
     """Return a copy of embedding evidence with retrieved raw text removed."""
@@ -2036,17 +1841,19 @@ def _safe_contrast_suffix(value: Any) -> str:
     return text or "view"
 
 
-def _linear_probe_direction(
+def _linear_probe_auc(
     embeddings: np.ndarray,
     labels: np.ndarray,
-) -> Tuple[Optional[float], Optional[np.ndarray]]:
+) -> Optional[float]:
+    """Cross-validated logistic-probe AUC, reported as a diagnostic."""
+
     labels = np.asarray(labels, dtype=int)
     if len(np.unique(labels)) < 2:
-        return None, None
+        return None
     class_counts = np.bincount(labels, minlength=2)
     min_class = int(np.min(class_counts[:2]))
     if min_class < 2:
-        return None, None
+        return None
 
     auc = None
     folds = min(5, min_class)
@@ -2066,13 +1873,7 @@ def _linear_probe_direction(
                 auc = float(roc_auc_score(labels, oof))
             except ValueError:
                 auc = None
-
-    model = LogisticRegression(C=1.0, solver="liblinear", max_iter=1000)
-    model.fit(embeddings, labels)
-    coef = np.asarray(model.coef_, dtype=np.float32).reshape(-1)
-    if not np.all(np.isfinite(coef)) or np.linalg.norm(coef) <= 0.0:
-        return auc, None
-    return auc, coef
+    return auc
 
 
 def _binary_labels(values: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -2286,118 +2087,6 @@ def _default_embedding_cache_dir(dataset_path: str, output_dir: Path) -> Path:
     return dataset_dir / ".oci_cache" / "embedding_contrast"
 
 
-def _resolve_external_cache_paths(raw_path: str) -> List[Path]:
-    root = Path(str(raw_path)).expanduser()
-    if _is_embedding_cache_path(root):
-        return [root]
-    if not root.exists():
-        raise FileNotFoundError(f"External embedding corpus path not found: {root}")
-    paths = [
-        child
-        for child in sorted(root.iterdir())
-        if child.is_dir() and _is_embedding_cache_path(child)
-    ]
-    if not paths:
-        raise FileNotFoundError(
-            f"No embedding chunk cache found at {root}; expected chunk_embeddings.npy, "
-            "offsets.npy, and chunk_texts.jsonl in the path or an immediate child."
-        )
-    return paths
-
-
-def _is_embedding_cache_path(path: Path) -> bool:
-    return all(
-        (path / filename).exists()
-        for filename in ["chunk_embeddings.npy", "offsets.npy", "chunk_texts.jsonl"]
-    )
-
-
-def _load_external_corpus_cache(cache_path: Path) -> Dict[str, Any]:
-    metadata_path = cache_path / "metadata.json"
-    metadata: Dict[str, Any] = {}
-    if metadata_path.exists():
-        with open(metadata_path, encoding="utf-8") as f:
-            metadata = json.load(f)
-    embeddings = np.load(str(cache_path / "chunk_embeddings.npy"), mmap_mode="r")
-    offsets = np.load(str(cache_path / "offsets.npy"))
-    chunks_by_sample = []
-    with open(cache_path / "chunk_texts.jsonl", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                chunks_by_sample.append(
-                    [str(chunk) for chunk in json.loads(line).get("chunks", [])]
-                )
-    if len(offsets) != len(chunks_by_sample) + 1:
-        raise RuntimeError(f"External cache offsets/chunk text length mismatch in {cache_path}")
-    row_metadata = _load_external_row_metadata(cache_path, len(chunks_by_sample))
-    name = str(metadata.get("corpus_name") or metadata.get("dataset_path") or cache_path.name)
-    return {
-        "name": name,
-        "cache_path": cache_path,
-        "metadata": metadata,
-        "embeddings": embeddings,
-        "offsets": offsets,
-        "chunks_by_sample": chunks_by_sample,
-        "row_metadata": row_metadata,
-    }
-
-
-def _load_external_row_metadata(
-    cache_path: Path,
-    expected_rows: int,
-) -> List[Dict[str, Any]]:
-    path = cache_path / "row_metadata.jsonl"
-    if not path.exists():
-        return [{"row_index": idx} for idx in range(expected_rows)]
-    rows: List[Dict[str, Any]] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                payload = json.loads(line)
-                rows.append(payload if isinstance(payload, dict) else {"value": payload})
-    if len(rows) != expected_rows:
-        logger.warning(
-            "External row metadata in %s has %d rows; expected %d",
-            path,
-            len(rows),
-            expected_rows,
-        )
-    return rows
-
-
-def _top_scored_flat_indices(
-    embeddings: np.ndarray,
-    direction: np.ndarray,
-    *,
-    limit: int,
-    descending: bool,
-) -> List[Tuple[float, int]]:
-    direction = np.asarray(direction, dtype=np.float32).reshape(-1)
-    block_size = 50_000
-    candidates: List[Tuple[float, int]] = []
-    n_rows = int(embeddings.shape[0])
-    for start in range(0, n_rows, block_size):
-        end = min(start + block_size, n_rows)
-        scores = np.asarray(embeddings[start:end], dtype=np.float32) @ direction
-        finite = np.isfinite(scores)
-        if not np.any(finite):
-            continue
-        finite_indices = np.flatnonzero(finite)
-        finite_scores = scores[finite_indices]
-        k = min(int(limit), len(finite_scores))
-        if k <= 0:
-            continue
-        if descending:
-            local = np.argpartition(finite_scores, -k)[-k:]
-        else:
-            local = np.argpartition(finite_scores, k - 1)[:k]
-        candidates.extend(
-            (float(finite_scores[idx]), int(start + finite_indices[idx])) for idx in local
-        )
-    candidates.sort(key=lambda item: item[0], reverse=descending)
-    return candidates[: int(limit)]
-
-
 def _finite_or_none(value: Optional[float]) -> Optional[float]:
     if value is None:
         return None
@@ -2417,17 +2106,5 @@ def _jsonable_scalar(value: Any) -> Any:
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, (np.ndarray,)):
-        return value.tolist()
-    return value
-
-
-def _jsonable_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(k): _jsonable_value(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable_value(item) for item in value]
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, np.ndarray):
         return value.tolist()
     return value

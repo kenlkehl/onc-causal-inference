@@ -33,7 +33,11 @@ def inputs(binary=True):
         }
     )
     extracted = pd.DataFrame({"_oci_row_id": range(n), "x": x})
-    definitions = [{**feature("x"), "roles": ["confounder", "effect_modifier"]}]
+    definitions = [{
+        **feature("x"),
+        "roles": ["confounder", "effect_modifier"],
+        "nuisance_model_roles": ["treatment", "outcome"],
+    }]
     split = {"fit_row_ids": list(range(72)), "heldout_row_ids": list(range(72, n))}
     split["inner_splits"] = analysis._fallback_inner_splits(range(72), folds=3, seed=9)
     return dict(
@@ -53,6 +57,14 @@ def inputs(binary=True):
     )
 
 
+def candidates(kw):
+    """The final fit cross-fits nuisances over the unscreened candidate catalog."""
+    return dict(
+        nuisance_candidate_definitions=kw["definitions"],
+        nuisance_candidate_fit=kw["extracted_fit"],
+    )
+
+
 def serial_nuisances(kw):
     """Original sequential fitting order, independent of the new dispatcher."""
     result = np.full((3, len(kw["extracted_fit"])), np.nan)
@@ -63,12 +75,13 @@ def serial_nuisances(kw):
         t, y = kw["dataset"].iloc[fit][["treatment", "outcome"]].to_numpy().T
         encoder = analysis._FeatureEncoder(kw["definitions"]).fit(train)
         x, xv = encoder.transform(train), encoder.transform(valid)
-        propensity = analysis._fit_classifier(x, t, seed=kw["seed"] + index)
-        outcomes = analysis._fit_outcome_models(
-            x, t, y, binary=kw["outcome_type"] == "binary", seed=kw["seed"] + index
-        )
-        result[0, hold] = analysis._predict_probability(propensity, xv)
-        result[1:, hold] = np.asarray(analysis._predict_outcomes(outcomes, xv))
+        seed = kw["seed"] + index
+        result[0, hold] = analysis._fit_nuisance_prediction(x, t, xv, binary=True, seed=seed)
+        for arm in (0, 1):
+            mask = t.astype(int) == arm
+            result[1 + arm, hold] = analysis._fit_nuisance_prediction(
+                x[mask], y[mask], xv, binary=kw["outcome_type"] == "binary", seed=seed + arm
+            )
     return result
 
 
@@ -146,7 +159,7 @@ def test_final_resume_reuses_nuisances_after_effect_fit_failure(tmp_path, monkey
     monkeypatch.setattr(effects, "fit_interaction_effect", fail)
     with pool.modeling_session(2):
         with pytest.raises(RuntimeError, match="effect fit interrupted"):
-            analysis.estimate_outer_fold(**kw, output_dir=tmp_path)
+            analysis.estimate_outer_fold(**kw, **candidates(kw), output_dir=tmp_path)
     assert not (tmp_path / "complete.json").exists()
     snapshots = {p: p.read_bytes() for p in tmp_path.glob("fit_checkpoints/*/**/*.json")}
     assert len(snapshots) == 12
@@ -157,7 +170,7 @@ def test_final_resume_reuses_nuisances_after_effect_fit_failure(tmp_path, monkey
 
     monkeypatch.setattr(analysis, "_fit_nuisance_prediction", forbidden)
     with pool.modeling_session(1):
-        analysis.estimate_outer_fold(**kw, output_dir=tmp_path)
+        analysis.estimate_outer_fold(**kw, **candidates(kw), output_dir=tmp_path)
     assert (tmp_path / "complete.json").exists()
     assert {p: p.read_bytes() for p in snapshots} == snapshots
 
@@ -168,7 +181,7 @@ def test_final_parallel_fits_do_not_learn_from_heldout_labels(tmp_path):
     results = []
     for name in ["original", "altered"]:
         with pool.modeling_session(2):
-            analysis.estimate_outer_fold(**kw, output_dir=tmp_path / name)
+            analysis.estimate_outer_fold(**kw, **candidates(kw), output_dir=tmp_path / name)
         results.append(pd.read_csv(tmp_path / name / "predictions.csv"))
         kw["dataset"] = kw["dataset"].copy()
         kw["dataset"].loc[72:, "outcome"] = 1 - kw["dataset"].loc[72:, "outcome"]
@@ -221,7 +234,9 @@ def test_real_final_estimation_parallel_equivalence_and_complete_resume(
     for workers in (1, 2):
         destination = tmp_path / str(workers)
         with pool.modeling_session(workers):
-            reports.append(analysis.estimate_outer_fold(**kw, output_dir=destination))
+            reports.append(
+                analysis.estimate_outer_fold(**kw, **candidates(kw), output_dir=destination)
+            )
         frames.append(pd.read_csv(destination / "predictions.csv"))
         assert len(list(destination.glob("fit_checkpoints/*/cross_fit/fold_*/*.json"))) == 9
         assert len(list(destination.glob("fit_checkpoints/*/full_training/*.json"))) == 3
@@ -235,7 +250,9 @@ def test_real_final_estimation_parallel_equivalence_and_complete_resume(
 
     monkeypatch.setattr(analysis, "_cross_fitted_nuisance", forbidden)
     with pool.modeling_session(3):
-        assert analysis.estimate_outer_fold(**kw, output_dir=tmp_path / "2") == reports[1]
+        assert analysis.estimate_outer_fold(
+            **kw, **candidates(kw), output_dir=tmp_path / "2"
+        ) == reports[1]
 
 
 def _timed_work():

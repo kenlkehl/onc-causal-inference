@@ -8,16 +8,14 @@ import random
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Iterable, List, Mapping, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 _RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504, 529}
 _GOOGLE_ADC_API_KEY_VALUES = {"google_adc", "google-adc", "adc", "application_default"}
-STAGE2_ENDPOINT_AUTH_MODE_ENV = "OCI_STAGE2_ENDPOINT_AUTH"
 STAGE2_ENDPOINT_API_KEY_ENV = "OCI_STAGE2_ENDPOINT_API_KEY"
-STAGE2_ENDPOINT_AUTH_IDENTITY_SCHEMA = "stage2_endpoint_authentication_v1"
 STAGE2_ENDPOINT_TRANSPORT_ENV = "OCI_STAGE2_ENDPOINT_TRANSPORT"
 STAGE2_ENDPOINT_TRANSPORT_IDENTITY_SCHEMA = "stage2_endpoint_transport_v1"
 _API_KEY_ENV_REFERENCE_PREFIX = "env:"
@@ -34,14 +32,6 @@ _GEMINI_36_MODEL_NAMES = {
 
 def _uses_gemini_36(model_name: Any) -> bool:
     return str(model_name or "").strip().lower() in _GEMINI_36_MODEL_NAMES
-
-
-@dataclass(frozen=True)
-class ResolvedStage2EndpointAuthentication:
-    """Runtime credential plus a secret-free immutable-request identity."""
-
-    api_key: str
-    identity: Mapping[str, str]
 
 
 @dataclass(frozen=True)
@@ -83,68 +73,6 @@ def resolve_stage2_endpoint_transport(
     )
 
 
-def resolve_stage2_endpoint_authentication(
-    environment: Mapping[str, str] | None = None,
-) -> ResolvedStage2EndpointAuthentication:
-    """Resolve optional production endpoint auth without storing credentials.
-
-    ``none`` preserves the historical local-vLLM behavior. ``api_key`` uses
-    the OpenAI SDK's bearer authorization header, while ``google_adc`` selects
-    the refreshable Vertex AI/OpenAI-compatible ADC client.
-    """
-
-    source = os.environ if environment is None else environment
-    raw_mode = str(source.get(STAGE2_ENDPOINT_AUTH_MODE_ENV, "none"))
-    mode = raw_mode.strip().lower().replace("-", "_")
-    if raw_mode != raw_mode.strip() or mode not in {
-        "none",
-        "api_key",
-        "google_adc",
-    }:
-        raise ValueError(
-            f"{STAGE2_ENDPOINT_AUTH_MODE_ENV} must be none, api_key, or google_adc"
-        )
-    configured_key = source.get(STAGE2_ENDPOINT_API_KEY_ENV)
-    if mode == "none":
-        if configured_key not in {None, ""}:
-            raise ValueError(
-                f"{STAGE2_ENDPOINT_API_KEY_ENV} is set while endpoint auth is none"
-            )
-        api_key = "EMPTY"
-    elif mode == "google_adc":
-        if configured_key not in {None, ""}:
-            raise ValueError(
-                f"{STAGE2_ENDPOINT_API_KEY_ENV} cannot accompany google_adc"
-            )
-        api_key = "GOOGLE_ADC"
-    else:
-        if not isinstance(configured_key, str) or not configured_key:
-            raise ValueError(
-                f"{STAGE2_ENDPOINT_API_KEY_ENV} is required for api_key auth"
-            )
-        if (
-            configured_key != configured_key.strip()
-            or any(ord(character) < 0x20 or ord(character) == 0x7F for character in configured_key)
-        ):
-            raise ValueError(
-                f"{STAGE2_ENDPOINT_API_KEY_ENV} must be nonempty without "
-                "surrounding whitespace or control characters"
-            )
-        api_key = _API_KEY_ENV_REFERENCE_PREFIX + STAGE2_ENDPOINT_API_KEY_ENV
-    return ResolvedStage2EndpointAuthentication(
-        api_key=api_key,
-        identity={
-            "schema_version": STAGE2_ENDPOINT_AUTH_IDENTITY_SCHEMA,
-            "mode": mode,
-            "credential_source": (
-                STAGE2_ENDPOINT_API_KEY_ENV
-                if mode == "api_key"
-                else mode
-            ),
-        },
-    )
-
-
 def resolve_openai_api_key(
     configured: str,
     environment: Mapping[str, str] | None = None,
@@ -168,23 +96,6 @@ def resolve_openai_api_key(
     ):
         raise ValueError(f"{name} must contain one nonempty bearer credential")
     return value
-
-
-def validate_stage2_endpoint_runtime_configuration(
-    *,
-    authentication: ResolvedStage2EndpointAuthentication,
-    transport: ResolvedStage2EndpointTransport,
-) -> None:
-    """Reject credential/transport combinations that would use the wrong wire dialect."""
-
-    if (
-        authentication.identity.get("mode") == "google_adc"
-        and transport.mode != "google_vertex"
-    ):
-        raise ValueError(
-            "google_adc endpoint authentication requires "
-            f"{STAGE2_ENDPOINT_TRANSPORT_ENV}=google_vertex"
-        )
 
 
 def project_stage2_chat_completion_request(
@@ -254,35 +165,6 @@ def project_stage2_chat_completion_request(
         if projected.get("tool_choice") == "none":
             projected.pop("tool_choice", None)
     return projected
-
-
-def validate_stage2_response_model(
-    response_model: Any,
-    *,
-    requested_model: str,
-    transport_mode: str | None = None,
-) -> str:
-    """Validate provider metadata without confusing an alias with the request ID."""
-
-    mode = (
-        resolve_stage2_endpoint_transport().mode
-        if transport_mode is None
-        else transport_mode
-    )
-    if mode not in _STAGE2_ENDPOINT_TRANSPORT_MODES:
-        raise ValueError("unsupported Stage 2 endpoint transport mode")
-    if (
-        not isinstance(response_model, str)
-        or not response_model
-        or response_model != response_model.strip()
-        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in response_model)
-    ):
-        raise ValueError("Stage 2 response must report one nonempty model identity")
-    if mode == "vllm" and response_model != requested_model:
-        raise ValueError(
-            "Stage 2 response model differs from the exact requested vLLM model"
-        )
-    return response_model
 
 
 class _ProjectedCompletions:
@@ -591,13 +473,6 @@ class OpenAIClientPool:
         self._lock = threading.Lock()
         self._next_index = os.getpid() % len(self.server_urls)
 
-    def next_client(self) -> Tuple[str, Any]:
-        with self._lock:
-            idx = self._next_index
-            self._next_index = (self._next_index + 1) % len(self.server_urls)
-        url = self.server_urls[idx]
-        return url, self.client_for_url(url)
-
     def client_for_attempt(self, start_index: int, attempt: int) -> Tuple[str, Any]:
         url = self.server_urls[(int(start_index) + int(attempt)) % len(self.server_urls)]
         return url, self.client_for_url(url)
@@ -651,9 +526,6 @@ class OpenAIClientPool:
             self._clients[url] = client
             logger.info("Connected to OpenAI-compatible LLM server at: %s", url)
             return client
-
-    def first_url(self) -> str:
-        return self.server_urls[0]
 
     def close(self) -> None:
         """Close all lazily-created clients and clear the pool."""

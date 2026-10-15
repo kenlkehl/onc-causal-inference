@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import concurrent.futures
 import json
 import os
 import signal
-import threading
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -335,25 +333,16 @@ def test_managed_vllm_cli_options_compile_into_stage2_config(tmp_path):
             "--output-dir",
             str(tmp_path / "output"),
             "--stage2-only",
-            "--stage2-model",
-            "Qwen/Qwen3.8-27B",
-            "--stage2-vllm-servers",
-            "2",
-            "--stage2-vllm-gpus",
-            "cuda:0,cuda:1",
-            "--stage2-vllm-gpus-per-server",
-            "1",
-            "--stage2-vllm-rapid-switch-seconds",
-            "1200",
-            "--stage2-vllm-base-port",
-            "9100",
-            "--stage2-vllm-download-dir",
-            "/models/cache",
-            "--stage2-vllm-reasoning-parser",
-            "custom-qwen",
-            "--no-stage2-vllm-language-model-only",
-            "--stage2-vllm-default-chat-template-kwargs",
-            '{"enable_thinking":true}',
+            "--set", "stage2.model=Qwen/Qwen3.8-27B",
+            "--set", "stage2.vllm.server_count=2",
+            "--set", "stage2.vllm.gpus=cuda:0,cuda:1",
+            "--set", "stage2.vllm.gpus_per_server=1",
+            "--set", "stage2.vllm_rapid_switch_seconds=1200",
+            "--set", "stage2.vllm.base_port=9100",
+            "--set", "stage2.vllm.download_dir=/models/cache",
+            "--set", "stage2.vllm.reasoning_parser=custom-qwen",
+            "--set", "stage2.vllm.language_model_only=false",
+            "--set", 'stage2.vllm.default_chat_template_kwargs={"enable_thinking":true}',
             "--stage2-vllm-extra-arg=--max-model-len",
             "--stage2-vllm-extra-arg=65536",
         ]
@@ -383,24 +372,15 @@ def test_managed_extraction_vllm_cli_options_compile_into_nested_config(tmp_path
             "--output-dir",
             str(tmp_path / "output"),
             "--stage2-only",
-            "--stage2-endpoint",
-            "http://review.test/v1",
-            "--stage2-model",
-            "large-reviewer",
-            "--stage2-extraction-model",
-            "LiquidAI/LFM2.5-2.6B",
-            "--stage2-extraction-workers",
-            "48",
-            "--stage2-extraction-vllm-gpus",
-            "cuda:4,cuda:5,cuda:6,cuda:7",
-            "--stage2-extraction-vllm-gpus-per-server",
-            "2",
-            "--stage2-extraction-vllm-base-port",
-            "9200",
-            "--stage2-extraction-vllm-internal-port-base",
-            "45000",
-            "--stage2-extraction-vllm-download-dir",
-            "/extractor/cache",
+            "--set", "stage2.endpoint=http://review.test/v1",
+            "--set", "stage2.model=large-reviewer",
+            "--set", "stage2.extraction_llm.model=LiquidAI/LFM2.5-2.6B",
+            "--set", "stage2.extraction_llm.workers=48",
+            "--set", "stage2.extraction_llm.vllm.gpus=cuda:4,cuda:5,cuda:6,cuda:7",
+            "--set", "stage2.extraction_llm.vllm.gpus_per_server=2",
+            "--set", "stage2.extraction_llm.vllm.base_port=9200",
+            "--set", "stage2.extraction_llm.vllm.internal_port_base=45000",
+            "--set", "stage2.extraction_llm.vllm.download_dir=/extractor/cache",
             "--stage2-extraction-vllm-extra-arg=--gpu-memory-utilization",
             "--stage2-extraction-vllm-extra-arg=0.75",
         ]
@@ -488,60 +468,6 @@ def test_stage2_round_robins_requests_and_transport_retries_across_endpoints(mon
         "http://127.0.0.1:8012/v1",
         "http://127.0.0.1:8010/v1",
     ]
-
-
-@pytest.mark.parametrize("logical_request", [False, True])
-def test_stage2_workers_bound_completion_concurrency_globally(logical_request):
-    lock = threading.Lock()
-    release = threading.Event()
-    saturated = threading.Event()
-    active = 0
-    peak = 0
-
-    def blocking_completion(_messages, _config):
-        nonlocal active, peak
-        with lock:
-            active += 1
-            peak = max(peak, active)
-            if active == 2:
-                saturated.set()
-        try:
-            assert release.wait(timeout=2.0)
-            return "{}"
-        finally:
-            with lock:
-                active -= 1
-
-    runner = PlainHandoffStage2(
-        config=PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            workers=2,
-        ),
-        clinical_question="test",
-        completion=blocking_completion,
-    )
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-        def request():
-            if logical_request:
-                return stage2_workflow._request_json(
-                    messages=[], config=runner.config,
-                    completion=runner.completion, validate=dict,
-                )
-            return runner.completion([], runner.config)
-
-        futures = [executor.submit(request) for _ in range(6)]
-        try:
-            assert saturated.wait(timeout=2.0)
-            with lock:
-                assert active == 2
-                assert peak == 2
-        finally:
-            release.set()
-        assert [future.result(timeout=2.0) for future in futures] == (
-            [{}] * 6 if logical_request else ["{}"] * 6
-        )
 
 
 def test_run_wrapper_keeps_managed_servers_alive_for_stage2_and_cleans_up(
@@ -708,83 +634,6 @@ def test_feature_definition_only_run_never_starts_managed_extractor(
         "stage2",
         "stop-orchestrator_all_gpus",
     ]
-
-
-@pytest.mark.parametrize("prepared,definition_only", [(False, False), (True, False), ("partial", False), (False, True)])
-@pytest.mark.parametrize("shared_primary_gpu", [False, True])
-def test_decision_preparation_uses_all_gpus_then_retains_primary(
-    tmp_path, monkeypatch, prepared, definition_only, shared_primary_gpu,
-):
-    from oci.inference.stage2_decision_ontology import prepare_ontologies
-    from oci.inference.plain_handoff_stage2_analysis import initial_feature_modeling_definitions
-
-    config = plain_stage2_config_from_mapping({
-        "model": "gemma", "vllm": {"gpus": [0], "gpus_per_server": 1},
-        "decision_extraction": {"enabled": True},
-        "extraction_llm": {"model": "plumb", "vllm": {"gpus": list(range(0 if shared_primary_gpu else 1, 8)), "gpus_per_server": 1}},
-    }, default_workers=4)
-    output = tmp_path / "stage2"
-    (tmp_path / "handoff.jsonl").write_text(json.dumps({"outer_fold": 1}) + "\n"
-        + (json.dumps({"outer_fold": 2}) + "\n" if prepared == "partial" else ""))
-    if prepared:
-        f = {"name": "color", "description": "Color", "value_type": "categorical",
-             "categories_or_unit": ["red", "blue"], "measurement_definition": "Recorded color"}
-        fold = output / "outer_001"
-        fold.mkdir(parents=True)
-        (fold / "feature_definitions.json").write_text(json.dumps({"features": [f]}))
-        prepare_ontologies(initial_feature_modeling_definitions([f]),
-            output_dir=fold / "ontology_supervision/round_001/failure_ontology_refinement",
-            request_json=lambda *a, **kw: pytest.fail("categorical feature needs no preparation"))
-    lifecycle = []
-
-    @contextmanager
-    def fake_launch(**kwargs):
-        role = kwargs["output_dir"].name
-        lifecycle.append(f"start-{role}")
-        if role == "ontology_preparation":
-            assert kwargs["model"] == "gemma"
-            assert kwargs["config"].gpus == tuple(f"cuda:{i}" for i in range(1, 8))
-            assert kwargs["config"].server_count == 7
-            assert kwargs["config"].effective_ports() == tuple(range(8011, 8018))
-        if role == "extractor":
-            assert "start-ontology_preparation" not in lifecycle or "stop-ontology_preparation" in lifecycle
-            assert "stop-orchestrator" not in lifecycle
-            assert "--runner" in kwargs["config"].extra_args
-            assert kwargs["config"].gpus == tuple(f"cuda:{i}" for i in range(0 if shared_primary_gpu else 1, 8))
-        try:
-            yield tuple(f"http://127.0.0.1:{p}/v1" for p in kwargs["config"].effective_ports())
-        finally:
-            lifecycle.append(f"stop-{role}")
-
-    def fake_run(self, **kwargs):
-        if kwargs["dataset"] is None:
-            assert len(self.config.runtime_endpoints) == 8
-            assert self.config.workers >= 32
-            assert kwargs["decision_ontology_preparation_only"] is (not definition_only)
-            assert "start-extractor" not in lifecycle
-            phase = json.loads((output / "vllm_servers/model_phase.json").read_text())
-            assert phase["gpus"] == [f"cuda:{i}" for i in range(8)]
-            lifecycle.append("prepare")
-            return {"phase": "feature_definitions" if definition_only else "decision_ontology_preparation"}
-        assert self.config.runtime_endpoints == ("http://127.0.0.1:8010/v1",)
-        assert len(self.config.extraction_llm.runtime_endpoints) == (8 if shared_primary_gpu else 7)
-        lifecycle.append("extract")
-        return {"phase": "causal_estimation"}
-
-    monkeypatch.setattr(stage2_workflow, "launch_managed_vllm_servers", fake_launch)
-    monkeypatch.setattr(PlainHandoffStage2, "run", fake_run)
-    monkeypatch.setattr(stage2_workflow, "_served_model_ids", lambda c: [c.model])
-    result = run_plain_handoff_stage2(handoff_path=tmp_path / "handoff.jsonl",
-        output_dir=output, clinical_question="test", config=config,
-        dataset=None if definition_only else object())
-    expected = ["start-orchestrator"]
-    if prepared is not True:
-        expected += ["start-ontology_preparation", "prepare", "stop-ontology_preparation"]
-    if not definition_only:
-        expected += ["start-extractor", "extract", "stop-extractor"]
-    expected += ["stop-orchestrator"]
-    assert lifecycle == expected
-    assert result["phase"] == ("feature_definitions" if definition_only else "causal_estimation")
 
 
 def test_managed_resume_after_extraction_starts_loads_all_gpu_extractor_immediately(

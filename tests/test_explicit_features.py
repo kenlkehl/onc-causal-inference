@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from oci.config import ExperimentConfig, ExplicitFeatureSpec
+from oci.config import ExplicitFeatureSpec
 from oci.extraction import (
     ExplicitFeatureValue,
     VLLMFeatureExtractor,
@@ -20,7 +20,6 @@ from oci.extraction.explicit_features import (
     build_extraction_repair_prompt,
 )
 from oci.models.explicit_feature_featurizer import (
-    ExplicitFeatureFeaturizer,
     filter_specs_by_role,
     get_raw_explicit_features,
 )
@@ -364,64 +363,46 @@ def test_extraction_prompt_distinguishes_unknown_from_not_documented():
     assert "For continuous fields" in prompt
 
 
-def test_neural_query_rag_prompt_uses_retrieved_excerpt_instruction_without_policy():
-    specs = [
-        ExplicitFeatureSpec(
-            name="prior_platinum_response",
-            type="categorical",
-            categories=["response", "no_response", "not_documented"],
-            roles=["confounder"],
-        )
-    ]
-    document = (
-        "[neural_query_rag_v1]\n"
-        "<retrieved_excerpt>Prior platinum produced a partial response.</retrieved_excerpt>"
-    )
-
-    prompt = build_extraction_prompt(document, specs)
-
-    assert "Read every retrieved excerpt" in prompt
-    assert "prior therapies, responses, or outcomes" not in prompt
-    assert "current treatment decision" not in prompt
-    assert "complete clinical note" not in prompt
-
-
-def test_extraction_prompts_contain_no_temporal_policy_text():
-    specs = [
-        ExplicitFeatureSpec(
-            name="response_status",
-            type="categorical",
-            categories=["absent", "present", "unknown", "not_documented"],
-            roles=["effect_modifier"],
-        )
-    ]
+@pytest.mark.parametrize(
+    ("specs", "note", "temporally_valid"),
+    [
+        (
+            [
+                ExplicitFeatureSpec(
+                    name="response_status",
+                    type="categorical",
+                    categories=["absent", "present", "unknown", "not_documented"],
+                    roles=["effect_modifier"],
+                )
+            ],
+            "After therapy, response status was present.",
+            True,
+        ),
+        (
+            [ExplicitFeatureSpec(name="age", type="continuous", roles=["confounder"])],
+            "Age 70.",
+            False,
+        ),
+    ],
+    ids=["temporally_valid_source", "default"],
+)
+def test_extraction_prompts_contain_no_temporal_policy_text(specs, note, temporally_valid):
     prompt = build_extraction_prompt(
-        "After therapy, response status was present.",
+        note,
         specs,
-        source_text_temporally_valid_by_design=True,
+        source_text_temporally_valid_by_design=temporally_valid,
     )
     repair = build_extraction_repair_prompt(
         ["malformed JSON"],
         specs,
-        source_text_temporally_valid_by_design=True,
+        source_text_temporally_valid_by_design=temporally_valid,
     )
 
     for text in (prompt, repair):
-        assert "temporally valid by design" not in text
-        assert "treatment-time boundary" not in text
-        assert "source_text_temporal_policy" not in text
-        assert "current treatment" not in text
-
-
-def test_default_extraction_prompt_also_contains_no_temporal_policy_text():
-    specs = [ExplicitFeatureSpec(name="age", type="continuous", roles=["confounder"])]
-    prompt = build_extraction_prompt("Age 70.", specs)
-    repair = build_extraction_repair_prompt(["malformed JSON"], specs)
-
-    assert "treatment" not in prompt.casefold()
-    assert "treatment" not in repair.casefold()
-    assert "temporally" not in prompt.casefold()
-    assert "temporally" not in repair.casefold()
+        folded = text.casefold()
+        assert "treatment" not in folded
+        assert "temporally" not in folded
+        assert "source_text_temporal_policy" not in folded
 
 
 def test_parse_extraction_response_accepts_quoted_null_as_missing():
@@ -993,65 +974,3 @@ def test_vllm_feature_extractor_server_uses_batch_size_for_concurrency(monkeypat
     assert calls["max_workers"] == 2
     assert calls["submitted"] == ["1", "2", "3"]
     assert [row["age"].value for row in results] == [1.0, 2.0, 3.0]
-
-
-def test_experiment_config_rejects_old_explicit_confounder_keys():
-    with pytest.raises(ValueError, match="explicit_confounders"):
-        ExperimentConfig.from_dict(
-            {
-                "applied_inference": {
-                    "dataset_path": "dataset.parquet",
-                    "explicit_confounders": {"enabled": True, "confounders": []},
-                }
-            }
-        )
-
-    with pytest.raises(ValueError, match="confounder_forest"):
-        ExperimentConfig.from_dict(
-            {
-                "applied_inference": {
-                    "dataset_path": "dataset.parquet",
-                    "architecture": {"model_type": "confounder_forest"},
-                }
-            }
-        )
-
-
-def test_explicit_confounder_imports_are_role_aware_feature_aliases():
-    from oci.extraction.explicit_confounders import (
-        ExplicitConfounderValue,
-        VLLMConfounderExtractor,
-    )
-    from oci.models.explicit_confounder_featurizer import (
-        ExplicitConfounderFeaturizer,
-        get_raw_confounder_features,
-    )
-
-    assert ExplicitConfounderValue is ExplicitFeatureValue
-    assert VLLMConfounderExtractor is VLLMFeatureExtractor
-    assert ExplicitConfounderFeaturizer is ExplicitFeatureFeaturizer
-    assert get_raw_confounder_features is get_raw_explicit_features
-
-
-def test_legacy_htr_and_training_keys_migrate_without_reactivating_old_models():
-    config = ExperimentConfig.from_dict(
-        {
-            "applied_inference": {
-                "dataset_path": "dataset.parquet",
-                "architecture": {
-                    "model_type": "multi_model_forest",
-                    "causal_head_hidden_outcome_dim": 73,
-                },
-                "training": {
-                    "learning_rate": 0.002,
-                    "gamma_rlearner": 99,
-                    "beta_targreg": 88,
-                    "stop_grad_propensity": True,
-                },
-            }
-        }
-    )
-
-    assert config.applied_inference.architecture.htr_prediction_head_hidden_dim == 73
-    assert config.applied_inference.training.learning_rate == pytest.approx(0.002)
-    assert not hasattr(config.applied_inference.training, "gamma_rlearner")

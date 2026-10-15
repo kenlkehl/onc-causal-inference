@@ -1,5 +1,3 @@
-import json
-
 import numpy as np
 import pandas as pd
 
@@ -8,14 +6,11 @@ from oci.config import (
     ModelArchitectureConfig,
     MultiModelForestConfig,
 )
-from oci.inference.tfidf_topic_discovery import stable_hash
 from oci.inference.tfidf_topic_stage1 import (
     _outer_split_plan,
     make_joint_treatment_outcome_splits,
     tfidf_topic_dataset_fingerprints,
-    tfidf_topic_stage1_cache_is_valid,
     tfidf_topic_stage1_config_hash,
-    tfidf_topic_stage1_identity,
 )
 
 
@@ -151,47 +146,3 @@ def test_stage1_hash_tracks_model_content_row_order_seed_and_split_semantics():
     changed_inner_folds = _config(seed=31)
     changed_inner_folds.architecture.multi_model_forest.candidate_consistency_inner_folds = 2
     assert tfidf_topic_stage1_config_hash(changed_inner_folds, data) != baseline_hash
-
-
-def test_stage1_manifest_cache_validation_fails_closed(tmp_path):
-    data = _dataset()
-    config = _config(seed=41)
-    identity = tfidf_topic_stage1_identity(config, data)
-    output_path = tmp_path / "stage1.parquet"
-    handoff_path = tmp_path / "handoff" / "discovery_contexts.jsonl"
-    manifest_path = handoff_path.parent / "manifest.json"
-    output_path.write_bytes(b"placeholder")
-    handoff_path.parent.mkdir(parents=True)
-    handoff_path.write_text("{}\n", encoding="utf-8")
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "stage1_config_hash": stable_hash(identity),
-                "dataset_content_fingerprint": identity["dataset"]["content_fingerprint"],
-                "dataset_ordered_row_fingerprint": identity["dataset"]["ordered_row_fingerprint"],
-                "split_semantics_hash": identity["split_semantics_hash"],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    assert tfidf_topic_stage1_cache_is_valid(
-        dataset=data,
-        config=config,
-        output_path=output_path,
-        handoff_path=handoff_path,
-    )
-    changed = data.copy()
-    changed.loc[0, "outcome_indicator"] = 1 - changed.loc[0, "outcome_indicator"]
-    assert not tfidf_topic_stage1_cache_is_valid(
-        dataset=changed,
-        config=config,
-        output_path=output_path,
-        handoff_path=handoff_path,
-    )
-    assert not tfidf_topic_stage1_cache_is_valid(
-        dataset=data,
-        config=_config(seed=42),
-        output_path=output_path,
-        handoff_path=handoff_path,
-    )

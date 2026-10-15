@@ -20,16 +20,6 @@ def clip_probability(values: Any, eps: float = 1e-4) -> np.ndarray:
     return np.clip(probs, eps, 1.0 - eps)
 
 
-def smooth_binary_targets(target: Any, smoothing: float) -> np.ndarray:
-    y = np.asarray(target, dtype=float)
-    value = float(smoothing)
-    if value <= 0:
-        return y
-    if value >= 1:
-        raise ValueError("binary label smoothing must be < 1")
-    return y * (1.0 - value) + 0.5 * value
-
-
 def binary_calibration_metrics(
     y_true: Any,
     prob: Any,

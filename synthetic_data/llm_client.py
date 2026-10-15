@@ -5,7 +5,7 @@ import logging
 import json
 import re
 import threading
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 try:
     from openai import OpenAI
@@ -31,7 +31,7 @@ class LLMClient:
         if OpenAI is None:
             raise ImportError(
                 "The 'openai' package is required for API-server synthetic data "
-                "generation. Install it or use --use-vllm-batch."
+                "generation. Install it with: pip install openai"
             )
         self.config = config
         self.client = OpenAI(

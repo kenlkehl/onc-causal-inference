@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 import json
-import pandas as pd
 
 from ..config import ExperimentConfig
 from ..utils import set_seed, ensure_dir, get_device

@@ -2,8 +2,7 @@
 """Configuration classes for synthetic data generation."""
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional, List, Dict, Any, Union, Tuple
-from pathlib import Path
+from typing import Optional, List, Dict, Any
 import json
 
 
@@ -82,10 +81,12 @@ class SyntheticDataConfig:
     outcome_type: str = "binary"
     outcome_noise_std: float = 1.0  # Noise std for continuous outcomes
 
-    # Generation mode: "single_document" (legacy) or "two_stage" (new)
+    # Generation mode. Only "two_stage" (event timeline, then per-event note
+    # expansion) is supported; the field is kept because saved generation
+    # configs record it and saved-DGP generation compares it.
     generation_mode: str = "two_stage"
 
-    # Two-stage generation settings (only used when generation_mode="two_stage")
+    # Two-stage generation settings
     min_events_per_patient: int = 15
     max_events_per_patient: int = 30
     note_types_to_expand: List[str] = field(default_factory=lambda: [
@@ -94,8 +95,8 @@ class SyntheticDataConfig:
     note_separator: str = "\n\n<new_note>\n\n"
     drug_perturbation_prob: float = 0.3
 
-    # Output
-    output_dir: str = "./synthetic_data/example_synthetic_datasets"
+    # Output (kept outside the tracked synthetic_data/example_synthetic_datasets/)
+    output_dir: str = "./synthetic_output"
 
     # LLM settings
     llm: LLMConfig = field(default_factory=LLMConfig)
@@ -144,21 +145,18 @@ class SyntheticDataConfig:
         if not self.llm.api_base_url:
             raise ValueError("llm.api_base_url is required")
 
-        if self.generation_mode not in ("single_document", "two_stage"):
-            raise ValueError(f"generation_mode must be 'single_document' or 'two_stage', got '{self.generation_mode}'")
+        if self.generation_mode != "two_stage":
+            raise ValueError(f"generation_mode must be 'two_stage', got '{self.generation_mode}'")
 
-        if self.generation_mode == "two_stage":
-            if self.min_events_per_patient < 5:
-                raise ValueError("min_events_per_patient must be at least 5")
-            if self.max_events_per_patient < self.min_events_per_patient:
-                raise ValueError("max_events_per_patient must be >= min_events_per_patient")
-            if not (0 <= self.drug_perturbation_prob <= 1):
-                raise ValueError("drug_perturbation_prob must be between 0 and 1")
+        if self.min_events_per_patient < 5:
+            raise ValueError("min_events_per_patient must be at least 5")
+        if self.max_events_per_patient < self.min_events_per_patient:
+            raise ValueError("max_events_per_patient must be >= min_events_per_patient")
+        if not (0 <= self.drug_perturbation_prob <= 1):
+            raise ValueError("drug_perturbation_prob must be between 0 and 1")
 
         # Validate structured data config
         if self.structured_data.enabled:
-            if self.generation_mode != "two_stage":
-                raise ValueError("structured_data requires generation_mode='two_stage'")
             valid_instruments = {"EORTC_QLQ_C30", "PRO_CTCAE"}
             for inst in self.structured_data.pro_instruments:
                 if inst not in valid_instruments:

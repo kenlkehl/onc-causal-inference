@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -92,20 +91,12 @@ class _FakeHTRRunner:
     def _cleanup_model(self, _model):
         return None
 
-    def _fold_n_jobs(self, _folds):
-        return 3
-
-    def _device_context_for_inner_fold(self, _fold):
-        return nullcontext()
-
 
 def _htr_provider(store: Stage1CheckpointStore, runner: _FakeHTRRunner):
     provider = object.__new__(multi_model_forest_stage1.MultiModelForestStage1HTRProvider)
     provider._runner = runner
     provider.config = runner.config
     provider.checkpoint_store = store
-    provider.native_capture_sink = None
-    provider.native_pair_capture_sink = None
     provider._ensure_runner = lambda _frame: runner
     return provider
 
@@ -272,7 +263,7 @@ def test_each_leaf_seed_is_independent_of_resume_order(tmp_path):
 
 
 def test_htr_nuisance_folds_resume_after_interruption(tmp_path, monkeypatch):
-    monkeypatch.setattr(multi_model_forest_stage1, "_NuisanceNet", _FakeHTRNet)
+    monkeypatch.setattr(multi_model_forest_stage1, "NuisanceNet", _FakeHTRNet)
     train = pd.DataFrame(
         {
             "_oci_row_id": np.arange(9),
@@ -312,7 +303,6 @@ def test_htr_nuisance_folds_resume_after_interruption(tmp_path, monkeypatch):
     )
     pd.testing.assert_frame_equal(resumed["test_predictions"], clean["test_predictions"])
     assert resumed["train"]["attention"] == clean["train"]["attention"]
-    assert resumed["inner_model_rows"] == clean["inner_model_rows"]
 
 
 def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
@@ -328,7 +318,7 @@ def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
 
     monkeypatch.setattr(stage1_dina, "neural_predictions", predictions)
 
-    monkeypatch.setattr(multi_model_forest_stage1, "_EffectNet", _FakeHTRNet)
+    monkeypatch.setattr(multi_model_forest_stage1, "EffectNet", _FakeHTRNet)
     train = pd.DataFrame(
         {
             "_oci_row_id": np.arange(9),
@@ -346,9 +336,6 @@ def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
             "m_hat": np.linspace(0.3, 0.7, 9),
         }
     )
-    test_nuisance = pd.DataFrame(
-        {"_oci_row_id": [20, 21], "e_hat": [0.4, 0.6], "m_hat": [0.6, 0.4]}
-    )
 
     def prepare(store):
         store.run("assembly/nuisance_ensemble", lambda: {"ready": True})
@@ -365,7 +352,6 @@ def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
             nuisance,
             outer_fold=1,
             effect_objective="squared_r_loss",
-            test_nuisance_predictions=test_nuisance,
         )
     assert first_runner.effect_calls == [1, 2]
 
@@ -379,7 +365,6 @@ def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
         nuisance,
         outer_fold=1,
         effect_objective="squared_r_loss",
-        test_nuisance_predictions=test_nuisance,
     )
     assert resumed_runner.effect_calls == [2, 3]
 
@@ -393,7 +378,6 @@ def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
         nuisance,
         outer_fold=1,
         effect_objective="squared_r_loss",
-        test_nuisance_predictions=test_nuisance,
     )
     assert clean_runner.effect_calls == [1, 2, 3]
     pd.testing.assert_frame_equal(
@@ -402,7 +386,6 @@ def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
     )
     pd.testing.assert_frame_equal(resumed["test_predictions"], clean["test_predictions"])
     assert resumed["train"]["attention"] == clean["train"]["attention"]
-    assert resumed["inner_model_rows"] == clean["inner_model_rows"]
 
 
 def test_context_lock_rejects_overlapping_writer(tmp_path):
@@ -413,34 +396,6 @@ def test_context_lock_rejects_overlapping_writer(tmp_path):
         with pytest.raises(Stage1CheckpointBusyError, match="already running"):
             with contender.context_lock():
                 raise AssertionError("contender unexpectedly acquired the lock")
-
-
-def test_native_capture_never_reuses_checkpointed_outputs(tmp_path):
-    store = _store(tmp_path)
-    store.run("bow/unit", lambda: np.asarray([1.0]))
-    runner = object.__new__(multi_model_forest_stage1.MultiModelForestStage1Runner)
-    runner.checkpoint_store = store
-    runner.bow_native_capture_sink = object()
-    runner.htr_native_capture_sink = None
-    runner.matched_pair_native_capture_sink = None
-    runner.embedding_provider = None
-    runner.htr_evidence_provider = None
-    calls = 0
-
-    def compute():
-        nonlocal calls
-        calls += 1
-        return np.asarray([2.0])
-
-    value = runner._checkpointed_value(
-        "bow/unit",
-        compute,
-        train_df=pd.DataFrame({"_oci_row_id": [1]}),
-        test_df=pd.DataFrame({"_oci_row_id": [2]}),
-    )
-
-    assert calls == 1
-    np.testing.assert_array_equal(value, [2.0])
 
 
 def test_dataset_identity_reads_only_path_size_and_mtime(tmp_path):
@@ -479,7 +434,6 @@ def test_htr_pair_folds_resume_after_interruption_with_equivalent_result(
             "test_prob": np.full(len(test), 0.5 + inner_fold / 20.0),
             "test_n": np.full(len(test), inner_fold, dtype=float),
             "attention_rows": [{"inner_fold": inner_fold}],
-            "evidence": {"inner_fold": inner_fold},
             "prediction_frame": pd.DataFrame(),
         }
 
@@ -557,7 +511,6 @@ def test_htr_pair_folds_resume_after_interruption_with_equivalent_result(
     np.testing.assert_array_equal(resumed.train_delta_logit, clean.train_delta_logit)
     np.testing.assert_array_equal(resumed.test_delta_logit, clean.test_delta_logit)
     np.testing.assert_array_equal(resumed.train_pred_prob, clean.train_pred_prob)
-    assert resumed.evidence_rows == clean.evidence_rows
     assert resumed.attention_rows == clean.attention_rows
     assert resumed.metrics == clean.metrics
 
@@ -582,7 +535,6 @@ def test_bow_pair_folds_and_full_importance_resume_independently(tmp_path, monke
             "test_prob": np.full(len(test), 0.5 + inner_fold / 20.0),
             "test_n": np.full(len(test), inner_fold, dtype=float),
             "attention_rows": [],
-            "evidence": {"inner_fold": inner_fold},
             "prediction_frame": pd.DataFrame(),
         }
 

@@ -4,7 +4,6 @@
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 from pathlib import Path
@@ -15,12 +14,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from .config import SyntheticDataConfig, LLMConfig, StructuredDataConfig, DEFAULT_CLINICAL_QUESTION
-from .generator import (
-    generate_synthetic_dataset,
-    generate_synthetic_dataset_batch,
-    generate_synthetic_dataset_gemini_batch,
-)
-from oci.extraction import resolve_vllm_reasoning_parser
+from .generator import generate_synthetic_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -330,96 +324,6 @@ class _OpenAIExtractionClient:
         return results, raw_responses
 
 
-class _VLLMExtractionClient:
-    """Direct vLLM inference client for confounder extraction."""
-
-    def __init__(
-        self,
-        model_name: str = "openai/gpt-oss-120b",
-        download_dir: str = "/data1/ken/models",
-        tensor_parallel_size: int = 1,
-        gpu_memory_utilization: float = 0.90,
-        confounders: Optional[List[Dict[str, Any]]] = None,
-        max_text_tokens: int = 100000,
-        reasoning_marker: Optional[str] = None,
-        vllm_reasoning_parser: Optional[str] = "auto",
-    ):
-        try:
-            from vllm import LLM, SamplingParams  # noqa: F401
-        except ImportError:
-            raise ImportError("vllm package required. Install with: pip install vllm")
-
-        reasoning_parser = resolve_vllm_reasoning_parser(
-            vllm_reasoning_parser,
-            model_name,
-        )
-        logger.info(
-            "Loading vLLM model: %s with TP=%s, reasoning_parser=%s",
-            model_name,
-            tensor_parallel_size,
-            reasoning_parser,
-        )
-
-        llm_kwargs = {
-            "model": model_name,
-            "tensor_parallel_size": tensor_parallel_size,
-            "gpu_memory_utilization": gpu_memory_utilization,
-            "trust_remote_code": True,
-            "download_dir": download_dir,
-        }
-        if reasoning_parser:
-            llm_kwargs["reasoning_parser"] = reasoning_parser
-
-        self.llm = LLM(**llm_kwargs)
-        self.model_name = model_name
-        self.confounders = confounders or []
-        self.max_text_tokens = max_text_tokens
-        self.reasoning_marker = reasoning_marker
-        self.vllm_reasoning_parser = reasoning_parser
-        self.tokenizer = self.llm.get_tokenizer()
-        logger.info("vLLM model loaded successfully")
-
-    def extract_batch(
-        self,
-        clinical_texts: List[str],
-        batch_size: int = 100,
-        temperature: float = 0.0,
-        max_tokens: int = 5000,
-    ) -> Tuple[List[Dict[str, Any]], List[str]]:
-        from vllm import SamplingParams
-
-        messages_list = []
-        for text in clinical_texts:
-            truncated = truncate_to_last_n_tokens(text, self.tokenizer, self.max_text_tokens)
-            user_content = build_extraction_prompt(truncated, self.confounders)
-            messages_list.append([{"role": "user", "content": user_content}])
-
-        sampling_params = SamplingParams(
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stop=["User:"],
-        )
-
-        logger.info(f"Running vLLM batch chat inference on {len(messages_list)} texts...")
-        outputs = self.llm.chat(messages_list, sampling_params=sampling_params)
-
-        results = []
-        raw_responses = []
-        for output in outputs:
-            if output.outputs and len(output.outputs) > 0:
-                raw_response = output.outputs[0].text.strip()
-                raw_responses.append(raw_response)
-                extracted = parse_extraction_response(
-                    raw_response, self.confounders, self.reasoning_marker
-                )
-                results.append(extracted)
-            else:
-                results.append(_make_empty_result(self.confounders))
-                raw_responses.append("<Empty>")
-
-        return results, raw_responses
-
-
 def evaluate_extraction_accuracy(
     df: pd.DataFrame,
     confounders: List[Dict[str, Any]],
@@ -555,17 +459,13 @@ def run_confounder_extraction(
     df: pd.DataFrame,
     confounders: List[Dict[str, Any]],
     output_dir: str,
-    use_vllm_direct: bool = False,
     model_name: str = "openai/gpt-oss-120b",
     api_url: str = "http://localhost:8000/v1",
     api_key: str = "EMPTY",
-    tensor_parallel_size: int = 2,
-    download_dir: str = "/data1/ken/models",
     batch_size: int = 10,
     max_text_tokens: int = 100000,
     max_completion_tokens: int = 5000,
     reasoning_marker: Optional[str] = None,
-    vllm_reasoning_parser: Optional[str] = "auto",
 ) -> Tuple[pd.DataFrame, Optional[Dict[str, Any]]]:
     """Run confounder extraction and evaluation on a generated dataset.
 
@@ -573,17 +473,13 @@ def run_confounder_extraction(
         df: DataFrame with 'clinical_text' and optionally 'patient_prompt' columns
         confounders: List of confounder definitions from metadata
         output_dir: Directory to save extraction outputs
-        use_vllm_direct: Use direct vLLM inference instead of API
         model_name: Model name/path
-        api_url: OpenAI-compatible API URL (used when use_vllm_direct=False)
+        api_url: OpenAI-compatible API URL
         api_key: API key
-        tensor_parallel_size: Tensor parallel size for vLLM
-        download_dir: Model download directory for vLLM
         batch_size: Batch size for extraction
         max_text_tokens: Max tokens to keep from end of each clinical text
         max_completion_tokens: Max tokens for model response
         reasoning_marker: Optional marker to strip legacy reasoning prefix
-        vllm_reasoning_parser: Native vLLM reasoning parser name, "auto", or disabled with "none"
 
     Returns:
         Tuple of (augmented DataFrame, metrics dict or None)
@@ -596,25 +492,14 @@ def run_confounder_extraction(
             logger.info(f"  - {conf['name']} (continuous)")
 
     # Initialize extraction client
-    if use_vllm_direct:
-        client = _VLLMExtractionClient(
-            model_name=model_name,
-            download_dir=download_dir,
-            tensor_parallel_size=tensor_parallel_size,
-            confounders=confounders,
-            max_text_tokens=max_text_tokens,
-            reasoning_marker=reasoning_marker,
-            vllm_reasoning_parser=vllm_reasoning_parser,
-        )
-    else:
-        client = _OpenAIExtractionClient(
-            base_url=api_url,
-            model=model_name,
-            api_key=api_key,
-            confounders=confounders,
-            max_text_tokens=max_text_tokens,
-            reasoning_marker=reasoning_marker,
-        )
+    client = _OpenAIExtractionClient(
+        base_url=api_url,
+        model=model_name,
+        api_key=api_key,
+        confounders=confounders,
+        max_text_tokens=max_text_tokens,
+        reasoning_marker=reasoning_marker,
+    )
 
     # Extract confounders
     clinical_texts = df["clinical_text"].tolist()
@@ -740,20 +625,11 @@ Examples:
   # Custom clinical question with positivity enforcement
   python -m synthetic_data.cli --clinical-question "Compare pembrolizumab with nivolumab for NSCLC" --enforce-positivity
 
-    # Single GPU (original behavior)
-  python -m synthetic_data.cli --use-vllm-batch --tensor-parallel-size 2
+  # More patients from an existing dataset's saved causal process
+  python -m synthetic_data.cli --config original/generation_config.json --dgp-metadata original/metadata.json --dataset-size 10000 --output-dir ./expanded_cohort
 
-  # Multi-GPU with 2 parallel workers (4 GPUs, 2 per worker)
-  python -m synthetic_data.cli --use-vllm-batch \
-    --gpu-devices 0,1,2,3 --tensor-parallel-size 2 \
-    --dataset-size 100 --output-dir ./test_multi_gpu
-
-  # Multi-GPU with 4 parallel workers (8 GPUs, 2 per worker)
-  python -m synthetic_data.cli --use-vllm-batch \
-    --gpu-devices 0,1,2,3,4,5,6,7 --tensor-parallel-size 2
-
-  # Generate and extract confounders in one step
-  python -m synthetic_data.cli --use-vllm-batch --dataset-size 100 --extract-confounders
+  # Generate and extract features in one step
+  python -m synthetic_data.cli --dataset-size 100 --extract-features
         """,
     )
 
@@ -843,14 +719,7 @@ Examples:
         help="Target std of logits; lower values compress propensities toward 0.5 (default: 2.0)",
     )
 
-    # Generation mode
-    parser.add_argument(
-        "--generation-mode",
-        type=str,
-        choices=["single_document", "two_stage"],
-        default="two_stage",
-        help="Generation mode: 'single_document' (legacy single blob) or 'two_stage' (event timeline + note expansion, default)",
-    )
+    # Two-stage generation (event timeline, then per-event note expansion)
     parser.add_argument(
         "--min-events",
         type=int,
@@ -932,15 +801,15 @@ Examples:
         "--max-tokens",
         type=int,
         default=50000,
-        help="Max tokens per LLM response (default: 20000)",
+        help="Max tokens per LLM response (default: 50000)",
     )
 
     # Output
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="./synthetic_data/example_synthetic_datasets",
-        help="Output directory for generated files (default: ./synthetic_data/example_synthetic_datasets)",
+        default="./synthetic_output",
+        help="Output directory for generated files (default: ./synthetic_output)",
     )
 
     # Execution
@@ -954,7 +823,7 @@ Examples:
         "--num-workers",
         type=int,
         default=40,
-        help="Number of parallel workers for patient generation (default: 4)",
+        help="Number of parallel API requests for patient generation (default: 40)",
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -962,112 +831,16 @@ Examples:
         help="Enable verbose logging",
     )
     parser.add_argument(
-        "--use-vllm-batch",
-        action="store_true",
-        help="Use direct vLLM batch inference (faster, no server needed)",
-    )
-    parser.add_argument(
-        "--use-gemini-batch",
-        action="store_true",
-        help="Use Gemini batch inference on Google Agent Platform / Vertex AI",
-    )
-    parser.add_argument(
         "--dgp-metadata",
         type=str,
         default=None,
-        help="Reuse saved feature definitions, calibrated equations, and distributions (API or Gemini batch)",
-    )
-    parser.add_argument(
-        "--gcp-project",
-        type=str,
-        default=None,
-        help="GCP project for Gemini batch jobs (defaults to GOOGLE_CLOUD_PROJECT)",
-    )
-    parser.add_argument(
-        "--gcp-location",
-        type=str,
-        default="us-central1",
-        help="GCP location for Gemini batch jobs (default: us-central1)",
-    )
-    parser.add_argument(
-        "--gcs-staging-uri",
-        type=str,
-        default=None,
-        help="GCS prefix for Gemini batch inputs and outputs, e.g. gs://bucket/path/run",
-    )
-    parser.add_argument(
-        "--gemini-model",
-        type=str,
-        default="gemini-2.5-flash-lite",
-        help="Gemini model ID for batch generation (default: gemini-2.5-flash-lite)",
-    )
-    parser.add_argument(
-        "--batch-max-requests",
-        type=int,
-        default=100000,
-        help="Maximum requests per Gemini batch input shard (default: 100000)",
-    )
-    parser.add_argument(
-        "--batch-max-input-bytes",
-        type=int,
-        default=800000000,
-        help="Maximum bytes per Gemini batch input shard (default: 800000000)",
-    )
-    parser.add_argument(
-        "--batch-poll-interval",
-        type=int,
-        default=30,
-        help="Seconds between Gemini batch job status polls (default: 30)",
-    )
-    parser.add_argument(
-        "--gemini-submit-only",
-        action="store_true",
-        help="Submit the next Gemini batch stage and stop before collecting/assembling outputs",
-    )
-    parser.add_argument(
-        "--gemini-local-partitions",
-        type=int,
-        default=256,
-        help="Number of local patient partitions for Gemini output assembly (default: 256)",
-    )
-    parser.add_argument(
-        "--tensor-parallel-size",
-        type=int,
-        default=2,
-        help="Tensor parallel size for vLLM (default: 2)",
-    )
-    parser.add_argument(
-        "--gpu-devices",
-        type=str,
-        default=None,
-        help="Comma-separated GPU device IDs for multi-GPU parallelization (e.g., '0,1,2,3'). "
-             "When specified with --use-vllm-batch, spawns multiple parallel workers. "
-             "Number of workers = len(gpu_devices) / tensor_parallel_size. "
-             "If not specified, uses CUDA_VISIBLE_DEVICES or all available GPUs.",
+        help="Reuse saved feature definitions, calibrated equations, and distributions from this metadata.json",
     )
     parser.add_argument(
         "--reasoning-marker",
         type=str,
         default=None,
         help="Optional legacy marker to strip reasoning prefix from model output, e.g. 'assistantfinal'.",
-    )
-    parser.add_argument(
-        "--vllm-reasoning-parser",
-        "--reasoning-parser",
-        type=str,
-        default="auto",
-        help=(
-            "Native vLLM reasoning parser for direct batch generation/extraction. "
-            "Use 'auto' to infer qwen3, gemma4, or openai_gptoss from the model name; "
-            "use 'none' to disable."
-        ),
-    )
-
-    parser.add_argument(
-        "--vllm-download-dir",
-        type=str,
-        default="./",
-        help="Download directory for vllm model",
     )
     parser.add_argument(
         "--outcome-type",
@@ -1119,18 +892,6 @@ Examples:
 
     args = parser.parse_args()
 
-    if args.use_vllm_batch and args.use_gemini_batch:
-        parser.error("--use-vllm-batch and --use-gemini-batch are mutually exclusive")
-    if args.use_vllm_batch and args.dgp_metadata:
-        parser.error("--dgp-metadata requires API-server mode or --use-gemini-batch")
-    if args.use_gemini_batch:
-        if not args.dgp_metadata:
-            parser.error("--use-gemini-batch requires --dgp-metadata")
-        if not args.gcs_staging_uri:
-            parser.error("--use-gemini-batch requires --gcs-staging-uri")
-        if not (args.gcp_project or os.environ.get("GOOGLE_CLOUD_PROJECT")):
-            parser.error("--use-gemini-batch requires --gcp-project or GOOGLE_CLOUD_PROJECT")
-
     if args.num_features is None and (
         args.num_confounders is not None or args.num_effect_modifiers is not None
     ):
@@ -1178,8 +939,6 @@ Examples:
         if args.outcome_noise_std != 1.0:
             config.outcome_noise_std = args.outcome_noise_std
         # Two-stage generation overrides
-        if args.generation_mode != "two_stage":
-            config.generation_mode = args.generation_mode
         if args.min_events != 15:
             config.min_events_per_patient = args.min_events
         if args.max_events != 30:
@@ -1199,8 +958,9 @@ Examples:
             config.structured_data.include_hospitalizations = False
         if args.no_pros:
             config.structured_data.include_pros = False
-        if args.output_dir != "./synthetic_output":
-            config.output_dir = args.output_dir
+        # Always use the CLI output directory (default ./synthetic_output) so a
+        # saved config never redirects output into the dataset it came from.
+        config.output_dir = args.output_dir
         if args.seed != 42:
             config.seed = args.seed
         # LLM overrides
@@ -1231,7 +991,6 @@ Examples:
             num_effect_modifiers=args.num_effect_modifiers,
             outcome_type=args.outcome_type,
             outcome_noise_std=args.outcome_noise_std,
-            generation_mode=args.generation_mode,
             min_events_per_patient=args.min_events,
             max_events_per_patient=args.max_events,
             note_separator=args.note_separator,
@@ -1254,9 +1013,6 @@ Examples:
             ),
         )
 
-    if args.use_gemini_batch:
-        config.llm.model_name = args.gemini_model
-
     # Save config to output directory before generation
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1264,85 +1020,14 @@ Examples:
     config.to_json(str(config_output_path))
     logging.info(f"Config saved to: {config_output_path}")
 
-    # Parse GPU devices (needed for both generation and extraction)
-    gpu_device_ids = None
-    if args.gpu_devices:
-        try:
-            gpu_device_ids = [int(d.strip()) for d in args.gpu_devices.split(",")]
-        except ValueError:
-            logging.error(f"Invalid --gpu-devices format: {args.gpu_devices}. Expected comma-separated integers.")
-            sys.exit(1)
-
-        if args.use_vllm_batch:
-            if len(gpu_device_ids) % args.tensor_parallel_size != 0:
-                logging.error(
-                    f"Number of GPU devices ({len(gpu_device_ids)}) must be divisible by "
-                    f"tensor_parallel_size ({args.tensor_parallel_size})"
-                )
-                sys.exit(1)
-
-            num_workers = len(gpu_device_ids) // args.tensor_parallel_size
-            logging.info(f"Multi-GPU mode: {len(gpu_device_ids)} GPUs -> {num_workers} parallel workers "
-                        f"(tensor_parallel_size={args.tensor_parallel_size})")
-
     # Run generation
     try:
-        if args.use_vllm_batch:
-            # Use direct vLLM batch inference (faster)
-            from .vllm_batch_client import VLLMConfig
-
-            vllm_config = VLLMConfig(
-                model_name=args.model,
-                tensor_parallel_size=args.tensor_parallel_size,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
-                download_dir=args.vllm_download_dir,
-                reasoning_marker=args.reasoning_marker,
-                vllm_reasoning_parser=args.vllm_reasoning_parser,
-            )
-            df, metadata = generate_synthetic_dataset_batch(
-                config=config,
-                vllm_config=vllm_config,
-                show_progress=True,
-                gpu_device_ids=gpu_device_ids,
-            )
-        elif args.use_gemini_batch:
-            from .gemini_batch_client import GeminiBatchConfig
-
-            gemini_config = GeminiBatchConfig(
-                project=args.gcp_project or os.environ["GOOGLE_CLOUD_PROJECT"],
-                location=args.gcp_location,
-                staging_uri=args.gcs_staging_uri,
-                model_name=args.gemini_model,
-                batch_max_requests=args.batch_max_requests,
-                batch_max_input_bytes=args.batch_max_input_bytes,
-                poll_interval_seconds=args.batch_poll_interval,
-                submit_only=args.gemini_submit_only,
-            )
-            df, metadata = generate_synthetic_dataset_gemini_batch(
-                config=config,
-                gemini_config=gemini_config,
-                dgp_metadata_path=args.dgp_metadata,
-                show_progress=True,
-                local_partitions=args.gemini_local_partitions,
-            )
-        else:
-            df, metadata = generate_synthetic_dataset(
-                config=config,
-                num_workers=args.num_workers,
-                show_progress=True,
-                dgp_metadata_path=args.dgp_metadata,
-            )
-
-        gemini_batch_metadata = metadata.get("gemini_batch", {})
-        if gemini_batch_metadata.get("submit_only"):
-            print("\nSubmitted Gemini batch jobs")
-            if gemini_batch_metadata.get("timeline_manifest"):
-                print(f"  - Timeline manifest: {gemini_batch_metadata['timeline_manifest']}")
-            if gemini_batch_metadata.get("note_manifest"):
-                print(f"  - Note manifest: {gemini_batch_metadata['note_manifest']}")
-            print(f"  - Metadata: {config.output_dir}/metadata.json")
-            return
+        df, metadata = generate_synthetic_dataset(
+            config=config,
+            num_workers=args.num_workers,
+            show_progress=True,
+            dgp_metadata_path=args.dgp_metadata,
+        )
 
         print(f"\n✓ Generated {len(df)} patients")
         print(f"  - Treatment rate: {df['treatment_indicator'].mean():.1%}")
@@ -1352,8 +1037,7 @@ Examples:
             print(f"  - Outcome rate: {df['outcome_indicator'].mean():.1%}")
         if config.enforce_positivity:
             print(f"  - Positivity enforcement: ON (min={config.min_treatment_rate_per_stratum:.0%}, max={config.max_treatment_rate_per_stratum:.0%})")
-        print(f"  - Generation mode: {config.generation_mode}")
-        if config.generation_mode == "two_stage" and "num_notes" in df.columns:
+        if "num_notes" in df.columns:
             print(f"  - Notes per patient: {df['num_notes'].mean():.1f} avg ({df['num_notes'].min()}-{df['num_notes'].max()} range)")
         print(f"  - Config: {config.output_dir}/generation_config.json")
         print(f"  - Dataset: {config.output_dir}/dataset.parquet")
@@ -1377,17 +1061,13 @@ Examples:
                     df=df,
                     confounders=confounders,
                     output_dir=config.output_dir,
-                    use_vllm_direct=args.use_vllm_batch,
                     model_name=args.model,
                     api_url=args.api_url,
                     api_key=args.api_key if args.api_key else "EMPTY",
-                    tensor_parallel_size=args.tensor_parallel_size,
-                    download_dir=args.vllm_download_dir,
                     batch_size=args.extraction_batch_size,
                     max_text_tokens=args.extraction_max_text_tokens,
                     max_completion_tokens=args.extraction_max_completion_tokens,
                     reasoning_marker=args.reasoning_marker,
-                    vllm_reasoning_parser=args.vllm_reasoning_parser,
                 )
 
                 if metrics:

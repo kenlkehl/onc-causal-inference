@@ -43,19 +43,6 @@ class _VariableLengthArray:
         return (len(self), "variable", int(self.flat.shape[-1]))
 
 
-class _VariableLengthMaskArray:
-    """Generate all-valid masks for variable-length cached embedding rows."""
-
-    def __init__(self, offsets: np.ndarray) -> None:
-        self.offsets = offsets
-
-    def __getitem__(self, index: int) -> np.ndarray:
-        length = int(self.offsets[index + 1] - self.offsets[index])
-        return np.ones(length, dtype=np.uint8)
-
-    def __len__(self) -> int:
-        return len(self.offsets) - 1
-
 _SENTENCE_TRANSFORMER_CACHE = {}
 _CHUNK_TEXTS_FILENAME = "chunk_texts.jsonl"
 _CHUNKING_POLICY_VERSION = "word_then_token_bound_lossless_v2"
@@ -257,7 +244,6 @@ class ConceptEmbeddingCache:
         self._offsets = None
         self._metadata = None
         self._hs_array = None
-        self._mask_array = None
 
     @staticmethod
     def compute_cache_hash(
@@ -328,12 +314,6 @@ class ConceptEmbeddingCache:
         if self._hs_array is None:
             self.open()
         return self._hs_array
-
-    @property
-    def attention_mask_array(self):
-        if self._mask_array is None:
-            self.open()
-        return self._mask_array
 
     def _load_metadata(self) -> None:
         meta_path = self._cache_path / "metadata.json"
@@ -871,31 +851,3 @@ class ConceptEmbeddingCache:
         self._flat_mmap = flat
         self._offsets = offsets
         self._hs_array = _VariableLengthArray(flat, offsets)
-        self._mask_array = _VariableLengthMaskArray(offsets)
-
-    def preload_to_ram(self) -> None:
-        """Load memmaps into RAM for DataLoader workers."""
-        if self._metadata is None:
-            self._load_metadata()
-        emb_path = self._cache_path / "chunk_embeddings.npy"
-        offsets_path = self._cache_path / "offsets.npy"
-        flat = np.load(str(emb_path))
-        offsets = np.load(str(offsets_path))
-        self._flat_mmap = flat
-        self._offsets = offsets
-        self._hs_array = _VariableLengthArray(flat, offsets)
-        self._mask_array = _VariableLengthMaskArray(offsets)
-
-    def load_batch(self, indices: List[int], device: torch.device):
-        """Load and pad a batch of variable-length chunk embeddings."""
-        self.open()
-        arrays = [self._hs_array[int(i)] for i in indices]
-        max_len = max(arr.shape[0] for arr in arrays)
-        hidden_size = arrays[0].shape[-1]
-        hs = np.zeros((len(arrays), max_len, hidden_size), dtype=np.float32)
-        mask = np.zeros((len(arrays), max_len), dtype=np.float32)
-        for i, arr in enumerate(arrays):
-            length = arr.shape[0]
-            hs[i, :length] = np.asarray(arr, dtype=np.float32)
-            mask[i, :length] = 1.0
-        return torch.from_numpy(hs).to(device), torch.from_numpy(mask).to(device)

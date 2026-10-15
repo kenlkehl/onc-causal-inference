@@ -24,15 +24,6 @@ _LAZY_EXPORTS = {
         "oci.models.gated_attention_pooling",
         "GatedAttentionPooling",
     ),
-    "ExplicitFeatureFeaturizer": (
-        "oci.models.explicit_feature_featurizer",
-        "ExplicitFeatureFeaturizer",
-    ),
-    # Historical public names remain aliases for the role-aware featurizer.
-    "ExplicitConfounderFeaturizer": (
-        "oci.models.explicit_feature_featurizer",
-        "ExplicitFeatureFeaturizer",
-    ),
     "filter_specs_by_role": (
         "oci.models.explicit_feature_featurizer",
         "filter_specs_by_role",
@@ -40,18 +31,6 @@ _LAZY_EXPORTS = {
     "get_raw_explicit_features": (
         "oci.models.explicit_feature_featurizer",
         "get_raw_explicit_features",
-    ),
-    "get_raw_confounder_features": (
-        "oci.models.explicit_feature_featurizer",
-        "get_raw_explicit_features",
-    ),
-    "get_raw_explicit_feature_matrices": (
-        "oci.models.explicit_feature_featurizer",
-        "get_raw_explicit_feature_matrices",
-    ),
-    "StructuredInteractionHead": (
-        "oci.models.structured_interaction_head",
-        "StructuredInteractionHead",
     ),
 }
 

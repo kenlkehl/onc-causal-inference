@@ -11,12 +11,8 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-def load_dataset(
-    path: str | Path,
-    split: Optional[str] = None,
-    split_column: str = "split",
-) -> pd.DataFrame:
-    """Load a CSV or Parquet cohort, optionally selecting one named split."""
+def load_dataset(path: str | Path) -> pd.DataFrame:
+    """Load a CSV or Parquet cohort."""
 
     source = Path(path)
     if source.suffix == ".parquet":
@@ -25,10 +21,6 @@ def load_dataset(
         frame = pd.read_csv(source)
     else:
         raise ValueError(f"Unsupported dataset format: {source.suffix or '<none>'}")
-    if split is not None:
-        if split_column not in frame.columns:
-            raise ValueError(f"Split column {split_column!r} not found")
-        frame = frame.loc[frame[split_column] == split].copy()
     logger.info("Loaded %d rows from %s", len(frame), source)
     return frame
 

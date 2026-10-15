@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
-import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
-from .stage2_prompt_catalog import ALIAS_MERGE_PROMPT_VERSION, PROMPT_VERSION, SYSTEM_PROMPTS
+from .stage2_prompt_catalog import (  # noqa: F401 - versions are read as module attributes
+    ALIAS_MERGE_PROMPT_VERSION,
+    PROMPT_VERSION,
+    SYSTEM_PROMPTS,
+)
 
 
 def messages(slug: str, clinical_input: str) -> list[dict[str, str]]:
@@ -209,84 +212,6 @@ def study_text(evidence):
     if low is not None or high is not None:
         lines.append(f"Modifier analyses use estimated treatment probabilities from {low if low is not None else 0} to {high if high is not None else 1}, including the bounds.")
     return "\n".join(lines)
-
-
-def evidence_text(card):
-    definition = dict(card.get("definition") or {})
-    definition.setdefault("name", card.get("name", "Clinical variable"))
-    lines = [feature_text(definition), "", "Model results"]
-    rows = card.get("modeling_evidence")
-    if rows is None:
-        lines.append(readable({k: v for k, v in card.items() if k not in {"definition", "feature_id"}}))
-        return "\n".join(lines)
-    for row in rows:
-        family = row["family"]
-        target = {"treatment": "treatment choice", "outcome": "outcome", "effect": "treatment-effect differences"}[row["role"]]
-        lines.append(f"- {METHODS[family]} — {target}: {row.get('supported', 0)} supported results among {row.get('evaluated', 0)} usable fits; {row.get('not_evaluable', 0)} fits unavailable.")
-        if row.get("mean_score") is not None:
-            lines.append(f"  Mean {SCORES[family]}: {row['mean_score']}; range {row.get('min_score')} to {row.get('max_score')}.")
-        for key, title in (("median_p", "Median p-value"), ("median_q", "Median multiplicity-adjusted q-value"),
-                           ("q_supported", "Fits meeting the adjusted q-value criterion"),
-                           ("mean_model_gain", "Mean whole-model validation gain over a constant predictor/effect"),
-                           ("mean_split_importance", "Mean forest split importance"),
-                           ("mean_permutation_sd", "Mean spread across permutation repeats")):
-            if row.get(key) is not None:
-                lines.append(f"  {title}: {row[key]}.")
-        if family == "univariable" and row.get("median_q") is None:
-            lines.append("  Multiplicity-adjusted q-values are unavailable.")
-        if row.get("folds"):
-            lines.append("  Supported/usable fits across overlapping patient groups: " + "; ".join(
-                f"{f.get('supported', 0)}/{f.get('evaluated', 0)}" for f in row["folds"]) + ".")
-        if family == "matched_batch_contrast":
-            lines.append(batch_evidence_text(row))
-    return "\n".join(lines)
-
-
-def evidence_input(evidence, cards):
-    return study_text(evidence) + "\n\n" + "\n\n".join(evidence_text(c) for c in cards)
-
-
-def role_decision(value, feature, *, modeling_evidence=()):
-    """Validate a one-variable judgment; attach internal identity and evidence in Python."""
-    if not isinstance(value, Mapping) or set(value) != {"confounder", "effect_modifier"}:
-        raise ValueError("return confounder and effect_modifier judgments for this clinical variable")
-    fields = {"assign", "assessment", "stability", "rationale", "evidence_comments"}
-    roles, explanations, comments = [], [], []
-    for role in ("confounder", "effect_modifier"):
-        row = value[role]
-        if not isinstance(row, Mapping) or set(row) != fields:
-            raise ValueError(f"{role} requires assign, assessment, stability, rationale, and evidence_comments")
-        if not isinstance(row["assign"], bool):
-            raise ValueError(f"{role}.assign must be a boolean")
-        if row["assessment"] not in {"supported", "plausible", "uncertain", "not_supported"}:
-            raise ValueError(f"invalid {role} assessment")
-        if row["stability"] not in {"consistent", "mixed", "insufficient"}:
-            raise ValueError(f"invalid {role} stability")
-        if row["assign"] and row["assessment"] not in {"supported", "plausible"}:
-            raise ValueError(f"retaining {role} requires a supported or plausible assessment")
-        if not isinstance(row["rationale"], str) or not row["rationale"].strip():
-            raise ValueError(f"{role} requires a rationale")
-        if not isinstance(row["evidence_comments"], list) or any(not isinstance(x, str) for x in row["evidence_comments"]):
-            raise ValueError(f"{role}.evidence_comments must be an array of text")
-        if row["assign"]:
-            roles.append(role)
-        explanations.append(f"{role}: {row['rationale']}")
-        comments.extend(row["evidence_comments"])
-    if feature.get("configured_explicit_feature") is True:
-        roles = list(feature.get("roles") or [])
-    stability = {row["stability"] for row in value.values()}
-    return {
-        "feature_id": str(feature.get("feature_id") or feature["name"]), "roles": roles,
-        "rationale": "\n".join(explanations),
-        "inner_fold_consistency": "; ".join(f"{role}: {value[role]['stability']}" for role in value),
-        "cross_method_reconciliation": "\n".join(comments) or "The supplied evidence is insufficient for further comparison.",
-        "evidence_for": [x for role in value if value[role]["assign"] for x in value[role]["evidence_comments"]],
-        "evidence_against": [x for role in value if not value[role]["assign"] for x in value[role]["evidence_comments"]],
-        "evidence_ids": [row["evidence_id"] for row in modeling_evidence],
-        "evidence_attachment": "Python attached available input evidence; these are not model-authored citations.",
-        "stability": next(iter(stability)) if len(stability) == 1 else "mixed",
-        "role_assessments": dict(value),
-    }
 
 
 def study_context(report):

@@ -41,7 +41,6 @@ class PairUpliftFitResult:
     train_n_controls: np.ndarray
     test_n_controls: np.ndarray
     feature_importance: Dict[str, Any]
-    evidence_rows: List[Dict[str, Any]]
     attention_rows: List[Dict[str, Any]]
     prediction_frame: pd.DataFrame
     metrics: Dict[str, Any]
@@ -527,13 +526,6 @@ class RidgeDeltaBoWPairModel:
         )
         return self
 
-    def predict_delta_prob(self, pairs: pd.DataFrame) -> np.ndarray:
-        if pairs.empty:
-            return np.zeros(0, dtype=float)
-        if self.vectorizer is None or self.model is None:
-            return np.zeros(len(pairs), dtype=float)
-        return np.asarray(self.model.predict(self._matrix(pairs)), dtype=float)
-
     def top_features(self, top_n: int) -> Dict[str, Any]:
         if self.vectorizer is None or self.model is None:
             return {"ridge_delta_probability_positive": [], "ridge_delta_probability_negative": []}
@@ -576,7 +568,6 @@ def _fit_bow_pair_uplift_fold(
     nearest_fallback_controls: int,
     l2_alpha: float,
     max_iter: int,
-    native_capture_sink: Optional[Any],
 ) -> Dict[str, Any]:
     """Fit and score one independently checkpointable BoW pair fold."""
 
@@ -642,46 +633,6 @@ def _fit_bow_pair_uplift_fold(
         test_pair_delta,
         len(test_df),
     )
-    if native_capture_sink is not None:
-        native_capture_sink.record_bow_pair_fold(
-            view_name=view_name,
-            view_index=view_index,
-            fold=inner_fold,
-            fit_pos=fit_pos,
-            validation_pos=heldout_pos,
-            fit_pairs=fit_pairs,
-            validation_pairs=heldout_pairs,
-            heldout_pairs=test_pairs,
-            model=model,
-            validation_pair_delta=heldout_pair_delta,
-            validation_delta=fold_delta,
-            validation_probability=fold_prob,
-            validation_n_controls=fold_n,
-            heldout_pair_delta=test_pair_delta,
-            heldout_delta=fold_test_delta,
-            heldout_probability=fold_test_prob,
-            heldout_n_controls=fold_test_n,
-        )
-    treated_eval = (t_train[heldout_pos].astype(int) == 1) & np.isfinite(fold_prob)
-    evidence = {
-        "outer_fold": int(outer_fold),
-        "inner_fold": int(inner_fold),
-        "source_family": "bow_pair_uplift",
-        "view_name": str(view_name),
-        "objective": "matched_pair_uplift_delta_logit",
-        "target_name": "treated_observed_outcome",
-        "train_rows": int(len(fit_pos)),
-        "heldout_rows": int(len(heldout_pos)),
-        "outer_test_rows": int(len(test_df)),
-        "matched_pair_train_rows": int(len(fit_pairs)),
-        "heldout_candidate_pair_rows": int(len(heldout_pairs)),
-        "outer_test_candidate_pair_rows": int(len(test_pairs)),
-        "heldout_treated_auroc": _safe_roc(
-            y_train[heldout_pos][treated_eval],
-            fold_prob[treated_eval],
-        ),
-        "prediction_provenance": "inner_fold_pair_model_heldout_and_outer_test",
-    }
     prediction_frame = pd.DataFrame()
     if not heldout_pairs.empty:
         prediction_frame = heldout_pairs[["candidate_row_id", "control_row_id"]].copy()
@@ -702,7 +653,6 @@ def _fit_bow_pair_uplift_fold(
         "test_prob": fold_test_prob,
         "test_n": fold_test_n,
         "attention_rows": [],
-        "evidence": evidence,
         "prediction_frame": prediction_frame,
     }
 
@@ -727,7 +677,6 @@ def _fit_bow_pair_full_importance(
     l2_alpha: float,
     max_iter: int,
     top_n: int,
-    native_capture_sink: Optional[Any],
 ) -> Dict[str, Any]:
     full_pairs = build_training_pairs(
         train_df,
@@ -746,7 +695,6 @@ def _fit_bow_pair_full_importance(
         random_state=77_000 + int(outer_fold),
     ).fit(full_pairs)
     importance = full_model.top_features(top_n)
-    ridge_model: Optional[RidgeDeltaBoWPairModel] = None
     try:
         ridge_model = RidgeDeltaBoWPairModel(
             vectorizer_params=vectorizer_params,
@@ -755,21 +703,7 @@ def _fit_bow_pair_full_importance(
         ).fit(full_pairs)
         importance.update(ridge_model.top_features(top_n))
     except Exception as exc:
-        if native_capture_sink is not None:
-            raise RuntimeError(
-                "native matched-pair proof requires the genuine full Ridge diagnostic fit"
-            ) from exc
         logger.debug("Skipping ridge pair-uplift feature table for %s: %s", view_name, exc)
-    if native_capture_sink is not None:
-        if ridge_model is None:
-            raise RuntimeError("native matched-pair proof lacks its full Ridge diagnostic fit")
-        native_capture_sink.record_bow_pair_full(
-            view_name=view_name,
-            view_index=view_index,
-            full_pairs=full_pairs,
-            offset_model=full_model,
-            ridge_model=ridge_model,
-        )
     importance.update(
         {
             "view_name": str(view_name),
@@ -820,7 +754,6 @@ def fit_bow_pair_uplift_train_test(
     l2_alpha: float,
     max_iter: int,
     top_n: int,
-    native_capture_sink: Optional[Any] = None,
     checkpoint_store: Optional[Stage1CheckpointStore] = None,
     checkpoint_dependencies: Sequence[str] = (),
     checkpoint_namespace: Optional[str] = None,
@@ -844,7 +777,6 @@ def fit_bow_pair_uplift_train_test(
     test_deltas = []
     test_probs = []
     test_n_controls = []
-    evidence_rows: List[Dict[str, Any]] = []
     prediction_frames = []
 
     for inner_fold, (fit_pos, heldout_pos) in enumerate(splitter.split(train_df), start=1):
@@ -876,14 +808,9 @@ def fit_bow_pair_uplift_train_test(
                 nearest_fallback_controls=nearest_fallback_controls,
                 l2_alpha=l2_alpha,
                 max_iter=max_iter,
-                native_capture_sink=native_capture_sink,
             )
 
-        if (
-            checkpoint_store is None
-            or checkpoint_namespace is None
-            or native_capture_sink is not None
-        ):
+        if checkpoint_store is None or checkpoint_namespace is None:
             fold_result = compute_fold()
         else:
             fold_result = checkpoint_store.run(
@@ -923,7 +850,6 @@ def fit_bow_pair_uplift_train_test(
         test_deltas.append(np.asarray(fold_result["test_delta"], dtype=float))
         test_probs.append(np.asarray(fold_result["test_prob"], dtype=float))
         test_n_controls.append(np.asarray(fold_result["test_n"], dtype=float))
-        evidence_rows.append(fold_result["evidence"])
         if not fold_result["prediction_frame"].empty:
             prediction_frames.append(fold_result["prediction_frame"])
 
@@ -951,14 +877,9 @@ def fit_bow_pair_uplift_train_test(
             l2_alpha=l2_alpha,
             max_iter=max_iter,
             top_n=top_n,
-            native_capture_sink=native_capture_sink,
         )
 
-    if (
-        checkpoint_store is None
-        or checkpoint_namespace is None
-        or native_capture_sink is not None
-    ):
+    if checkpoint_store is None or checkpoint_namespace is None:
         importance_payload = compute_full_importance()
     else:
         fold_dependencies = tuple(
@@ -999,7 +920,6 @@ def fit_bow_pair_uplift_train_test(
         train_n_controls=train_n_controls,
         test_n_controls=np.asarray(test_n, dtype=float),
         feature_importance=importance,
-        evidence_rows=evidence_rows,
         attention_rows=[],
         prediction_frame=pair_predictions,
         metrics=metrics,
@@ -1036,14 +956,6 @@ class HTRPairUpliftNet(nn.Module):
         }
         if str(head_activation) not in activation_factories:
             raise ValueError("HTR pair head activation is unsupported")
-        self._head_configuration = {
-            "hidden_dim": int(hidden_dim),
-            "depth": int(head_depth),
-            "activation": str(head_activation),
-            "dropout": float(dropout),
-            "layer_norm": head_layer_norm,
-            "bias": head_bias,
-        }
         layers: list[nn.Module] = []
         source_dim = 4 * dim
         for _ in range(int(head_depth)):
@@ -1057,9 +969,6 @@ class HTRPairUpliftNet(nn.Module):
             source_dim = int(hidden_dim)
         layers.append(nn.Linear(source_dim, 1, bias=head_bias))
         self.fusion = nn.Sequential(*layers)
-
-    def head_configuration(self) -> Dict[str, Any]:
-        return dict(self._head_configuration)
 
     def forward(self, control_texts: Sequence[str], treated_texts: Sequence[str]) -> torch.Tensor:
         control = self.extractor(list(control_texts))
@@ -1244,7 +1153,6 @@ def _fit_htr_pair_uplift_fold(
     max_controls_per_candidate: int,
     nearest_fallback_controls: int,
     max_attention_pairs: int,
-    native_capture_sink: Optional[Any],
 ) -> Dict[str, Any]:
     """Fit and score one independently checkpointable HTR pair fold."""
 
@@ -1331,43 +1239,6 @@ def _fit_htr_pair_uplift_fold(
             test_pair_delta,
             len(test_df),
         )
-        if native_capture_sink is not None:
-            native_capture_sink.record_htr_pair_fold(
-                fold=inner_fold,
-                fit_pos=fit_pos,
-                validation_pos=heldout_pos,
-                fit_pairs=fit_pairs,
-                validation_pairs=heldout_pairs,
-                heldout_pairs=test_pairs,
-                model=model,
-                validation_pair_delta=heldout_pair_delta,
-                validation_delta=fold_delta,
-                validation_probability=fold_prob,
-                validation_n_controls=fold_n,
-                heldout_pair_delta=test_pair_delta,
-                heldout_delta=fold_test_delta,
-                heldout_probability=fold_test_prob,
-                heldout_n_controls=fold_test_n,
-            )
-        treated_eval = (t_train[heldout_pos].astype(int) == 1) & np.isfinite(fold_prob)
-        evidence = {
-            "outer_fold": int(outer_fold),
-            "inner_fold": int(inner_fold),
-            "source_family": "htr_pair_uplift",
-            "objective": "matched_pair_uplift_delta_logit",
-            "target_name": "treated_observed_outcome",
-            "train_rows": int(len(fit_pos)),
-            "heldout_rows": int(len(heldout_pos)),
-            "outer_test_rows": int(len(test_df)),
-            "matched_pair_train_rows": int(len(fit_pairs)),
-            "heldout_candidate_pair_rows": int(len(heldout_pairs)),
-            "outer_test_candidate_pair_rows": int(len(test_pairs)),
-            "heldout_treated_auroc": _safe_roc(
-                y_train[heldout_pos][treated_eval],
-                fold_prob[treated_eval],
-            ),
-            "prediction_provenance": "inner_fold_pair_model_heldout_and_outer_test",
-        }
         prediction_frame = pd.DataFrame()
         if not heldout_pairs.empty:
             prediction_frame = heldout_pairs[["candidate_row_id", "control_row_id"]].copy()
@@ -1388,7 +1259,6 @@ def _fit_htr_pair_uplift_fold(
             "test_prob": fold_test_prob,
             "test_n": fold_test_n,
             "attention_rows": attention_rows,
-            "evidence": evidence,
             "prediction_frame": prediction_frame,
         }
     finally:
@@ -1434,7 +1304,6 @@ def fit_htr_pair_uplift_train_test(
     max_controls_per_candidate: int,
     nearest_fallback_controls: int,
     max_attention_pairs: int,
-    native_capture_sink: Optional[Any] = None,
     checkpoint_store: Optional[Stage1CheckpointStore] = None,
     checkpoint_dependencies: Sequence[str] = (),
 ) -> PairUpliftFitResult:
@@ -1453,7 +1322,6 @@ def fit_htr_pair_uplift_train_test(
     test_deltas = []
     test_probs = []
     test_n_controls = []
-    evidence_rows: List[Dict[str, Any]] = []
     attention_rows: List[Dict[str, Any]] = []
     prediction_frames = []
 
@@ -1484,9 +1352,8 @@ def fit_htr_pair_uplift_train_test(
                 max_controls_per_candidate=max_controls_per_candidate,
                 nearest_fallback_controls=nearest_fallback_controls,
                 max_attention_pairs=max_attention_pairs,
-                native_capture_sink=native_capture_sink,
             )
-        if checkpoint_store is None or native_capture_sink is not None:
+        if checkpoint_store is None:
             fold_result = compute_fold()
         else:
             fold_result = checkpoint_store.run(
@@ -1525,7 +1392,6 @@ def fit_htr_pair_uplift_train_test(
         test_probs.append(np.asarray(fold_result["test_prob"], dtype=float))
         test_n_controls.append(np.asarray(fold_result["test_n"], dtype=float))
         attention_rows.extend(fold_result["attention_rows"])
-        evidence_rows.append(fold_result["evidence"])
         if not fold_result["prediction_frame"].empty:
             prediction_frames.append(fold_result["prediction_frame"])
 
@@ -1558,7 +1424,6 @@ def fit_htr_pair_uplift_train_test(
                 "nearest_fallback_controls": int(nearest_fallback_controls),
             },
         },
-        evidence_rows=evidence_rows,
         attention_rows=attention_rows,
         prediction_frame=prediction_frame,
         metrics=metrics,

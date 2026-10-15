@@ -834,12 +834,7 @@ def _extract_embedding_occurrences(
         contrast_name = str(
             contrast.get("name") or contrast.get("contrast_family") or "embedding_contrast"
         )
-        for side in (
-            "positive_aligned_chunks",
-            "negative_aligned_chunks",
-            "positive_external_chunks",
-            "negative_external_chunks",
-        ):
+        for side in ("positive_aligned_chunks", "negative_aligned_chunks"):
             values = contrast.get(side)
             if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
                 continue

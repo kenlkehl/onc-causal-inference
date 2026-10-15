@@ -88,7 +88,7 @@ def adapter_inputs():
     x, t, y, n, _ = simulated(120)
     frame = pd.DataFrame({"_oci_row_id": range(120), "x": x[:, 0], "z": x[:, 2]})
     definitions = [{"feature_id": name, "name": name, "value_type": "continuous"} for name in ["x", "z"]]
-    policy = Stage2ElasticNetSelectionConfig(internal_cv_folds=2, regularization_grid_size=3,
+    policy = Stage2ElasticNetSelectionConfig(internal_cv_folds=2,
         minimum_log10_alpha=-3, maximum_log10_alpha=-1)
     policy = replace(policy, multi_model=replace(policy.multi_model, regularization_grid_size=3))
     return dict(train=frame.iloc[:80], valid=frame.iloc[80:], definitions=definitions,

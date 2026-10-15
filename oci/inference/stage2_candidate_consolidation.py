@@ -19,7 +19,6 @@ MIXED_SCHEMA = "mixed_semantic_alphabetical_exact_alias_candidate_batches_v2"
 
 @dataclass(frozen=True)
 class CandidateConsolidationPolicy:
-    strategy: str = "mixed"
     semantic_fraction: float = 0.6
     random_fraction: float = 0.0
     embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
@@ -29,8 +28,6 @@ class CandidateConsolidationPolicy:
     early_stop_min_reduction: float = 0.005
 
     def __post_init__(self):
-        if self.strategy not in {"mixed", "legacy"}:
-            raise ValueError("consolidation_policy.strategy must be mixed or legacy")
         for name in ("semantic_fraction", "random_fraction", "early_stop_min_reduction"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 1:

@@ -8,7 +8,6 @@ import pandas as pd
 
 from oci.evaluation.stage1 import (
     _lexical_metrics,
-    _load_score_frames,
     _materialize_or_load_manifest,
     _native_evidence_metrics,
     _outer_heldout,
@@ -98,7 +97,6 @@ def test_posthoc_evaluation_uses_frozen_architecture_artifacts(tmp_path: Path):
         / "text_models"
         / "outer_001_full"
         / "worker_artifacts"
-        / "shard_000"
         / "fold_000001"
         / "predictions.parquet"
     )
@@ -219,64 +217,6 @@ def test_outer_heldout_rejects_contextless_external_tfidf_rows():
 
     assert _outer_heldout(inner_context).empty
     assert _outer_heldout(canonical_outer)["_oci_row_id"].tolist() == [1]
-
-
-def test_legacy_tfidf_manifest_loads_only_the_canonical_outer_sidecar(
-    tmp_path: Path,
-    monkeypatch,
-):
-    run_dir = tmp_path / "run"
-    primary = run_dir / "components" / "tfidf" / "predictions.parquet"
-    context = (
-        run_dir
-        / "components"
-        / "tfidf"
-        / "stage1_tfidf_topics"
-        / "contexts"
-        / "outer_001_inner_001"
-        / "nuisance_predictions.parquet"
-    )
-    primary.parent.mkdir(parents=True)
-    context.parent.mkdir(parents=True)
-    primary.touch()
-    context.touch()
-    reads: list[Path] = []
-
-    def fake_read_parquet(path):
-        reads.append(Path(path))
-        return pd.DataFrame(
-            {
-                "_oci_row_id": [1],
-                "architecture": ["tfidf_topics"],
-                "outer_fold": [1],
-                "honest_outer_holdout": [True],
-            }
-        )
-
-    monkeypatch.setattr("oci.evaluation.stage1.pd.read_parquet", fake_read_parquet)
-    manifest = {
-        "architectures": {
-            "tfidf_topics": {
-                "score_artifacts": [
-                    str(primary.relative_to(run_dir)),
-                    str(context.relative_to(run_dir)),
-                ]
-            },
-            "tfidf_orphan_ngrams": {
-                "score_artifacts": [
-                    str(primary.relative_to(run_dir)),
-                    str(context.relative_to(run_dir)),
-                ]
-            },
-        }
-    }
-
-    loaded = _load_score_frames(run_dir, "tfidf_topics", manifest)
-    orphan_loaded = _load_score_frames(run_dir, "tfidf_orphan_ngrams", manifest)
-
-    assert [path for path, _selected, _raw in loaded] == [primary]
-    assert orphan_loaded == []
-    assert reads == [primary]
 
 
 def test_legacy_backfill_resolves_source_artifacts_from_handoff_index(tmp_path: Path):

@@ -1,29 +1,29 @@
+# Generate a new cohort through an OpenAI-compatible server (e.g. vLLM).
 python -m synthetic_data.cli \
   --api-url http://localhost:8000/v1 \
-  --dataset-size 500 \
-  --output-dir ./synthetic_data/example_synthetic_datasets/my_dataset
-
-
-python -m synthetic_data.cli \
+  --model openai/gpt-oss-120b \
   --dataset-size 1000 \
-  --num-features 1 \
+  --num-features 2 \
   --num-confounders 1 \
-  --max-tokens 50000 \
-  --use-vllm-batch \
-  --tensor-parallel-size 2 \
-  --output-dir ./synthetic_data/example_synthetic_datasets/one_confounder
+  --num-effect-modifiers 1 \
+  --structured-data \
+  --clinical-question "Compare vinorelbine to gemcitabine for advanced/metastatic NSCLC." \
+  --output-dir ./synthetic_output/my_dataset
 
-python -m synthetic_data.cli --outcome-type continuous --outcome-noise-std 1.0       --output-dir ./synthetic_data/example_synthetic_datasets/ten_confounders_continuous_50K       --num-features 10       --num-confounders 10       --dataset-size 50000       --model openai/gpt-oss-120b       --use-vllm-batch --tensor-parallel-size 1 --num-workers 8  --gpu-devices 0,1,2,3,4,5,6,7
+# Continuous outcome
+python -m synthetic_data.cli \
+  --api-url http://localhost:8000/v1 \
+  --outcome-type continuous --outcome-noise-std 1.0 \
+  --num-features 10 --num-confounders 10 \
+  --dataset-size 5000 \
+  --output-dir ./synthetic_output/ten_confounders_continuous
 
-
-python -m synthetic_data.cli  --use-vllm-batch  --model openai/gpt-oss-120b \
---gpu-devices 0,1,2,3 \
---tensor-parallel-size 1 \
---dataset-size 1000 \
---generation-mode two_stage \
---num-features 1 \
---num-confounders 1 \
---structured-data \
---output-dir ./synthetic_data/example_synthetic_datasets/one_confounder_nsclc_with_structured \
---clinical-question "Compare vinorelbine to gemcitabine for advanced/metastatic NSCLC." \
---vllm-download-dir /data1/ken/models
+# More patients from an existing dataset's saved causal process (resumable).
+python -m synthetic_data.cli \
+  --config ./synthetic_data/example_synthetic_datasets/five_confounders_five_effect_modifiers_nsclc_with_structured/generation_config.json \
+  --dgp-metadata ./synthetic_data/example_synthetic_datasets/five_confounders_five_effect_modifiers_nsclc_with_structured/metadata.json \
+  --api-url http://localhost:8000/v1 \
+  --model nvidia/Gemma-4-31B-IT-NVFP4 \
+  --dataset-size 10000 \
+  --num-workers 32 \
+  --output-dir ./synthetic_output/five_conf_five_mod_10k

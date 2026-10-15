@@ -1,25 +1,15 @@
-"""Honest held-out topic and n-gram score tests for TF-IDF/NMF banks.
+"""Fit-side orphan n-gram clusters and their nested-calibration score tests.
 
-The score layer is deliberately upstream of agents and CATE models.  Its
-primary topic hypothesis asks whether each fitted one-dimensional NMF
-patient-topic score has held-out association with the bank-specific target.
-It also tests the topic's configured complete set of supplied TF-IDF terms
-jointly and tests every supplied n-gram individually:
-
-* treatment: treatment minus the fit prevalence;
-* outcome: outcome minus the fit mean;
-* effect: the orthogonal constant-effect cohort contribution.
-
-Every fitted topic and every one of its supplied n-grams is tested.  Topic and
-n-gram hypotheses are calibrated as two explicit, complete families.  All
-topic definitions and scaling are fit-side.  Inner-held-out labels enter only
-the score statistic.  Full outer contexts must not call this module with their
-held-out labels.
+Effect n-grams that are stable on the fit rows but absent from every fitted
+effect topic's term summary are grouped into bounded clusters without using
+held-out rows or labels.  Each cluster is then tested once, as a complete
+group, against the orthogonal (or DINA) constant-effect contribution on a
+label-bearing calibration partition that was not used for fitting.  Callers
+must never pass registered held-out labels to this module.
 """
 
 from __future__ import annotations
 
-import copy
 import re
 from dataclasses import asdict
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
@@ -34,8 +24,7 @@ from ..config import TfidfTopicDiscoveryConfig
 from .sparse_text_modeling import _make_bow_vectorizer
 
 
-TOPIC_SCORE_TEST_SCHEMA_VERSION = "tfidf_topic_and_ngram_score_test_v6"
-_BANKS = ("treatment", "outcome", "effect")
+ORPHAN_NGRAM_SCORE_SCHEMA_VERSION = "tfidf_orphan_ngram_score_test_v1"
 
 _ORPHAN_STOPWORDS = {
     "a",
@@ -94,26 +83,10 @@ def _bank_contribution(
     heldout_outcome_prediction: np.ndarray,
     dina_nuisance=None,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
-    """Return held-out score contribution and feature-centering weights."""
-    if bank == "treatment":
-        baseline = float(np.mean(fit_treatment))
-        contribution = np.asarray(heldout_treatment, dtype=float) - baseline
-        weights = np.ones_like(contribution)
-        definition = {
-            "null_model": "fit_treatment_prevalence",
-            "fit_baseline": baseline,
-            "row_contribution": "heldout_treatment - fit_treatment_prevalence",
-        }
-    elif bank == "outcome":
-        baseline = float(np.mean(fit_outcome))
-        contribution = np.asarray(heldout_outcome, dtype=float) - baseline
-        weights = np.ones_like(contribution)
-        definition = {
-            "null_model": "fit_outcome_mean",
-            "fit_baseline": baseline,
-            "row_contribution": "heldout_outcome - fit_outcome_mean",
-        }
-    elif bank == "effect" and dina_nuisance is not None:
+    """Return held-out effect score contribution and feature-centering weights."""
+    if bank != "effect":
+        raise ValueError(f"Only the effect bank is scored on held-out rows, not {bank!r}")
+    if dina_nuisance is not None:
         from ..models import dina
 
         dn, dv = dina_nuisance
@@ -128,7 +101,7 @@ def _bank_contribution(
             "centering": "DINA Fisher information",
             "effect_scale": "conditional_log_odds_ratio",
         }
-    elif bank == "effect":
+    else:
         constant = _constant_effect(
             fit_treatment,
             fit_outcome,
@@ -151,38 +124,9 @@ def _bank_contribution(
                 "fit_constant_effect * treatment_residual)"
             ),
         }
-    else:
-        raise ValueError(f"Unknown topic bank: {bank}")
     if not np.isfinite(contribution).all() or not np.isfinite(weights).all():
         raise ValueError(f"{bank} score contribution contains non-finite values")
     return contribution, weights, definition
-
-
-def _topic_columns(
-    topic: Mapping[str, Any],
-    vocabulary: Mapping[str, int],
-    *,
-    terms_per_topic: int,
-) -> Tuple[List[Dict[str, Any]], List[int]]:
-    records = [dict(record) for record in topic.get("terms", [])]
-    if int(terms_per_topic) < 1:
-        raise ValueError("terms_per_topic must be positive")
-    if int(topic.get("terms_per_topic", terms_per_topic)) != int(terms_per_topic):
-        raise ValueError(
-            f"Topic {topic.get('topic_id')} changed its configured term capacity"
-        )
-    if len(records) != int(terms_per_topic):
-        raise ValueError(
-            f"Topic {topic.get('topic_id')} must contain exactly "
-            f"{int(terms_per_topic)} configured term records"
-        )
-    missing = [str(record.get("term")) for record in records if str(record.get("term")) not in vocabulary]
-    if missing:
-        raise ValueError(
-            f"Topic {topic.get('topic_id')} terms are absent from the common vocabulary: "
-            f"{missing[:3]}"
-        )
-    return records, [int(vocabulary[str(record["term"])]) for record in records]
 
 
 def _orphan_tokens(value: Any) -> Tuple[str, ...]:
@@ -221,7 +165,7 @@ def build_fit_side_orphan_ngram_clusters(
     """Build bounded raw effect n-gram groups without held-out labels.
 
     The effect score frame and topic summaries are both fitted inside the
-    current inner-fit rows.  Nested phrases with near-identical document
+    current nested model-fit rows.  Nested phrases with near-identical document
     support collapse before a word/character/co-occurrence neighborhood is
     formed.  Greedy bounded neighborhoods prevent transitive graph chains from
     creating an oversized prompt or quadratic test.
@@ -346,21 +290,21 @@ def build_fit_side_orphan_ngram_clusters(
                 np.sqrt(float(semantic.word_similarity_weight))
                 * normalize(
                     word,
-                    norm=semantic.row_normalization_norm,
+                    norm="l2",
                     axis=1,
                     copy=True,
                 ),
                 np.sqrt(float(semantic.char_similarity_weight))
                 * normalize(
                     char,
-                    norm=semantic.row_normalization_norm,
+                    norm="l2",
                     axis=1,
                     copy=True,
                 ),
                 np.sqrt(float(semantic.occurrence_similarity_weight))
                 * normalize(
                     occurrence,
-                    norm=semantic.row_normalization_norm,
+                    norm="l2",
                     axis=1,
                     copy=True,
                 ),
@@ -373,9 +317,9 @@ def build_fit_side_orphan_ngram_clusters(
         distances, neighbors = NearestNeighbors(
             n_neighbors=neighbor_count,
             radius=1.0,
-            algorithm=semantic.neighbor_algorithm,
+            algorithm="brute",
             leaf_size=30,
-            metric=semantic.neighbor_metric,
+            metric="cosine",
             p=2,
             metric_params=None,
             n_jobs=1,
@@ -459,180 +403,6 @@ def build_fit_side_orphan_ngram_clusters(
         "deduplicated_alias_count": int(sum(map(len, aliases.values()))),
         "representative_count": int(len(kept)),
         "clusters": rendered_clusters,
-    }
-
-
-def _single_topic_score(
-    *,
-    topic: Mapping[str, Any],
-    fit_topic_values: np.ndarray,
-    heldout_topic_values: np.ndarray,
-    fit_matrix: sparse.spmatrix,
-    heldout_matrix: sparse.spmatrix,
-    vocabulary: Mapping[str, int],
-    contribution: np.ndarray,
-    centering_weights: np.ndarray,
-    terms_per_topic: int,
-) -> Dict[str, Any]:
-    records, columns = _topic_columns(
-        topic,
-        vocabulary,
-        terms_per_topic=terms_per_topic,
-    )
-    fit_topic = np.asarray(fit_topic_values, dtype=float).reshape(-1)
-    heldout_topic = np.asarray(heldout_topic_values, dtype=float).reshape(-1)
-    if fit_topic.shape[0] != fit_matrix.shape[0]:
-        raise ValueError(f"Topic {topic.get('topic_id')} fit scores are misaligned")
-    if heldout_topic.shape[0] != heldout_matrix.shape[0]:
-        raise ValueError(f"Topic {topic.get('topic_id')} held-out scores are misaligned")
-    topic_fit_scale = float(np.std(fit_topic))
-    topic_fit_testable = topic_fit_scale > 1e-12
-    if not topic_fit_testable:
-        topic_fit_scale = 1.0
-    standardized_topic = (
-        heldout_topic - float(np.mean(fit_topic))
-    ) / topic_fit_scale
-    weight_sum = float(np.sum(centering_weights))
-    if weight_sum <= 1e-12:
-        centered_topic = standardized_topic - float(np.mean(standardized_topic))
-    else:
-        centered_topic = standardized_topic - float(
-            np.dot(centering_weights, standardized_topic) / weight_sum
-        )
-    topic_row_scores = centered_topic * contribution
-    topic_moment = float(np.mean(topic_row_scores))
-    topic_row_scale = float(np.std(topic_row_scores, ddof=1))
-    topic_testable = bool(topic_fit_testable and topic_row_scale > 1e-12)
-    topic_standardized_score = (
-        float(np.sqrt(len(topic_row_scores)) * topic_moment / topic_row_scale)
-        if topic_testable
-        else 0.0
-    )
-    scalar_topic_result = {
-        "topic_score_testable": topic_testable,
-        "topic_score_moment": topic_moment,
-        "topic_standardized_score": topic_standardized_score,
-        "topic_unadjusted_two_sided_p": float(
-            2.0 * norm.sf(abs(topic_standardized_score))
-        ),
-        "topic_fit_mean": float(np.mean(fit_topic)),
-        "topic_fit_standard_deviation": (
-            float(np.std(fit_topic)) if topic_fit_testable else 0.0
-        ),
-        "_topic_bootstrap_rows": (
-            ((topic_row_scores - topic_moment) / topic_row_scale)[:, None]
-            if topic_testable
-            else np.zeros((len(topic_row_scores), 0), dtype=float)
-        ),
-    }
-    fit_values = np.asarray(fit_matrix[:, columns].toarray(), dtype=float)
-    heldout_values = np.asarray(heldout_matrix[:, columns].toarray(), dtype=float)
-    fit_means = np.mean(fit_values, axis=0)
-    fit_scales = np.std(fit_values, axis=0)
-    fit_scales = np.where(fit_scales > 1e-12, fit_scales, 1.0)
-    standardized = (heldout_values - fit_means) / fit_scales
-
-    if weight_sum <= 1e-12:
-        centered = standardized - np.mean(standardized, axis=0)
-    else:
-        weighted_means = np.sum(
-            centering_weights[:, None] * standardized, axis=0
-        ) / weight_sum
-        centered = standardized - weighted_means
-    row_scores = centered * contribution[:, None]
-    column_means = np.mean(row_scores, axis=0)
-    column_scales = np.std(row_scores, axis=0, ddof=1)
-    retained = column_scales > 1e-12
-    n_rows = int(row_scores.shape[0])
-
-    if not np.any(retained):
-        return {
-            "topic_id": str(topic["topic_id"]),
-            **scalar_topic_result,
-            "quadratic_statistic": 0.0,
-            "quadratic_covariance_rank": 0,
-            "quadratic_statistic_per_rank": 0.0,
-            "asymptotic_p": 1.0,
-            "maximum_absolute_standardized_score": 0.0,
-            "term_scores": [
-                {
-                    **record,
-                    "heldout_standardized_score": 0.0,
-                    "heldout_score_moment": 0.0,
-                    "unadjusted_two_sided_p": 1.0,
-                    "testable_in_heldout": False,
-                }
-                for record in records
-            ],
-            "_row_scores": np.zeros((n_rows, 0), dtype=float),
-            "_inverse_covariance": np.zeros((0, 0), dtype=float),
-            "_column_scales": np.zeros(0, dtype=float),
-            "_retained_term_positions": [],
-        }
-
-    test_scores = row_scores[:, retained]
-    means = column_means[retained]
-    scales = column_scales[retained]
-    score_vector = np.sqrt(n_rows) * means
-    covariance = np.atleast_2d(np.cov(test_scores, rowvar=False, ddof=1))
-    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-    tolerance = max(float(np.max(eigenvalues)) * 1e-8, 1e-12)
-    nonzero = eigenvalues > tolerance
-    rank = int(np.sum(nonzero))
-    if rank:
-        inverse = (eigenvectors[:, nonzero] / eigenvalues[nonzero]) @ eigenvectors[
-            :, nonzero
-        ].T
-        quadratic = float(score_vector @ inverse @ score_vector)
-        asymptotic_p = float(chi2.sf(quadratic, rank))
-        energy = float(quadratic / rank)
-    else:
-        inverse = np.zeros_like(covariance)
-        quadratic = 0.0
-        asymptotic_p = 1.0
-        energy = 0.0
-    standardized_scores = score_vector / scales
-
-    term_scores: List[Dict[str, Any]] = []
-    retained_position = 0
-    for record, keep, moment in zip(records, retained, column_means):
-        if keep:
-            statistic = float(standardized_scores[retained_position])
-            retained_position += 1
-            term_scores.append(
-                {
-                    **record,
-                    "heldout_standardized_score": statistic,
-                    "heldout_score_moment": float(moment),
-                    "unadjusted_two_sided_p": float(2.0 * norm.sf(abs(statistic))),
-                    "testable_in_heldout": True,
-                }
-            )
-        else:
-            term_scores.append(
-                {
-                    **record,
-                    "heldout_standardized_score": 0.0,
-                    "heldout_score_moment": float(moment),
-                    "unadjusted_two_sided_p": 1.0,
-                    "testable_in_heldout": False,
-                }
-            )
-    return {
-        "topic_id": str(topic["topic_id"]),
-        **scalar_topic_result,
-        "quadratic_statistic": quadratic,
-        "quadratic_covariance_rank": rank,
-        "quadratic_statistic_per_rank": energy,
-        "asymptotic_p": asymptotic_p,
-        "maximum_absolute_standardized_score": float(
-            np.max(np.abs(standardized_scores))
-        ),
-        "term_scores": term_scores,
-        "_row_scores": test_scores,
-        "_inverse_covariance": inverse,
-        "_column_scales": scales,
-        "_retained_term_positions": np.flatnonzero(retained).astype(int).tolist(),
     }
 
 
@@ -1074,391 +844,6 @@ def _bootstrap_candidates(
     }
 
 
-def _select_ngrams(
-    results: List[Dict[str, Any]],
-    config: TfidfTopicDiscoveryConfig,
-    bootstrap: Mapping[str, Any],
-) -> Dict[str, Any]:
-    """Calibrate every unique supplied n-gram and annotate all occurrences.
-
-    A term may load on more than one NMF topic.  It is one statistical
-    hypothesis, so multiplicity adjustment is performed over unique strings,
-    while every topic occurrence retains the resulting evidence and topic
-    provenance.  There is deliberately no minimum-significance fallback for
-    individual terms: the bounded topic fallback already guarantees that an
-    agent receives evidence when a small held-out fold has low power.
-    """
-    instances_by_term: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
-    for result in results:
-        topic_id = str(result["topic_id"])
-        for term_score in result.get("term_scores", []):
-            term = str(term_score.get("term") or "")
-            if not term:
-                continue
-            instances_by_term.setdefault(term, []).append((topic_id, term_score))
-    if not instances_by_term:
-        return {
-            "ngram_tests": [],
-            "selected_ngrams": [],
-            "selected_ngram_terms": [],
-            "ngram_selection_count": 0,
-            "ngram_selection_rule": "no_ngrams",
-            "unique_ngram_count": 0,
-            "testable_unique_ngram_count": 0,
-        }
-
-    complete_bootstrap = bool(bootstrap.get("complete_ngram_family"))
-    rows: List[Dict[str, Any]] = []
-    for term, instances in sorted(instances_by_term.items()):
-        testable = [
-            (topic_id, score)
-            for topic_id, score in instances
-            if bool(score.get("testable_in_heldout"))
-        ]
-        candidates = testable or instances
-        representative_topic, representative = min(
-            candidates,
-            key=lambda item: (
-                float(item[1].get("unadjusted_two_sided_p", 1.0)),
-                -abs(float(item[1].get("heldout_standardized_score", 0.0))),
-                item[0],
-            ),
-        )
-        if complete_bootstrap and "multiplier_p" in representative:
-            primary_p = float(representative["multiplier_p"])
-            primary_source = "complete_family_multiplier_bootstrap"
-        else:
-            primary_p = float(
-                representative.get("unadjusted_two_sided_p", 1.0)
-            )
-            primary_source = "asymptotic_complete_unique_ngram_family"
-        familywise_values = [
-            float(score["ngram_familywise_p"])
-            for _topic_id, score in instances
-            if "ngram_familywise_p" in score
-        ]
-        rows.append(
-            {
-                "term": term,
-                "topic_ids": sorted({topic_id for topic_id, _score in instances}),
-                "representative_topic_id": representative_topic,
-                "topic_occurrence_count": len(instances),
-                "testable_in_heldout": bool(testable),
-                "heldout_standardized_score": float(
-                    representative.get("heldout_standardized_score", 0.0)
-                ),
-                "heldout_score_moment": float(
-                    representative.get("heldout_score_moment", 0.0)
-                ),
-                "unadjusted_two_sided_p": float(
-                    representative.get("unadjusted_two_sided_p", 1.0)
-                ),
-                "primary_p": primary_p,
-                "primary_p_source": primary_source,
-                "familywise_p": (
-                    min(familywise_values) if familywise_values else None
-                ),
-                "best_screen_rank": min(
-                    int(score.get("screen_rank") or 10**9)
-                    for _topic_id, score in instances
-                ),
-                "maximum_topic_loading": max(
-                    float(score.get("loading") or 0.0)
-                    for _topic_id, score in instances
-                ),
-                "fit_signed_score": float(
-                    representative.get("signed_score", 0.0)
-                ),
-            }
-        )
-
-    adjusted = benjamini_hochberg([row["primary_p"] for row in rows])
-    for row, q_value in zip(rows, adjusted):
-        row["fdr_q"] = float(q_value)
-    order = sorted(
-        range(len(rows)),
-        key=lambda index: (
-            not bool(rows[index]["testable_in_heldout"]),
-            float(rows[index]["primary_p"]),
-            -abs(float(rows[index]["heldout_standardized_score"])),
-            int(rows[index]["best_screen_rank"]),
-            str(rows[index]["term"]),
-        ),
-    )
-    selected: List[int] = []
-    for index in order:
-        row = rows[index]
-        row["selection_reason"] = "not_selected"
-        if not bool(row["testable_in_heldout"]):
-            continue
-        if float(row["fdr_q"]) <= float(config.score_test_fdr_level):
-            row["selection_reason"] = "fdr"
-            selected.append(index)
-        elif (
-            complete_bootstrap
-            and row["familywise_p"] is not None
-            and float(row["familywise_p"])
-            <= float(config.score_test_p_threshold)
-        ):
-            row["selection_reason"] = "ngram_familywise_p"
-            selected.append(index)
-    selected_set = set(selected)
-    rank_by_index = {index: rank for rank, index in enumerate(order, start=1)}
-    row_by_term: Dict[str, Dict[str, Any]] = {}
-    for index, row in enumerate(rows):
-        row["evidence_rank"] = int(rank_by_index[index])
-        row["selected_for_agent_evidence"] = index in selected_set
-        row_by_term[str(row["term"])] = row
-    for term, instances in instances_by_term.items():
-        evidence = row_by_term[term]
-        for _topic_id, score in instances:
-            score["ngram_primary_p"] = float(evidence["primary_p"])
-            score["ngram_primary_p_source"] = str(evidence["primary_p_source"])
-            score["ngram_fdr_q"] = float(evidence["fdr_q"])
-            score["ngram_global_familywise_p"] = evidence["familywise_p"]
-            score["ngram_evidence_rank"] = int(evidence["evidence_rank"])
-            score["selected_for_agent_evidence"] = bool(
-                evidence["selected_for_agent_evidence"]
-            )
-            score["ngram_selection_reason"] = str(evidence["selection_reason"])
-
-    selected_rows = [rows[index] for index in selected]
-    selected_rows.sort(key=lambda row: int(row["evidence_rank"]))
-    return {
-        "ngram_tests": sorted(rows, key=lambda row: int(row["evidence_rank"])),
-        "selected_ngrams": selected_rows,
-        "selected_ngram_terms": [str(row["term"]) for row in selected_rows],
-        "ngram_selection_count": len(selected_rows),
-        "ngram_selection_rule": (
-            "unique_ngram_fdr_or_complete_familywise_p"
-            if complete_bootstrap
-            else "unique_ngram_fdr"
-        ),
-        "unique_ngram_count": len(rows),
-        "testable_unique_ngram_count": int(
-            sum(bool(row["testable_in_heldout"]) for row in rows)
-        ),
-        "complete_family_multiplier_bootstrap": complete_bootstrap,
-    }
-
-
-def _select_topics(
-    results: List[Dict[str, Any]],
-    config: TfidfTopicDiscoveryConfig,
-    bootstrap: Mapping[str, Any],
-) -> Dict[str, Any]:
-    if not results:
-        return {
-            "selected_topic_ids": [],
-            "selection_count": 0,
-            "selection_rule": "no_topics",
-        }
-    complete_bootstrap = bool(bootstrap.get("complete_topic_family"))
-    complete_term_group_bootstrap = bool(
-        bootstrap.get("complete_term_group_family")
-    )
-    for result in results:
-        if complete_bootstrap and "topic_multiplier_p" in result:
-            result["primary_p"] = float(result["topic_multiplier_p"])
-            result["primary_p_source"] = "complete_family_multiplier_bootstrap"
-        else:
-            result["primary_p"] = float(
-                result.get("topic_unadjusted_two_sided_p", 1.0)
-            )
-            result["primary_p_source"] = "asymptotic_nmf_topic_score"
-        result["familywise_p"] = (
-            float(result["topic_familywise_p"])
-            if "topic_familywise_p" in result
-            else None
-        )
-        if complete_term_group_bootstrap and "quadratic_multiplier_p" in result:
-            result["term_group_primary_p"] = float(
-                result["quadratic_multiplier_p"]
-            )
-            result["term_group_primary_p_source"] = (
-                "complete_family_multiplier_bootstrap"
-            )
-        else:
-            result["term_group_primary_p"] = float(result["asymptotic_p"])
-            result["term_group_primary_p_source"] = (
-                "asymptotic_joint_ngram_group_score"
-            )
-        result["term_group_familywise_p"] = (
-            float(result["candidate_familywise_energy_p"])
-            if "candidate_familywise_energy_p" in result
-            else None
-        )
-    adjusted = benjamini_hochberg([result["primary_p"] for result in results])
-    term_group_adjusted = benjamini_hochberg(
-        [result["term_group_primary_p"] for result in results]
-    )
-    for result, q_value, term_group_q in zip(
-        results, adjusted, term_group_adjusted
-    ):
-        result["fdr_q"] = float(q_value)
-        result["term_group_fdr_q"] = float(term_group_q)
-        selected_terms = [
-            term
-            for term in result.get("term_scores", [])
-            if bool(term.get("selected_for_agent_evidence"))
-        ]
-        result["selected_ngram_count"] = len(selected_terms)
-        result["selected_ngram_terms"] = [
-            str(term.get("term")) for term in selected_terms
-        ]
-        result["strongest_selected_ngram_rank"] = (
-            min(int(term["ngram_evidence_rank"]) for term in selected_terms)
-            if selected_terms
-            else None
-        )
-        result["filter_priority_p"] = min(
-            float(result["primary_p"]),
-            float(result["term_group_primary_p"]),
-            min(
-                (
-                    float(term.get("ngram_primary_p", 1.0))
-                    for term in selected_terms
-                ),
-                default=1.0,
-            ),
-        )
-    order = sorted(
-        range(len(results)),
-        key=lambda index: (
-            float(results[index]["filter_priority_p"]),
-            -int(results[index]["selected_ngram_count"]),
-            float(results[index]["primary_p"]),
-            -abs(float(results[index].get("topic_standardized_score", 0.0))),
-            -float(results[index]["quadratic_statistic_per_rank"]),
-            str(results[index]["topic_id"]),
-        ),
-    )
-    testable_order = [
-        index
-        for index in order
-        if bool(results[index].get("topic_score_testable"))
-        or int(results[index]["quadratic_covariance_rank"]) > 0
-        or int(results[index]["selected_ngram_count"]) > 0
-    ]
-    maximum = min(
-        int(config.score_test_max_topics_per_bank), len(testable_order)
-    )
-    minimum = min(int(config.score_test_min_topics_per_bank), maximum)
-    selected = [
-        index
-        for index in testable_order
-        if float(results[index]["fdr_q"]) <= float(config.score_test_fdr_level)
-        or float(results[index]["term_group_fdr_q"])
-        <= float(config.score_test_fdr_level)
-        or int(results[index]["selected_ngram_count"]) > 0
-        or (
-            complete_bootstrap
-            and results[index]["familywise_p"] is not None
-            and float(results[index]["familywise_p"])
-            <= float(config.score_test_p_threshold)
-        )
-        or (
-            complete_term_group_bootstrap
-            and results[index]["term_group_familywise_p"] is not None
-            and float(results[index]["term_group_familywise_p"])
-            <= float(config.score_test_p_threshold)
-        )
-        or (
-            not complete_bootstrap
-            and float(results[index]["primary_p"])
-            <= float(config.score_test_p_threshold)
-        )
-        or (
-            not complete_term_group_bootstrap
-            and float(results[index]["term_group_primary_p"])
-            <= float(config.score_test_p_threshold)
-        )
-    ][:maximum]
-    selected_set = set(selected)
-    for index in testable_order:
-        if len(selected) >= minimum:
-            break
-        if index not in selected_set:
-            selected.append(index)
-            selected_set.add(index)
-    selected = sorted(
-        selected,
-        key=lambda index: order.index(index),
-    )[:maximum]
-    selected_set = set(selected)
-    for rank, index in enumerate(order, start=1):
-        result = results[index]
-        result["evidence_rank"] = int(rank)
-        result["selected_for_agent"] = index in selected_set
-        topic_fdr = float(result["fdr_q"]) <= float(config.score_test_fdr_level)
-        topic_familywise = (
-            complete_bootstrap
-            and result["familywise_p"] is not None
-            and float(result["familywise_p"])
-            <= float(config.score_test_p_threshold)
-        )
-        topic_unadjusted = (
-            not complete_bootstrap
-            and float(result["primary_p"])
-            <= float(config.score_test_p_threshold)
-        )
-        term_group_fdr = float(result["term_group_fdr_q"]) <= float(
-            config.score_test_fdr_level
-        )
-        term_group_familywise = (
-            complete_term_group_bootstrap
-            and result["term_group_familywise_p"] is not None
-            and float(result["term_group_familywise_p"])
-            <= float(config.score_test_p_threshold)
-        )
-        term_group_unadjusted = (
-            not complete_term_group_bootstrap
-            and float(result["term_group_primary_p"])
-            <= float(config.score_test_p_threshold)
-        )
-        ngram_selected = int(result["selected_ngram_count"]) > 0
-        topic_selected = topic_fdr or topic_familywise or topic_unadjusted
-        term_group_selected = (
-            term_group_fdr or term_group_familywise or term_group_unadjusted
-        )
-        if index not in selected_set:
-            result["selection_reason"] = "not_selected"
-        elif ngram_selected and topic_selected and term_group_selected:
-            result["selection_reason"] = (
-                "nmf_topic_term_group_and_ngram_score_evidence"
-            )
-        elif ngram_selected and (topic_selected or term_group_selected):
-            result["selection_reason"] = "topic_or_term_group_and_ngram_score_evidence"
-        elif topic_selected and term_group_selected:
-            result["selection_reason"] = "nmf_topic_and_term_group_score_evidence"
-        elif ngram_selected:
-            result["selection_reason"] = "ngram_score_evidence"
-        elif topic_selected:
-            result["selection_reason"] = "nmf_topic_score_evidence"
-        elif term_group_selected:
-            result["selection_reason"] = "joint_ngram_group_score_evidence"
-        else:
-            result["selection_reason"] = "minimum_evidence_rank_fallback"
-    return {
-        "selected_topic_ids": [results[index]["topic_id"] for index in selected],
-        "selection_count": len(selected),
-        "selection_rule": (
-            "nmf_topic_or_joint_ngram_group_or_individual_ngram_evidence_"
-            "then_minimum_rank_fallback_with_maximum"
-            if complete_bootstrap and complete_term_group_bootstrap
-            else "complete_family_asymptotic_union_then_minimum_rank_fallback_with_maximum"
-        ),
-        "fdr_level": float(config.score_test_fdr_level),
-        "p_threshold": float(config.score_test_p_threshold),
-        "minimum_topics": int(minimum),
-        "maximum_topics": int(maximum),
-        "complete_family_multiplier_bootstrap": complete_bootstrap,
-        "complete_term_group_multiplier_bootstrap": (
-            complete_term_group_bootstrap
-        ),
-    }
-
-
 def _select_orphan_clusters(
     results: List[Dict[str, Any]],
     config: TfidfTopicDiscoveryConfig,
@@ -1635,9 +1020,9 @@ def score_effect_orphan_ngram_clusters(
     ]
     bootstrap = _bootstrap_candidates(
         results,
-        repeats=int(config.score_test_bootstrap_repeats),
-        top_topics=int(config.score_test_bootstrap_top_topics),
-        chunk_size=int(config.score_test_bootstrap_chunk_size),
+        repeats=int(config.orphan_ngram_bootstrap_repeats),
+        top_topics=int(config.orphan_ngram_bootstrap_top_clusters),
+        chunk_size=int(config.orphan_ngram_bootstrap_chunk_size),
         seed=int(config.random_state) + 1907,
     )
     complete_bootstrap = bool(bootstrap.get("complete_term_group_family"))
@@ -1682,211 +1067,3 @@ def score_effect_orphan_ngram_clusters(
         **selection,
         "bootstrap_calibration": bootstrap,
     }
-
-
-def score_topic_banks(
-    *,
-    fit_matrix: sparse.spmatrix,
-    heldout_matrix: sparse.spmatrix,
-    feature_names: Sequence[str],
-    topic_banks: Mapping[str, Mapping[str, Any]],
-    fit_topic_values: Mapping[str, np.ndarray],
-    heldout_topic_values: Mapping[str, np.ndarray],
-    fit_treatment: np.ndarray,
-    fit_outcome: np.ndarray,
-    heldout_treatment: np.ndarray,
-    heldout_outcome: np.ndarray,
-    fit_propensity: np.ndarray,
-    fit_outcome_prediction: np.ndarray,
-    heldout_propensity: np.ndarray,
-    heldout_outcome_prediction: np.ndarray,
-    dina_nuisance=None,
-    config: TfidfTopicDiscoveryConfig,
-    scope_id: str,
-    raw_ngram_scores: Mapping[str, Any] | None = None,
-) -> Dict[str, Any]:
-    """Score and select every fitted topic using exact held-out rows."""
-    fit_matrix = sparse.csr_matrix(fit_matrix)
-    heldout_matrix = sparse.csr_matrix(heldout_matrix)
-    if fit_matrix.shape[1] != heldout_matrix.shape[1]:
-        raise ValueError("Fit and held-out TF-IDF matrices have different vocabularies")
-    if heldout_matrix.shape[0] != len(heldout_treatment):
-        raise ValueError("Held-out score rows do not align with held-out labels")
-    vocabulary = {str(name): index for index, name in enumerate(feature_names)}
-    output: Dict[str, Any] = {
-        "schema_version": TOPIC_SCORE_TEST_SCHEMA_VERSION,
-        "scope_id": str(scope_id),
-        "terms_per_topic": int(config.terms_per_topic),
-        "fit_n": int(fit_matrix.shape[0]),
-        "heldout_n": int(heldout_matrix.shape[0]),
-        "uses_heldout_treatment_and_outcome": True,
-        "fits_patient_level_cate_model": False,
-        "constructs_divided_pseudo_target": False,
-        "banks": {},
-    }
-    for bank_index, bank in enumerate(_BANKS):
-        topics = list((topic_banks.get(bank) or {}).get("topics") or [])
-        bank_fit_topics = np.asarray(
-            fit_topic_values.get(bank, np.zeros((fit_matrix.shape[0], 0))),
-            dtype=float,
-        )
-        bank_heldout_topics = np.asarray(
-            heldout_topic_values.get(
-                bank, np.zeros((heldout_matrix.shape[0], 0))
-            ),
-            dtype=float,
-        )
-        if bank_fit_topics.ndim == 1:
-            bank_fit_topics = bank_fit_topics[:, None]
-        if bank_heldout_topics.ndim == 1:
-            bank_heldout_topics = bank_heldout_topics[:, None]
-        expected_fit_shape = (fit_matrix.shape[0], len(topics))
-        expected_heldout_shape = (heldout_matrix.shape[0], len(topics))
-        if bank_fit_topics.shape != expected_fit_shape:
-            raise ValueError(
-                f"{bank} fit topic scores have shape {bank_fit_topics.shape}; "
-                f"expected {expected_fit_shape}"
-            )
-        if bank_heldout_topics.shape != expected_heldout_shape:
-            raise ValueError(
-                f"{bank} held-out topic scores have shape "
-                f"{bank_heldout_topics.shape}; expected {expected_heldout_shape}"
-            )
-        contribution, weights, definition = _bank_contribution(
-            dina_nuisance=dina_nuisance,
-            bank=bank,
-            fit_treatment=np.asarray(fit_treatment, dtype=float),
-            fit_outcome=np.asarray(fit_outcome, dtype=float),
-            heldout_treatment=np.asarray(heldout_treatment, dtype=float),
-            heldout_outcome=np.asarray(heldout_outcome, dtype=float),
-            fit_propensity=np.asarray(fit_propensity, dtype=float),
-            fit_outcome_prediction=np.asarray(fit_outcome_prediction, dtype=float),
-            heldout_propensity=np.asarray(heldout_propensity, dtype=float),
-            heldout_outcome_prediction=np.asarray(heldout_outcome_prediction, dtype=float),
-        )
-        results = [
-            _single_topic_score(
-                topic=topic,
-                fit_topic_values=bank_fit_topics[:, topic_index],
-                heldout_topic_values=bank_heldout_topics[:, topic_index],
-                fit_matrix=fit_matrix,
-                heldout_matrix=heldout_matrix,
-                vocabulary=vocabulary,
-                contribution=contribution,
-                centering_weights=weights,
-                terms_per_topic=int(config.terms_per_topic),
-            )
-            for topic_index, topic in enumerate(topics)
-        ]
-        bootstrap = _bootstrap_candidates(
-            results,
-            repeats=int(config.score_test_bootstrap_repeats),
-            top_topics=int(config.score_test_bootstrap_top_topics),
-            chunk_size=int(config.score_test_bootstrap_chunk_size),
-            seed=int(config.random_state) + 701 + 101 * bank_index,
-        )
-        ngram_selection = _select_ngrams(results, config, bootstrap)
-        selection = _select_topics(results, config, bootstrap)
-        for result in results:
-            for private_key in [
-                "_row_scores",
-                "_inverse_covariance",
-                "_column_scales",
-                "_retained_term_positions",
-                "_topic_bootstrap_rows",
-            ]:
-                result.pop(private_key, None)
-        output["banks"][bank] = {
-            "bank": bank,
-            "target_definition": definition,
-            "contribution_mean": float(np.mean(contribution)),
-            "contribution_standard_deviation": float(
-                np.std(contribution, ddof=1)
-            ),
-            "topic_tests": results,
-            "bootstrap_calibration": bootstrap,
-            **ngram_selection,
-            **selection,
-        }
-    effect_score_frame = (raw_ngram_scores or {}).get("effect")
-    if effect_score_frame is None:
-        output["effect_orphan_ngram_branch"] = {
-            "status": "not_available",
-            "reason": "raw_effect_ngram_scores_not_supplied",
-            "uses_heldout_treatment_and_outcome": False,
-            "clusters": [],
-            "selected_clusters": [],
-            "selected_cluster_ids": [],
-            "selection_count": 0,
-        }
-    else:
-        output["effect_orphan_ngram_branch"] = score_effect_orphan_ngram_clusters(
-            dina_nuisance=dina_nuisance,
-            fit_matrix=fit_matrix,
-            heldout_matrix=heldout_matrix,
-            feature_names=feature_names,
-            effect_scores=effect_score_frame,
-            effect_topics=list((topic_banks.get("effect") or {}).get("topics") or []),
-            fit_treatment=np.asarray(fit_treatment, dtype=float),
-            fit_outcome=np.asarray(fit_outcome, dtype=float),
-            heldout_treatment=np.asarray(heldout_treatment, dtype=float),
-            heldout_outcome=np.asarray(heldout_outcome, dtype=float),
-            fit_propensity=np.asarray(fit_propensity, dtype=float),
-            fit_outcome_prediction=np.asarray(fit_outcome_prediction, dtype=float),
-            heldout_propensity=np.asarray(heldout_propensity, dtype=float),
-            heldout_outcome_prediction=np.asarray(heldout_outcome_prediction, dtype=float),
-            config=config,
-        )
-    return output
-
-
-def topic_score_test_by_id(
-    score_tests: Mapping[str, Any],
-    bank: str,
-) -> Dict[str, Dict[str, Any]]:
-    """Index one bank's persisted topic tests by topic id."""
-    rows = (
-        ((score_tests.get("banks") or {}).get(bank) or {}).get("topic_tests")
-        or []
-    )
-    return {str(row["topic_id"]): dict(row) for row in rows}
-
-
-def reselect_persisted_topic_scores(
-    score_tests: Mapping[str, Any],
-    config: TfidfTopicDiscoveryConfig,
-) -> Dict[str, Any]:
-    """Apply current selection policy to already-calibrated score statistics.
-
-    This never recomputes a statistic or reads a label.  It is intended for a
-    schema migration in which the persisted scalar-topic, joint-term-group,
-    and individual-ngram families are unchanged but their selection union has
-    been corrected.
-    """
-    output = copy.deepcopy(dict(score_tests))
-    banks = output.get("banks") or {}
-    for bank in _BANKS:
-        bank_payload = banks.get(bank)
-        if not isinstance(bank_payload, dict):
-            raise ValueError(f"Persisted score payload is missing bank {bank!r}")
-        results = list(bank_payload.get("topic_tests") or [])
-        bootstrap = bank_payload.get("bootstrap_calibration") or {}
-        bank_payload.update(_select_topics(results, config, bootstrap))
-        bank_payload["topic_tests"] = results
-    orphan = output.get("effect_orphan_ngram_branch")
-    if isinstance(orphan, dict) and orphan.get("status") == "completed":
-        clusters = list(orphan.get("clusters") or [])
-        orphan.update(
-            _select_orphan_clusters(
-                clusters,
-                config,
-                orphan.get("bootstrap_calibration") or {},
-            )
-        )
-        orphan["clusters"] = clusters
-        orphan["selection_recomputed_without_labels"] = True
-        orphan["score_statistics_recomputed"] = False
-    output["schema_version"] = TOPIC_SCORE_TEST_SCHEMA_VERSION
-    output["selection_recomputed_without_labels"] = True
-    output["score_statistics_recomputed"] = False
-    return output

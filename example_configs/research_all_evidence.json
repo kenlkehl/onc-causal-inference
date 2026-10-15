@@ -43,20 +43,15 @@
     "extraction_reasoning_effort": "none",
     "operationalization_max_prompt_chars": 640000,
     "consolidation_batch_size": 20,
-    "consolidation_alphabetical_rounds": 5,
     "consolidation_max_rounds": 55,
     "extraction_max_prompt_chars": 640000,
     "extraction_feature_batch_size": 10,
-    "extraction_note_search": {
-      "enabled": false
-    },
     "extraction_chunk_size_tokens": 50000,
     "extraction_context_window_tokens": 131072,
     "extraction_context_margin_tokens": 1024,
     "max_review_rounds": 2,
     "ontology_refinement_min_failure_patients": 3,
     "max_ontology_refinement_rounds": 2,
-    "input_temporal_scope": "pre_index_treatment",
     "selection_consolidation": {
       "enabled": true,
       "neighbor_count": 10,
@@ -72,43 +67,20 @@
     },
     "statistical_selection": {
       "l1_ratio": 0.8,
-      "nuisance_selection_rule": "any_inner_fold_union",
-      "modifier_selection_rule": "any_inner_fold_union",
       "internal_cv_folds": 3,
-      "regularization_grid_size": 16,
       "optimization_tolerance": 1e-06,
-      "one_standard_error_rule": true,
-      "nuisance_prediction_one_standard_error_rule": false,
       "modifier_one_standard_error_rule": false,
-      "univariable_confounder_p_value_threshold": 0.05,
-      "univariable_confounder_q_value_threshold": 0.1,
-      "modifier_top_n_per_inner_fold": 10,
       "modifier_ridge_alpha": 10.0,
       "modifier_continuous_winsor_quantile": 0.005
     },
     "role_adjudication": {
-      "enabled": true,
       "max_description_chars": 1200,
       "max_measurement_definition_chars": 1600,
-      "max_categories_per_feature": 40,
-      "max_candidates_per_request": 20
+      "max_categories_per_feature": 40
     },
     "estimation_trees": 200,
     "propensity_clip": 0.02,
-    "explicit_features": [],
-    "extraction_context_strategy": "full_record",
-    "colbert": {
-      "model_name": "lightonai/GTE-ModernColBERT-v1",
-      "devices": [
-        "auto"
-      ],
-      "cache_dir": ".oci_cache/colbert",
-      "chunk_size": 64,
-      "chunk_overlap": 0,
-      "query_length": 512,
-      "batch_size": 32,
-      "top_k": 20
-    }
+    "explicit_features": []
   },
   "run": {
     "devices": [

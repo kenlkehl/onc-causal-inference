@@ -32,15 +32,9 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
-from .stage2_agentic_selection import (
-    LATENT_SCHEMA_VERSION,
-    Stage2AgenticSelectionConfig,
-    _apply_latent_state,
-    _pairwise_evidence,
-    _validate_rule_expression,
-    fit_latent_state,
-)
+from .stage2_statistical_selection import _feature_strategy
 
 SCHEMA_VERSION = "stage2_sequential_equivalent_measurement_consolidation_v5_clinical_prompts"
 SELECTION_SCHEMA_VERSION = (
@@ -49,6 +43,7 @@ SELECTION_SCHEMA_VERSION = (
 DEFAULT_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 DEFAULT_NEIGHBOR_COUNT = 10
 DEFAULT_MINIMUM_PAIRWISE_ASSOCIATION = 0.85
+LATENT_SCHEMA_VERSION = "stage2_structured_latent_v1"
 
 
 class RequestJSON(Protocol):
@@ -328,13 +323,297 @@ def _normalized_embeddings(
     return values / norms
 
 
+# Mixed-type pairwise association evidence (outcome-blind).
+
+
+def _finite(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _missing_mask(series: pd.Series) -> np.ndarray:
+    return series.isna().to_numpy(dtype=bool)
+
+
+def _categorical_values(
+    series: pd.Series,
+    *,
+    rare_minimum: int,
+) -> tuple[pd.Series, dict[str, str]]:
+    text = series.astype(str)
+    counts = text.value_counts(dropna=False)
+    rare = {str(value) for value, count in counts.items() if int(count) < rare_minimum}
+    mapping = {value: "__OTHER__" for value in sorted(rare)}
+    collapsed = text.map(lambda value: mapping.get(str(value), str(value)))
+    return collapsed, mapping
+
+
+def _bias_corrected_cramers_v(table: np.ndarray) -> float | None:
+    table = np.asarray(table, dtype=float)
+    n = float(table.sum())
+    if n <= 1.0 or table.ndim != 2 or min(table.shape) < 2:
+        return None
+    try:
+        chi2 = float(stats.chi2_contingency(table, correction=False)[0])
+    except ValueError:
+        return None
+    rows, columns = table.shape
+    phi2 = chi2 / n
+    correction = ((columns - 1) * (rows - 1)) / max(1.0, n - 1.0)
+    corrected_phi2 = max(0.0, phi2 - correction)
+    corrected_rows = rows - ((rows - 1) ** 2) / max(1.0, n - 1.0)
+    corrected_columns = columns - ((columns - 1) ** 2) / max(1.0, n - 1.0)
+    denominator = min(corrected_rows - 1.0, corrected_columns - 1.0)
+    if denominator <= 0.0:
+        return None
+    return float(np.clip(math.sqrt(corrected_phi2 / denominator), 0.0, 1.0))
+
+
+def _correlation_ratio(continuous: np.ndarray, categorical: np.ndarray) -> float | None:
+    continuous = np.asarray(continuous, dtype=float)
+    categorical = np.asarray(categorical, dtype=str)
+    if len(continuous) < 3 or np.std(continuous) <= 0.0:
+        return None
+    grand = float(np.mean(continuous))
+    denominator = float(np.sum(np.square(continuous - grand)))
+    if denominator <= 0.0:
+        return None
+    numerator = 0.0
+    for level in np.unique(categorical):
+        group = continuous[categorical == level]
+        if len(group):
+            numerator += len(group) * float(np.mean(group) - grand) ** 2
+    return float(np.clip(math.sqrt(max(0.0, numerator / denominator)), 0.0, 1.0))
+
+
+def _contingency_records(table: pd.DataFrame) -> list[dict[str, Any]]:
+    return [
+        {"left_level": str(left), "right_level": str(right), "count": int(count)}
+        for left in table.index
+        for right in table.columns
+        if (count := table.loc[left, right]) != 0
+    ]
+
+
+def _association_feature_id(feature: Mapping[str, Any]) -> str:
+    return str(feature.get("feature_id") or feature["name"])
+
+
+def _pairwise_evidence(
+    frame: pd.DataFrame,
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+    *,
+    minimum_complete_rows: int,
+    rare_level_min_count: int,
+) -> dict[str, Any]:
+    left_name, right_name = str(left["name"]), str(right["name"])
+    left_values = frame[left_name] if left_name in frame else pd.Series([None] * len(frame))
+    right_values = frame[right_name] if right_name in frame else pd.Series([None] * len(frame))
+    left_missing = _missing_mask(left_values)
+    right_missing = _missing_mask(right_values)
+    complete = ~(left_missing | right_missing)
+    complete_count = int(complete.sum())
+
+    missing_table = pd.crosstab(
+        pd.Series(left_missing, name="left_missing"),
+        pd.Series(right_missing, name="right_missing"),
+        dropna=False,
+    ).reindex(index=[False, True], columns=[False, True], fill_value=0)
+    missing_phi = None
+    if np.std(left_missing.astype(float)) > 0 and np.std(right_missing.astype(float)) > 0:
+        missing_phi = _finite(
+            np.corrcoef(left_missing.astype(float), right_missing.astype(float))[0, 1]
+        )
+    missing_union = int(np.sum(left_missing | right_missing))
+    missing_jaccard = (
+        None
+        if missing_union == 0
+        else float(np.sum(left_missing & right_missing) / missing_union)
+    )
+
+    row: dict[str, Any] = {
+        "left_feature_id": _association_feature_id(left),
+        "left_name": left_name,
+        "right_feature_id": _association_feature_id(right),
+        "right_name": right_name,
+        "n_rows": int(len(frame)),
+        "n_pairwise_complete": complete_count,
+        "missingness": {
+            "table": _contingency_records(missing_table),
+            "phi": missing_phi,
+            "absolute_phi": None if missing_phi is None else abs(missing_phi),
+            "agreement": float(np.mean(left_missing == right_missing)),
+            "jaccard": missing_jaccard,
+        },
+        "evaluable": complete_count >= minimum_complete_rows,
+        "association_kind": None,
+        "association": None,
+        "p_value": None,
+        "details": {},
+    }
+    if not row["evaluable"]:
+        row["details"] = {"reason": "insufficient_pairwise_complete_rows"}
+        return row
+
+    left_strategy = _feature_strategy(left)
+    right_strategy = _feature_strategy(right)
+    left_continuous = left_strategy in {"continuous", "continuous_with_categorical_fallback"}
+    right_continuous = right_strategy in {"continuous", "continuous_with_categorical_fallback"}
+
+    if left_continuous and right_continuous:
+        x = pd.to_numeric(left_values[complete], errors="coerce")
+        y = pd.to_numeric(right_values[complete], errors="coerce")
+        valid = x.notna() & y.notna()
+        if int(valid.sum()) < minimum_complete_rows:
+            row["evaluable"] = False
+            row["details"] = {"reason": "insufficient_numeric_pairwise_rows"}
+            return row
+        valid_x = x[valid]
+        valid_y = y[valid]
+        if np.unique(valid_x).size < 2 or np.unique(valid_y).size < 2:
+            rho = None
+            p_value = None
+        else:
+            result = stats.spearmanr(valid_x, valid_y)
+            rho = _finite(result.statistic)
+            p_value = _finite(result.pvalue)
+        row.update(
+            {
+                "association_kind": "absolute_spearman",
+                "association": None if rho is None else abs(rho),
+                "signed_association": rho,
+                "p_value": p_value,
+                "details": {"numeric_pairwise_rows": int(valid.sum())},
+            }
+        )
+        return row
+
+    if not left_continuous and not right_continuous:
+        raw_left = left_values[complete].astype(str)
+        raw_right = right_values[complete].astype(str)
+        raw_table = pd.crosstab(raw_left, raw_right, dropna=False)
+        collapsed_left, left_mapping = _categorical_values(
+            raw_left,
+            rare_minimum=rare_level_min_count,
+        )
+        collapsed_right, right_mapping = _categorical_values(
+            raw_right,
+            rare_minimum=rare_level_min_count,
+        )
+        inferential = pd.crosstab(collapsed_left, collapsed_right, dropna=False)
+        details: dict[str, Any] = {
+            "raw_table": _contingency_records(raw_table),
+            "inferential_table": _contingency_records(inferential),
+            "raw_shape": list(map(int, raw_table.shape)),
+            "inferential_shape": list(map(int, inferential.shape)),
+            "left_rare_level_mapping": left_mapping,
+            "right_rare_level_mapping": right_mapping,
+        }
+        if min(inferential.shape) < 2:
+            row["evaluable"] = False
+            details["reason"] = "contingency_has_one_level"
+            row["details"] = details
+            return row
+        try:
+            chi2, p_value, degrees, expected = stats.chi2_contingency(
+                inferential.to_numpy(), correction=False
+            )
+        except ValueError as exc:
+            row["evaluable"] = False
+            details["reason"] = f"chi_square_error: {exc}"
+            row["details"] = details
+            return row
+        details.update(
+            {
+                "chi_square": float(chi2),
+                "degrees_of_freedom": int(degrees),
+                "minimum_expected_count": float(np.min(expected)),
+                "expected_cells_below_five": int(np.sum(expected < 5.0)),
+            }
+        )
+        association = _bias_corrected_cramers_v(inferential.to_numpy())
+        signed_phi = None
+        if inferential.shape == (2, 2):
+            denominator = math.sqrt(
+                float(inferential.sum(axis=1).prod() * inferential.sum(axis=0).prod())
+            )
+            if denominator > 0:
+                values = inferential.to_numpy(dtype=float)
+                signed_phi = float((values[0, 0] * values[1, 1] - values[0, 1] * values[1, 0]) / denominator)
+        row.update(
+            {
+                "association_kind": "bias_corrected_cramers_v",
+                "association": association,
+                "signed_association": signed_phi,
+                "p_value": float(p_value),
+                "details": details,
+            }
+        )
+        return row
+
+    continuous_values = left_values if left_continuous else right_values
+    categorical_values = right_values if left_continuous else left_values
+    numeric = pd.to_numeric(continuous_values[complete], errors="coerce")
+    categorical = categorical_values[complete].astype(str)
+    valid = numeric.notna()
+    numeric = numeric[valid]
+    categorical = categorical[valid]
+    details = {"numeric_pairwise_rows": int(valid.sum())}
+    if int(valid.sum()) < minimum_complete_rows or categorical.nunique() < 2:
+        row["evaluable"] = False
+        details["reason"] = "insufficient_mixed_pair_variation"
+        row["details"] = details
+        return row
+    groups = [
+        numeric[categorical == level].to_numpy(dtype=float)
+        for level in sorted(categorical.unique())
+        if int(np.sum(categorical == level)) > 0
+    ]
+    if np.unique(numeric).size < 2:
+        p_value = None
+        statistic = None
+    else:
+        try:
+            test = stats.kruskal(*groups)
+            p_value = _finite(test.pvalue)
+            statistic = _finite(test.statistic)
+        except ValueError:
+            p_value = None
+            statistic = None
+    details.update(
+        {
+            "kruskal_wallis": statistic,
+            "levels": [str(value) for value in sorted(categorical.unique())],
+            "level_counts": {
+                str(level): int(np.sum(categorical == level))
+                for level in sorted(categorical.unique())
+            },
+        }
+    )
+    row.update(
+        {
+            "association_kind": "correlation_ratio",
+            "association": _correlation_ratio(
+                numeric.to_numpy(dtype=float), categorical.to_numpy(dtype=str)
+            ),
+            "p_value": p_value,
+            "details": details,
+        }
+    )
+    return row
+
+
 def _association_policy(
     policy: Stage2SequentialConsolidationConfig,
-) -> Stage2AgenticSelectionConfig:
-    return Stage2AgenticSelectionConfig(
-        minimum_pairwise_complete_rows=int(policy.minimum_pairwise_complete_rows),
-        categorical_rare_level_min_count=int(policy.categorical_rare_level_min_count),
-    )
+) -> dict[str, int]:
+    return {
+        "minimum_complete_rows": int(policy.minimum_pairwise_complete_rows),
+        "rare_level_min_count": int(policy.categorical_rare_level_min_count),
+    }
 
 
 def _compact_association(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -772,7 +1051,7 @@ def _validate_pairwise_association_threshold(
                 frame,
                 definitions_by_id[left_id],
                 definitions_by_id[right_id],
-                policy=association_policy,
+                **association_policy,
             )
             association = evidence.get("association")
             if not evidence.get("evaluable") or association is None:
@@ -788,6 +1067,211 @@ def _validate_pairwise_association_threshold(
                     f"minimum_pairwise_association={threshold:.3f}; pair=({left_id!r}, "
                     f"{right_id!r}) has association={association_value:.6f}"
                 )
+
+
+# Declarative latent-rule language.
+
+
+def _validate_condition(
+    value: Mapping[str, Any],
+    *,
+    allowed_feature_ids: set[str],
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("a categorical-rule condition must be an object")
+    feature_id = str(value.get("feature_id") or "")
+    if feature_id not in allowed_feature_ids:
+        raise ValueError(f"rule condition references unavailable feature {feature_id!r}")
+    operator = str(value.get("operator") or "")
+    if operator not in {"eq", "in", "gt", "ge", "lt", "le", "present", "missing"}:
+        raise ValueError(f"unsupported categorical-rule condition operator {operator!r}")
+    result: dict[str, Any] = {"feature_id": feature_id, "operator": operator}
+    if operator == "in":
+        values = value.get("values")
+        if not isinstance(values, list) or not values:
+            raise ValueError("an 'in' condition requires a nonempty values list")
+        result["values"] = [_validated_rule_scalar(item) for item in values]
+    elif operator not in {"present", "missing"}:
+        if "value" not in value:
+            raise ValueError(f"a {operator!r} condition requires value")
+        result["value"] = _validated_rule_scalar(value["value"])
+    return result
+
+
+def _validated_rule_scalar(value: Any) -> str | int | float | bool | None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float) and math.isfinite(value):
+        return value
+    raise ValueError("categorical-rule values must be finite JSON scalars")
+
+
+def _validate_rule_expression(
+    value: Mapping[str, Any],
+    *,
+    allowed_feature_ids: set[str],
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("categorical_rule.expression must be an object")
+    operation = str(value.get("op") or "")
+    if operation in {"count_present", "sum", "mean", "minimum", "maximum", "coalesce"}:
+        raw_features = value.get("feature_ids")
+        if not isinstance(raw_features, list) or not raw_features:
+            raise ValueError(f"rule operation {operation!r} requires feature_ids")
+        feature_ids = list(dict.fromkeys(map(str, raw_features)))
+        unknown = sorted(set(feature_ids) - allowed_feature_ids)
+        if unknown:
+            raise ValueError(f"rule references unavailable features: {unknown}")
+        return {"op": operation, "feature_ids": feature_ids}
+    if operation in {"any", "all", "count_true"}:
+        raw_conditions = value.get("conditions")
+        if not isinstance(raw_conditions, list) or not raw_conditions:
+            raise ValueError(f"rule operation {operation!r} requires conditions")
+        return {
+            "op": operation,
+            "conditions": [
+                _validate_condition(item, allowed_feature_ids=allowed_feature_ids)
+                for item in raw_conditions
+            ],
+        }
+    if operation == "case":
+        raw_cases = value.get("cases")
+        if not isinstance(raw_cases, list) or not raw_cases:
+            raise ValueError("rule operation 'case' requires cases")
+        cases: list[dict[str, Any]] = []
+        for item in raw_cases:
+            if not isinstance(item, Mapping) or "then" not in item:
+                raise ValueError("each case requires when and then")
+            cases.append(
+                {
+                    "when": _validate_condition(
+                        item.get("when") or {},
+                        allowed_feature_ids=allowed_feature_ids,
+                    ),
+                    "then": _validated_rule_scalar(item["then"]),
+                }
+            )
+        if "else" not in value:
+            raise ValueError("rule operation 'case' requires else")
+        return {
+            "op": operation,
+            "cases": cases,
+            "else": _validated_rule_scalar(value["else"]),
+        }
+    raise ValueError(f"unsupported categorical-rule operation {operation!r}")
+
+
+def _condition_mask(
+    frame: pd.DataFrame,
+    condition: Mapping[str, Any],
+    definitions_by_id: Mapping[str, Mapping[str, Any]],
+) -> pd.Series:
+    name = str(definitions_by_id[str(condition["feature_id"])]["name"])
+    series = frame[name] if name in frame else pd.Series([None] * len(frame))
+    operator = str(condition["operator"])
+    if operator == "present":
+        return series.notna()
+    if operator == "missing":
+        return series.isna()
+    if operator == "in":
+        allowed = {str(item) for item in condition["values"]}
+        return series.notna() & series.astype(str).isin(allowed)
+    target = condition.get("value")
+    if operator == "eq":
+        return series.notna() & (series.astype(str) == str(target))
+    numeric = pd.to_numeric(series, errors="coerce")
+    try:
+        threshold = float(target)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"numeric rule condition has nonnumeric value {target!r}") from exc
+    return {
+        "gt": numeric > threshold,
+        "ge": numeric >= threshold,
+        "lt": numeric < threshold,
+        "le": numeric <= threshold,
+    }[operator].fillna(False)
+
+
+def _apply_rule(
+    frame: pd.DataFrame,
+    spec: Mapping[str, Any],
+    definitions_by_id: Mapping[str, Mapping[str, Any]],
+) -> pd.Series:
+    expression = spec["expression"]
+    operation = str(expression["op"])
+    if operation in {"count_present", "sum", "mean", "minimum", "maximum", "coalesce"}:
+        columns = [
+            frame[str(definitions_by_id[feature_id]["name"])]
+            if str(definitions_by_id[feature_id]["name"]) in frame
+            else pd.Series([None] * len(frame))
+            for feature_id in expression["feature_ids"]
+        ]
+        values = pd.concat(columns, axis=1)
+        if operation == "count_present":
+            return values.notna().sum(axis=1).astype(float)
+        if operation == "coalesce":
+            if str(spec.get("output_type") or "") == "continuous":
+                # A continuous ontology can still contain an occasional malformed
+                # extractor value (for example, a complete blood-pressure pair in a
+                # systolic-only column). Treat values that cannot be parsed as missing
+                # and continue to the next equivalent source instead of allowing one
+                # bad alias value to invalidate the canonical measurement.
+                numeric = values.apply(pd.to_numeric, errors="coerce")
+                return numeric.bfill(axis=1).iloc[:, 0]
+            return values.bfill(axis=1).iloc[:, 0]
+        numeric = values.apply(pd.to_numeric, errors="coerce")
+        if operation == "sum":
+            return numeric.sum(axis=1, min_count=1)
+        if operation == "mean":
+            return numeric.mean(axis=1, skipna=True)
+        if operation == "minimum":
+            return numeric.min(axis=1, skipna=True)
+        return numeric.max(axis=1, skipna=True)
+    if operation in {"any", "all", "count_true"}:
+        masks = [
+            _condition_mask(frame, condition, definitions_by_id)
+            for condition in expression["conditions"]
+        ]
+        values = pd.concat(masks, axis=1)
+        if operation == "any":
+            return values.any(axis=1).astype(int)
+        if operation == "all":
+            return values.all(axis=1).astype(int)
+        return values.sum(axis=1).astype(float)
+    result = pd.Series([expression["else"]] * len(frame), index=frame.index, dtype=object)
+    # First matching case wins.
+    assigned = pd.Series(False, index=frame.index)
+    for case in expression["cases"]:
+        mask = _condition_mask(frame, case["when"], definitions_by_id) & ~assigned
+        result.loc[mask] = case["then"]
+        assigned |= mask
+    return result
+
+
+def _apply_latent_state(
+    frame: pd.DataFrame,
+    state: Mapping[str, Any],
+    definitions_by_id: Mapping[str, Mapping[str, Any]],
+) -> pd.Series:
+    if state["kind"] != "categorical_rule":
+        raise ValueError(f"unsupported Stage 2 latent kind {state['kind']!r}")
+    return _apply_rule(frame, state["spec"], definitions_by_id)
+
+
+def fit_latent_state(
+    frame: pd.DataFrame,
+    spec: Mapping[str, Any],
+    definitions_by_id: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    if spec["kind"] != "categorical_rule":
+        raise ValueError(f"unsupported Stage 2 latent kind {spec['kind']!r}")
+    # Declarative rules have no learned parameters, but retain an explicit
+    # fold-fitted state so their provenance is recorded per outer fold.
+    return {
+        "schema_version": LATENT_SCHEMA_VERSION,
+        "kind": "categorical_rule",
+        "spec": dict(spec),
+    }
 
 
 def _latent_definition(
@@ -1083,155 +1567,6 @@ def _rule_expression_examples(cluster_ids: Sequence[str]) -> dict[str, Any]:
                 },
             ],
             "else": None,
-        },
-    }
-
-
-def _decision_response_schema(
-    cluster_ids: Sequence[str],
-    *,
-    max_latents_per_cluster: int,
-) -> dict[str, Any]:
-    allowed_ids = list(map(str, cluster_ids))
-    nonempty_text = {"type": "string", "minLength": 1}
-    condition = {
-        "type": "object",
-        "required": ["feature_id", "operator"],
-        "properties": {
-            "feature_id": {"type": "string", "enum": allowed_ids},
-            "operator": {
-                "type": "string",
-                "enum": ["eq", "in"],
-            },
-            "value": {"type": ["string", "number", "boolean", "null"]},
-            "values": {
-                "type": "array",
-                "minItems": 1,
-                "items": {"type": ["string", "number", "boolean", "null"]},
-            },
-        },
-        "additionalProperties": False,
-    }
-    expression = {
-        "oneOf": [
-            {
-                "type": "object",
-                "required": ["op", "feature_ids"],
-                "properties": {
-                    "op": {
-                        "const": "coalesce",
-                    },
-                    "feature_ids": {
-                        "type": "array",
-                        "minItems": 2,
-                        "uniqueItems": True,
-                        "items": {"type": "string", "enum": allowed_ids},
-                    },
-                },
-                "additionalProperties": False,
-            },
-            {
-                "type": "object",
-                "required": ["op", "cases", "else"],
-                "properties": {
-                    "op": {"const": "case"},
-                    "cases": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                            "type": "object",
-                            "required": ["when", "then"],
-                            "properties": {
-                                "when": {"$ref": "#/$defs/condition"},
-                                "then": {"type": ["string", "number", "boolean", "null"]},
-                            },
-                            "additionalProperties": False,
-                        },
-                    },
-                    "else": {"type": "null"},
-                },
-                "additionalProperties": False,
-            },
-        ]
-    }
-    common_latent_properties = {
-        "source_feature_ids": {
-            "type": "array",
-            "minItems": 2,
-            "uniqueItems": True,
-            "items": {"type": "string", "enum": allowed_ids},
-        },
-        "label": nonempty_text,
-        "description": nonempty_text,
-        "rationale": nonempty_text,
-        "measurement_definition": nonempty_text,
-        "missing_value_rule": nonempty_text,
-    }
-    common_required = list(common_latent_properties)
-    latent = {
-        "type": "object",
-        "required": [
-            "kind",
-            *common_required,
-            "output_type",
-            "categories_or_unit",
-            "expression",
-        ],
-        "properties": {
-            "kind": {"const": "categorical_rule"},
-            **common_latent_properties,
-            "output_type": {
-                "type": "string",
-                "enum": ["binary", "categorical", "ordinal", "continuous"],
-            },
-            "categories_or_unit": {
-                "type": "array",
-                "minItems": 1,
-                "uniqueItems": True,
-                "items": {"type": "string", "minLength": 1},
-            },
-            "expression": {"$ref": "#/$defs/expression"},
-        },
-        "additionalProperties": False,
-    }
-    return {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "required": ["action", "rationale", "latents"],
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["leave_unchanged", "replace_with_latents"],
-            },
-            "rationale": nonempty_text,
-            "latents": {
-                "type": "array",
-                "maxItems": int(max_latents_per_cluster),
-                "items": {"$ref": "#/$defs/latent"},
-            },
-        },
-        "oneOf": [
-            {
-                "properties": {
-                    "action": {"const": "leave_unchanged"},
-                    "latents": {"maxItems": 0},
-                }
-            },
-            {
-                "properties": {
-                    "action": {"const": "replace_with_latents"},
-                    "latents": {
-                        "minItems": 1,
-                        "maxItems": int(max_latents_per_cluster),
-                    },
-                }
-            },
-        ],
-        "additionalProperties": False,
-        "$defs": {
-            "condition": condition,
-            "expression": expression,
-            "latent": latent,
         },
     }
 
@@ -1576,7 +1911,7 @@ def consolidate_stage2_candidates(
                     frame,
                     cluster[left],
                     cluster[right],
-                    policy=association_policy,
+                    **association_policy,
                 )
             )
             for left in range(len(cluster))

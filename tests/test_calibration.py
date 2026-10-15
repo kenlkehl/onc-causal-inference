@@ -3,7 +3,6 @@ import numpy as np
 from oci.utils.calibration import (
     BinaryProbabilityCalibrator,
     binary_calibration_metrics,
-    smooth_binary_targets,
 )
 
 
@@ -29,11 +28,3 @@ def test_temperature_isotonic_calibrator_shrinks_overconfident_probabilities():
     assert calibrated.shape == p.shape
     assert np.all((calibrated > 0.0) & (calibrated < 1.0))
     assert calibrator.temperature > 0.0
-
-
-def test_smooth_binary_targets_moves_labels_toward_half():
-    target = np.array([0.0, 1.0])
-
-    smoothed = smooth_binary_targets(target, 0.2)
-
-    assert np.allclose(smoothed, [0.1, 0.9])

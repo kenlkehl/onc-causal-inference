@@ -70,10 +70,8 @@ def _columns_to_feature_dicts(
         values = {}
         for spec in specs:
             col = f"explicit_feat_{spec.name}"
-            legacy_col = f"explicit_conf_{spec.name}"
-            source_col = col if col in df.columns else legacy_col
-            miss_col = f"{source_col}_missing"
-            val = row.get(source_col)
+            miss_col = f"{col}_missing"
+            val = row.get(col)
             values[spec.name] = val
             values[f"{spec.name}_missing"] = bool(row.get(miss_col, pd.isna(val)))
         result.append(values)

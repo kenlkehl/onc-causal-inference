@@ -1,8 +1,6 @@
 """Scientific boundaries and end-to-end behavior of the multi-model selector."""
 
 from dataclasses import replace
-from tests.stage2_prompt_spy import prompt_inputs, role_response
-from oci.inference.stage2_prompt_catalog import SYSTEM_PROMPTS
 
 import json
 import warnings
@@ -16,23 +14,23 @@ from sklearn.model_selection import KFold
 
 from oci.inference.stage2_elastic_net_selection import (
     Stage2ElasticNetSelectionConfig,
-    select_stage2_features_elastic_net,
     statistical_selection_config_from_mapping,
 )
-from oci.inference.stage2_multi_model_config import FAMILIES, MatchedBatchConfig, Stage2MultiModelConfig, EvidenceStabilityConfig
+from oci.inference.stage2_multi_model_config import (
+    FAMILIES,
+    SCHEMA_VERSION as MULTI_MODEL_SCHEMA_VERSION,
+    EvidenceStabilityConfig,
+    MatchedBatchConfig,
+    Stage2MultiModelConfig,
+)
 from oci.inference.stage2_multi_model_selection import (
     aggregate_evidence,
-    candidate_subsets,
-    grouped_permutation_gain,
+    select_stage2_features_multi_model,
 )
-from oci.inference.stage2_multi_model_adjudication import (
-    _decision_validator,
-    _themes_validator,
-    build_multi_model_role_evidence,
-)
+from oci.inference.stage2_multi_model_adjudication import build_multi_model_role_evidence
 from oci.inference.stage2_role_adjudication import (
     Stage2RoleAdjudicationConfig,
-    adjudicate_stage2_roles,
+    role_adjudication_config_from_mapping,
 )
 
 
@@ -51,7 +49,6 @@ def feature(key):
 
 def small_policy():
     return Stage2ElasticNetSelectionConfig(
-        selection_mode="multi_model",
         internal_cv_folds=2,
         max_iter=1500,
         minimum_log10_alpha=-1.5,
@@ -116,7 +113,7 @@ def test_real_models_are_honest_cover_candidates_and_resume_without_refitting(
             arguments["extracted_fit"]["other"] > 0, "a", "b"
         )
         arguments["definitions"][-1].update(value_type="categorical", categories_or_unit=["a", "b"])
-    result = select_stage2_features_elastic_net(**arguments, checkpoint_dir=tmp_path)
+    result = select_stage2_features_multi_model(**arguments, checkpoint_dir=tmp_path)
     _, report, dependencies, latents = result
     assert not latents and len(dependencies) == 4
     assert set(report["evaluable_cells_by_family"]) == set(
@@ -130,7 +127,7 @@ def test_real_models_are_honest_cover_candidates_and_resume_without_refitting(
     if matched:
         legacy_policy = replace(arguments["policy"], multi_model=replace(
             arguments["policy"].multi_model, matched_batch=MatchedBatchConfig()))
-        _, legacy, _, _ = select_stage2_features_elastic_net(**{**arguments, "policy": legacy_policy})
+        _, legacy, _, _ = select_stage2_features_multi_model(**{**arguments, "policy": legacy_policy})
         assert [c for c in report["cells"] if c["family"] != "matched_batch_contrast"] == legacy["cells"]
     assert {r["_oci_row_id"] for r in report["cross_fitted_nuisance_models"]["predictions"]} == set(
         range(96)
@@ -152,7 +149,7 @@ def test_real_models_are_honest_cover_candidates_and_resume_without_refitting(
     )
     monkeypatch.setattr("oci.inference.stage2_matched_batch.score_candidates",
                         lambda *a, **k: pytest.fail("completed batch checkpoint was refitted"))
-    resumed = select_stage2_features_elastic_net(
+    resumed = select_stage2_features_multi_model(
         **{**arguments, "dataset": changed}, checkpoint_dir=tmp_path
     )
     assert resumed == result
@@ -168,11 +165,11 @@ def test_invalid_inner_boundary_fails_before_fitting(tmp_path):
     arguments = sample_inputs()
     arguments["inner_splits"][0]["heldout_row_ids"].append(100)
     with pytest.raises(ValueError, match="outer-training"):
-        select_stage2_features_elastic_net(**arguments, checkpoint_dir=tmp_path)
+        select_stage2_features_multi_model(**arguments, checkpoint_dir=tmp_path)
     arguments = sample_inputs()
     arguments["dataset"]["treatment"] = 0
     with pytest.raises(ValueError, match="both binary treatment arms"):
-        select_stage2_features_elastic_net(**arguments, checkpoint_dir=tmp_path)
+        select_stage2_features_multi_model(**arguments, checkpoint_dir=tmp_path)
 
 
 def test_all_modifier_evidence_uses_overlap_while_associations_keep_all_rows(monkeypatch):
@@ -207,11 +204,11 @@ def test_all_modifier_evidence_uses_overlap_while_associations_keep_all_rows(mon
                 "predictive_support": {"task_feature_ids": {"treatment": [], "outcome": []}},
         },
     )
-    _, original, _, _ = select_stage2_features_elastic_net(**arguments)
+    _, original, _, _ = select_stage2_features_multi_model(**arguments)
     excluded = ~selection.linear.propensity_eligibility(p(arguments["extracted_fit"]), 0.1, 0.9)
     changed = arguments["dataset"].copy()
     changed.loc[np.flatnonzero(excluded), "outcome"] += 100
-    _, poisoned, _, _ = select_stage2_features_elastic_net(**{**arguments, "dataset": changed})
+    _, poisoned, _, _ = select_stage2_features_multi_model(**{**arguments, "dataset": changed})
     for old, new in zip(original["cells"], poisoned["cells"]):
         if old["family"] == "univariable":
             assert old["audit"]["association_fit_row_ids"] == old["fit_row_ids"]
@@ -245,26 +242,6 @@ def test_all_modifier_evidence_uses_overlap_while_associations_keep_all_rows(mon
         nuisance={"e": np.full(96, 0.5), "m": np.zeros(96)},
     )
     assert all(r["status"] == "not_evaluable" for r in empty["records"] if r["role"] == "effect")
-
-
-def test_subsets_and_group_permutation_preserve_candidate_units():
-    for repeat in (0, 1, 2):
-        groups = candidate_subsets(list("abcdefg"), repeat=repeat, subset_size=3, seed=55)
-        assert sorted(k for group in groups for k in group) == list("abcdefg")
-        assert len(groups) == (1 if repeat == 0 else 3)
-    x = np.array([[1, 0, 1], [0, 1, 2], [1, 0, 3], [0, 1, 4]], dtype=float)
-    calls = []
-
-    def score(values):
-        assert np.all(values[:, :2].sum(axis=1) == 1)
-        calls.append(values.copy())
-        return float(np.mean(values[:, 0] * values[:, 2]))
-
-    _, result = grouped_permutation_gain(
-        x, ["category", "category", "number"], score, repeats=3, seed=24
-    )
-    assert set(result) == {"category", "number"} and len(calls) == 7
-    assert np.array_equal(x, [[1, 0, 1], [0, 1, 2], [1, 0, 3], [0, 1, 4]])
 
 
 def test_missing_fit_is_not_a_negative_stability_vote(monkeypatch):
@@ -353,115 +330,104 @@ def role_fixture():
     return definitions, report
 
 
-def test_themes_cover_all_batches_roles_cite_evidence_and_resume(tmp_path):
+def test_concept_review_evidence_uses_allowlisted_aggregate_inputs_only():
     definitions, report = role_fixture()
-    policy = Stage2RoleAdjudicationConfig(max_candidates_per_request=2)
-    calls = []
-
-    def request(messages, validate, **kwargs):
-        assert "DO_NOT_LEAK" not in json.dumps(messages)
-        slug = next(key for key, text in SYSTEM_PROMPTS.items() if text == messages[0]["content"])
-        calls.append(slug)
-        if slug == "16_merge_themes":
-            return validate({"merges": []})
-        payload = prompt_inputs(messages)
-        if slug == "15_model_themes":
-            return validate({"themes": [{"name": "Shared evidence", "members": [c["definition"]["name"].replace("_", " ") for c in payload["candidates"]],
-                "interpretation": "Candidate-specific support.", "disagreements": "Shared samples limit independence."}]})
-        candidate = payload["candidates"][0]
-        assert payload["themes"]
-        return validate(role_response(confounder=candidate["feature_id"] == "f0", modifier=candidate["feature_id"] != "f0"))
-
-    selected, audit, evidence = adjudicate_stage2_roles(
-        definitions=definitions,
-        statistical_report=report,
-        request_json=request,
-        output_dir=tmp_path,
-        policy=policy,
-    )
-    assert len(selected) == 7 and selected[0]["roles"] == ["confounder"]
-    assert {k for t in audit["themes"] for k in t["member_feature_ids"]} == {
-        f"f{i}" for i in range(7)
-    }
-    assert "16_merge_themes" in calls
-    assert calls.count("17_model_roles") == 7
-    first_count = len(calls)
-    second = adjudicate_stage2_roles(
-        definitions=definitions,
-        statistical_report=report,
-        request_json=request,
-        output_dir=tmp_path,
-        policy=policy,
-    )
-    assert len(calls) == first_count and second == (selected, audit, evidence)
-    response = tmp_path / "roles/batch_000/response.json"
-    response.write_text(response.read_text().replace("Exploratory support.", "Tampered evidence."))
-    with pytest.raises(ValueError, match="hash does not match"):
-        adjudicate_stage2_roles(
-            definitions=definitions,
-            statistical_report=report,
-            request_json=request,
-            output_dir=tmp_path,
-            policy=policy,
-        )
-
-
-def test_role_review_rejects_lost_candidates_and_invented_citations():
-    validator = _themes_validator(["a", "b"], ["e1"], maximum=2)
-    with pytest.raises(ValueError, match="include every"):
-        validator(
-            {
-                "themes": [
-                    {
-                        "name": "A",
-                        "member_feature_ids": ["a"],
-                        "evidence_ids": ["e1"],
-                        "interpretation": "A",
-                        "disagreements": "B",
-                    }
-                ]
-            }
-        )
-    definitions, report = role_fixture()
+    definitions[1].update(oracle_role="DO_NOT_LEAK", data_generation_notes="DO_NOT_LEAK")
+    policy = Stage2RoleAdjudicationConfig()
     evidence = build_multi_model_role_evidence(
-        definitions=definitions, statistical_report=report, policy=Stage2RoleAdjudicationConfig()
+        definitions=definitions, statistical_report=report, policy=policy
     )
-    validate = _decision_validator(definitions[:1], evidence["candidates"][:1])
-    with pytest.raises(ValueError, match="supplied evidence"):
-        validate(
-            {
-                "summary": "A",
-                "decisions": [
-                    {
-                        "feature_id": "f0",
-                        "roles": ["confounder"],
-                        "evidence_ids": ["invented"],
-                        "rationale": "A",
-                        "inner_fold_consistency": "A",
-                        "cross_method_reconciliation": "A",
-                        "stability": "mixed",
-                    }
-                ],
-            }
+    rendered = json.dumps(evidence)
+    assert "DO_NOT_LEAK" not in rendered
+    for key in ("ground_truth", "source_dataset_path", "oracle_role", "data_generation_notes", "row_values"):
+        assert key not in rendered
+    assert evidence["evidence_boundary"]["outer_heldout_rows_are_excluded"] is True
+    assert evidence["evidence_boundary"]["oracle_columns_are_excluded"] is True
+    assert [c["feature_id"] for c in evidence["candidates"]] == [f["feature_id"] for f in definitions]
+    locked = evidence["candidates"][0]["definition"]
+    assert locked["investigator_locked"] is True and locked["configured_roles"] == ["confounder"]
+    with pytest.raises(ValueError, match="exactly once"):
+        build_multi_model_role_evidence(
+            definitions=definitions[:-1], statistical_report=report, policy=policy
         )
 
 
-def test_mode_is_explicit_and_legacy_checkpoint_policies_are_unchanged():
-    legacy = Stage2ElasticNetSelectionConfig().public_dict()
-    assert "selection_mode" not in legacy and "multi_model" not in legacy
-    independent = Stage2ElasticNetSelectionConfig(selection_mode="independent_tasks").public_dict()
-    assert "multi_model" not in independent
-    new = statistical_selection_config_from_mapping(
-        {"selection_mode": "multi_model", "multi_model": {"repeats": 2}}
-    )
-    assert new.multi_model.repeats == 2
-    assert statistical_selection_config_from_mapping(new.public_dict()) == new
+def test_default_policy_roundtrips_and_is_multi_model_only():
+    default = statistical_selection_config_from_mapping({})
+    public = default.public_dict()
+    assert "selection_mode" not in public
+    assert public["multi_model"]["schema_version"] == MULTI_MODEL_SCHEMA_VERSION
+    count_policy = default.multi_model.modifier_count
+    assert count_policy.estimators == ("causal_forest", "linear_interactions", "dina")
+    assert count_policy.selection_rule == "balanced_evidence"
+    assert "enabled" not in count_policy.public_dict()
+    assert default.multi_model.interaction_ranking_weight == 0.5
+    # The former mode selector and count-search flag are accepted only as no-ops.
+    assert statistical_selection_config_from_mapping(
+        {"selection_mode": "multi_model", "multi_model": {"modifier_count": {"enabled": True}}}
+    ) == default
+    custom = statistical_selection_config_from_mapping({"multi_model": {"repeats": 2}})
+    assert custom.multi_model.repeats == 2
+    for config in (default, custom):
+        assert statistical_selection_config_from_mapping(config.public_dict()) == config
+
+
+def test_retired_policy_fields_warn_and_are_ignored(caplog):
+    with caplog.at_level("WARNING"):
+        config = statistical_selection_config_from_mapping(
+            {"one_standard_error_rule": True, "modifier_top_n_per_inner_fold": 10,
+             "regularization_grid_size": 16}
+        )
+    assert config == statistical_selection_config_from_mapping({})
+    assert "one_standard_error_rule" in caplog.text
+    with caplog.at_level("WARNING"):
+        roles = role_adjudication_config_from_mapping(
+            {"enabled": True, "max_candidates_per_request": 20}
+        )
+    assert roles == Stage2RoleAdjudicationConfig()
+    assert "max_candidates_per_request" in caplog.text
     with pytest.raises(ValueError, match="unsupported"):
-        statistical_selection_config_from_mapping(
-            {"selection_mode": "multi_model", "multi_model": {"unknown": True}}
-        )
-    with pytest.raises(ValueError):
-        replace(new, multi_model=replace(new.multi_model, row_fraction=float("nan"))).validate()
+        role_adjudication_config_from_mapping({"unknown": 1})
+
+
+@pytest.mark.parametrize(
+    "raw, message",
+    [
+        ({"selection_mode": "llm_roles"}, "only 'multi_model'"),
+        ({"selection_mode": "independent_tasks"}, "only 'multi_model'"),
+        ({"unknown": True}, "unsupported"),
+        ({"multi_model": {"unknown": True}}, "unsupported"),
+        (
+            {"multi_model": {"schema_version": "stage2_multi_model_selection_v6_predictive_nuisances"}},
+            "schema_version",
+        ),
+        ({"multi_model": {"modifier_count": {"enabled": False}}}, "no longer supported"),
+        ({"multi_model": {"modifier_count": {"enabled": "yes"}}}, "no longer supported"),
+        ({"multi_model": {"modifier_count": {"selection_rule": "minimum_r_loss"}}}, "selection_rule"),
+        ({"multi_model": {"modifier_count": {"selection_rule": "oracle"}}}, "selection_rule"),
+        ({"multi_model": {"modifier_count": {"candidate_counts": [4, 0]}}}, "candidate_counts"),
+        ({"multi_model": {"modifier_count": {"candidate_counts": [0, True]}}}, "candidate_counts"),
+        *[
+            ({"multi_model": {"modifier_count": {"estimators": estimators}}}, "estimators")
+            for estimators in ([], ["unknown"], ["causal_forest", "causal_forest"], [True])
+        ],
+    ],
+)
+def test_invalid_selection_policy_is_rejected(raw, message):
+    with pytest.raises(ValueError, match=message):
+        statistical_selection_config_from_mapping(raw)
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1, True, float("nan")])
+def test_invalid_numeric_policy_values_are_rejected(value):
+    multi = statistical_selection_config_from_mapping({}).multi_model
+    for invalid in (
+        replace(multi, interaction_ranking_weight=value),
+        replace(multi, row_fraction=value),
+        replace(multi, modifier_count=replace(multi.modifier_count, relative_r_loss_tolerance=value)),
+    ):
+        with pytest.raises(ValueError):
+            invalid.validate()
 
 
 def test_new_example_uses_predictive_nuisances_and_freezes_resume_policy(tmp_path):
@@ -477,16 +443,9 @@ def test_new_example_uses_predictive_nuisances_and_freezes_resume_policy(tmp_pat
     )
     raw = json.loads(path.read_text())
     config = compile_config(raw, config_dir=path.parent)
-    assert config.stage2.statistical_selection.selection_mode == "multi_model"
-    assert config.stage2.statistical_selection.multi_model.modifier_count.enabled
     assert config.stage2.statistical_selection.multi_model.modifier_count.selection_rule == 'balanced_evidence'
     assert config.stage2.statistical_selection.multi_model.interaction_ranking_weight == .5
     assert (config.stage2.min_propensity, config.stage2.max_propensity) == (0.1, 0.9)
-    assert config.stage2.role_adjudication.enabled is False
-    # Saved configs with the old flag still parse; multi_model ignores that
-    # flag for retention. Explicit disabled configurations are also valid.
-    raw["stage2"]["role_adjudication"]["enabled"] = True
-    compile_config(raw, config_dir=path.parent)
     root = tmp_path / "stage2"
     root.mkdir()
     saved = {
@@ -502,13 +461,6 @@ def test_new_example_uses_predictive_nuisances_and_freezes_resume_policy(tmp_pat
         json.dumps({"selection_authority": "multi_model"})
     )
     validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
-    old = json.loads(json.dumps(saved))
-    for version in ("stage2_multi_model_selection_v1", "stage2_multi_model_selection_v2", "stage2_multi_model_selection_v5_stable_joint", "stage2_multi_model_selection_v6_predictive_nuisances"):
-        old["statistical_selection"]["multi_model"]["schema_version"] = version
-        (root / "config.json").write_text(json.dumps(old))
-        with pytest.raises(RuntimeError, match="predictive nuisance selection"):
-            validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
-    (root / "config.json").write_text(json.dumps(saved))
     changed_trees = replace(config.stage2, estimation_trees=config.stage2.estimation_trees * 2)
     with pytest.raises(RuntimeError, match="modifier-count estimation_trees changed"):
         validate_selection_resume(SimpleNamespace(stage2=changed_trees, output_dir=tmp_path))

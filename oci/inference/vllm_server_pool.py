@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 import signal
 import socket
@@ -13,7 +12,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 from urllib.error import HTTPError, URLError
@@ -150,63 +149,6 @@ def managed_argument(config, flag, default=None):
     return value
 
 
-def co_resident_vllm_configs(primary, extraction):
-    """Replicate both roles on their configured GPU union, preserving TP widths.
-
-    Explicit memory fractions reserve room for the other role and retrieval.
-    The GPU union respects CUDA visibility and the run's selected devices; no
-    unrelated host GPU is claimed. Port expansion keeps both pools isolated.
-    """
-    primary.validate()
-    extraction.validate()
-    fractions = []
-    for config in (primary, extraction):
-        raw = managed_argument(config, "--gpu-memory-utilization")
-        if raw is None:
-            raise ValueError("co-resident all-GPU serving requires explicit --gpu-memory-utilization for both models")
-        fraction = float(raw)
-        if not math.isfinite(fraction) or not 0 < fraction <= 1:
-            raise ValueError("co-resident GPU memory fractions must be finite and positive")
-        fractions.append(fraction)
-    if sum(fractions) > 0.90 + 1e-12:
-        raise ValueError("co-resident GPU memory fractions must total at most 0.90, leaving room for retrieval and CUDA contexts")
-    gpus = tuple(dict.fromkeys((*primary.gpus, *extraction.gpus)))
-    ports = set(primary.effective_ports())
-    other_ports = set(extraction.effective_ports())
-    if ports & other_ports:
-        raise ValueError("co-resident model pools require distinct public HTTP ports")
-    used = ports | other_ports
-
-    def expand(config):
-        width = config.effective_gpus_per_server()
-        if len(gpus) % width:
-            raise ValueError("co-resident GPU union must divide evenly by each model's tensor-parallel width")
-        count = len(gpus) // width
-        expanded_ports = list(config.effective_ports())
-        candidate = max(expanded_ports) + 1
-        while len(expanded_ports) < count:
-            if candidate > 65535:
-                raise ValueError("cannot allocate co-resident model ports below 65536")
-            if candidate not in used:
-                expanded_ports.append(candidate)
-                used.add(candidate)
-            candidate += 1
-        result = replace(config, gpus=gpus, server_count=count,
-                         gpus_per_server=width, ports=tuple(expanded_ports))
-        result.validate()
-        return result
-
-    primary, extraction = expand(primary), expand(extraction)
-    # Expanding a pool may overtake the other pool's original rendezvous range.
-    # Preserve its base when possible, otherwise allocate after the primary.
-    primary_end = primary.internal_port_base + primary.server_count * _VLLM_INTERNAL_PORT_STRIDE
-    extraction_end = extraction.internal_port_base + extraction.server_count * _VLLM_INTERNAL_PORT_STRIDE
-    if max(primary.internal_port_base, extraction.internal_port_base) < min(primary_end, extraction_end):
-        extraction = replace(extraction, internal_port_base=primary_end)
-    validate_managed_vllm_pool_isolation(primary, extraction)
-    return primary, extraction
-
-
 @dataclass(frozen=True)
 class ManagedVLLMConfig:
     """Configuration for pipeline-owned vLLM replica processes."""
@@ -341,7 +283,7 @@ def managed_vllm_config_from_mapping(
         raise ValueError("stage2.vllm.gpus must be a list or comma-separated string")
     gpus = tuple(_normalized_gpu(value) for value in raw_gpus)
 
-    raw_server_count = raw.get("server_count", raw.get("servers"))
+    raw_server_count = raw.get("server_count")
     raw_gpus_per_server = raw.get("gpus_per_server")
     gpus_per_server = (
         None if raw_gpus_per_server is None else int(raw_gpus_per_server)

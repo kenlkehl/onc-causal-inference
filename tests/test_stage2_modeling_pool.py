@@ -2,10 +2,8 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from hashlib import sha256
 import json
 import os
-from pathlib import Path
 import time
 
 import pytest
@@ -13,7 +11,6 @@ import pytest
 from oci.inference import stage2_modeling_pool as pool
 from oci.inference import stage2_multi_model_selection as numerical
 from oci.inference import stage2_modifier_count as count
-from oci.inference.stage2_modeling_identity import scientific_source_sha256
 from oci.inference.stage2_multi_model_config import ModifierCountConfig
 from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
 from tests.test_stage2_multi_model import sample_inputs
@@ -95,18 +92,6 @@ def test_real_evidence_and_model_selection_identical_in_parallel(tmp_path, binar
         value = json.dumps([evidence, result], sort_keys=True).replace(str(root), "ROOT")
         results.append(value)
     assert results[0] == results[1]
-
-
-def test_source_aliases_are_exact_and_future_edits_invalidate(tmp_path):
-    source = Path(numerical.__file__)
-    aliases = json.loads(source.with_name("stage2_modeling_source_aliases.json").read_text())
-    for filename, mapping in aliases.items():
-        path = source.with_name(filename)
-        actual = sha256(path.read_bytes()).hexdigest()
-        assert scientific_source_sha256(path) == mapping.get(actual, actual)
-    changed = tmp_path / source.name
-    changed.write_text(source.read_text() + "\n# future change\n")
-    assert scientific_source_sha256(changed) == sha256(changed.read_bytes()).hexdigest()
 
 
 def test_config_and_serial_session_validation():

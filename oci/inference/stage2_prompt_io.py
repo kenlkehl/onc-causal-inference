@@ -20,8 +20,7 @@ def write_json(path, value):
     os.replace(temporary, path)
 
 
-def request_review(directory, messages, validate, *, request_json, identity, maximum_chars=200000,
-                   compatible_identities=()):
+def request_review(directory, messages, validate, *, request_json, identity, maximum_chars=200000):
     if sum(len(m["content"]) for m in messages) > maximum_chars:
         raise ValueError("clinical review prompt exceeds max_prompt_chars; no input was truncated")
     directory = Path(directory)
@@ -29,9 +28,7 @@ def request_review(directory, messages, validate, *, request_json, identity, max
     response_path, complete_path = directory / "response.json", directory / "complete.json"
     if response_path.is_file() and complete_path.is_file():
         complete = json.loads(complete_path.read_text())
-        compatible_keys = {key, *(fingerprint({"messages": messages, "identity": previous,
-            "version": PROMPT_VERSION}) for previous in compatible_identities)}
-        if complete.get("input_fingerprint") in compatible_keys:
+        if complete.get("input_fingerprint") == key:
             response = json.loads(response_path.read_text())
             if complete.get("response_sha256") != fingerprint(response):
                 raise ValueError("clinical review checkpoint response hash does not match")

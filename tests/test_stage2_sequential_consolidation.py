@@ -7,9 +7,14 @@ import pandas as pd
 import pytest
 
 from oci.inference.stage2_sequential_consolidation import (
+    LATENT_SCHEMA_VERSION,
     SCHEMA_VERSION,
     Stage2SequentialConsolidationConfig,
+    _apply_latent_state,
+    _pairwise_evidence,
+    _validate_rule_expression,
     consolidate_stage2_candidates,
+    fit_latent_state,
     latent_states_for_selected,
     materialize_selected_latents,
     measurement_definitions_for_selected,
@@ -1170,3 +1175,105 @@ def test_invalid_response_and_conservative_fallback_are_persisted(tmp_path):
     )
     assert decision["action"] == "leave_unchanged"
     assert "Conservative schema-validation fallback" in decision["rationale"]
+
+
+def test_pairwise_evidence_covers_every_mixed_type_pair():
+    index = np.arange(48)
+    score_a = index.astype(float) + np.sin(index)
+    score_b = 2.0 * score_a + (index % 3) * 0.05
+    score_a[index % 11 == 0] = np.nan
+    group_a = np.where(index % 2, "high", "low").astype(object)
+    group_b = np.where(index % 2, "yes", "no").astype(object)
+    group_b[index % 13 == 0] = None
+    frame = pd.DataFrame(
+        {"score_a": score_a, "score_b": score_b, "group_a": group_a, "group_b": group_b}
+    )
+    definitions = [
+        _continuous("f_score_a", "score_a"),
+        _continuous("f_score_b", "score_b"),
+        _categorical("f_group_a", "group_a"),
+        _categorical("f_group_b", "group_b"),
+    ]
+    rows = [
+        _pairwise_evidence(
+            frame,
+            definitions[left],
+            definitions[right],
+            minimum_complete_rows=10,
+            rare_level_min_count=5,
+        )
+        for left in range(len(definitions))
+        for right in range(left + 1, len(definitions))
+    ]
+
+    assert all(row["evaluable"] for row in rows)
+    assert {row["association_kind"] for row in rows} == {
+        "absolute_spearman",
+        "bias_corrected_cramers_v",
+        "correlation_ratio",
+    }
+    continuous = next(row for row in rows if row["association_kind"] == "absolute_spearman")
+    assert continuous["left_feature_id"] == "f_score_a"
+    assert continuous["association"] > 0.99
+    categorical = next(
+        row for row in rows if row["association_kind"] == "bias_corrected_cramers_v"
+    )
+    assert categorical["details"]["raw_table"]
+    assert categorical["details"]["inferential_table"]
+    assert categorical["missingness"]["table"]
+
+    sparse = _pairwise_evidence(
+        frame,
+        definitions[0],
+        definitions[1],
+        minimum_complete_rows=len(frame) + 1,
+        rare_level_min_count=5,
+    )
+    assert sparse["evaluable"] is False
+    assert sparse["details"] == {"reason": "insufficient_pairwise_complete_rows"}
+
+
+def test_declarative_latent_rule_has_no_executable_escape_hatch():
+    frame = pd.DataFrame(
+        {
+            "group_a": ["high", "low", None, "high"],
+            "group_b": ["no", "yes", "no", None],
+        }
+    )
+    definitions_by_id = {
+        "f_group_a": _categorical("f_group_a", "group_a"),
+        "f_group_b": _categorical("f_group_b", "group_b"),
+    }
+    allowed = set(definitions_by_id)
+    expression = _validate_rule_expression(
+        {
+            "op": "any",
+            "conditions": [
+                {"feature_id": "f_group_a", "operator": "eq", "value": "high"},
+                {"feature_id": "f_group_b", "operator": "eq", "value": "yes"},
+            ],
+        },
+        allowed_feature_ids=allowed,
+    )
+    spec = {
+        "kind": "categorical_rule",
+        "source_feature_ids": ["f_group_a", "f_group_b"],
+        "output_type": "binary",
+        "expression": expression,
+    }
+    state = fit_latent_state(frame, spec, definitions_by_id)
+
+    assert set(state) == {"schema_version", "kind", "spec"}
+    assert state["schema_version"] == LATENT_SCHEMA_VERSION
+    assert _apply_latent_state(frame, state, definitions_by_id).tolist() == [1, 1, 0, 1]
+    for invalid in (
+        {"op": "python", "code": "__import__('os')"},
+        {"op": "coalesce", "feature_ids": ["f_group_a", "f_other"]},
+        {
+            "op": "any",
+            "conditions": [{"feature_id": "f_group_a", "operator": "regex", "value": ".*"}],
+        },
+        {"op": "case", "cases": [{"when": {"feature_id": "f_group_a", "operator": "present"}, "then": 1}]},
+    ):
+        with pytest.raises(ValueError):
+            _validate_rule_expression(invalid, allowed_feature_ids=allowed)

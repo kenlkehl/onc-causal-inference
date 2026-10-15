@@ -18,12 +18,10 @@ from oci.inference.plain_handoff_stage2 import (
     PlainHandoffStage2,
     PlainHandoffStage2Config,
     Stage2ExtractionLLMConfig,
-    packetize_handoff,
     plain_stage2_config_from_mapping,
     run_plain_handoff_stage2,
 )
 from oci.inference.plain_handoff_stage2_analysis import extract_rows, run_fold_analysis
-from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
 
 
 class _CharacterChatTokenizer:
@@ -73,12 +71,6 @@ def _original_evidence_packets(packet_ids):
 def _prompt_job(body):
     if "job" in body:
         return body["job"]
-    if body.get("task") == "analyze_cluster":
-        return "analyze_stage2_variable_cluster"
-    if body.get("task") == "outer_fold_role_adjudication":
-        return "adjudicate_stage2_variable_role"
-    if body.get("task") == "adjudicate_stage2_roles_from_all_evidence":
-        return "adjudicate_stage2_roles_from_all_evidence"
     if set(body) == {"candidate_feature_name", "supporting_evidence"}:
         return "operationalize_stage2_candidate_group"
     raise AssertionError(f"unrecognized prompt body keys: {sorted(body)}")
@@ -138,13 +130,7 @@ def test_stage2_config_allows_endpoint_without_model():
     assert config.consolidation_max_prompt_chars == 640_000
     assert config.operationalization_max_prompt_chars == 640_000
     assert config.consolidation_batch_size == 20
-    assert config.consolidation_alphabetical_rounds == 5
     assert config.consolidation_max_rounds == 55
-    assert (
-        config.consolidation_max_rounds - config.consolidation_alphabetical_rounds
-        == stage2_workflow.DEFAULT_CONSOLIDATION_SHUFFLE_ROUNDS
-        == 50
-    )
     assert config.extraction_max_prompt_chars == 640_000
     assert config.extraction_feature_batch_size == 10
     assert config.extraction_chunk_size_tokens == 50_000
@@ -153,35 +139,12 @@ def test_stage2_config_allows_endpoint_without_model():
     assert config.vllm_rapid_switch_seconds == 900.0
     assert config.ontology_refinement_min_failure_patients == 3
     assert config.max_ontology_refinement_rounds == 2
-    assert config.evidence_compiler == "semantic_cluster_cards_v5"
     assert config.evidence_max_cards_per_fold == 400
     assert config.extraction_llm is None
-    assert config.input_temporal_scope == "pre_index_treatment"
-    assert config.agentic_selection.cluster_similarity_threshold == 0.60
-    assert config.agentic_selection.cluster_consensus_fraction == 0.60
-    assert config.agentic_selection.max_latents_per_cluster == 2
     assert config.selection_consolidation.enabled is False
     assert config.selection_consolidation.neighbor_count == 10
     assert config.selection_consolidation.minimum_pairwise_association == 0.85
     assert config.workers == 4
-
-
-def test_stage2_config_parses_agentic_evidence_pair_chunk_size():
-    config = plain_stage2_config_from_mapping(
-        {
-            "endpoint": "http://stage2.test/v1",
-            "agentic_evidence_pair_chunk_size": 37,
-        },
-        default_workers=8,
-    )
-
-    assert config is not None
-    assert config.agentic_evidence_pair_chunk_size == 37
-    with pytest.raises(ValueError, match="pair_chunk_size"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            agentic_evidence_pair_chunk_size=0,
-        ).validate(require_model=False)
 
 
 def test_extraction_token_cap_does_not_invalidate_completed_feature_definitions():
@@ -214,59 +177,6 @@ def test_extraction_token_cap_does_not_invalidate_completed_feature_definitions(
         resumed_config,
         "extraction",
     )["max_tokens"] == 60_000
-
-
-def test_agentic_selection_policy_does_not_invalidate_feature_definitions():
-    prior_config = PlainHandoffStage2Config(
-        endpoint="http://stage2.test/v1",
-        model="primary-model",
-        agentic_selection=stage2_workflow.Stage2AgenticSelectionConfig(
-            cluster_similarity_threshold=0.60,
-        ),
-    )
-    resumed_config = PlainHandoffStage2Config(
-        endpoint="http://stage2.test/v1",
-        model="primary-model",
-        agentic_selection=stage2_workflow.Stage2AgenticSelectionConfig(
-            cluster_similarity_threshold=0.75,
-        ),
-    )
-
-    def definition_inputs(config):
-        return stage2_workflow._feature_definition_input_value(
-            config=config,
-            clinical_question="Identify confounders.",
-            outer_fold=1,
-            discovery_packets=[],
-            seed=42,
-        )
-
-    assert definition_inputs(resumed_config) == definition_inputs(prior_config)
-
-
-def test_stage2_defaults_to_full_record_llm_and_retains_decision_opt_in():
-    config = plain_stage2_config_from_mapping({"endpoint": "http://test/v1", "model": "gemma"}, default_workers=2)
-    assert config.extraction_context_strategy == "full_record"
-    assert config.extraction_feature_batch_size == 10
-    assert config.decision_extraction.enabled is False
-    assert stage2_analysis._configured_serial_extraction(config)["context_strategy"] == "full_record"
-    decision = plain_stage2_config_from_mapping({
-        "endpoint": "http://test/v1", "model": "gemma",
-        "decision_extraction": {"enabled": True},
-        "extraction_llm": {"endpoint": "http://plumb/v1", "model": "crh225/plumb-4b"},
-    }, default_workers=2)
-    assert decision.extraction_context_strategy == "colbert"
-    assert decision.decision_extraction.enabled is True
-
-
-def test_stage2_analysis_defaults_pre_refinement_config_fields(caplog):
-    class PreRefinementConfig:
-        pass
-
-    limits = stage2_analysis._ontology_refinement_limits(PreRefinementConfig())
-
-    assert limits == (3, 2)
-    assert "pre-ontology-refinement config" in caplog.text
 
 
 def test_large_statistical_selector_runs_in_loky_process(monkeypatch):
@@ -303,7 +213,7 @@ def test_large_statistical_selector_runs_in_loky_process(monkeypatch):
     )
     monkeypatch.setattr(
         stage2_analysis,
-        "select_stage2_features_elastic_net",
+        "select_stage2_features_multi_model",
         fake_selector,
     )
     monkeypatch.setattr(
@@ -337,7 +247,6 @@ def test_stage2_config_parses_independent_large_context_prompt_budgets():
             "consolidation_max_prompt_chars": 450_000,
             "operationalization_max_prompt_chars": 475_000,
             "consolidation_batch_size": 18,
-            "consolidation_alphabetical_rounds": 4,
             "consolidation_max_rounds": 7,
             "extraction_max_prompt_chars": 500_000,
             "extraction_feature_batch_size": 7,
@@ -353,15 +262,6 @@ def test_stage2_config_parses_independent_large_context_prompt_budgets():
             },
             "ontology_refinement_min_failure_patients": 4,
             "max_ontology_refinement_rounds": 3,
-            "input_temporal_scope": "pre_index_treatment",
-            "agentic_selection": {
-                "cluster_similarity_threshold": 0.7,
-                "cluster_consensus_fraction": 0.8,
-                "cluster_max_size": 10,
-                "max_latents_per_cluster": 2,
-                "cluster_tool_call_limit": 6,
-                "adjudicator_tool_call_limit": 7,
-            },
             "selection_consolidation": {
                 "enabled": True,
                 "neighbor_count": 8,
@@ -372,11 +272,9 @@ def test_stage2_config_parses_independent_large_context_prompt_budgets():
                 "latent_min_coverage": 0.1,
             },
             "role_adjudication": {
-                "enabled": True,
                 "max_description_chars": 900,
                 "max_measurement_definition_chars": 1_100,
                 "max_categories_per_feature": 25,
-                "max_candidates_per_request": 17,
             },
         },
         default_workers=1,
@@ -396,7 +294,6 @@ def test_stage2_config_parses_independent_large_context_prompt_budgets():
     assert config.consolidation_max_prompt_chars == 450_000
     assert config.operationalization_max_prompt_chars == 475_000
     assert config.consolidation_batch_size == 18
-    assert config.consolidation_alphabetical_rounds == 4
     assert config.consolidation_max_rounds == 7
     assert config.extraction_max_prompt_chars == 500_000
     assert config.extraction_feature_batch_size == 7
@@ -409,22 +306,15 @@ def test_stage2_config_parses_independent_large_context_prompt_budgets():
     assert config.extraction_llm.endpoint == "http://extract.test/v1"
     assert config.extraction_llm.model == "small-model"
     assert config.extraction_llm.workers == 3
-    assert config.input_temporal_scope == "pre_index_treatment"
-    assert config.agentic_selection.cluster_similarity_threshold == 0.7
-    assert config.agentic_selection.cluster_consensus_fraction == 0.8
-    assert config.agentic_selection.cluster_max_size == 10
-    assert config.agentic_selection.cluster_tool_call_limit == 6
     assert config.selection_consolidation.enabled is True
     assert config.selection_consolidation.neighbor_count == 8
     assert config.selection_consolidation.embedding_model == "test-embedding-model"
     assert config.selection_consolidation.max_latents_per_cluster == 3
     assert config.selection_consolidation.minimum_pairwise_association == 0.9
     assert config.selection_consolidation.latent_min_coverage == 0.1
-    assert config.role_adjudication.enabled is True
     assert config.role_adjudication.max_description_chars == 900
     assert config.role_adjudication.max_measurement_definition_chars == 1_100
     assert config.role_adjudication.max_categories_per_feature == 25
-    assert config.role_adjudication.max_candidates_per_request == 17
     assert config.public_dict()["max_tokens"] == 148_000
     assert config.public_dict()["request_timeout"] == 1_200.0
     assert config.public_dict()["request_attempt_timeout"] == 120.0
@@ -437,7 +327,6 @@ def test_stage2_config_parses_independent_large_context_prompt_budgets():
     assert config.public_dict()["consolidation_max_prompt_chars"] == 450_000
     assert config.public_dict()["operationalization_max_prompt_chars"] == 475_000
     assert config.public_dict()["consolidation_batch_size"] == 18
-    assert config.public_dict()["consolidation_alphabetical_rounds"] == 4
     assert config.public_dict()["consolidation_max_rounds"] == 7
     assert config.public_dict()["extraction_max_prompt_chars"] == 500_000
     assert config.public_dict()["extraction_feature_batch_size"] == 7
@@ -448,11 +337,9 @@ def test_stage2_config_parses_independent_large_context_prompt_budgets():
     assert config.public_dict()["ontology_refinement_min_failure_patients"] == 4
     assert config.public_dict()["max_ontology_refinement_rounds"] == 3
     assert config.public_dict()["role_adjudication"] == {
-        "enabled": True,
         "max_description_chars": 900,
         "max_measurement_definition_chars": 1_100,
         "max_categories_per_feature": 25,
-        "max_candidates_per_request": 17,
     }
     assert config.public_dict()["extraction_llm"]["api_key"] == "<redacted>"
     assert config.public_dict()["api_key"] == "<redacted>"
@@ -473,26 +360,6 @@ def test_stage2_allows_primary_and_extraction_models_on_the_same_endpoint():
 
     assert config is not None
     assert config.endpoint == config.extraction_llm.endpoint
-
-
-def test_stage2_config_warns_and_ignores_retired_colbert_settings(caplog):
-    config = plain_stage2_config_from_mapping(
-        {
-            "endpoint": "http://stage2.test/v1",
-            "evidence_community_enabled": True,
-            "candidate_selection_method": "late_interaction",
-            "max_evaluation_rounds": 10,
-            "screening_trees": 200,
-        },
-        default_workers=1,
-    )
-
-    assert config is not None
-    public = config.public_dict()
-    assert "evidence_community_enabled" not in public
-    assert "candidate_selection_method" not in public
-    assert "max_evaluation_rounds" not in public
-    assert "ignoring retired Stage 2" in caplog.text
 
 
 def test_extraction_runtime_continuation_route_is_parsed_and_audited_separately():
@@ -542,228 +409,43 @@ def test_extraction_runtime_continuation_route_requires_endpoint_model_pair(kwar
         ).validate()
 
 
-@pytest.mark.parametrize(
-    "field_name,value",
-    [
-        ("cluster_similarity_threshold", 0.0),
-        ("cluster_consensus_fraction", 1.1),
-        ("missingness_weight", float("nan")),
-        ("cluster_max_size", 1),
-        ("cluster_tool_call_limit", 0),
-    ],
-)
-def test_stage2_config_rejects_invalid_agentic_selection_policy(field_name, value):
-    policy = stage2_workflow.Stage2AgenticSelectionConfig(**{field_name: value})
-    with pytest.raises(ValueError, match=field_name):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            agentic_selection=policy,
-        ).validate()
+_INVALID_STAGE2_CONFIG_VALUES = [
+    *(("vllm_rapid_switch_seconds", value, "vllm_rapid_switch_seconds")
+      for value in (-1, True, float("inf"), float("nan"), "900")),
+    *(("request_timeout", value, "request_timeout") for value in (0, float("inf"), True)),
+    *(("request_attempt_timeout", value, "request_attempt_timeout")
+      for value in (-1, float("nan"), "300")),
+    ("operationalization_max_prompt_chars", 3_999, "operationalization_max_prompt_chars"),
+    ("consolidation_batch_size", 1, "consolidation_batch_size must be at least 2"),
+    ("consolidation_max_rounds", 0, "consolidation_max_rounds must be positive"),
+    ("ontology_refinement_min_failure_patients", 1, "ontology_refinement_min_failure_patients"),
+    ("max_ontology_refinement_rounds", -1, "max_ontology_refinement_rounds"),
+    ("extraction_feature_batch_size", 0, "extraction_feature_batch_size"),
+    ("extraction_chunk_size_tokens", 0, "extraction_chunk_size_tokens"),
+    ("extraction_context_window_tokens", 76_024, "context window must exceed"),
+    *(("max_tokens", value, "max_tokens must be an integer of at least 100000")
+      for value in (0, -1, 99_999, True, 1.5, "100000")),
+    *(("extraction_max_tokens", value, "extraction_max_tokens must be an integer of at least 4096")
+      for value in (0, -1, 4_095, True, 1.5, "4096")),
+    *(("max_response_repairs", value, "max_response_repairs must be a nonnegative integer")
+      for value in (-1, True, 1.5, "10")),
+    *(("thinking_after_response_repairs", value,
+       "thinking_after_response_repairs must be a nonnegative integer")
+      for value in (-1, True, 1.5, "5")),
+    *(("repetition_penalty", value, "repetition_penalty")
+      for value in (0, -1, True, float("inf"), float("nan"), "1.1")),
+    ("interpretation_reasoning_effort", "very-hard", "interpretation_reasoning_effort"),
+    ("extraction_reasoning_effort", "very-hard", "extraction_reasoning_effort"),
+]
 
 
-@pytest.mark.parametrize(
-    "removed_key",
-    [
-        "selection_workers",
-        "confounder_p_value_threshold",
-        "confounder_min_inner_fold_fraction",
-        "effect_modifier_p_value_threshold",
-        "effect_modifier_min_inner_fold_fraction",
-    ],
-)
-def test_stage2_config_migrates_retired_p_value_screen_settings(removed_key, caplog):
-    config = plain_stage2_config_from_mapping(
-        {"endpoint": "http://stage2.test/v1", removed_key: 1},
-        default_workers=1,
-    )
-
-    assert config is not None
-    assert "migrating legacy Stage 2 screen settings" in caplog.text
-    assert (
-        config.statistical_selection.nuisance_selection_rule
-        == "any_inner_fold_union"
-    )
-    assert (
-        config.statistical_selection.modifier_selection_rule
-        == "any_inner_fold_union"
-    )
-
-
-@pytest.mark.parametrize(
-    "rapid_switch_seconds",
-    [-1, True, float("inf"), float("nan"), "900"],
-)
-def test_stage2_config_rejects_invalid_vllm_rapid_switch_seconds(
-    rapid_switch_seconds,
-):
-    with pytest.raises(ValueError, match="vllm_rapid_switch_seconds"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            vllm_rapid_switch_seconds=rapid_switch_seconds,
-        ).validate()
-
-
-@pytest.mark.parametrize(
-    ("field_name", "value"),
-    [
-        ("request_timeout", 0),
-        ("request_timeout", float("inf")),
-        ("request_timeout", True),
-        ("request_attempt_timeout", -1),
-        ("request_attempt_timeout", float("nan")),
-        ("request_attempt_timeout", "300"),
-    ],
-)
-def test_stage2_config_rejects_invalid_request_timeouts(field_name, value):
-    with pytest.raises(ValueError, match=field_name):
+@pytest.mark.parametrize(("field_name", "value", "message"), _INVALID_STAGE2_CONFIG_VALUES)
+def test_stage2_config_rejects_invalid_values(field_name, value, message):
+    with pytest.raises(ValueError, match=message):
         PlainHandoffStage2Config(
             endpoint="http://stage2.test/v1",
             model="test-model",
             **{field_name: value},
-        ).validate()
-
-
-def test_stage2_config_rejects_invalid_consolidation_iteration_limits():
-    with pytest.raises(ValueError, match="operationalization_max_prompt_chars"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            operationalization_max_prompt_chars=3_999,
-        ).validate()
-
-    with pytest.raises(ValueError, match="consolidation_batch_size must be at least 2"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            consolidation_batch_size=1,
-        ).validate()
-
-    with pytest.raises(ValueError, match="consolidation_max_rounds must be positive"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            consolidation_max_rounds=0,
-        ).validate()
-
-    with pytest.raises(ValueError, match="consolidation_alphabetical_rounds"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            consolidation_alphabetical_rounds=-1,
-        ).validate()
-
-    with pytest.raises(ValueError, match="ontology_refinement_min_failure_patients"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            ontology_refinement_min_failure_patients=1,
-        ).validate()
-
-    with pytest.raises(ValueError, match="max_ontology_refinement_rounds"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            max_ontology_refinement_rounds=-1,
-        ).validate()
-
-    with pytest.raises(ValueError, match="extraction_feature_batch_size"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            extraction_feature_batch_size=0,
-        ).validate()
-
-    with pytest.raises(ValueError, match="extraction_chunk_size_tokens"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            extraction_chunk_size_tokens=0,
-        ).validate()
-
-    with pytest.raises(ValueError, match="context window must exceed"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            extraction_context_window_tokens=76_024,
-        ).validate()
-
-
-@pytest.mark.parametrize("max_tokens", [0, -1, 99_999, True, 1.5, "100000"])
-def test_stage2_config_rejects_invalid_max_tokens(max_tokens):
-    with pytest.raises(ValueError, match="max_tokens must be an integer of at least 100000"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            max_tokens=max_tokens,
-        ).validate()
-
-
-@pytest.mark.parametrize(
-    "extraction_max_tokens",
-    [0, -1, 4_095, True, 1.5, "4096"],
-)
-def test_stage2_config_rejects_invalid_extraction_max_tokens(extraction_max_tokens):
-    with pytest.raises(
-        ValueError,
-        match="extraction_max_tokens must be an integer of at least 4096",
-    ):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            extraction_max_tokens=extraction_max_tokens,
-        ).validate()
-
-
-@pytest.mark.parametrize("max_response_repairs", [-1, True, 1.5, "10"])
-def test_stage2_config_rejects_invalid_max_response_repairs(max_response_repairs):
-    with pytest.raises(ValueError, match="max_response_repairs must be a nonnegative integer"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            max_response_repairs=max_response_repairs,
-        ).validate()
-
-
-@pytest.mark.parametrize("thinking_after_response_repairs", [-1, True, 1.5, "5"])
-def test_stage2_config_rejects_invalid_thinking_repair_threshold(
-    thinking_after_response_repairs,
-):
-    with pytest.raises(
-        ValueError,
-        match="thinking_after_response_repairs must be a nonnegative integer",
-    ):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            thinking_after_response_repairs=thinking_after_response_repairs,
-        ).validate()
-
-
-@pytest.mark.parametrize(
-    "repetition_penalty",
-    [0, -1, True, float("inf"), float("nan"), "1.1"],
-)
-def test_stage2_config_rejects_invalid_repetition_penalty(repetition_penalty):
-    with pytest.raises(ValueError, match="repetition_penalty"):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            repetition_penalty=repetition_penalty,
-        ).validate()
-
-
-@pytest.mark.parametrize(
-    "field_name",
-    ["interpretation_reasoning_effort", "extraction_reasoning_effort"],
-)
-def test_stage2_config_rejects_invalid_reasoning_effort(field_name):
-    with pytest.raises(ValueError, match=field_name):
-        PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            **{field_name: "very-hard"},
         ).validate()
 
 
@@ -824,49 +506,6 @@ def test_stage2_explicit_feature_requires_complete_ontology():
             },
             default_workers=1,
         )
-
-
-def test_stage2_rejects_retired_raw_packet_compiler():
-    with pytest.raises(ValueError, match="raw_packets_v1 was retired"):
-        plain_stage2_config_from_mapping(
-            {
-                "endpoint": "http://stage2.test/v1",
-                "evidence_compiler": "raw_packets_v1",
-            },
-            default_workers=1,
-        )
-
-
-def test_stage2_ignores_legacy_extraction_batch_size_and_parses_extraction_token_cap(caplog):
-    config = plain_stage2_config_from_mapping(
-        {
-            "endpoint": "http://stage2.test/v1",
-            "extraction_batch_size": 100,
-            "max_tokens": 125_000,
-        },
-        default_workers=8,
-    )
-
-    assert config is not None
-    assert "extraction_batch_size" not in config.public_dict()
-    assert config.max_tokens == 125_000
-    assert config.public_dict()["max_tokens"] == 125_000
-    assert "permanently isolated to one patient per prompt" in caplog.text
-
-
-def test_stage2_maps_legacy_enable_thinking_to_interpretation_effort(caplog):
-    config = plain_stage2_config_from_mapping(
-        {
-            "endpoint": "http://stage2.test/v1",
-            "enable_thinking": False,
-        },
-        default_workers=1,
-    )
-
-    assert config is not None
-    assert config.interpretation_reasoning_effort == "none"
-    assert config.extraction_reasoning_effort == "none"
-    assert "enable_thinking is deprecated" in caplog.text
 
 
 def test_stage2_autodiscovers_the_only_served_model(monkeypatch):
@@ -1645,125 +1284,6 @@ def test_stage2_extraction_batches_features_by_default_and_accepts_override(
     pd.testing.assert_frame_equal(resumed, frame)
 
 
-def test_extraction_retries_only_legacy_infrastructure_failure_feature_batches(
-    tmp_path: Path,
-):
-    definitions = [
-        {
-            "name": f"feature_{index:02d}",
-            "description": f"Feature {index}",
-            "value_type": "continuous",
-            "categories_or_unit": ["score"],
-            "measurement_definition": f"Extract feature {index}.",
-            "missing_value_rule": "Return null when undocumented.",
-        }
-        for index in range(2)
-    ]
-    dataset = pd.DataFrame({"clinical_text": ["Both feature values are documented."]})
-    output = tmp_path / "extraction"
-    calls: list[list[str]] = []
-
-    def request_json(messages, validate, *, request_kind="interpretation"):
-        assert request_kind == "extraction"
-        body = prompt_inputs(messages)
-        names = [feature["name"] for feature in body["features"]]
-        calls.append(names)
-        return validate(
-            {
-                "rows": [
-                    {
-                        "row_id": 0,
-                        "values": {
-                            name: int(name.removeprefix("feature_")) for name in names
-                        },
-                    }
-                ]
-            }
-        )
-
-    expected = extract_rows(
-        dataset=dataset,
-        row_ids=[0],
-        text_column="clinical_text",
-        definitions=definitions,
-        output_dir=output,
-        request_json=request_json,
-        workers=1,
-        max_prompt_chars=100_000,
-        feature_batch_size=1,
-    )
-    calls.clear()
-
-    parent_dir = output / "batches" / "batch_00001"
-    failed_dir = parent_dir / "feature_batches" / "batch_00002"
-    (failed_dir / "result.json").write_text(
-        json.dumps({"rows": [{"row_id": 0, "values": {"feature_01": None}}]}),
-        encoding="utf-8",
-    )
-    (failed_dir / "extraction_failure.json").write_text(
-        json.dumps(
-            {
-                "resolution": "conservative_all_null",
-                "validation_error": (
-                    "Stage2RequestExhaustedError: transport attempts exhausted"
-                ),
-            }
-        ),
-        encoding="utf-8",
-    )
-    (failed_dir / "extraction_issues.json").write_text(
-        json.dumps(
-            {
-                "events": [
-                    {
-                        "failure_kind": "structural_response_failure",
-                        "reason": "Stage2RequestExhaustedError: transport attempts exhausted",
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    (parent_dir / "result.json").write_text(
-        json.dumps(
-            {
-                "rows": [
-                    {
-                        "row_id": 0,
-                        "values": {"feature_00": 0, "feature_01": None},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    repaired = extract_rows(
-        dataset=dataset,
-        row_ids=[0],
-        text_column="clinical_text",
-        definitions=definitions,
-        output_dir=output,
-        request_json=request_json,
-        workers=1,
-        max_prompt_chars=100_000,
-        feature_batch_size=1,
-    )
-
-    pd.testing.assert_frame_equal(repaired, expected)
-    assert calls == [["feature_01"]]
-    assert (failed_dir / "superseded_infrastructure_extraction_failure.json").is_file()
-    assert (failed_dir / "superseded_infrastructure_result.json").is_file()
-    assert (parent_dir / "superseded_infrastructure_complete.json").is_file()
-    archived_failure = output / "_partial_backup_20260827" / "extraction_failure.json"
-    archived_failure.parent.mkdir()
-    archived_failure.write_text(
-        '{"validation_error":"Stage2RequestExhaustedError: archived"}',
-        encoding="utf-8",
-    )
-    assert stage2_analysis.infrastructure_failure_audit_paths(output) == ()
-
-
 def test_stage2_serial_extraction_carries_state_across_lossless_token_chunks_and_resumes(
     tmp_path: Path,
 ):
@@ -2133,189 +1653,6 @@ def test_extraction_recovers_feature_key_drift_and_defaults_missing_values_to_nu
     }
     assert "missing_as_null=['performance_status']" in caplog.text
     assert "extras_dropped=['invented_feature']" in caplog.text
-
-
-def test_resume_adopts_valid_legacy_single_patient_extraction_checkpoint(
-    tmp_path: Path,
-    caplog,
-):
-    caplog.set_level("INFO", logger=stage2_analysis.__name__)
-    output = tmp_path / "extraction"
-    batch = output / "batches" / "batch_00001"
-    batch.mkdir(parents=True)
-    (batch / "row_ids.json").write_text("[0]\n", encoding="utf-8")
-    (batch / "result.json").write_text(
-        json.dumps(
-            {
-                "rows": [
-                    {
-                        "row_id": 0,
-                        "values": {"performance_status": "2"},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    (batch / "complete.json").write_text(
-        json.dumps({"status": "complete", "rows": 1}),
-        encoding="utf-8",
-    )
-    definition = {
-        "name": "performance_status",
-        "value_type": "ordinal",
-        "categories_or_unit": ["0-4"],
-    }
-
-    def unexpected_request(_messages, _validate, *, request_kind="interpretation"):
-        raise AssertionError("valid legacy singleton checkpoint should be adopted")
-
-    frame = extract_rows(
-        dataset=pd.DataFrame({"clinical_text": ["Pretreatment ECOG was 2."]}),
-        row_ids=[0],
-        text_column="clinical_text",
-        definitions=[definition],
-        output_dir=output,
-        request_json=unexpected_request,
-        workers=1,
-        max_prompt_chars=10_000,
-    )
-
-    assert frame.loc[0, "performance_status"] == "2"
-    completion = json.loads((batch / "complete.json").read_text(encoding="utf-8"))
-    assert completion["schema_version"] == stage2_analysis.EXTRACTION_CHECKPOINT_SCHEMA_VERSION
-    assert completion["adopted_legacy_single_patient_checkpoint"] is True
-    assert "adopt legacy single-patient" in caplog.text
-
-
-def test_resume_relocates_legacy_singleton_by_row_id_after_batch_numbers_shift(
-    tmp_path: Path,
-    caplog,
-):
-    caplog.set_level("INFO", logger=stage2_analysis.__name__)
-    output = tmp_path / "extraction"
-    old_batch = output / "batches" / "batch_00002"
-    old_batch.mkdir(parents=True)
-    (old_batch / "row_ids.json").write_text("[0]\n", encoding="utf-8")
-    (old_batch / "result.json").write_text(
-        json.dumps(
-            {
-                "rows": [
-                    {
-                        "row_id": 0,
-                        "values": {"performance_status": "2"},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    (old_batch / "complete.json").write_text(
-        json.dumps({"status": "complete", "rows": 1}),
-        encoding="utf-8",
-    )
-    definition = {
-        "name": "performance_status",
-        "value_type": "ordinal",
-        "categories_or_unit": ["0-4"],
-    }
-
-    def unexpected_request(_messages, _validate, *, request_kind="interpretation"):
-        raise AssertionError("shifted legacy singleton should be relocated")
-
-    frame = extract_rows(
-        dataset=pd.DataFrame({"clinical_text": ["Pretreatment ECOG was 2."]}),
-        row_ids=[0],
-        text_column="clinical_text",
-        definitions=[definition],
-        output_dir=output,
-        request_json=unexpected_request,
-        workers=1,
-        max_prompt_chars=10_000,
-    )
-
-    new_batch = output / "batches" / "batch_00001"
-    assert frame.loc[0, "performance_status"] == "2"
-    assert json.loads((new_batch / "row_ids.json").read_text(encoding="utf-8")) == [0]
-    completion = json.loads((new_batch / "complete.json").read_text(encoding="utf-8"))
-    assert completion["relocated_single_patient_checkpoint"] is True
-    assert completion["checkpoint_source"] == str(old_batch)
-    assert "relocate single-patient" in caplog.text
-
-
-def test_resume_reconstructs_failure_ledger_from_legacy_category_audit(
-    tmp_path: Path,
-):
-    output = tmp_path / "extraction"
-    batch = output / "batches" / "batch_00001"
-    batch.mkdir(parents=True)
-    (batch / "row_ids.json").write_text("[0]\n", encoding="utf-8")
-    (batch / "result.json").write_text(
-        json.dumps(
-            {
-                "rows": [
-                    {
-                        "row_id": 0,
-                        "values": {"marker_status": None},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    (batch / "complete.json").write_text(
-        json.dumps({"status": "complete", "rows": 1}),
-        encoding="utf-8",
-    )
-    (batch / "category_ontology_repair.json").write_text(
-        json.dumps(
-            {
-                "schema_version": "stage2_category_ontology_repair_v1",
-                "resolution": "conservative_null",
-                "items": [
-                    {
-                        "mapping_id": "category_mapping_0001",
-                        "feature_name": "marker_status",
-                        "value_type": "categorical",
-                        "allowed_categories": ["negative", "positive"],
-                        "prior_extracted_value": "equivocal",
-                    }
-                ],
-                "targets": {
-                    "category_mapping_0001": [{"row_id": 0, "feature_name": "marker_status"}]
-                },
-                "corrections": [{"mapping_id": "category_mapping_0001", "value": None}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    definition = {
-        "name": "marker_status",
-        "value_type": "categorical",
-        "categories_or_unit": ["negative", "positive"],
-    }
-
-    frame = extract_rows(
-        dataset=pd.DataFrame({"clinical_text": ["Marker was equivocal."]}),
-        row_ids=[0],
-        text_column="clinical_text",
-        definitions=[definition],
-        output_dir=output,
-        request_json=(
-            lambda _messages, _validate, *, request_kind="interpretation": (_ for _ in ()).throw(
-                AssertionError("legacy checkpoint should be adopted")
-            )
-        ),
-        workers=1,
-        max_prompt_chars=10_000,
-    )
-
-    assert pd.isna(frame.loc[0, "marker_status"])
-    ledger = json.loads((batch / "extraction_issues.json").read_text(encoding="utf-8"))
-    assert ledger["reconstructed_from_legacy_audits"] is True
-    assert ledger["events"][0]["failure_kind"] == "out_of_ontology_category"
-    summary = json.loads((output / "failure_summary.json").read_text(encoding="utf-8"))
-    assert summary["feature_failure_patterns"][0]["patient_count"] == 1
 
 
 def test_resume_retries_only_checkpoints_with_stale_range_ontology_repairs(tmp_path: Path):
@@ -2835,7 +2172,7 @@ def test_rejected_packet_audit_prompt_is_generic_recall_guardrail():
     assert excerpt in messages[1]["content"]
     assert "PRIVATE_PACKET" not in str(messages)
     assert "supporting_items" not in str(messages)
-    result = stage2_workflow._validate_interpretation({"candidates": [{"name": "Serum albumin", "description": "Albumin concentration.", "basis": "Albumin result.", "uncertainty": ""}]}, packet_ids=["PRIVATE_PACKET"])
+    result = stage2_workflow._validate_discovery({"candidates": [{"name": "Serum albumin", "description": "Albumin concentration.", "basis": "Albumin result.", "uncertainty": ""}]}, packet_id="PRIVATE_PACKET")
     assert result["concepts"][0]["supporting_packet_ids"] == ["PRIVATE_PACKET"]
 
 
@@ -2885,126 +2222,6 @@ def test_supporting_evidence_preserves_text_and_architecture_without_packet_meta
     ]
 
 
-def test_interpretation_normalizes_axes_and_derives_complete_dispositions():
-    packet_ids = ["packet-a", "packet-b"]
-    result = stage2_workflow._validate_interpretation(
-        {
-            "candidates": [
-                {
-                    "name": "performance_status",
-                    "supporting_items": [1, 99],
-                    "evidence_rationale": (
-                        "Functional limitation could produce the cited text pattern."
-                    ),
-                }
-            ],
-        },
-        packet_ids=packet_ids,
-        packet_evidence_axes={
-            "packet-a": ["effect-modifier", "unsupported-axis"],
-            "packet-b": ["outcome"],
-        },
-    )
-
-    assert result["concepts"] == [
-        {
-            "name": "performance_status",
-            "description": "performance_status",
-            "supporting_packet_ids": ["packet-a"],
-            "evidence_axes": ["residual_effect"],
-            "evidence_rationale": "Functional limitation could produce the cited text pattern.",
-            "caveats": "",
-        }
-    ]
-    assert set(result["packet_dispositions"]) == set(packet_ids)
-    assert result["packet_dispositions"]["packet-a"]["status"] == "supports_concept"
-    assert result["packet_dispositions"]["packet-b"]["status"] == "reviewed_no_specific_concept"
-
-
-def test_interpretation_requires_a_latent_feature_evidence_rationale():
-    with pytest.raises(ValueError, match="has no evidence_rationale"):
-        stage2_workflow._validate_interpretation(
-            {
-                "concepts": [
-                    {
-                        "name": "performance_status",
-                        "supporting_items": [1],
-                    }
-                ],
-            },
-            packet_ids=["packet-a"],
-        )
-
-
-def test_interpretation_ignores_unnamed_candidate_and_preserves_valid_candidates(caplog):
-    result = stage2_workflow._validate_interpretation(
-        {
-            "candidates": [
-                {
-                    "name": "",
-                    "description": "An ambiguous fragment with no defensible feature name.",
-                    "supporting_items": [1],
-                    "evidence_rationale": "The fragment was reviewed but is not identifiable.",
-                },
-                {
-                    "name": "thrombocytopenia",
-                    "supporting_items": [2],
-                    "evidence_rationale": "The cited text explicitly names thrombocytopenia.",
-                },
-            ]
-        },
-        packet_ids=["packet-ambiguous", "packet-thrombocytopenia"],
-    )
-
-    assert [concept["name"] for concept in result["concepts"]] == ["thrombocytopenia"]
-    assert (
-        result["packet_dispositions"]["packet-ambiguous"]["status"]
-        == "reviewed_no_specific_concept"
-    )
-    assert result["packet_dispositions"]["packet-thrombocytopenia"]["status"] == "supports_concept"
-    assert "ignored unnamed candidate at position=1" in caplog.text
-
-
-def test_interpretation_drops_only_concepts_without_grounded_packet_citations(caplog):
-    result = stage2_workflow._validate_interpretation(
-        {
-            "concepts": [
-                {
-                    "name": "performance_status",
-                    "supporting_items": [1],
-                    "evidence_rationale": "Functional limitation could explain the evidence.",
-                },
-                {
-                    "name": "invented_feature",
-                    "supporting_items": [99],
-                },
-            ],
-        },
-        packet_ids=["packet-a", "packet-b"],
-    )
-
-    assert [concept["name"] for concept in result["concepts"]] == ["performance_status"]
-    assert set(result["packet_dispositions"]) == {"packet-a", "packet-b"}
-    assert "dropped ungrounded concept=invented_feature" in caplog.text
-
-
-def test_interpretation_maps_prompt_local_numeric_string_to_packet_id():
-    result = stage2_workflow._validate_interpretation(
-        {
-            "concepts": [
-                {
-                    "name": "performance_status",
-                    "supporting_items": ["1"],
-                    "evidence_rationale": "Functional limitation could explain the evidence.",
-                }
-            ],
-        },
-        packet_ids=["packet-a"],
-    )
-
-    assert result["concepts"][0]["supporting_packet_ids"] == ["packet-a"]
-
-
 def test_interpretation_second_pass_recovers_rejected_named_measurement(tmp_path: Path):
     packet = {
         "packet_id": "outer_001_card_albumin",
@@ -3035,12 +2252,11 @@ def test_interpretation_second_pass_recovers_rejected_named_measurement(tmp_path
                     {
                         "name": "serum_albumin",
                         "description": "Serum albumin concentration.",
-                        "supporting_items": [1],
-                        "evidence_rationale": (
+                        "basis": (
                             "The evidence item directly names a reproducibly measurable "
                             "laboratory value."
                         ),
-                        "caveats": "Confirm units during extraction.",
+                        "uncertainty": "Confirm units during extraction.",
                     }
                 ],
             }
@@ -3552,91 +2768,6 @@ def test_openai_completion_reports_output_token_truncation(monkeypatch):
     assert client.closed is True
 
 
-def _agentic_fixture_response(body):
-    if body.get("task") == "adjudicate_stage2_roles_from_all_evidence":
-        decisions = []
-        for item in body["role_evidence"]["candidates"]:
-            definition = item["definition"]
-            roles = (
-                list(definition["configured_roles"])
-                if definition["investigator_locked"]
-                else ["confounder", "effect_modifier"]
-            )
-            decisions.append(
-                {
-                    "feature_id": item["feature_id"],
-                    "roles": roles,
-                    "evidence_for": ["Fold-honest fixture evidence."],
-                    "evidence_against": [],
-                    "inner_fold_consistency": "Consistent in fixture folds.",
-                    "cross_method_reconciliation": (
-                        "Fixture methods support the assigned roles."
-                    ),
-                    "rationale": "Exercise all-evidence role adjudication.",
-                }
-            )
-        return {
-            "summary": "Apply fixture all-evidence decisions.",
-            "decisions": decisions,
-        }
-    if body.get("task") == "analyze_cluster":
-        recommendations = []
-        for feature in body["definitions"]:
-            promote = (
-                body["role"] in feature.get("roles", [])
-                if feature.get("configured_explicit_feature") is True
-                else True
-            )
-            recommendations.append(
-                {
-                    "candidate_id": feature["feature_id"],
-                    "promote": promote,
-                    "evidence_for": ["test fixture retention"] if promote else [],
-                    "evidence_against": [] if promote else ["role not configured"],
-                    "inner_fold_consistency": "Consistent in the fixture folds.",
-                    "rationale": "Exercise the agentic selection integration.",
-                }
-            )
-        return {
-            "action": "final",
-            "role": body["role"],
-            "cluster_id": body["cluster"]["cluster_id"],
-            "assessment": "Apply fixture decisions.",
-            "latent_ids": [],
-            "recommendations": recommendations,
-        }
-    if body.get("task") == "outer_fold_role_adjudication":
-        decisions = []
-        for item in body["eligible_candidates"]:
-            definition = item["definition"]
-            promote = (
-                body["role"] in definition.get("roles", [])
-                if definition.get("configured_explicit_feature") is True
-                else True
-            )
-            decisions.append(
-                {
-                    "candidate_id": item["candidate_id"],
-                    "promote": promote,
-                    "evidence_for": ["test fixture retention"] if promote else [],
-                    "evidence_against": [] if promote else ["role not configured"],
-                    "inner_fold_consistency": "Consistent in the fixture folds.",
-                    "rationale": "Exercise the agentic adjudication integration.",
-                }
-            )
-        return {
-            "action": "final",
-            "role": body["role"],
-            "summary": "Apply fixture decisions.",
-            "decisions": decisions,
-            "selected_candidate_ids": [
-                row["candidate_id"] for row in decisions if row["promote"]
-            ],
-            "latent_source_exceptions": [],
-        }
-    raise AssertionError("not an agentic fixture prompt")
-
-
 def _fake_completion(calls):
     def complete(messages, _config):
         if messages[0]["content"].startswith("You identify clinical variables"):
@@ -3645,12 +2776,6 @@ def _fake_completion(calls):
             body = prompt_inputs(messages)
         job = _prompt_job(body)
         calls.append(job)
-        if body.get("task") in {
-            "analyze_cluster",
-            "outer_fold_role_adjudication",
-            "adjudicate_stage2_roles_from_all_evidence",
-        }:
-            return json.dumps(_agentic_fixture_response(body))
         if job == "extract_stage2_patient_variables":
             rows = []
             for patient in body["patients"]:
@@ -3679,20 +2804,6 @@ def _fake_completion(calls):
                     "reason": "Aggregate extraction values match the ontology.",
                 }
             )
-        if job == "review_stage2_variables_against_training_fold_performance":
-            return json.dumps(
-                {
-                    "feature_decisions": [
-                        {
-                            "feature_id": feature["feature_id"],
-                            "action": "keep",
-                            "reason": "The training-fold extraction is usable.",
-                        }
-                        for feature in body["features"]
-                    ],
-                    "overall_assessment": "Keep the operational definitions.",
-                }
-            )
         if job == "infer_clinical_features_from_text_evidence":
             return json.dumps({"candidates": [{
                 "name": "Performance status",
@@ -3718,168 +2829,6 @@ def _fake_completion(calls):
         )
 
     return complete
-
-
-def test_packetizer_removes_old_control_plane_fields():
-    packets = packetize_handoff(
-        [
-            {
-                "source": "tfidf",
-                "outer_fold": 1,
-                "scope": "full_outer_train",
-                "evidence": {
-                    "architecture": "tfidf_topic_contrast",
-                    "evidence_id": "topic-1",
-                    "terms": ["ECOG", "performance status"],
-                    "fit_row_ids": [1, 2, 3],
-                    "artifact_inventory": {"path": "/sealed/place"},
-                    "content_sha256": "a" * 64,
-                },
-            }
-        ],
-        max_packet_chars=2_000,
-    )
-
-    assert len(packets) == 1
-    assert packets[0]["content"]["terms"] == ["ECOG", "performance status"]
-    assert packets[0]["observable_axes"] == ["semantic"]
-    assert "fit_row_ids" not in packets[0]["content"]
-    assert "artifact_inventory" not in packets[0]["content"]
-    assert "content_sha256" not in packets[0]["content"]
-
-
-def test_packet_axes_use_model_objectives_not_clinical_witness_wording():
-    packets = packetize_handoff(
-        [
-            {
-                "source": "text_models",
-                "outer_fold": 1,
-                "scope": "full_outer_train",
-                "evidence": {
-                    "architecture": "embedding_contrast_whole",
-                    "objective": "outcome",
-                    "witnesses": ["ECOG 2 before treatment."],
-                },
-            }
-        ],
-        max_packet_chars=2_000,
-    )
-
-    assert packets[0]["observable_axes"] == ["outcome", "semantic"]
-
-
-def test_mixed_tfidf_and_neural_banks_become_separate_axis_packets():
-    packets = packetize_handoff(
-        [
-            {
-                "source": "tfidf",
-                "outer_fold": 1,
-                "scope": "full_outer_train",
-                "evidence": {
-                    "discovery": {
-                        "topic_banks": {
-                            "treatment": {"topics": [{"terms": ["cisplatin"]}]},
-                            "outcome": {"topics": [{"terms": ["cachexia"]}]},
-                        }
-                    }
-                },
-            },
-            {
-                "source": "neural_queries",
-                "outer_fold": 1,
-                "scope": "full_outer_train",
-                "evidence": {
-                    "evidence": [
-                        {"bank": "treatment", "witnesses": ["frail"]},
-                        {"bank": "effect", "witnesses": ["squamous"]},
-                    ]
-                },
-            },
-        ],
-        max_packet_chars=2_000,
-    )
-
-    axes_by_path = {packet["json_path"]: packet["observable_axes"] for packet in packets}
-    assert axes_by_path["discovery.topic_banks.treatment"] == ["semantic", "treatment"]
-    assert axes_by_path["discovery.topic_banks.outcome"] == ["outcome", "semantic"]
-    assert axes_by_path["evidence.treatment"] == ["semantic", "treatment"]
-    assert axes_by_path["evidence.effect"] == ["residual_effect", "semantic"]
-
-
-def test_packetizer_losslessly_splits_json_expanding_unicode():
-    text = "漢" * 5_000
-    packets = packetize_handoff(
-        [
-            {
-                "source": "custom",
-                "outer_fold": 1,
-                "scope": "full_outer_train",
-                "evidence": {
-                    "architecture": "unicode_witnesses",
-                    "payload": text,
-                },
-            }
-        ],
-        max_packet_chars=2_000,
-    )
-
-    payload_packets = [packet for packet in packets if "payload" in packet["json_path"]]
-    assert "".join(str(packet["content"]) for packet in payload_packets) == text
-    assert all(
-        len(json.dumps(packet, separators=(",", ":"), sort_keys=True)) <= 2_000
-        for packet in packets
-    )
-
-
-def test_packetizer_accounts_for_deep_generated_json_paths():
-    long_key = "nested_" + ("x" * 500)
-    text = "漢" * 5_000
-    packets = packetize_handoff(
-        [
-            {
-                "source": "custom",
-                "outer_fold": 1,
-                "scope": "full_outer_train",
-                "evidence": {
-                    "architecture": "deep_unicode_witnesses",
-                    "nested": {long_key: {"payload": text}},
-                },
-            }
-        ],
-        max_packet_chars=2_000,
-    )
-
-    payload_packets = [packet for packet in packets if "payload" in packet["json_path"]]
-    assert "".join(str(packet["content"]) for packet in payload_packets) == text
-    assert all(
-        len(json.dumps(packet, separators=(",", ":"), sort_keys=True)) <= 2_000
-        for packet in packets
-    )
-
-
-def test_packetizer_splits_large_flat_lists_without_changing_items():
-    terms = [f"term_{index:05d}" for index in range(20_000)]
-    packets = packetize_handoff(
-        [
-            {
-                "source": "custom",
-                "outer_fold": 1,
-                "scope": "full_outer_train",
-                "evidence": {
-                    "architecture": "large_term_inventory",
-                    "terms": terms,
-                },
-            }
-        ],
-        max_packet_chars=2_000,
-    )
-
-    term_packets = [packet for packet in packets if "terms" in packet["json_path"]]
-    assert [term for packet in term_packets for term in packet["content"]] == terms
-    assert all(
-        len(json.dumps(packet, separators=(",", ":"), sort_keys=True)) <= 2_000
-        for packet in packets
-    )
 
 
 def test_stage2_pages_oversized_unicode_note_without_dropping_text(tmp_path: Path):
@@ -4408,261 +3357,6 @@ def test_global_candidate_pool_prompt_exposes_all_unique_names_and_descriptions(
     assert "candidate_id" not in str(messages) and "group_id" not in str(messages)
     result = stage2_workflow._validate_global_candidate_pool_directives({"merges": [{"members": ["patient age", "age 2"], "canonical_label": "Patient age"}]}, group_names=["patient_age", "age_2", "serum_sodium"])
     assert result["merge_directives"] == [{"inputs": ["patient_age", "age_2"], "output": "patient_age"}]
-
-
-def test_alphabetical_candidate_batches_shift_boundaries_between_rounds():
-    groups = [
-        {"candidate_id": f"candidate_{name}", "name": name}
-        for name in reversed(["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf"])
-    ]
-
-    offsets_and_names = []
-    for round_number in range(1, 4):
-        offset, batches = stage2_workflow._alphabetical_candidate_batches(
-            groups,
-            batch_size=3,
-            round_number=round_number,
-        )
-        offsets_and_names.append(
-            (
-                offset,
-                [[str(group["name"]) for group in batch] for batch in batches],
-            )
-        )
-
-    assert offsets_and_names == [
-        (0, [["alpha", "bravo", "charlie"], ["delta", "echo", "foxtrot"], ["golf"]]),
-        (1, [["alpha"], ["bravo", "charlie", "delta"], ["echo", "foxtrot", "golf"]]),
-        (2, [["alpha", "bravo"], ["charlie", "delta", "echo"], ["foxtrot", "golf"]]),
-    ]
-
-
-def test_candidate_consolidation_batches_switch_to_reproducible_seeded_shuffles():
-    groups = [
-        {"candidate_id": f"candidate_{index}", "name": name}
-        for index, name in enumerate(
-            ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf"],
-            start=1,
-        )
-    ]
-
-    alphabetical = stage2_workflow._candidate_consolidation_batches(
-        groups,
-        batch_size=3,
-        round_number=2,
-        alphabetical_rounds=2,
-        seed=91,
-    )
-    shuffled = stage2_workflow._candidate_consolidation_batches(
-        groups,
-        batch_size=3,
-        round_number=3,
-        alphabetical_rounds=2,
-        seed=91,
-    )
-    repeated = stage2_workflow._candidate_consolidation_batches(
-        list(reversed(groups)),
-        batch_size=3,
-        round_number=3,
-        alphabetical_rounds=2,
-        seed=91,
-    )
-
-    assert alphabetical[:3] == ("alphabetical_shift", 1, None)
-    assert shuffled[:3] == ("seeded_shuffle", None, 1)
-    shuffled_names = [[group["name"] for group in batch] for batch in shuffled[3]]
-    repeated_names = [[group["name"] for group in batch] for batch in repeated[3]]
-    assert shuffled_names == repeated_names
-    assert sorted(name for batch in shuffled_names for name in batch) == sorted(
-        group["name"] for group in groups
-    )
-    assert shuffled_names != [
-        ["alpha", "bravo", "charlie"],
-        ["delta", "echo", "foxtrot"],
-        ["golf"],
-    ]
-
-
-def test_iterative_consolidation_finds_aliases_across_a_shifted_batch_boundary(
-    tmp_path: Path,
-):
-    names = ["aaa", "bbb", "marker_level", "marker_status", "yyy", "zzz"]
-    groups = stage2_workflow._materialize_exact_name_groups(
-        [
-            {
-                "candidate_id": f"candidate_{index:04d}",
-                "architecture": f"architecture_{index}",
-                "name": name,
-                "description": f"Description for {name}.",
-                "value_type": "ambiguous",
-                "supporting_packet_ids": [f"packet_{index:04d}"],
-                "evidence_axes": ["outcome"],
-                "caveats": "",
-            }
-            for index, name in enumerate(names, start=1)
-        ]
-    )
-    prompt_features = []
-
-    def completion(messages, _config):
-        body = prompt_inputs(messages)
-        batch_names = [feature["name"] for feature in body["features"]]
-        prompt_features.append(body["features"])
-        if {"marker_level", "marker_status"} <= set(batch_names):
-            return json.dumps(
-                {
-                    "merge_directives": [
-                        {
-                            "inputs": ["marker_level", "marker_status"],
-                            "output": "marker_level",
-                        }
-                    ],
-                }
-            )
-        return json.dumps({"merge_directives": []})
-
-    output_dir = tmp_path / "candidate_pool_consolidation"
-    consolidated = PlainHandoffStage2(
-        config=PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            workers=1,
-            consolidation_batch_size=3,
-            consolidation_max_rounds=3,
-            consolidation_policy=stage2_workflow.CandidateConsolidationPolicy(strategy="legacy"),
-        ),
-        clinical_question="Not supplied to consolidation.",
-        completion=completion,
-    )._consolidate_candidate_pool(
-        outer_fold=1,
-        groups=groups,
-        output_dir=output_dir,
-    )
-
-    assert [group["name"] for group in consolidated] == [
-        "aaa",
-        "bbb",
-        "marker_level",
-        "yyy",
-        "zzz",
-    ]
-    marker = next(group for group in consolidated if group["name"] == "marker_level")
-    assert marker["origin_candidate_ids"] == ["candidate_0003", "candidate_0004"]
-    marker_views = [
-        feature
-        for batch in prompt_features
-        for feature in batch
-        if feature["name"] == "marker_level" and len(feature["descriptions"]) == 2
-    ]
-    assert marker_views[-1]["descriptions"] == [
-        "Description for marker_level.",
-        "Description for marker_status.",
-    ]
-    assert any(
-        [feature["name"] for feature in batch] == ["bbb", "marker_level", "marker_status"]
-        for batch in prompt_features
-    )
-    summaries = [
-        json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(output_dir.glob("round_*/complete.json"))
-    ]
-    assert [summary["boundary_offset"] for summary in summaries] == [0, 1, 2]
-    assert [summary["changed"] for summary in summaries] == [False, True, False]
-
-
-def test_seeded_shuffle_round_can_merge_candidates_from_distant_alphabetical_batches(
-    tmp_path: Path,
-):
-    names = [
-        "alpha",
-        "bravo",
-        "charlie",
-        "delta",
-        "echo",
-        "foxtrot",
-        "golf",
-        "hotel",
-        "india",
-    ]
-    groups = stage2_workflow._materialize_exact_name_groups(
-        [
-            {
-                "candidate_id": f"candidate_{index:04d}",
-                "architecture": "architecture_alpha",
-                "name": name,
-                "description": f"Description for {name}.",
-                "supporting_packet_ids": [f"packet_{index:04d}"],
-                "evidence_axes": ["outcome"],
-            }
-            for index, name in enumerate(names, start=1)
-        ]
-    )
-    seed = 17
-    _, alphabetical_batches = stage2_workflow._alphabetical_candidate_batches(
-        groups,
-        batch_size=3,
-        round_number=1,
-    )
-    alphabetical_owner = {
-        str(group["name"]): batch_index
-        for batch_index, batch in enumerate(alphabetical_batches)
-        for group in batch
-    }
-    shuffled_batches = stage2_workflow._seeded_shuffle_candidate_batches(
-        groups,
-        batch_size=3,
-        seed=seed + 1_000_003,
-        shuffle_round=1,
-    )
-    alias_pair = next(
-        (str(left["name"]), str(right["name"]))
-        for batch in shuffled_batches
-        for left_index, left in enumerate(batch)
-        for right in batch[left_index + 1 :]
-        if alphabetical_owner[str(left["name"])] != alphabetical_owner[str(right["name"])]
-    )
-
-    def completion(messages, _config):
-        body = prompt_inputs(messages)
-        batch_names = {feature["name"] for feature in body["features"]}
-        if set(alias_pair) <= batch_names:
-            return json.dumps(
-                {
-                    "merge_directives": [{"inputs": list(alias_pair), "output": alias_pair[0]}],
-                }
-            )
-        return json.dumps({"merge_directives": []})
-
-    output_dir = tmp_path / "candidate_pool_consolidation"
-    consolidated = PlainHandoffStage2(
-        config=PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="test-model",
-            workers=1,
-            consolidation_batch_size=3,
-            consolidation_alphabetical_rounds=1,
-            consolidation_max_rounds=2,
-            consolidation_policy=stage2_workflow.CandidateConsolidationPolicy(strategy="legacy"),
-        ),
-        clinical_question="Not supplied to consolidation.",
-        completion=completion,
-    )._consolidate_candidate_pool(
-        outer_fold=1,
-        groups=groups,
-        output_dir=output_dir,
-        seed=seed,
-    )
-
-    assert len(consolidated) == len(groups) - 1
-    summaries = [
-        json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(output_dir.glob("round_*/complete.json"))
-    ]
-    assert [summary["ordering"] for summary in summaries] == [
-        "alphabetical_shift",
-        "seeded_shuffle",
-    ]
-    assert [summary["changed"] for summary in summaries] == [False, True]
 
 
 def test_iterative_consolidation_retains_batch_and_explicit_feature_after_invalid_responses(
@@ -5378,15 +4072,14 @@ def test_configured_feature_is_consolidated_with_discovery_and_keeps_supplied_on
     assert [feature["name"] for feature in exact_result["features"]] == ["ecog_performance_status"]
 
 
-def test_shifted_consolidation_round_preserves_explicit_feature_name_ontology_and_roles():
+def test_consolidation_rounds_preserve_explicit_feature_name_ontology_and_roles():
     config = plain_stage2_config_from_mapping(
         {
             "endpoint": "http://stage2.test/v1",
             "model": "test-model",
             "workers": 1,
-            "consolidation_batch_size": 2,
+            "consolidation_batch_size": 4,
             "consolidation_max_rounds": 2,
-            "consolidation_policy": {"strategy": "legacy"},
             "explicit_features": [
                 {
                     "name": "ecog_performance_status",
@@ -5478,7 +4171,7 @@ def test_shifted_consolidation_round_preserves_explicit_feature_name_ontology_an
         "candidate_ecog_alias",
     ]
     assert explicit_group["configured_feature_definitions"] == [explicit.as_definition()]
-    assert stage2_workflow._group_roles(explicit_group) == ["effect_modifier"]
+    assert explicit_group["configured_feature_definitions"][0]["roles"] == ["effect_modifier"]
 
 
 def test_configured_feature_is_retained_without_any_discovered_candidate():
@@ -6200,21 +4893,24 @@ def test_stage2_continuous_nuisances_predict_with_and_without_covariates():
     outcome = 1.0 + 2.0 * design[:, 0] + 3.0 * treatment
     heldout = np.array([[-1.0], [0.3], [1.2]])
 
-    models = stage2_analysis._fit_outcome_models(
-        design, treatment, outcome, binary=False, seed=13
-    )
-    control, treated = stage2_analysis._predict_outcomes(models, heldout)
+    def arm_predictions(x, valid):
+        return [
+            stage2_analysis._fit_nuisance_prediction(
+                x[treatment == arm], outcome[treatment == arm], valid,
+                binary=False, seed=13 + arm,
+            )
+            for arm in (0, 1)
+        ]
 
-    assert models.control.__class__.__name__ == "ElasticNetRegressor"
-    assert models.treated.__class__.__name__ == "ElasticNetRegressor"
+    assert stage2_analysis._fit_regressor(design, outcome, seed=13).__class__.__name__ == (
+        "ElasticNetRegressor"
+    )
+    control, treated = arm_predictions(design, heldout)
     np.testing.assert_allclose(control, 1.0 + 2.0 * heldout[:, 0], atol=0.05)
     np.testing.assert_allclose(treated, 4.0 + 2.0 * heldout[:, 0], atol=0.05)
 
-    intercept_only = stage2_analysis._fit_outcome_models(
-        np.empty((len(treatment), 0)), treatment, outcome, binary=False, seed=13
-    )
-    control, treated = stage2_analysis._predict_outcomes(
-        intercept_only, np.empty((len(heldout), 0))
+    control, treated = arm_predictions(
+        np.empty((len(treatment), 0)), np.empty((len(heldout), 0))
     )
     np.testing.assert_allclose(control, outcome[treatment == 0].mean())
     np.testing.assert_allclose(treated, outcome[treatment == 1].mean())
@@ -6948,6 +5644,21 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
         "".join(json.dumps(row) + "\n" for row in split_rows),
         encoding="utf-8",
     )
+    from dataclasses import replace
+
+    from oci.inference.stage2_multi_model_config import ModifierCountConfig
+    from tests.test_stage2_multi_model import small_policy
+
+    # Exercise the real multi-model selector with a small numerical budget and
+    # a causal-forest final estimator.
+    selection_policy = small_policy()
+    selection_policy = replace(
+        selection_policy,
+        multi_model=replace(
+            selection_policy.multi_model,
+            modifier_count=ModifierCountConfig(estimators=("causal_forest",)),
+        ),
+    )
     primary_calls = []
     extraction_calls = []
     output = tmp_path / "stage2"
@@ -6956,6 +5667,7 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
         model="test-model",
         max_prompt_chars=12_000,
         workers=4,
+        statistical_selection=selection_policy,
         extraction_llm=stage2_workflow.Stage2ExtractionLLMConfig(
             endpoint="http://extract.test/v1",
             model="small-model",
@@ -6999,25 +5711,23 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     assert selection["cross_fitted_nuisance_models"][
         "predictions_are_inner_fold_out_of_fold"
     ] is True
-    assert selection["confounder_univariable_screen"]["hard_selection_gate"] is False
-    assert selection["multivariable_modifier_elastic_net_screen"][
-        "hard_selection_gate"
-    ] is False
-    assert selection["final_role_assignment"] == "llm_all_evidence_adjudication"
-    assert selection["role_adjudication"]["prompt_data_contract"][
-        "oracle_columns_are_excluded"
-    ] is True
-    assert (
+    assert selection["selection_authority"] == "multi_model"
+    assert selection["final_role_assignment"] == (
+        "predictive_nuisances_and_nested_r_loss_modifiers"
+    )
+    assert selection["role_adjudication"]["llm_requests"] == 0
+    assert selection["role_adjudication"]["llm_roles_are_binding"] is False
+    statistical_evidence_path = (
         output
         / "outer_001"
         / "selection"
         / "statistical_evidence.json"
-    ).is_file()
-    role_batch_prompt_path = output / "outer_001" / "selection" / "role_adjudication" / "batches" / "batch_001" / "prompt.json"
-    assert role_batch_prompt_path.is_file()
-    role_prompt = role_batch_prompt_path.read_text(encoding="utf-8").casefold()
-    assert "oracle_ite" not in role_prompt
-    assert "generation_config" not in role_prompt
+    )
+    assert statistical_evidence_path.is_file()
+    statistical_evidence = statistical_evidence_path.read_text(encoding="utf-8").casefold()
+    assert "true_ite" not in statistical_evidence
+    assert "generation_config" not in statistical_evidence
+    assert not (output / "outer_001" / "selection" / "role_adjudication").exists()
     assert not (output / "outer_001" / "selection" / "stage2_evidence").exists()
     assert (
         output
@@ -7047,9 +5757,6 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     }
     assert diagnostics["nuisance_model_family"] == "elastic_net"
     assert "extract_stage2_patient_variables" not in primary_calls
-    assert "analyze_stage2_variable_cluster" not in primary_calls
-    assert "adjudicate_stage2_variable_role" not in primary_calls
-    assert "adjudicate_stage2_roles_from_all_evidence" in primary_calls
     assert extraction_calls
     assert set(extraction_calls) == {"extract_stage2_patient_variables"}
     calls_after_first = (len(primary_calls), len(extraction_calls))
@@ -7315,18 +6022,19 @@ def test_aggregate_supervisor_can_revise_then_reextract_a_definition(
 
     monkeypatch.setattr(
         stage2_analysis,
-        "select_stage2_features_elastic_net",
+        "select_stage2_features_multi_model",
         retain_revised_definition,
+    )
+    from oci.inference import stage2_modifier_count
+
+    monkeypatch.setattr(
+        stage2_modifier_count,
+        "select_modifier_count",
+        lambda **kw: (kw["selected"], kw["role_report"], {"status": "complete"}),
     )
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         body = prompt_inputs(messages)
-        if body.get("task") in {
-            "analyze_cluster",
-            "outer_fold_role_adjudication",
-            "adjudicate_stage2_roles_from_all_evidence",
-        }:
-            return validate(_agentic_fixture_response(body))
         jobs.append(body["job"])
         if body["job"] == "extract_stage2_patient_variables":
             assert request_kind == "extraction"
@@ -7427,15 +6135,11 @@ def test_aggregate_supervisor_can_revise_then_reextract_a_definition(
     ]
 
 
-@pytest.mark.parametrize("multi_model", [False, True])
 def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     tmp_path: Path,
     monkeypatch,
-    multi_model,
 ):
     from dataclasses import replace
-
-    from oci.inference.stage2_elastic_net_selection import Stage2ElasticNetSelectionConfig
 
     dataset = pd.DataFrame(
         {
@@ -7468,17 +6172,12 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     }
     packets = [{"packet_id": "packet_1", "outer_fold": 1}]
     config = PlainHandoffStage2Config(
-        extraction_context_strategy="full_record",  # archived legacy measurements
         endpoint="http://stage2.test/v1",
         model="primary-model",
         extraction_llm=Stage2ExtractionLLMConfig(
             endpoint="http://extract.test/v1",
             model="extractor-model",
             workers=1,
-        ),
-        role_adjudication=Stage2RoleAdjudicationConfig(enabled=multi_model),
-        statistical_selection=Stage2ElasticNetSelectionConfig(
-            selection_mode="multi_model" if multi_model else "llm_roles"
         ),
         max_review_rounds=2,
         estimation_trees=10,
@@ -7579,7 +6278,7 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     )
     monkeypatch.setattr(
         stage2_analysis,
-        "select_stage2_features_elastic_net",
+        "select_stage2_features_multi_model",
         lambda **_kwargs: (
             [],
             {
@@ -7607,25 +6306,21 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     )
 
     count_calls = []
-    if multi_model:
-        from oci.inference import stage2_modifier_count
+    from oci.inference import stage2_modifier_count
 
-        monkeypatch.setattr(stage2_analysis, "adjudicate_stage2_roles",
-                            lambda **kw: pytest.fail("multi_model must skip LLM retention"))
+    def choose_constant(**kw):
+        assert kw["run_numerical"] is stage2_analysis._run_stage2_statistical_selection
+        assert kw["extracted_fit"]._oci_row_id.tolist() == [0, 1, 2]
+        assert kw["inner_splits"] == split["inner_splits"]
+        assert kw["role_policy"] == config.role_adjudication
+        assert kw["selected"] == []
+        assert kw["role_report"]["llm_requests"] == 0
+        assert kw["estimation_trees"] in {10, 20}
+        count_calls.append(kw["estimation_trees"])
+        report = {"status": "complete", "chosen_modifier_count": 0, "chosen_estimator": "linear_interactions"}
+        return [], {"decisions": [{"feature_id": definitions[0]["feature_id"], "roles": []}]}, report
 
-        def choose_constant(**kw):
-            assert kw["run_numerical"] is stage2_analysis._run_stage2_statistical_selection
-            assert kw["extracted_fit"]._oci_row_id.tolist() == [0, 1, 2]
-            assert kw["inner_splits"] == split["inner_splits"]
-            assert kw["role_policy"].enabled
-            assert kw["selected"] == []
-            assert kw["role_report"]["llm_requests"] == 0
-            assert kw["estimation_trees"] in {10, 20}
-            count_calls.append(kw["estimation_trees"])
-            report = {"status": "complete", "chosen_modifier_count": 0, "chosen_estimator": "linear_interactions"}
-            return [], {"decisions": [{"feature_id": definitions[0]["feature_id"], "roles": []}]}, report
-
-        monkeypatch.setattr(stage2_modifier_count, "select_modifier_count", choose_constant)
+    monkeypatch.setattr(stage2_modifier_count, "select_modifier_count", choose_constant)
 
     arguments = dict(
         dataset=dataset,
@@ -7649,18 +6344,17 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     result = run_fold_analysis(**arguments)
 
     assert result["estimation"]["status"] == "estimated_from_snapshot"
-    assert result["estimation"]["estimator"] == ("linear_interactions" if multi_model else "causal_forest")
+    assert result["estimation"]["estimator"] == "linear_interactions"
     assert result["review_convergence"]["reused_frozen_preselection_snapshot"] is True
     assert result["review_rounds"] == 1
-    assert len(count_calls) == int(multi_model)
-    if multi_model:
-        assert result["selection"]["final_role_assignment"] == "predictive_nuisances_and_nested_r_loss_modifiers"
-        assert result["selection"]["modifier_count_selection"]["chosen_modifier_count"] == 0
-        resumed = run_fold_analysis(**arguments)
-        assert resumed["estimation"]["estimator"] == "linear_interactions"
-        assert count_calls == [10]
-        run_fold_analysis(**{**arguments, "config": replace(config, estimation_trees=20)})
-        assert count_calls == [10, 20]
+    assert len(count_calls) == 1
+    assert result["selection"]["final_role_assignment"] == "predictive_nuisances_and_nested_r_loss_modifiers"
+    assert result["selection"]["modifier_count_selection"]["chosen_modifier_count"] == 0
+    resumed = run_fold_analysis(**arguments)
+    assert resumed["estimation"]["estimator"] == "linear_interactions"
+    assert count_calls == [10]
+    run_fold_analysis(**{**arguments, "config": replace(config, estimation_trees=20)})
+    assert count_calls == [10, 20]
 
 
 def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_missing(
@@ -7708,7 +6402,6 @@ def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_m
     }
     packets = [{"packet_id": "packet_1", "outer_fold": 1}]
     config = PlainHandoffStage2Config(
-        extraction_context_strategy="full_record",  # archived legacy measurements
         endpoint="http://stage2.test/v1",
         model="primary-model",
         extraction_llm=Stage2ExtractionLLMConfig(
@@ -7716,7 +6409,6 @@ def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_m
             model="extractor-model",
             workers=1,
         ),
-        role_adjudication=Stage2RoleAdjudicationConfig(enabled=False),
         max_review_rounds=2,
         estimation_trees=10,
     )
@@ -7854,7 +6546,7 @@ def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_m
     selected = [{**definition, "roles": ["confounder"]} for definition in definitions]
     monkeypatch.setattr(
         stage2_analysis,
-        "select_stage2_features_elastic_net",
+        "select_stage2_features_multi_model",
         lambda **_kwargs: (
             selected,
             {
@@ -7864,6 +6556,13 @@ def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_m
             definitions,
             [],
         ),
+    )
+    from oci.inference import stage2_modifier_count
+
+    monkeypatch.setattr(
+        stage2_modifier_count,
+        "select_modifier_count",
+        lambda **kw: (kw["selected"], kw["role_report"], {"status": "complete"}),
     )
     extraction_calls = []
 
@@ -7998,7 +6697,27 @@ def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_m
 
 def test_repeated_training_extraction_failures_refine_ontology_and_reextract(
     tmp_path: Path,
+    monkeypatch,
 ):
+    from oci.inference import stage2_modifier_count
+
+    # Six training patients cannot support numerical selection; this test is
+    # about extraction-failure ontology refinement, so retain the candidate.
+    monkeypatch.setattr(
+        stage2_analysis,
+        "select_stage2_features_multi_model",
+        lambda **kwargs: (
+            [{**kwargs["definitions"][0], "nuisance_model_roles": ["treatment", "outcome"]}],
+            {"schema_version": stage2_analysis.STAGE2_ROLE_SELECTION_SCHEMA_VERSION},
+            [],
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        stage2_modifier_count,
+        "select_modifier_count",
+        lambda **kw: (kw["selected"], kw["role_report"], {"status": "complete"}),
+    )
     dataset = pd.DataFrame(
         {
             "patient_id": [f"p{index:02d}" for index in range(12)],
@@ -8034,12 +6753,6 @@ def test_repeated_training_extraction_failures_refine_ontology_and_reextract(
 
     def request_json(messages, validate, *, request_kind="interpretation", initial_reasoning_effort=None):
         body = prompt_inputs(messages)
-        if body.get("task") in {
-            "analyze_cluster",
-            "outer_fold_role_adjudication",
-            "adjudicate_stage2_roles_from_all_evidence",
-        }:
-            return validate(_agentic_fixture_response(body))
         jobs.append(body["job"])
         if body["job"] == "extract_stage2_patient_variables":
             categories = body["features"][0]["categories_or_unit"]
@@ -8199,12 +6912,6 @@ def test_failure_refinement_reextracts_only_changed_features_and_resumes(
 
     def request_json(messages, validate, *, request_kind="interpretation", initial_reasoning_effort=None):
         body = prompt_inputs(messages)
-        if body.get("task") in {
-            "analyze_cluster",
-            "outer_fold_role_adjudication",
-            "adjudicate_stage2_roles_from_all_evidence",
-        }:
-            return validate(_agentic_fixture_response(body))
         if body["job"] == "extract_stage2_patient_variables":
             assert request_kind == "extraction"
             feature_names = [feature["name"] for feature in body["features"]]
@@ -8468,12 +7175,6 @@ def test_final_training_extraction_fails_fast_when_effectively_all_null(
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         body = prompt_inputs(messages)
-        if body.get("task") in {
-            "analyze_cluster",
-            "outer_fold_role_adjudication",
-            "adjudicate_stage2_roles_from_all_evidence",
-        }:
-            return validate(_agentic_fixture_response(body))
         if body["job"] == "extract_stage2_patient_variables":
             return validate(
                 {

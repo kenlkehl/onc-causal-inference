@@ -7,7 +7,6 @@ from pathlib import Path
 import json
 import hashlib
 import math
-from .colbert_config import ColBERTConfig, colbert_config_from_mapping
 
 
 def _validate_parallelism_setting(value: Any, name: str) -> None:
@@ -240,29 +239,16 @@ class ExplicitFeatureExtractionConfig:
     # LLM request packing; retrieval is an explicit opt-in.
     extraction_grouping_strategy: str = "clinical_domain"
     extraction_context_strategy: str = "full_record"
-    colbert: ColBERTConfig = field(default_factory=ColBERTConfig)
-    extraction_provider: str = "openai"
     # Opt-in for datasets whose text has already been made temporally valid by
     # construction. The legacy default preserves treatment-time extraction
     # eligibility instructions for every existing caller.
     source_text_temporally_valid_by_design: bool = False
-    codex_cli_executable: str = "codex"
-    codex_cli_model_name: Optional[str] = "gpt-5.4-mini"
-    codex_cli_reasoning_effort: Optional[str] = "medium"
-    codex_cli_extra_args: List[str] = field(default_factory=list)
-    codex_cli_parallelism: int = 4
 
     # Caching
     cache_enabled: bool = True  # Cache extraction results to disk
-    cache_dir: Optional[str] = None  # Directory for cache files (default: alongside dataset)
-
-    # Featurizer settings (for neural models only)
-    featurizer_output_dim: int = 64
-    featurizer_hidden_dim: int = 128
-    featurizer_dropout: float = 0.1
+    cache_dir: Optional[str] = None  # Directory for cache files (default: run output directory)
 
     def __post_init__(self):
-        self.colbert = colbert_config_from_mapping(self.colbert)
         if not isinstance(self.source_text_temporally_valid_by_design, bool):
             raise ValueError(
                 "explicit_features.source_text_temporally_valid_by_design must be boolean"
@@ -280,10 +266,10 @@ class ExplicitFeatureExtractionConfig:
             )
         self.extraction_grouping_strategy = grouping
         context = str(self.extraction_context_strategy).strip().lower().replace("-", "_")
-        if context not in {"full_record", "colbert", "tail", "contract_lexical_rag", "complete_paged_v1"}:
+        if context not in {"full_record", "tail", "contract_lexical_rag", "complete_paged_v1"}:
             raise ValueError(
                 "explicit_features.extraction_context_strategy must be "
-                "'full_record', 'colbert', 'tail', 'contract_lexical_rag', or 'complete_paged_v1'"
+                "'full_record', 'tail', 'contract_lexical_rag', or 'complete_paged_v1'"
             )
         self.extraction_context_strategy = context
         if self.extraction_max_text_length is not None:
@@ -478,12 +464,6 @@ def _as_list(value: Any) -> List[Any]:
     return [value]
 
 
-# Backward-compatible symbol aliases for older internal imports. Config files
-# using the old explicit_confounders key are rejected in ExperimentConfig.from_dict.
-ExplicitConfounderSpec = ExplicitFeatureSpec
-ExplicitConfounderExtractionConfig = ExplicitFeatureExtractionConfig
-
-
 # =============================================================================
 # EXPLICIT-FEATURE-ONLY CAUSAL FOREST CONFIGURATION
 # =============================================================================
@@ -504,18 +484,6 @@ class ExplicitFeatureForestConfig:
     max_features: str = "sqrt"
     honest: bool = True
     inference: bool = True
-    # Outcome-regression interaction head used by the integrated evidence
-    # pathway.  The regularization value is selected by fit-sample inner CV on
-    # observed outcome loss; no ITE labels are available to this selection.
-    interaction_regularization_grid: List[float] = field(
-        default_factory=lambda: [0.003, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
-    )
-    interaction_inner_folds: int = 3
-    interaction_interact_all_features: bool = True
-    interaction_max_iter: int = 3000
-
-
-ConfounderForestConfig = ExplicitFeatureForestConfig
 
 
 # =============================================================================
@@ -538,7 +506,6 @@ class AgenticFeatureSearchConfig:
     max_additions_per_iter: int = 6
     max_removals_per_iter: int = 3
     min_feature_coverage: float = 0.0
-    search_mode: str = "broad_screen"
     broad_candidate_count: int = 80
     broad_screen_top_k: int = 20
 
@@ -576,11 +543,6 @@ class AgenticFeatureSearchConfig:
     agent_retry_max_delay: float = 30.0
     agent_retry_backoff_factor: float = 2.0
     agent_request_timeout: Optional[float] = 900.0
-    agent_provider: str = "openai"
-    codex_cli_executable: str = "codex"
-    codex_cli_model_name: Optional[str] = "gpt-5.4-mini"
-    codex_cli_reasoning_effort: Optional[str] = "medium"
-    codex_cli_extra_args: List[str] = field(default_factory=list)
 
     # Prompt/context controls. Clinical text examples are sent to the proposal
     # agent to ground variable suggestions, but are not written to artifacts by
@@ -639,10 +601,6 @@ class AgenticFeatureSearchConfig:
                 )
         if not 0.0 <= self.min_feature_coverage <= 1.0:
             raise ValueError("agentic_feature_search.min_feature_coverage must be in [0, 1]")
-        if self.search_mode not in {"iterative", "broad_screen"}:
-            raise ValueError(
-                "agentic_feature_search.search_mode must be one of " "['iterative', 'broad_screen']"
-            )
         if self.broad_candidate_count < 1:
             raise ValueError("agentic_feature_search.broad_candidate_count must be >= 1")
         if self.broad_screen_top_k < 1:
@@ -692,35 +650,29 @@ class ClusterLocalEmbeddingScientificConfig:
     """Closed scientific controls for native cluster-local embedding evidence.
 
     This type intentionally has no defaults so an omitted sklearn, pooling,
-    SVD, rank, or replay setting cannot silently inherit a library default. The
-    KMeans ``random_state`` is derived from the context's ordered rows and is
-    therefore represented by a seed policy rather than a free-standing integer.
+    SVD, or rank setting cannot silently inherit a library default. The KMeans
+    ``random_state`` is derived from the context's ordered rows and the
+    discovery seed rather than configured as a free-standing integer.
     """
 
     requested_cluster_count: int
-    cluster_count_policy: str
     maximum_components_per_family: int
     loading_evidence_capacity: Optional[int]
-    loading_evidence_overflow_policy: str
     minimum_cluster_size: int
     minimum_group_size: int
     minimum_cell_size: int
     minimum_distinct_local_clusters_per_family: int
     minimum_numerical_rank_per_family: int
-    patient_pooling_policy: str
     computation_dtype: str
     normalize_patient_embeddings: bool
     normalization_epsilon: float
     zero_vector_policy: str
-    local_direction_weighting_policy: str
     kmeans_init: str
     kmeans_max_iter: int
-    kmeans_batch_size_policy: str
     kmeans_batch_size_lower_bound: int
     kmeans_batch_size_upper_bound: int
     kmeans_verbose: int
     kmeans_compute_labels: bool
-    kmeans_seed_derivation_policy: str
     kmeans_tol: float
     kmeans_max_no_improvement: Optional[int]
     kmeans_init_size: Optional[int]
@@ -730,13 +682,8 @@ class ClusterLocalEmbeddingScientificConfig:
     svd_compute_uv: bool
     svd_hermitian: bool
     svd_sign_canonicalization_policy: str
-    svd_rank_tolerance_policy: str
     svd_rank_tolerance_dtype: str
     svd_rank_tolerance_multiplier: float
-    replay_comparison_policy: str
-    replay_relative_tolerance: float
-    replay_absolute_tolerance: float
-    exception_policy: str
 
     def __post_init__(self) -> None:
         integer_minimums = {
@@ -822,8 +769,6 @@ class ClusterLocalEmbeddingScientificConfig:
         finite_nonnegative = (
             "kmeans_tol",
             "kmeans_reassignment_ratio",
-            "replay_relative_tolerance",
-            "replay_absolute_tolerance",
         )
         for name in finite_nonnegative:
             value = float(getattr(self, name))
@@ -837,61 +782,21 @@ class ClusterLocalEmbeddingScientificConfig:
                 raise ValueError(
                     f"cluster_local_scientific.{name} must be finite and positive"
                 )
-        if self.cluster_count_policy != "require_exact_configured_count_v1":
-            raise ValueError("cluster-local cluster_count_policy is unsupported")
-        if (
-            self.loading_evidence_overflow_policy
-            != "fail_closed_no_truncation_v1"
-        ):
-            raise ValueError(
-                "cluster-local loading evidence must fail closed instead of truncating"
-            )
-        if (
-            self.patient_pooling_policy
-            != "arithmetic_mean_all_chunks_v1"
-        ):
-            raise ValueError("cluster-local patient pooling policy is unsupported")
         if self.computation_dtype not in {"float32", "float64"}:
             raise ValueError(
                 "cluster_local_scientific.computation_dtype must be float32 or float64"
             )
         if self.zero_vector_policy != "reject":
             raise ValueError("cluster-local zero-vector policy must be reject")
-        if (
-            self.local_direction_weighting_policy
-            != "sqrt_cluster_size_times_unit_direction_v1"
-        ):
-            raise ValueError(
-                "cluster-local direction weighting policy is unsupported"
-            )
         if self.kmeans_init not in {"k-means++", "random"}:
             raise ValueError("cluster-local KMeans init must be k-means++ or random")
-        if (
-            self.kmeans_batch_size_policy
-            != "clamp_usable_rows_to_configured_bounds_v1"
-        ):
-            raise ValueError("cluster-local KMeans batch-size policy is unsupported")
-        if (
-            self.kmeans_seed_derivation_policy
-            != "canonical_ordered_fit_rows_group_seed_v1"
-        ):
-            raise ValueError("cluster-local KMeans seed policy is unsupported")
         if (
             self.svd_sign_canonicalization_policy
             != "largest_absolute_coordinate_positive_v1"
         ):
             raise ValueError("cluster-local SVD sign policy is unsupported")
-        if (
-            self.svd_rank_tolerance_policy
-            != "dtype_epsilon_times_max_shape_times_largest_singular_v1"
-        ):
-            raise ValueError("cluster-local SVD rank policy is unsupported")
         if self.svd_rank_tolerance_dtype not in {"float32", "float64"}:
             raise ValueError("cluster-local SVD rank dtype is unsupported")
-        if self.replay_comparison_policy != "allclose_and_exact_discrete_state_v1":
-            raise ValueError("cluster-local replay comparison policy is unsupported")
-        if self.exception_policy != "abort_scope_no_skip_or_fallback_v1":
-            raise ValueError("cluster-local exceptions must abort the scope")
         if (
             self.minimum_numerical_rank_per_family
             > self.minimum_distinct_local_clusters_per_family
@@ -939,7 +844,6 @@ class EmbeddingContrastDiscoveryConfig:
     # Complete-note encoder capacity. This must not select a prefix/tail; 512
     # is nonbinding for the bundled long-note cohorts.
     max_chunks: int = 512
-    chunk_selection: str = "last"
     normalize_embeddings: bool = True
     top_k_chunks_per_tail: int = 12
     max_chunks_per_patient: int = 2
@@ -951,19 +855,9 @@ class EmbeddingContrastDiscoveryConfig:
     include_residualized_interaction_contrast: bool = True
     include_orthogonal_r_score_contrasts: bool = True
     include_cluster_contrast_vectors: bool = True
-    cluster_contrast_n_clusters: int = 10
-    cluster_contrast_max_components: int = 5
-    cluster_contrast_min_cluster_size: int = 24
-    cluster_contrast_min_group_size: int = 8
-    cluster_contrast_min_cell_size: int = 4
-    cluster_contrast_top_loadings: int = 5
-    cluster_contrast_random_state: int = 42
-    cluster_contrast_kmeans_n_init: int = 20
     cluster_local_scientific: Optional[
         ClusterLocalEmbeddingScientificConfig
     ] = None
-    external_corpus_cache_dirs: List[str] = field(default_factory=list)
-    external_top_k_chunks_per_tail: int = 12
     # Optional lexical summaries of embedding contrasts. Contextual embedding
     # witnesses remain enabled when this additional evidence lane is disabled.
     retrieval_tfidf_enabled: bool = False
@@ -999,16 +893,10 @@ class EmbeddingContrastDiscoveryConfig:
             )
         if self.max_chunks < 1:
             raise ValueError("embedding_contrast.max_chunks must be >= 1")
-        chunk_selection = str(self.chunk_selection).strip().lower()
-        if chunk_selection not in {"first", "last"}:
-            raise ValueError("embedding_contrast.chunk_selection must be 'first' or 'last'")
-        self.chunk_selection = chunk_selection
         if self.top_k_chunks_per_tail < 1:
             raise ValueError("embedding_contrast.top_k_chunks_per_tail must be >= 1")
         if self.max_chunks_per_patient < 1:
             raise ValueError("embedding_contrast.max_chunks_per_patient must be >= 1")
-        if self.external_top_k_chunks_per_tail < 1:
-            raise ValueError("embedding_contrast.external_top_k_chunks_per_tail must be >= 1")
         if self.retrieval_tfidf_ngram_range_min < 1:
             raise ValueError("embedding_contrast.retrieval_tfidf_ngram_range_min must be >= 1")
         if self.retrieval_tfidf_ngram_range_max < self.retrieval_tfidf_ngram_range_min:
@@ -1030,20 +918,6 @@ class EmbeddingContrastDiscoveryConfig:
             raise ValueError("embedding_contrast.max_concept_phrases must be >= 0")
         if self.concept_probe_top_k < 1:
             raise ValueError("embedding_contrast.concept_probe_top_k must be >= 1")
-        if self.cluster_contrast_n_clusters < 2:
-            raise ValueError("embedding_contrast.cluster_contrast_n_clusters must be >= 2")
-        if self.cluster_contrast_max_components < 1:
-            raise ValueError("embedding_contrast.cluster_contrast_max_components must be >= 1")
-        if self.cluster_contrast_min_cluster_size < 2:
-            raise ValueError("embedding_contrast.cluster_contrast_min_cluster_size must be >= 2")
-        if self.cluster_contrast_min_group_size < 2:
-            raise ValueError("embedding_contrast.cluster_contrast_min_group_size must be >= 2")
-        if self.cluster_contrast_min_cell_size < 1:
-            raise ValueError("embedding_contrast.cluster_contrast_min_cell_size must be >= 1")
-        if self.cluster_contrast_top_loadings < 1:
-            raise ValueError("embedding_contrast.cluster_contrast_top_loadings must be >= 1")
-        if self.cluster_contrast_kmeans_n_init < 1:
-            raise ValueError("embedding_contrast.cluster_contrast_kmeans_n_init must be >= 1")
         if isinstance(self.cluster_local_scientific, dict):
             self.cluster_local_scientific = (
                 ClusterLocalEmbeddingScientificConfig.from_mapping(
@@ -1058,9 +932,6 @@ class EmbeddingContrastDiscoveryConfig:
                 "embedding_contrast.cluster_local_scientific must be the "
                 "closed ClusterLocalEmbeddingScientificConfig"
             )
-        self.external_corpus_cache_dirs = [
-            str(path).strip() for path in self.external_corpus_cache_dirs if str(path).strip()
-        ]
         self.residualize_columns = [str(col) for col in self.residualize_columns]
         self.concept_phrases = [
             str(phrase).strip() for phrase in self.concept_phrases if str(phrase).strip()
@@ -1071,19 +942,16 @@ class EmbeddingContrastDiscoveryConfig:
 class TfidfVectorizerScientificConfig:
     """Closed, portable scientific parameters for one TF-IDF vectorizer.
 
-    Operational I/O is deliberately absent.  Text is always supplied as
-    complete in-memory content; case handling, tokenization, vocabulary
-    learning, weighting, and numerical precision are scientific behavior.
+    Text is always supplied as complete in-memory content, the vocabulary is
+    learned on the fit scope only, and sklearn's term-frequency ranking selects
+    ``max_features``; case handling, tokenization, weighting, and numerical
+    precision are configured here.
     """
 
-    input_text_case_policy: str = "vectorizer_controls_complete_text_case_v1"
-    input: str = "content"
     encoding: str = "utf-8"
     decode_error: str = "strict"
     strip_accents: Optional[str] = None
     lowercase: bool = True
-    preprocessor_policy: str = "none"
-    tokenizer_policy: str = "token_pattern"
     analyzer: str = "word"
     stop_words: Optional[Any] = None
     token_pattern: Optional[str] = r"(?u)[a-z0-9%<>+=-]+"
@@ -1092,35 +960,20 @@ class TfidfVectorizerScientificConfig:
     max_df: float = 0.95
     min_df: int = 5
     max_features: Optional[int] = 30000
-    vocabulary_policy: str = "fit_scope_only"
     binary: bool = False
     dtype: str = "float32"
     norm: Optional[str] = "l2"
     use_idf: bool = True
     smooth_idf: bool = True
     sublinear_tf: bool = True
-    feature_selection_rule: str = "sklearn_term_frequency_rank_v1"
 
     def __post_init__(self):
-        if self.input_text_case_policy != "vectorizer_controls_complete_text_case_v1":
-            raise ValueError(
-                "TF-IDF input_text_case_policy must consume complete text and "
-                "delegate case handling to the configured vectorizer"
-            )
-        if self.input != "content":
-            raise ValueError("TF-IDF vectorizer input must be 'content'")
         if not isinstance(self.encoding, str) or not self.encoding:
             raise ValueError("TF-IDF vectorizer encoding must be nonempty")
         if self.decode_error not in {"strict", "ignore", "replace"}:
             raise ValueError("TF-IDF vectorizer decode_error is invalid")
         if self.strip_accents not in {None, "ascii", "unicode"}:
             raise ValueError("TF-IDF vectorizer strip_accents is invalid")
-        if self.preprocessor_policy != "none":
-            raise ValueError("TF-IDF vectorizer supports only preprocessor_policy='none'")
-        if self.tokenizer_policy != "token_pattern":
-            raise ValueError(
-                "TF-IDF vectorizer supports only tokenizer_policy='token_pattern'"
-            )
         if self.analyzer not in {"word", "char", "char_wb"}:
             raise ValueError("TF-IDF vectorizer analyzer is invalid")
         if self.stop_words is not None:
@@ -1170,21 +1023,18 @@ class TfidfVectorizerScientificConfig:
                     "TF-IDF vectorizer max_features must be null or positive"
                 )
             self.max_features = int(self.max_features)
-        if self.vocabulary_policy != "fit_scope_only":
-            raise ValueError(
-                "TF-IDF vectorizer vocabulary_policy must be 'fit_scope_only'"
-            )
         if self.dtype not in {"float32", "float64"}:
             raise ValueError("TF-IDF vectorizer dtype must be float32 or float64")
         if self.norm not in {None, "l1", "l2"}:
             raise ValueError("TF-IDF vectorizer norm is invalid")
-        if self.feature_selection_rule != "sklearn_term_frequency_rank_v1":
-            raise ValueError("TF-IDF vectorizer feature_selection_rule is invalid")
 
 
 @dataclass
 class LogisticRegressionScientificConfig:
-    """Result-changing LogisticRegression settings other than C/iterations."""
+    """Result-changing LogisticRegression settings other than C/iterations.
+
+    Every target is binary, so scikit-learn's multi-class strategy is moot.
+    """
 
     penalty: Optional[str] = "l2"
     dual: bool = False
@@ -1193,7 +1043,6 @@ class LogisticRegressionScientificConfig:
     intercept_scaling: float = 1.0
     class_weight: Optional[Any] = None
     solver: str = "liblinear"
-    multi_class: str = "auto"
     warm_start: bool = False
     l1_ratio: Optional[float] = None
 
@@ -1219,8 +1068,6 @@ class LogisticRegressionScientificConfig:
             "saga",
         }:
             raise ValueError("logistic solver is invalid")
-        if self.multi_class not in {"auto", "ovr", "multinomial"}:
-            raise ValueError("logistic multi_class is invalid")
         if self.l1_ratio is not None and not 0.0 <= float(self.l1_ratio) <= 1.0:
             raise ValueError("logistic l1_ratio must be null or in [0, 1]")
         if self.l1_ratio is not None:
@@ -1375,7 +1222,6 @@ class XGBoostScientificConfig:
     reg_lambda: float = 1.0
     scale_pos_weight: float = 1.0
     base_score: float = 0.5
-    missing_value_policy: str = "nan"
     num_parallel_tree: int = 1
     monotone_constraints: Optional[Any] = None
     interaction_constraints: Optional[Any] = None
@@ -1434,8 +1280,6 @@ class XGBoostScientificConfig:
             if not 0.0 < value <= 1.0:
                 raise ValueError(f"xgboost {name} must be in (0, 1]")
             setattr(self, name, value)
-        if self.missing_value_policy != "nan":
-            raise ValueError("xgboost missing_value_policy must be 'nan'")
         if self.multi_strategy not in {"one_output_per_tree", "multi_output_tree"}:
             raise ValueError("xgboost multi_strategy is invalid")
         for name in (
@@ -1450,7 +1294,10 @@ class XGBoostScientificConfig:
 
 @dataclass
 class NuisanceCalibrationScientificConfig:
-    """Closed probability calibration diagnostics for nuisance models."""
+    """Closed probability calibration diagnostics for nuisance models.
+
+    The expected calibration error uses ``ece_bins`` uniform-width bins.
+    """
 
     probability_clip_epsilon: float = 1e-6
     logistic_c: float = 1e6
@@ -1461,7 +1308,6 @@ class NuisanceCalibrationScientificConfig:
         )
     )
     ece_bins: int = 10
-    ece_strategy: str = "uniform_width"
 
     def __post_init__(self):
         if isinstance(self.logistic, dict):
@@ -1480,13 +1326,16 @@ class NuisanceCalibrationScientificConfig:
         if isinstance(self.ece_bins, bool) or int(self.ece_bins) < 2:
             raise ValueError("calibration ece_bins must be at least two")
         self.ece_bins = int(self.ece_bins)
-        if self.ece_strategy != "uniform_width":
-            raise ValueError("calibration ece_strategy must be uniform_width")
 
 
 @dataclass
 class TfidfNuisanceStackScientificConfig:
-    """Exact nested cross-fit, meta-model, and degeneracy policies."""
+    """Exact nested cross-fit and meta-model settings.
+
+    Folds are stratified when feasible (otherwise shuffled K-fold), seeds are
+    scope-seed offsets, and single-class or degenerate meta targets fall back
+    to the empirical mean.
+    """
 
     meta_logistic_c: float = 1.0
     meta_logistic_max_iter: int = 1000
@@ -1500,12 +1349,7 @@ class TfidfNuisanceStackScientificConfig:
     calibration: NuisanceCalibrationScientificConfig = field(
         default_factory=NuisanceCalibrationScientificConfig
     )
-    split_policy: str = "stratified_if_feasible_else_kfold_v1"
     split_shuffle: bool = True
-    seed_derivation_policy: str = "scope_seed_offset_v1"
-    single_class_policy: str = "empirical_mean_constant"
-    empty_vocabulary_policy: str = "fail_closed"
-    meta_degenerate_policy: str = "empirical_mean_constant"
 
     def __post_init__(self):
         if isinstance(self.meta_logistic, dict):
@@ -1536,31 +1380,20 @@ class TfidfNuisanceStackScientificConfig:
         if float(self.meta_ridge_alpha) < 0.0:
             raise ValueError("TF-IDF meta_ridge_alpha must be >= 0")
         self.meta_ridge_alpha = float(self.meta_ridge_alpha)
-        if self.split_policy != "stratified_if_feasible_else_kfold_v1":
-            raise ValueError("TF-IDF nuisance split_policy is invalid")
-        if self.seed_derivation_policy != "scope_seed_offset_v1":
-            raise ValueError("TF-IDF nuisance seed_derivation_policy is invalid")
-        if self.single_class_policy != "empirical_mean_constant":
-            raise ValueError("TF-IDF nuisance single_class_policy is invalid")
-        if self.empty_vocabulary_policy not in {
-            "fail_closed",
-            "empirical_mean_constant",
-        }:
-            raise ValueError("TF-IDF nuisance empty_vocabulary_policy is invalid")
-        if self.meta_degenerate_policy != "empirical_mean_constant":
-            raise ValueError("TF-IDF nuisance meta_degenerate_policy is invalid")
 
 
 @dataclass
 class NMFScientificConfig:
-    """Remaining result-changing NMF constructor and numerical settings."""
+    """Remaining result-changing NMF constructor and numerical settings.
+
+    The fitted component count is min(requested, rows - 1, selected terms).
+    """
 
     alpha_w: float = 0.0
     alpha_h: Any = "same"
     l1_ratio: float = 0.0
     shuffle: bool = False
     importance_scale_epsilon: float = 1e-12
-    component_capacity_policy: str = "min_requested_rows_minus_one_selected_terms"
 
     def __post_init__(self):
         if float(self.alpha_w) < 0.0:
@@ -1576,16 +1409,15 @@ class NMFScientificConfig:
         if not float(self.importance_scale_epsilon) > 0.0:
             raise ValueError("NMF importance_scale_epsilon must be > 0")
         self.importance_scale_epsilon = float(self.importance_scale_epsilon)
-        if (
-            self.component_capacity_policy
-            != "min_requested_rows_minus_one_selected_terms"
-        ):
-            raise ValueError("NMF component_capacity_policy is invalid")
 
 
 @dataclass
 class TfidfScreeningScientificConfig:
-    """Closed source selection and aggregation weights for linear screens."""
+    """Closed source selection and aggregation weights for linear screens.
+
+    Screening seeds are scope-seed offsets, and every topic carries exactly
+    the configured number of terms.
+    """
 
     model_source_view_name: str = "linear_1_3"
     linear_base_weight: float = 0.5
@@ -1595,8 +1427,6 @@ class TfidfScreeningScientificConfig:
     effect_nuisance_agreement_weight: float = 0.2
     effect_selection_stability_weight: float = 0.2
     effect_sign_stability_weight: float = 0.2
-    seed_derivation_policy: str = "scope_seed_offset_v1"
-    topic_term_evidence_policy: str = "fail_closed_exact_configured_capacity"
 
     def __post_init__(self):
         self.model_source_view_name = str(self.model_source_view_name).strip()
@@ -1628,15 +1458,15 @@ class TfidfScreeningScientificConfig:
             self.effect_selection_stability_weight,
             self.effect_sign_stability_weight,
         ) = effect
-        if self.seed_derivation_policy != "scope_seed_offset_v1":
-            raise ValueError("TF-IDF screening seed_derivation_policy is invalid")
-        if self.topic_term_evidence_policy != "fail_closed_exact_configured_capacity":
-            raise ValueError("TF-IDF topic term evidence policy is invalid")
 
 
 @dataclass
 class OrphanSemanticClusteringScientificConfig:
-    """Exact sparse-semantic clustering settings for residual n-gram groups."""
+    """Exact sparse-semantic clustering settings for residual n-gram groups.
+
+    Similarity blocks are L2-normalized and neighbors are found by brute-force
+    cosine search.
+    """
 
     alias_jaccard_threshold: float = 0.8
     word_vectorizer: TfidfVectorizerScientificConfig = field(
@@ -1667,9 +1497,6 @@ class OrphanSemanticClusteringScientificConfig:
     word_similarity_weight: float = 0.35
     char_similarity_weight: float = 0.35
     occurrence_similarity_weight: float = 0.30
-    row_normalization_norm: str = "l2"
-    neighbor_metric: str = "cosine"
-    neighbor_algorithm: str = "brute"
 
     def __post_init__(self):
         if isinstance(self.word_vectorizer, dict):
@@ -1699,12 +1526,6 @@ class OrphanSemanticClusteringScientificConfig:
             self.char_similarity_weight,
             self.occurrence_similarity_weight,
         ) = weights
-        if self.row_normalization_norm != "l2":
-            raise ValueError("orphan row_normalization_norm must be l2")
-        if self.neighbor_metric != "cosine":
-            raise ValueError("orphan neighbor_metric must be cosine")
-        if self.neighbor_algorithm != "brute":
-            raise ValueError("orphan neighbor_algorithm must be brute")
 
 
 @dataclass
@@ -1737,7 +1558,6 @@ class BoWViewConfig:
     xgboost_scientific: XGBoostScientificConfig = field(
         default_factory=XGBoostScientificConfig
     )
-    single_class_policy: str = "empirical_mean_constant"
     empty_vocabulary_policy: str = "fail_closed"
     unsupported_sample_weight_policy: str = "fail_closed"
 
@@ -1822,8 +1642,6 @@ class BoWViewConfig:
             "empirical_mean_constant",
         }:
             raise ValueError("bow view empty_vocabulary_policy is invalid")
-        if self.single_class_policy != "empirical_mean_constant":
-            raise ValueError("bow view single_class_policy is invalid")
         if self.unsupported_sample_weight_policy not in {
             "fail_closed",
             "unweighted_legacy_compatibility",
@@ -1842,7 +1660,7 @@ class BoWViewConfig:
 
 
 def legacy_default_bow_views_v1() -> List[BoWViewConfig]:
-    """Historical implicit grid for non-production compatibility callers only."""
+    """Default BoW view grid used when a configuration lists no views."""
     return [
         BoWViewConfig(
             name="linear_unigram_c0p5",
@@ -1892,23 +1710,15 @@ def legacy_default_bow_views_v1() -> List[BoWViewConfig]:
     ]
 
 
-def default_multi_model_bow_views() -> List[BoWViewConfig]:
-    """Deprecated compatibility alias; portable production never calls this."""
-
-    return legacy_default_bow_views_v1()
-
-
 @dataclass
 class TfidfTopicDiscoveryConfig:
     """Deterministic nuisance, contrast, and consensus-NMF settings."""
 
-    max_features: int = 30000
-    ngram_range_min: int = 1
-    ngram_range_max: int = 3
-    min_df: int = 5
-    max_df: float = 0.98
-    sublinear_tf: bool = True
-    vectorizer_scientific: Optional[TfidfVectorizerScientificConfig] = None
+    # The common topic vocabulary.  NMF is nndsvdar-initialized coordinate
+    # descent on the Frobenius objective.
+    vectorizer_scientific: TfidfVectorizerScientificConfig = field(
+        default_factory=lambda: TfidfVectorizerScientificConfig(max_df=0.98)
+    )
     nuisance_stack_scientific: TfidfNuisanceStackScientificConfig = field(
         default_factory=TfidfNuisanceStackScientificConfig
     )
@@ -1920,9 +1730,6 @@ class TfidfTopicDiscoveryConfig:
     # prompt constant. Downstream consumers must account for exactly this many
     # terms or fail closed; they may not slice the configured evidence.
     terms_per_topic: int = 15
-    nmf_init: str = "nndsvdar"
-    nmf_solver: str = "cd"
-    nmf_beta_loss: str = "frobenius"
     nmf_max_iter: int = 400
     nmf_tol: float = 1e-4
     nmf_scientific: NMFScientificConfig = field(
@@ -1939,35 +1746,17 @@ class TfidfTopicDiscoveryConfig:
     minimum_nuisance_source_agreement: float = 0.50
     minimum_subsample_selection_fraction: float = 0.20
     minimum_tail_sign_agreement: float = 0.50
-    topic_label_parallelism: int = 8
-    initial_effect_coverage_target: float = 0.80
-    topic_reconstruction_tolerance: float = 0.03
-    contrast_coverage_tolerance: float = 0.05
-    # Honest inner-held-out group score tests used to filter topics before
-    # agent labeling.  Every bank retains a bounded evidence-ranked set; the
-    # minimum is a power safeguard rather than a significance claim.
-    score_test_enabled: bool = True
-    # Historical experiments scored on the registered context holdout. New
-    # production bundles split the registered fit partition again, freeze
-    # selection there, and only then transform the label-free holdout.
-    score_selection_label_policy: str = "registered_context_heldout"
-    score_test_bootstrap_repeats: int = 500
-    # Zero means every fitted topic.  Production defaults to the complete
-    # family so a topic is never chosen for bootstrap calibration after its
-    # held-out statistic has already been inspected.  A positive limit is an
-    # explicitly approximate/debug mode; selection then falls back to the
-    # asymptotic p-values shared by the complete family.
-    score_test_bootstrap_top_topics: int = 0
-    score_test_bootstrap_chunk_size: int = 100
-    score_test_fdr_level: float = 0.20
-    score_test_p_threshold: float = 0.10
-    score_test_min_topics_per_bank: int = 5
-    score_test_max_topics_per_bank: int = 20
-    score_test_full_topic_min_inner_folds: int = 1
-    # Opt-in sparse skip connection around NMF. Candidate groups are built only from
-    # stable fit-side effect n-grams that are absent from every fitted topic's
-    # configured term summary, then tested once on the exact inner-held-out rows.
+    # Opt-in sparse skip connection around NMF (the tfidf_orphan_ngrams lane).
+    # Candidate groups are built only from stable fit-side effect n-grams that
+    # are absent from every fitted topic's configured term summary, then tested
+    # once on a nested calibration partition of the registered fit rows.
     orphan_ngram_enabled: bool = False
+    # Shared-multiplier bootstrap for the orphan cluster family.  Zero top
+    # clusters means the complete family; a positive limit falls back to the
+    # asymptotic p-values.
+    orphan_ngram_bootstrap_repeats: int = 500
+    orphan_ngram_bootstrap_top_clusters: int = 0
+    orphan_ngram_bootstrap_chunk_size: int = 100
     orphan_ngram_min_abs_fit_score: float = 2.0
     orphan_ngram_cluster_similarity_threshold: float = 0.25
     orphan_ngram_cluster_max_terms: int = 15
@@ -1976,49 +1765,18 @@ class TfidfTopicDiscoveryConfig:
     orphan_ngram_p_threshold: float = 0.10
     orphan_ngram_min_selected_clusters: int = 5
     orphan_ngram_max_selected_clusters: int = 20
-    orphan_ngram_full_min_inner_folds: int = 1
     orphan_semantic_clustering_scientific: OrphanSemanticClusteringScientificConfig = field(
         default_factory=OrphanSemanticClusteringScientificConfig
     )
-    prompt_version: str = "tfidf_topic_label_v2"
     random_state: int = 42
 
     def __post_init__(self):
-        if self.max_features < 1:
-            raise ValueError("tfidf_topic.max_features must be >= 1")
-        if self.ngram_range_min < 1 or self.ngram_range_max < self.ngram_range_min:
-            raise ValueError("tfidf_topic ngram range is invalid")
-        if self.min_df < 1:
-            raise ValueError("tfidf_topic.min_df must be >= 1")
-        if not 0.0 < self.max_df <= 1.0:
-            raise ValueError("tfidf_topic.max_df must be in (0, 1]")
-        if self.vectorizer_scientific is None:
-            self.vectorizer_scientific = TfidfVectorizerScientificConfig(
-                ngram_range_min=int(self.ngram_range_min),
-                ngram_range_max=int(self.ngram_range_max),
-                min_df=int(self.min_df),
-                max_df=float(self.max_df),
-                max_features=int(self.max_features),
-                sublinear_tf=bool(self.sublinear_tf),
-            )
-        elif isinstance(self.vectorizer_scientific, dict):
+        if isinstance(self.vectorizer_scientific, dict):
             self.vectorizer_scientific = TfidfVectorizerScientificConfig(
                 **self.vectorizer_scientific
             )
         if type(self.vectorizer_scientific) is not TfidfVectorizerScientificConfig:
             raise ValueError("tfidf_topic.vectorizer_scientific must be typed")
-        vectorizer = self.vectorizer_scientific
-        if (
-            vectorizer.ngram_range_min != int(self.ngram_range_min)
-            or vectorizer.ngram_range_max != int(self.ngram_range_max)
-            or vectorizer.min_df != int(self.min_df)
-            or vectorizer.max_df != float(self.max_df)
-            or vectorizer.max_features != int(self.max_features)
-            or vectorizer.sublinear_tf != bool(self.sublinear_tf)
-        ):
-            raise ValueError(
-                "tfidf_topic compatibility fields differ from vectorizer_scientific"
-            )
         if isinstance(self.nuisance_stack_scientific, dict):
             self.nuisance_stack_scientific = TfidfNuisanceStackScientificConfig(
                 **self.nuisance_stack_scientific
@@ -2038,10 +1796,6 @@ class TfidfTopicDiscoveryConfig:
         if int(self.terms_per_topic) < 1:
             raise ValueError("tfidf_topic.terms_per_topic must be >= 1")
         self.terms_per_topic = int(self.terms_per_topic)
-        if self.nmf_init != "nndsvdar" or self.nmf_solver != "cd":
-            raise ValueError("tfidf_topic v2 requires nndsvdar coordinate-descent NMF")
-        if self.nmf_beta_loss != "frobenius":
-            raise ValueError("tfidf_topic v2 requires the Frobenius objective")
         if self.nmf_max_iter < 1 or self.nmf_tol <= 0.0:
             raise ValueError("tfidf_topic NMF convergence settings are invalid")
         if isinstance(self.nmf_scientific, dict):
@@ -2076,31 +1830,12 @@ class TfidfTopicDiscoveryConfig:
             raise ValueError("tfidf_topic.stability_repeats must be >= 0")
         if not 0.0 < self.stability_fraction <= 1.0:
             raise ValueError("tfidf_topic.stability_fraction must be in (0, 1]")
-        if self.topic_label_parallelism < 1:
-            raise ValueError("tfidf_topic.topic_label_parallelism must be >= 1")
-        if self.score_test_bootstrap_repeats < 0:
-            raise ValueError("tfidf_topic.score_test_bootstrap_repeats must be >= 0")
-        if self.score_selection_label_policy not in {
-            "registered_context_heldout",
-            "nested_fit_calibration",
-        }:
-            raise ValueError(
-                "tfidf_topic.score_selection_label_policy must be "
-                "registered_context_heldout or nested_fit_calibration"
-            )
-        if self.score_test_bootstrap_top_topics < 0:
-            raise ValueError("tfidf_topic.score_test_bootstrap_top_topics must be >= 0")
-        if self.score_test_bootstrap_chunk_size < 1:
-            raise ValueError("tfidf_topic.score_test_bootstrap_chunk_size must be >= 1")
-        if self.score_test_min_topics_per_bank < 0:
-            raise ValueError("tfidf_topic.score_test_min_topics_per_bank must be >= 0")
-        if self.score_test_max_topics_per_bank < self.score_test_min_topics_per_bank:
-            raise ValueError(
-                "tfidf_topic.score_test_max_topics_per_bank must be >= "
-                "score_test_min_topics_per_bank"
-            )
-        if self.score_test_full_topic_min_inner_folds < 1:
-            raise ValueError("tfidf_topic.score_test_full_topic_min_inner_folds must be >= 1")
+        if self.orphan_ngram_bootstrap_repeats < 0:
+            raise ValueError("tfidf_topic.orphan_ngram_bootstrap_repeats must be >= 0")
+        if self.orphan_ngram_bootstrap_top_clusters < 0:
+            raise ValueError("tfidf_topic.orphan_ngram_bootstrap_top_clusters must be >= 0")
+        if self.orphan_ngram_bootstrap_chunk_size < 1:
+            raise ValueError("tfidf_topic.orphan_ngram_bootstrap_chunk_size must be >= 1")
         if float(self.orphan_ngram_min_abs_fit_score) < 0.0:
             raise ValueError("tfidf_topic.orphan_ngram_min_abs_fit_score must be >= 0")
         if int(self.orphan_ngram_cluster_max_terms) < 1:
@@ -2120,8 +1855,6 @@ class TfidfTopicDiscoveryConfig:
                 "tfidf_topic.orphan_ngram_min_selected_clusters must be in "
                 "[0, orphan_ngram_max_selected_clusters]"
             )
-        if int(self.orphan_ngram_full_min_inner_folds) < 1:
-            raise ValueError("tfidf_topic.orphan_ngram_full_min_inner_folds must be >= 1")
         if isinstance(self.orphan_semantic_clustering_scientific, dict):
             self.orphan_semantic_clustering_scientific = (
                 OrphanSemanticClusteringScientificConfig(
@@ -2135,17 +1868,10 @@ class TfidfTopicDiscoveryConfig:
             raise ValueError(
                 "tfidf_topic.orphan_semantic_clustering_scientific must be typed"
             )
-        if self.orphan_ngram_enabled and not self.score_test_enabled:
-            raise ValueError("tfidf_topic.orphan_ngram_enabled requires score_test_enabled")
         for field_name in (
             "minimum_nuisance_source_agreement",
             "minimum_subsample_selection_fraction",
             "minimum_tail_sign_agreement",
-            "initial_effect_coverage_target",
-            "topic_reconstruction_tolerance",
-            "contrast_coverage_tolerance",
-            "score_test_fdr_level",
-            "score_test_p_threshold",
             "orphan_ngram_cluster_similarity_threshold",
             "orphan_ngram_fdr_level",
             "orphan_ngram_p_threshold",
@@ -2226,12 +1952,6 @@ class MultiModelAgenticForestConfig:
     parsimony_factor_min_coverage: float = 0.10
     parsimony_parallelism: str = "auto"
     parsimony_metric_epsilon: float = 1e-6
-    # Deprecated compatibility fields from the legacy single-feature ablation
-    # implementation.  They remain parseable but no longer govern parsimony.
-    parsimony_review_auc_tolerance: float = 0.01
-    parsimony_review_loss_relative_tolerance: float = 0.03
-    parsimony_review_corr_threshold: float = 0.75
-    parsimony_review_max_single_feature_ablations: int = 30
     # Compatibility default: allow legacy full-data runs, but label them as
     # non-honest. Set true to require CV or an explicit held-out test split.
     require_honest_outer_split: bool = False
@@ -2378,24 +2098,6 @@ class MultiModelAgenticForestConfig:
                 "multi_model_agentic_forest.extracted_feature_review_min_benchmark_auc "
                 "must be in [0, 1]"
             )
-        if self.parsimony_review_auc_tolerance < 0.0:
-            raise ValueError(
-                "multi_model_agentic_forest.parsimony_review_auc_tolerance " "must be >= 0"
-            )
-        if self.parsimony_review_loss_relative_tolerance < 0.0:
-            raise ValueError(
-                "multi_model_agentic_forest.parsimony_review_loss_relative_tolerance "
-                "must be >= 0"
-            )
-        if not 0.0 <= self.parsimony_review_corr_threshold <= 1.0:
-            raise ValueError(
-                "multi_model_agentic_forest.parsimony_review_corr_threshold " "must be in [0, 1]"
-            )
-        if self.parsimony_review_max_single_feature_ablations < 0:
-            raise ValueError(
-                "multi_model_agentic_forest.parsimony_review_max_single_feature_ablations "
-                "must be >= 0"
-            )
         if not 0.0 <= self.parsimony_cluster_semantic_weight <= 1.0:
             raise ValueError(
                 "multi_model_agentic_forest.parsimony_cluster_semantic_weight " "must be in [0, 1]"
@@ -2508,23 +2210,35 @@ class MultiModelAgenticForestConfig:
 
 
 @dataclass
-class MultiModelForestConfig(MultiModelAgenticForestConfig):
+class MultiModelForestConfig:
     """Stage 1 scientific configuration for the all-evidence workflow."""
 
+    nuisance_folds: int = 5
+    effect_folds: int = 5
+    # Explicit selector for the evidence/discovery methods used in this run.
+    # Accepted entries: "bow", "htr", and "embedding_contrast".
+    # When omitted, the selector is derived from the per-method toggles below.
+    feature_discovery_methods: Optional[List[str]] = None
+    bow_discovery_enabled: bool = True
+    bow_discovery_disable_reason: Optional[str] = None
+    bow_views: List[BoWViewConfig] = field(default_factory=list)
+    e_clip: float = 0.01
+    top_n_features: int = 100
+    # Inner discovery folds inside each outer fold.
+    candidate_consistency_inner_folds: int = 3
+    # Fit-only calibration inside a registered TF-IDF scope. This is distinct
+    # from hierarchy partitions and downstream interaction cross-fitting.
+    tfidf_nested_calibration_folds: int = 3
+    embedding_contrast: EmbeddingContrastDiscoveryConfig = field(
+        default_factory=EmbeddingContrastDiscoveryConfig
+    )
+    htr_evidence_enabled: bool = True
+    htr_evidence_disable_reason: Optional[str] = None
     tfidf_topic: TfidfTopicDiscoveryConfig = field(default_factory=TfidfTopicDiscoveryConfig)
-    # Optional audited outer/inner fold registry for exact-context Stage 1
-    # artifact reproduction. The registry content, rather than its path, is
-    # incorporated into the Stage 1 cache identity.
-    split_registry_path: Optional[str] = None
     # Outer-fold execution backend for CPU-only TF-IDF/NMF contexts.
     outer_parallel_backend: str = "processes"
-    # Optional overrides for the two nested fold families. When unset, the legacy
-    # fold_parallelism setting is used for both.
-    bow_fold_parallelism: Optional[str] = None
-    htr_fold_parallelism: Optional[str] = None
-    # Public scheduler controls for exact Stage 1 context fits.
+    # CPU budget for exact TF-IDF contexts.
     cpus_total: Optional[int] = None
-    htr_jobs_per_gpu: int = 1
     # Matched-pair uplift evidence. Inner folds fit pair-level models on
     # observed treated/control matches from the outer-train fold; outer-test
     # patients are scored as candidate treated patients against similar
@@ -2539,47 +2253,67 @@ class MultiModelForestConfig(MultiModelAgenticForestConfig):
     matched_pair_nearest_fallback_controls: int = 1
     matched_pair_bow_l2_alpha: float = 1.0
     matched_pair_bow_max_iter: int = 100
-    matched_pair_bow_optimizer_method: str = "L-BFGS-B"
-    matched_pair_bow_optimizer_ftol: float = 1e-8
-    matched_pair_bow_optimizer_gtol: float = 1e-5
-    matched_pair_bow_optimizer_maxls: int = 30
-    matched_pair_bow_optimizer_maxcor: int = 10
-    matched_pair_bow_optimizer_maxfun: int = 15_000
-    matched_pair_bow_optimizer_tol: Optional[float] = None
-    matched_pair_bow_optimizer_initialization: str = "zeros"
-    matched_pair_bow_require_optimizer_success: bool = False
-    matched_pair_htr_optimizer_name: str = "adamw"
-    matched_pair_htr_adamw_beta1: float = 0.9
-    matched_pair_htr_adamw_beta2: float = 0.999
-    matched_pair_htr_adamw_eps: float = 1e-8
-    matched_pair_htr_adamw_amsgrad: bool = False
-    matched_pair_htr_adamw_maximize: bool = False
-    matched_pair_htr_adamw_foreach: bool = False
-    matched_pair_htr_adamw_capturable: bool = False
-    matched_pair_htr_adamw_differentiable: bool = False
-    matched_pair_htr_adamw_fused: bool = False
-    matched_pair_htr_optimizer_zero_grad_set_to_none: bool = True
-    matched_pair_htr_gradient_clip_norm: float = 0.0
-    matched_pair_htr_gradient_clip_norm_type: float = 2.0
-    matched_pair_htr_gradient_clip_error_if_nonfinite: bool = False
-    matched_pair_htr_gradient_clip_foreach: bool = False
-    matched_pair_htr_head_depth: int = 2
-    matched_pair_htr_head_activation: str = "relu"
-    matched_pair_htr_head_layer_norm: bool = False
-    matched_pair_htr_head_bias: bool = True
     matched_pair_htr_attention_pairs_per_fold: int = 16
-    # Final structured CATE head.  Keep the honest causal-forest path as the
-    # production default; the interaction S-learner remains an explicit
-    # diagnostic/ablation option.
-    structured_effect_estimator: str = "causal_forest"
 
     def __post_init__(self):
-        super().__post_init__()
+        if isinstance(self.embedding_contrast, dict):
+            self.embedding_contrast = EmbeddingContrastDiscoveryConfig(**self.embedding_contrast)
+        if self.feature_discovery_methods is not None:
+            self.set_feature_discovery_methods(
+                self.feature_discovery_methods,
+                source="multi_model_forest.feature_discovery_methods",
+            )
+        else:
+            self.feature_discovery_methods = self._feature_discovery_methods_from_flags()
+        if not self.feature_discovery_methods:
+            raise ValueError(
+                "multi_model_forest must enable at least one feature "
+                "discovery method: bow, htr, or embedding_contrast"
+            )
+        if (
+            not bool(self.bow_discovery_enabled)
+            and not str(self.bow_discovery_disable_reason or "").strip()
+        ):
+            self.bow_discovery_disable_reason = (
+                "disabled by multi_model_forest.feature_discovery_methods"
+            )
+        if (
+            not bool(self.htr_evidence_enabled)
+            and not str(self.htr_evidence_disable_reason or "").strip()
+        ):
+            self.htr_evidence_disable_reason = (
+                "disabled by multi_model_forest.feature_discovery_methods"
+            )
+        if self.bow_views:
+            self.bow_views = [
+                view if isinstance(view, BoWViewConfig) else BoWViewConfig(**view)
+                for view in self.bow_views
+            ]
+        else:
+            self.bow_views = legacy_default_bow_views_v1()
+        seen_view_names = set()
+        for idx, view in enumerate(self.bow_views, start=1):
+            if not view.name:
+                view.name = (
+                    f"{view.bow_model}_{view.ngram_range_min}_" f"{view.ngram_range_max}_{idx}"
+                )
+            if view.name in seen_view_names:
+                raise ValueError("multi_model_forest.bow_views names must be unique")
+            seen_view_names.add(view.name)
+        if self.nuisance_folds < 2:
+            raise ValueError("multi_model_forest.nuisance_folds must be >= 2")
+        if self.effect_folds < 2:
+            raise ValueError("multi_model_forest.effect_folds must be >= 2")
+        if not 0.0 < self.e_clip < 0.5:
+            raise ValueError("multi_model_forest.e_clip must be in (0, 0.5)")
+        if self.top_n_features < 1:
+            raise ValueError("multi_model_forest.top_n_features must be >= 1")
+        if self.candidate_consistency_inner_folds < 2:
+            raise ValueError("multi_model_forest.candidate_consistency_inner_folds must be >= 2")
+        if self.tfidf_nested_calibration_folds < 2:
+            raise ValueError("multi_model_forest.tfidf_nested_calibration_folds must be >= 2")
         if isinstance(self.tfidf_topic, dict):
             self.tfidf_topic = TfidfTopicDiscoveryConfig(**self.tfidf_topic)
-        if self.split_registry_path is not None:
-            registry_path = str(self.split_registry_path).strip()
-            self.split_registry_path = registry_path or None
         backend = str(self.outer_parallel_backend).strip().lower()
         if backend not in {"threads", "processes", "loky", "multiprocessing", "fork"}:
             raise ValueError(
@@ -2591,25 +2325,9 @@ class MultiModelForestConfig(MultiModelAgenticForestConfig):
             "fork": "multiprocessing",
         }
         self.outer_parallel_backend = backend_aliases.get(backend, backend)
-        for field_name in ("bow_fold_parallelism", "htr_fold_parallelism"):
-            value = getattr(self, field_name)
-            if value is None:
-                continue
-            value_text = str(value).strip().lower()
-            if not value_text:
-                setattr(self, field_name, None)
-                continue
-            _validate_parallelism_setting(
-                value_text,
-                f"multi_model_forest.{field_name}",
-            )
-            setattr(self, field_name, value_text)
         if self.cpus_total is not None and int(self.cpus_total) < 1:
             raise ValueError("multi_model_forest.cpus_total must be >= 1")
-        if int(self.htr_jobs_per_gpu) < 1:
-            raise ValueError("multi_model_forest.htr_jobs_per_gpu must be >= 1")
         self.cpus_total = None if self.cpus_total is None else int(self.cpus_total)
-        self.htr_jobs_per_gpu = int(self.htr_jobs_per_gpu)
         if not 0.0 < float(self.matched_pair_propensity_caliper) <= 1.0:
             raise ValueError("multi_model_forest.matched_pair_propensity_caliper must be in (0, 1]")
         if not 0.0 < float(self.matched_pair_outcome_caliper) <= 1.0:
@@ -2626,117 +2344,6 @@ class MultiModelForestConfig(MultiModelAgenticForestConfig):
             raise ValueError("multi_model_forest.matched_pair_bow_l2_alpha must be >= 0")
         if int(self.matched_pair_bow_max_iter) < 1:
             raise ValueError("multi_model_forest.matched_pair_bow_max_iter must be >= 1")
-        if self.matched_pair_bow_optimizer_method != "L-BFGS-B":
-            raise ValueError(
-                "multi_model_forest.matched_pair_bow_optimizer_method "
-                "must be 'L-BFGS-B'"
-            )
-        if self.matched_pair_bow_optimizer_initialization != "zeros":
-            raise ValueError(
-                "multi_model_forest.matched_pair_bow_optimizer_initialization "
-                "must be 'zeros'"
-            )
-        for field_name in (
-            "matched_pair_bow_optimizer_ftol",
-            "matched_pair_bow_optimizer_gtol",
-        ):
-            value = float(getattr(self, field_name))
-            if not math.isfinite(value) or value < 0.0:
-                raise ValueError(
-                    f"multi_model_forest.{field_name} must be finite and >= 0"
-                )
-            setattr(self, field_name, value)
-        if self.matched_pair_bow_optimizer_tol is not None:
-            tolerance = float(self.matched_pair_bow_optimizer_tol)
-            if not math.isfinite(tolerance) or tolerance < 0.0:
-                raise ValueError(
-                    "multi_model_forest.matched_pair_bow_optimizer_tol "
-                    "must be null or finite and >= 0"
-                )
-            self.matched_pair_bow_optimizer_tol = tolerance
-        for field_name in (
-            "matched_pair_bow_optimizer_maxls",
-            "matched_pair_bow_optimizer_maxcor",
-            "matched_pair_bow_optimizer_maxfun",
-            "matched_pair_htr_head_depth",
-        ):
-            value = getattr(self, field_name)
-            if isinstance(value, bool) or int(value) < 1:
-                raise ValueError(
-                    f"multi_model_forest.{field_name} must be a positive integer"
-                )
-            setattr(self, field_name, int(value))
-        if self.matched_pair_htr_optimizer_name != "adamw":
-            raise ValueError(
-                "multi_model_forest.matched_pair_htr_optimizer_name "
-                "must be 'adamw'"
-            )
-        for field_name in (
-            "matched_pair_htr_adamw_beta1",
-            "matched_pair_htr_adamw_beta2",
-        ):
-            value = float(getattr(self, field_name))
-            if not math.isfinite(value) or not 0.0 <= value < 1.0:
-                raise ValueError(
-                    f"multi_model_forest.{field_name} must be in [0, 1)"
-                )
-            setattr(self, field_name, value)
-        self.matched_pair_htr_adamw_eps = float(
-            self.matched_pair_htr_adamw_eps
-        )
-        if (
-            not math.isfinite(self.matched_pair_htr_adamw_eps)
-            or self.matched_pair_htr_adamw_eps <= 0.0
-        ):
-            raise ValueError(
-                "multi_model_forest.matched_pair_htr_adamw_eps "
-                "must be finite and positive"
-            )
-        self.matched_pair_htr_gradient_clip_norm = float(
-            self.matched_pair_htr_gradient_clip_norm
-        )
-        self.matched_pair_htr_gradient_clip_norm_type = float(
-            self.matched_pair_htr_gradient_clip_norm_type
-        )
-        if (
-            not math.isfinite(self.matched_pair_htr_gradient_clip_norm)
-            or self.matched_pair_htr_gradient_clip_norm < 0.0
-            or not math.isfinite(self.matched_pair_htr_gradient_clip_norm_type)
-            or self.matched_pair_htr_gradient_clip_norm_type <= 0.0
-        ):
-            raise ValueError(
-                "multi_model_forest matched-pair HTR gradient-clip "
-                "configuration is invalid"
-            )
-        if self.matched_pair_htr_head_activation not in {
-            "gelu_exact",
-            "gelu_tanh",
-            "relu",
-            "silu",
-            "tanh",
-        }:
-            raise ValueError(
-                "multi_model_forest.matched_pair_htr_head_activation "
-                "is unsupported"
-            )
-        for field_name in (
-            "matched_pair_bow_require_optimizer_success",
-            "matched_pair_htr_adamw_amsgrad",
-            "matched_pair_htr_adamw_maximize",
-            "matched_pair_htr_adamw_foreach",
-            "matched_pair_htr_adamw_capturable",
-            "matched_pair_htr_adamw_differentiable",
-            "matched_pair_htr_adamw_fused",
-            "matched_pair_htr_optimizer_zero_grad_set_to_none",
-            "matched_pair_htr_gradient_clip_error_if_nonfinite",
-            "matched_pair_htr_gradient_clip_foreach",
-            "matched_pair_htr_head_layer_norm",
-            "matched_pair_htr_head_bias",
-        ):
-            if type(getattr(self, field_name)) is not bool:
-                raise TypeError(
-                    f"multi_model_forest.{field_name} must be an exact boolean"
-                )
         if int(self.matched_pair_htr_attention_pairs_per_fold) < 0:
             raise ValueError(
                 "multi_model_forest.matched_pair_htr_attention_pairs_per_fold must be >= 0"
@@ -2754,20 +2361,44 @@ class MultiModelForestConfig(MultiModelAgenticForestConfig):
         self.matched_pair_htr_attention_pairs_per_fold = int(
             self.matched_pair_htr_attention_pairs_per_fold
         )
-        estimator = str(self.structured_effect_estimator).strip().lower().replace("-", "_")
-        estimator_aliases = {
-            "interaction": "interaction_s_learner",
-            "s_learner": "interaction_s_learner",
-            "interaction_s_learner": "interaction_s_learner",
-            "causal_forest": "causal_forest",
-            "forest": "causal_forest",
-        }
-        if estimator not in estimator_aliases:
-            raise ValueError(
-                "multi_model_forest.structured_effect_estimator must be "
-                "'interaction_s_learner' or 'causal_forest'"
-            )
-        self.structured_effect_estimator = estimator_aliases[estimator]
+
+    def set_feature_discovery_methods(
+        self,
+        methods: Any,
+        *,
+        source: str = "feature_discovery_methods",
+    ) -> None:
+        normalized = normalize_multi_model_feature_discovery_methods(
+            methods,
+            source=source,
+        )
+        assert normalized is not None
+        self.feature_discovery_methods = normalized
+        self.bow_discovery_enabled = "bow" in normalized
+        self.htr_evidence_enabled = "htr" in normalized
+        self.embedding_contrast.enabled = "embedding_contrast" in normalized
+        if self.bow_discovery_enabled:
+            self.bow_discovery_disable_reason = None
+        elif not str(self.bow_discovery_disable_reason or "").strip():
+            self.bow_discovery_disable_reason = f"disabled by {source}"
+        if self.htr_evidence_enabled:
+            self.htr_evidence_disable_reason = None
+        elif not str(self.htr_evidence_disable_reason or "").strip():
+            self.htr_evidence_disable_reason = f"disabled by {source}"
+        if self.embedding_contrast.enabled:
+            self.embedding_contrast.disable_reason = None
+        elif not str(self.embedding_contrast.disable_reason or "").strip():
+            self.embedding_contrast.disable_reason = f"disabled by {source}"
+
+    def _feature_discovery_methods_from_flags(self) -> List[str]:
+        methods: List[str] = []
+        if bool(self.bow_discovery_enabled):
+            methods.append("bow")
+        if bool(self.htr_evidence_enabled):
+            methods.append("htr")
+        if bool(getattr(self.embedding_contrast, "enabled", False)):
+            methods.append("embedding_contrast")
+        return methods
 
 
 @dataclass
@@ -2815,19 +2446,6 @@ class AgenticAttentionVariableForestConfig:
     r_stage_min_propensity: float = 0.0
     r_stage_max_propensity: float = 1.0
     effect_objective: str = "pseudo_outcome_mse"
-    neural_stage_mode: str = "staged"
-    joint_rlearner_gamma: float = 1.0
-    interaction_l2_weight: float = 1e-3
-    tarnet_offset_batch_size: Optional[int] = 128
-    tarnet_offset_heterogeneity_weight: float = 0.1
-    tarnet_offset_min_logit_std: float = 0.5
-    residual_contrastive_enabled: bool = False
-    residual_contrastive_use_for_effect_discovery: bool = True
-    residual_contrastive_score: str = "r_score"
-    residual_contrastive_high_quantile: float = 0.80
-    residual_contrastive_low_quantile: float = 0.20
-    residual_contrastive_neutral_abs_quantile: float = 0.40
-    residual_contrastive_min_class_count: int = 10
     manual_features_locked: bool = True
     neural_only: bool = False
 
@@ -2889,51 +2507,13 @@ class AgenticAttentionVariableForestConfig:
         if effect_objective not in {
             "dina",
             "squared_r_loss",
-            "logistic_r_loss",
             "pseudo_outcome_mse",
         }:
             raise ValueError(
                 "agentic_attention_variable_forest.effect_objective must be one "
-                "of 'squared_r_loss', 'logistic_r_loss', or 'pseudo_outcome_mse'"
+                "of 'dina', 'squared_r_loss', or 'pseudo_outcome_mse'"
             )
         self.effect_objective = effect_objective
-        neural_stage_mode = str(self.neural_stage_mode).strip().lower()
-        if neural_stage_mode not in {
-            "staged",
-            "joint_rlearner",
-            "interaction_outcome",
-            "tarnet_offset",
-        }:
-            raise ValueError(
-                "agentic_attention_variable_forest.neural_stage_mode must be "
-                "one of 'staged', 'joint_rlearner', 'interaction_outcome', "
-                "or 'tarnet_offset'"
-            )
-        self.neural_stage_mode = neural_stage_mode
-        self.joint_rlearner_gamma = float(self.joint_rlearner_gamma)
-        if self.joint_rlearner_gamma < 0:
-            raise ValueError("agentic_attention_variable_forest.joint_rlearner_gamma must be >= 0")
-        self.interaction_l2_weight = float(self.interaction_l2_weight)
-        if self.interaction_l2_weight < 0:
-            raise ValueError("agentic_attention_variable_forest.interaction_l2_weight must be >= 0")
-        if self.tarnet_offset_batch_size is not None:
-            self.tarnet_offset_batch_size = int(self.tarnet_offset_batch_size)
-            if self.tarnet_offset_batch_size < 1:
-                raise ValueError(
-                    "agentic_attention_variable_forest.tarnet_offset_batch_size "
-                    "must be >= 1 when set"
-                )
-        self.tarnet_offset_heterogeneity_weight = float(self.tarnet_offset_heterogeneity_weight)
-        if self.tarnet_offset_heterogeneity_weight < 0:
-            raise ValueError(
-                "agentic_attention_variable_forest."
-                "tarnet_offset_heterogeneity_weight must be >= 0"
-            )
-        self.tarnet_offset_min_logit_std = float(self.tarnet_offset_min_logit_std)
-        if self.tarnet_offset_min_logit_std < 0:
-            raise ValueError(
-                "agentic_attention_variable_forest.tarnet_offset_min_logit_std " "must be >= 0"
-            )
         if self.candidate_proposals_per_fold < 1:
             raise ValueError(
                 "agentic_attention_variable_forest.candidate_proposals_per_fold " "must be >= 1"
@@ -2989,32 +2569,6 @@ class AgenticAttentionVariableForestConfig:
                 "agentic_attention_variable_forest r-stage propensity bounds "
                 "must satisfy 0 <= min < max <= 1"
             )
-        valid_scores = {"r_score", "r_score_normalized"}
-        if self.residual_contrastive_score not in valid_scores:
-            raise ValueError(
-                "agentic_attention_variable_forest.residual_contrastive_score "
-                f"must be one of {sorted(valid_scores)}"
-            )
-        if not (
-            0.0
-            < self.residual_contrastive_low_quantile
-            < self.residual_contrastive_high_quantile
-            < 1.0
-        ):
-            raise ValueError(
-                "agentic_attention_variable_forest residual contrastive low/high "
-                "quantiles must satisfy 0 < low < high < 1"
-            )
-        if not 0.0 < self.residual_contrastive_neutral_abs_quantile < 1.0:
-            raise ValueError(
-                "agentic_attention_variable_forest.residual_contrastive_neutral_abs_quantile "
-                "must be in (0, 1)"
-            )
-        if self.residual_contrastive_min_class_count < 1:
-            raise ValueError(
-                "agentic_attention_variable_forest.residual_contrastive_min_class_count "
-                "must be >= 1"
-            )
 
 
 @dataclass
@@ -3045,42 +2599,6 @@ class ModelArchitectureConfig:
     # Require a real trainable encoder whenever the sentence encoder is
     # configured as unfrozen. Lightweight hash-backed tests leave this false.
     htr_require_live_unfrozen_encoder: bool = False
-    htr_role_attention: bool = False
-    htr_w_attention_heads: int = 1
-    htr_x_attention_heads: int = 1
-    # Explicit HTR transformer/output topology used by Stage 1.
-    htr_transformer_feedforward_dim: int = 1024
-    htr_transformer_activation: str = "gelu_exact"
-    htr_transformer_norm_style: str = "post_norm"
-    htr_transformer_layer_norm_eps: float = 1e-5
-    htr_transformer_layer_norm_elementwise_affine: bool = True
-    htr_transformer_layer_norm_bias: bool = True
-    htr_transformer_attention_dropout: float = 0.05
-    htr_transformer_residual_dropout: float = 0.05
-    htr_transformer_feedforward_dropout: float = 0.05
-    htr_transformer_attention_bias: bool = True
-    htr_transformer_feedforward_bias: bool = True
-    htr_output_projection_depth: int = 1
-    htr_output_projection_hidden_dim: int = 256
-    htr_output_projection_activation: str = "gelu_exact"
-    htr_output_projection_dropout: float = 0.05
-    htr_output_projection_hidden_layer_norm: bool = True
-    htr_output_projection_final_layer_norm: bool = True
-    htr_output_projection_bias: bool = True
-    htr_pool_token_init_std: float = 0.02
-    htr_positional_encoding_base: float = 10_000.0
-    htr_environment_override_policy: str = "legacy_allow"
-    # Closed causal nuisance/effect heads used by the role-neutral producer.
-    htr_nuisance_head_depth: int = 1
-    htr_nuisance_head_activation: str = "relu"
-    htr_nuisance_head_dropout: float = 0.1
-    htr_nuisance_head_layer_norm: bool = False
-    htr_nuisance_head_bias: bool = True
-    htr_effect_head_depth: int = 1
-    htr_effect_head_activation: str = "relu"
-    htr_effect_head_dropout: float = 0.1
-    htr_effect_head_layer_norm: bool = False
-    htr_effect_head_bias: bool = True
     htr_prediction_head_hidden_dim: int = 64
 
     # Explicit-Feature-Only Causal Forest config (used when model_type="explicit_feature_forest")
@@ -3116,7 +2634,6 @@ class TrainingConfig:
     epochs: int = 50
     batch_size: int = 8
     effect_batch_size: Optional[int] = 32
-    dataloader_workers: Optional[int] = None  # None = 0 on CPU, 2 on accelerator devices
     alpha_propensity: float = 1.0
     weight_decay: float = 0.01  # L2 regularization (AdamW decoupled weight decay)
     gradient_clip_norm: float = 1.0  # Max gradient norm (0 to disable)
@@ -3178,57 +2695,10 @@ class ExperimentConfig:
     def from_dict(cls, data: Dict[str, Any]) -> "ExperimentConfig":
         """Create config from dictionary."""
         applied_data = data.get("applied_inference", {})
-        if "explicit_confounders" in applied_data:
-            raise ValueError(
-                "Configuration key applied_inference.explicit_confounders has been removed. "
-                "Use applied_inference.explicit_features.features with role-tagged "
-                "ExplicitFeatureSpec entries instead."
-            )
 
         def parse_architecture_config(arch_data: Dict[str, Any]) -> ModelArchitectureConfig:
-            """Parse retained architectures while tolerating inert legacy fields."""
+            """Parse retained architectures; unknown keys fail dataclass validation."""
             arch_data = arch_data.copy()
-            retired_model_types = {
-                "causal_forest",
-                "confounder_forest",
-                "dragonnet",
-                "dragonnet_drlearner",
-                "non_neural_agentic_forest",
-                "rlearner",
-                "tfidf_forest",
-            }
-            if arch_data.get("model_type") in retired_model_types:
-                raise ValueError(
-                    f"model_type={arch_data.get('model_type')!r} has been removed; "
-                    "use the all-evidence workflow or a retained explicit-feature model"
-                )
-            retired_keys = {
-                "causal_forest",
-                "dragonnet_drlearner",
-                "tfidf_forest",
-            }
-            retired_prefixes = (
-                "causal_head_",
-                "ctcnn_",
-                "flp_",
-                "hcnn_",
-                "hgru_",
-                "hlm_",
-                "scnn_",
-                "svx_",
-            )
-            legacy_head_hidden_dim = arch_data.pop(
-                "causal_head_hidden_outcome_dim",
-                None,
-            )
-            if (
-                legacy_head_hidden_dim is not None
-                and "htr_prediction_head_hidden_dim" not in arch_data
-            ):
-                arch_data["htr_prediction_head_hidden_dim"] = legacy_head_hidden_dim
-            for key in tuple(arch_data):
-                if key in retired_keys or key.startswith(retired_prefixes):
-                    arch_data.pop(key)
             if "explicit_feature_forest" in arch_data and isinstance(
                 arch_data["explicit_feature_forest"], dict
             ):
@@ -3244,13 +2714,10 @@ class ExperimentConfig:
             if "agentic_attention_variable_forest" in arch_data and isinstance(
                 arch_data["agentic_attention_variable_forest"], dict
             ):
-                avf_data = arch_data["agentic_attention_variable_forest"].copy()
-                if "inner_fold_parallelism" in avf_data and "fold_parallelism" not in avf_data:
-                    avf_data["fold_parallelism"] = avf_data.pop("inner_fold_parallelism")
-                else:
-                    avf_data.pop("inner_fold_parallelism", None)
                 arch_data["agentic_attention_variable_forest"] = (
-                    AgenticAttentionVariableForestConfig(**avf_data)
+                    AgenticAttentionVariableForestConfig(
+                        **arch_data["agentic_attention_variable_forest"]
+                    )
                 )
             if "multi_model_agentic_forest" in arch_data and isinstance(
                 arch_data["multi_model_agentic_forest"], dict
@@ -3266,35 +2733,6 @@ class ExperimentConfig:
                 )
             return ModelArchitectureConfig(**arch_data)
 
-        def parse_training_config(training_data: Dict[str, Any]) -> TrainingConfig:
-            """Drop retired neural-model settings while preserving active HTR knobs."""
-
-            training_data = training_data.copy()
-            retired_training_keys = {
-                "adamw_amsgrad",
-                "adamw_beta1",
-                "adamw_beta2",
-                "adamw_capturable",
-                "adamw_differentiable",
-                "adamw_eps",
-                "adamw_foreach",
-                "adamw_fused",
-                "adamw_maximize",
-                "attention_entropy_weight",
-                "beta_targreg",
-                "gamma_rlearner",
-                "gradient_clip_error_if_nonfinite",
-                "gradient_clip_foreach",
-                "gradient_clip_norm_type",
-                "label_smoothing",
-                "optimizer_zero_grad_set_to_none",
-                "optimizer",
-                "stop_grad_propensity",
-            }
-            for key in retired_training_keys:
-                training_data.pop(key, None)
-            return TrainingConfig(**training_data)
-
         def parse_explicit_features_config(
             feat_data: Dict[str, Any],
         ) -> ExplicitFeatureExtractionConfig:
@@ -3302,11 +2740,6 @@ class ExperimentConfig:
             if not feat_data:
                 return ExplicitFeatureExtractionConfig()
             feat_data = feat_data.copy()
-            if "confounders" in feat_data:
-                raise ValueError(
-                    "explicit_features.confounders is not supported. "
-                    "Use explicit_features.features and set roles on each feature."
-                )
             if "features" in feat_data and isinstance(feat_data["features"], list):
                 feat_data["features"] = [
                     ExplicitFeatureSpec(**f) if isinstance(f, dict) else f
@@ -3316,12 +2749,10 @@ class ExperimentConfig:
 
         parsed_applied: Dict[str, Any] = {}
         for key, value in applied_data.items():
-            if key in {"matching_analysis", "outcome_model", "propensity_trimming"}:
-                continue
             if key == "architecture":
                 parsed_applied[key] = parse_architecture_config(value)
             elif key == "training":
-                parsed_applied[key] = parse_training_config(value)
+                parsed_applied[key] = TrainingConfig(**value)
             elif key == "explicit_features":
                 parsed_applied[key] = parse_explicit_features_config(value)
             else:
@@ -3370,12 +2801,6 @@ class ExperimentConfig:
             raise ValueError(
                 f"Unsupported or retired model_type={model_type!r}; retained types are "
                 + ", ".join(sorted(retained_model_types))
-            )
-        if model_type == "multi_model_forest":
-            raise ValueError(
-                "model_type='multi_model_forest' is a Stage 1 all-evidence producer and "
-                "cannot run through ExperimentRunner; use "
-                "scripts/run_all_evidence.py (ResearchAllEvidenceWorkflow)"
             )
         if model_type == "agentic_attention_variable_forest":
             avf_config = self.applied_inference.architecture.agentic_attention_variable_forest

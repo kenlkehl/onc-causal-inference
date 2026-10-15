@@ -104,29 +104,3 @@ def test_hardware_detection_fails_when_no_gpu_has_enough_free_vram(
 
     with pytest.raises(SystemExit, match="no visible GPU has the required 20.0 GiB free"):
         hardware.main()
-
-
-def test_stage2_only_detection_does_not_inspect_local_gpus(monkeypatch, capsys):
-    def unexpected_gpu_probe():
-        raise AssertionError("endpoint-backed Stage 2 must not inspect local GPUs")
-
-    monkeypatch.setattr(hardware, "_visible_gpus", unexpected_gpu_probe)
-    monkeypatch.setattr(hardware, "_available_cpu_count", lambda: 12)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "detect_all_evidence_hardware.py",
-            "--stage2-only",
-            "--outer-folds",
-            "5",
-            "--inner-folds",
-            "5",
-        ],
-    )
-
-    assert hardware.main() == 0
-
-    fields = capsys.readouterr().out.strip().split("\t")
-    assert fields[:5] == ["0", "cpu", "12", "32", "12"]
-    assert fields[5] == "not inspected (endpoint-backed Stage 2 only)"

@@ -34,7 +34,6 @@ _BOW_MODEL_PARAMETER_KEYS = frozenset(
         "ridge_scientific",
         "forest_scientific",
         "xgboost_scientific",
-        "single_class_policy",
         "empty_vocabulary_policy",
         "unsupported_sample_weight_policy",
     }
@@ -84,7 +83,6 @@ def bow_model_params(view: BoWViewConfig) -> Dict[str, Any]:
         "ridge_scientific": asdict(view.ridge_scientific),
         "forest_scientific": asdict(view.forest_scientific),
         "xgboost_scientific": asdict(view.xgboost_scientific),
-        "single_class_policy": str(view.single_class_policy),
         "empty_vocabulary_policy": str(view.empty_vocabulary_policy),
         "unsupported_sample_weight_policy": str(view.unsupported_sample_weight_policy),
     }
@@ -96,19 +94,9 @@ def make_bow_vectorizer(params: Dict[str, Any]) -> TfidfVectorizer:
         expected=_BOW_VECTORIZER_PARAMETER_KEYS,
         label="BoW TF-IDF vectorizer",
     )
-    policies = {
-        "input_text_case_policy": "vectorizer_controls_complete_text_case_v1",
-        "preprocessor_policy": "none",
-        "tokenizer_policy": "token_pattern",
-        "vocabulary_policy": "fit_scope_only",
-        "feature_selection_rule": "sklearn_term_frequency_rank_v1",
-    }
-    for key, expected in policies.items():
-        if params[key] != expected:
-            raise ValueError(f"BoW vectorizer {key.replace('_', ' ')} is unsupported")
     dtype = {"float32": np.float32, "float64": np.float64}[str(params["dtype"])]
     return TfidfVectorizer(
-        input=str(params["input"]),
+        input="content",
         encoding=str(params["encoding"]),
         decode_error=str(params["decode_error"]),
         strip_accents=params["strip_accents"],
@@ -178,7 +166,6 @@ def make_bow_classifier(params: Dict[str, Any], *, random_state: int = 17):
             class_weight=config["class_weight"],
             solver=str(config["solver"]),
             max_iter=int(params["logistic_max_iter"]),
-            multi_class=str(config["multi_class"]),
             verbose=0,
             warm_start=bool(config["warm_start"]),
             n_jobs=1,

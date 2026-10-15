@@ -1,11 +1,10 @@
-"""Lightweight scientific policy for the opt-in Stage 2 evidence ensemble."""
+"""Lightweight scientific policy for the Stage 2 multi-model evidence ensemble."""
 
 from dataclasses import asdict, dataclass, field
 import math
 from typing import Any, Mapping
 
 SCHEMA_VERSION = "stage2_multi_model_selection_v7_adjusted_interactions"
-from .stage2_prompt_catalog import PROMPT_VERSION
 FAMILIES = (
     "univariable",
     "penalized_main",
@@ -61,7 +60,6 @@ class MatchedBatchConfig:
 class ModifierCountConfig:
     """Nested predictive/interaction selection of nonlocked modifier candidates."""
 
-    enabled: bool = True
     candidate_counts: tuple[int, ...] = (0, 4, 8, 12, 16, 24, 32)
     max_ranked_modifiers: int = 64
     selection_rule: str = "balanced_evidence"
@@ -72,8 +70,8 @@ class ModifierCountConfig:
     concept_top_n_per_fold: int = 100
 
     def validate(self) -> None:
-        if not isinstance(self.enabled, bool) or not isinstance(self.concept_review, bool):
-            raise ValueError("multi_model.modifier_count.enabled and concept_review must be boolean")
+        if not isinstance(self.concept_review, bool):
+            raise ValueError("multi_model.modifier_count.concept_review must be boolean")
         if (
             not isinstance(self.estimators, tuple)
             or not self.estimators
@@ -101,14 +99,8 @@ class ModifierCountConfig:
             raise ValueError(
                 "modifier_count.candidate_counts must be sorted unique integers starting at 0 and at most max_ranked_modifiers"
             )
-        if not isinstance(self.selection_rule, str) or self.selection_rule not in {
-            "minimum_r_loss",
-            "one_standard_error",
-            "balanced_evidence",
-        }:
-            raise ValueError(
-                "modifier_count.selection_rule must be minimum_r_loss, one_standard_error, or balanced_evidence"
-            )
+        if self.selection_rule != "balanced_evidence":
+            raise ValueError("modifier_count.selection_rule must be balanced_evidence")
         if (isinstance(self.relative_r_loss_tolerance, bool)
                 or not isinstance(self.relative_r_loss_tolerance, (int, float))
                 or not math.isfinite(self.relative_r_loss_tolerance)
@@ -163,8 +155,6 @@ class Stage2MultiModelConfig:
     interaction_ranking_weight: float = 0.5
     max_prompt_chars: int = 100_000
     modifier_count: ModifierCountConfig = field(default_factory=ModifierCountConfig)
-    # The immutable class default also supports policy instances unpickled from
-    # a running pre-extension process, whose instance state lacks this field.
     matched_batch: MatchedBatchConfig = MatchedBatchConfig()
 
     def validate(self) -> None:
@@ -244,15 +234,7 @@ def multi_model_config_from_mapping(
     if value is not None and not isinstance(value, Mapping):
         raise ValueError("stage2.statistical_selection.multi_model must be an object")
     raw = dict(value or {})
-    if raw.pop("schema_version", SCHEMA_VERSION) not in {
-        SCHEMA_VERSION,
-        "stage2_multi_model_selection_v1",
-        "stage2_multi_model_selection_v2",
-        "stage2_multi_model_selection_v3",
-        "stage2_multi_model_selection_v4_dina",
-        "stage2_multi_model_selection_v5_stable_joint",
-        "stage2_multi_model_selection_v6_predictive_nuisances",
-    }:
+    if raw.pop("schema_version", SCHEMA_VERSION) != SCHEMA_VERSION:
         raise ValueError("unsupported multi_model schema_version")
     unknown = set(raw) - set(Stage2MultiModelConfig.__dataclass_fields__)
     if unknown:
@@ -279,6 +261,12 @@ def multi_model_config_from_mapping(
         if not isinstance(count, Mapping):
             raise ValueError("multi_model.modifier_count must be an object")
         count = dict(count)
+        # The nested count search always runs; accept the former flag only as true.
+        if count.pop("enabled", True) is not True:
+            raise ValueError(
+                "multi_model.modifier_count.enabled=false is no longer supported; "
+                "the nested modifier count search always runs"
+            )
         unknown = set(count) - set(ModifierCountConfig.__dataclass_fields__)
         if unknown:
             raise ValueError(f"unsupported modifier_count fields: {sorted(unknown)}")

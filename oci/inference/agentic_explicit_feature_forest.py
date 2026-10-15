@@ -9,11 +9,7 @@ import hashlib
 import json
 import logging
 import math
-import os
 import re
-import shlex
-import subprocess
-import tempfile
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
@@ -48,34 +44,23 @@ from ..extraction import (
     resolve_vllm_reasoning_parser,
     strip_reasoning_trace,
 )
-from ..extraction.explicit_features import (
-    _missing_values_for_specs,
-    _parse_extraction_response_with_issues,
-    build_extraction_prompt,
-    build_extraction_repair_prompt,
-)
 from ..extraction.llm_routing import (
     OpenAIClientPool,
     call_with_exponential_backoff,
     google_json_response_format_kwargs,
-    retry_delay,
 )
 from ..extraction.llm_routing import parse_server_urls
 from ..models.causal_forest_head import CausalForestHead
-from ..models.structured_interaction_head import StructuredInteractionHead
 from .applied_explicit_feature_forest import _build_features, _hstack_present
 
 logger = logging.getLogger(__name__)
 
-AGENT_PROMPT_VERSION = "agentic_explicit_feature_search_v1"
 BROAD_AGENT_PROMPT_VERSION = "agentic_explicit_feature_broad_screen_v2"
 EXTRACTION_PROMPT_VERSION = "explicit_features_v5"
 VALID_ACTIONS = {"add", "remove", "update_role", "none"}
 VALID_ROLES = {"confounder", "effect_modifier"}
 VALID_TYPES = {"categorical", "continuous"}
 _CONCEPT_INVENTORY_PROMPT_VERSIONS = {
-    "multi_model_agentic_concept_inventory_v1",
-    "multi_model_agentic_cluster_labeling_v1",
     "multi_model_agentic_cluster_labeling_v2",
 }
 _PARSIMONY_FACTOR_PROMPT_VERSION = "multi_model_agentic_parsimony_factor_v1"
@@ -294,15 +279,8 @@ class AgenticFeatureSearchRunner:
         logger.info("AGENTIC EXPLICIT FEATURE CAUSAL FOREST")
         logger.info("=" * 80)
 
-        # Iterative mode needs the starting variables before the first prompt
-        # because the agent sees extraction summaries. Broad-screen mode
-        # extracts initial variables together with the broad inventory union.
-        if self.search_config.search_mode != "broad_screen":
-            self.dataset = self.extraction_provider.ensure_features(
-                self.dataset,
-                self.initial_specs,
-            )
-
+        # Broad-screen search extracts the initial variables together with the
+        # broad inventory union.
         outer_splits = _make_splits(
             self.dataset,
             self.config,
@@ -310,9 +288,7 @@ class AgenticFeatureSearchRunner:
             random_state=self.search_config.random_state,
         )
 
-        selected_by_outer_fold: Dict[int, List[ExplicitFeatureSpec]] = {}
-        if self.search_config.search_mode == "broad_screen":
-            selected_by_outer_fold = self._search_all_outer_trains_broad_screen(outer_splits)
+        selected_by_outer_fold = self._search_all_outer_trains_broad_screen(outer_splits)
 
         outer_predictions = []
         for outer_fold, (train_idx, test_idx) in enumerate(outer_splits, start=1):
@@ -323,9 +299,7 @@ class AgenticFeatureSearchRunner:
                 len(train_idx),
                 len(test_idx),
             )
-            selected_specs = selected_by_outer_fold.get(outer_fold)
-            if selected_specs is None:
-                selected_specs = self._search_outer_train(outer_fold, train_idx)
+            selected_specs = selected_by_outer_fold[outer_fold]
             selected_specs = self._resolve_selected_aliases(
                 outer_fold=outer_fold,
                 selected_specs=selected_specs,
@@ -367,238 +341,6 @@ class AgenticFeatureSearchRunner:
         results_df = pd.concat(outer_predictions).sort_index()
         self._save_predictions(results_df)
         self._save_artifacts()
-
-    def _search_outer_train(
-        self,
-        outer_fold: int,
-        outer_train_idx: np.ndarray,
-    ) -> List[ExplicitFeatureSpec]:
-        """Run the configured feature search for one outer-training split."""
-        if self.search_config.search_mode == "broad_screen":
-            return self._search_outer_train_broad_screen(outer_fold, outer_train_idx)
-        return self._search_outer_train_iterative(outer_fold, outer_train_idx)
-
-    def _search_outer_train_iterative(
-        self,
-        outer_fold: int,
-        outer_train_idx: np.ndarray,
-    ) -> List[ExplicitFeatureSpec]:
-        """Run the inner adaptive search for one outer-training split."""
-        current_specs = list(self.initial_specs)
-        accepted_additions = 0
-
-        baseline_rows, baseline_summary = self._evaluate_inner_cv(
-            outer_fold=outer_fold,
-            iteration=0,
-            candidate_name="initial",
-            train_idx=outer_train_idx,
-            specs=current_specs,
-        )
-        self._record_inner_rows(baseline_rows, accepted=True)
-
-        for iteration in range(1, self.search_config.max_iterations + 1):
-            context = self._build_agent_context(
-                outer_fold=outer_fold,
-                iteration=iteration,
-                train_idx=outer_train_idx,
-                current_specs=current_specs,
-                current_summary=baseline_summary,
-            )
-            try:
-                raw_proposals = self.proposal_agent.propose(context)
-            except Exception as exc:
-                error_payload = {
-                    "error": repr(exc),
-                    "context": context,
-                }
-                if self.search_config.save_agent_raw_output:
-                    error_payload["agent_raw_output"] = _get_agent_response_trace(
-                        self.proposal_agent
-                    )
-                self._record_decision(
-                    outer_fold,
-                    iteration,
-                    "agent_proposal_error",
-                    error_payload,
-                )
-                self._save_decision_events()
-                raise
-            proposal_payload = {
-                "raw_count": len(raw_proposals),
-                "valid_count": None,
-                "rejected": None,
-                "context": context,
-                "raw_proposals": raw_proposals,
-            }
-            if self.search_config.save_agent_raw_output:
-                proposal_payload["agent_raw_output"] = _get_agent_response_trace(
-                    self.proposal_agent
-                )
-            proposals, rejected = validate_agentic_proposals(
-                raw_proposals,
-                current_specs=current_specs,
-                search_config=self.search_config,
-                allow_removals=accepted_additions > 0,
-            )
-            proposal_payload["valid_count"] = len(proposals)
-            proposal_payload["rejected"] = rejected
-            self._record_decision(
-                outer_fold,
-                iteration,
-                "agent_proposals",
-                proposal_payload,
-            )
-
-            if not proposals:
-                logger.info("Outer fold %s iteration %s: no valid proposals", outer_fold, iteration)
-                break
-
-            candidate_results = []
-            for candidate_id, proposal_group in _candidate_groups(proposals):
-                candidate_specs = apply_proposals(current_specs, proposal_group)
-                if _spec_names(candidate_specs) == _spec_names(current_specs):
-                    continue
-                self.dataset = self.extraction_provider.ensure_features(
-                    self.dataset,
-                    candidate_specs,
-                )
-                proposal_specs = _candidate_proposal_specs(
-                    current_specs=current_specs,
-                    candidate_specs=candidate_specs,
-                    proposal_group=proposal_group,
-                )
-                role_diagnostics = evaluate_candidate_role_diagnostics(
-                    dataset=self.dataset.iloc[outer_train_idx],
-                    current_specs=current_specs,
-                    candidate_specs=proposal_specs,
-                    config=self.config,
-                    search_config=self.search_config,
-                )
-                coverage_failures = _coverage_failures(
-                    self.dataset.iloc[outer_train_idx],
-                    proposal_specs,
-                    self.search_config.min_feature_coverage,
-                )
-                if coverage_failures:
-                    summary = {"coverage_failures": coverage_failures}
-                    if role_diagnostics:
-                        summary["role_diagnostics"] = role_diagnostics
-                    candidate_results.append(
-                        {
-                            "candidate_id": candidate_id,
-                            "proposal_group": proposal_group,
-                            "specs": candidate_specs,
-                            "rows": [],
-                            "summary": summary,
-                            "comparison": {
-                                "passes_acceptance": False,
-                                "rejection_reason": "low_feature_coverage",
-                                "coverage_failures": coverage_failures,
-                            },
-                        }
-                    )
-                    continue
-                rows, summary = self._evaluate_inner_cv(
-                    outer_fold=outer_fold,
-                    iteration=iteration,
-                    candidate_name=candidate_id,
-                    train_idx=outer_train_idx,
-                    specs=candidate_specs,
-                )
-                if role_diagnostics:
-                    summary = dict(summary)
-                    summary["role_diagnostics"] = role_diagnostics
-                comparison = compare_candidate_to_baseline(
-                    baseline_rows=baseline_rows,
-                    candidate_rows=rows,
-                    search_config=self.search_config,
-                )
-                candidate_results.append(
-                    {
-                        "candidate_id": candidate_id,
-                        "proposal_group": proposal_group,
-                        "specs": candidate_specs,
-                        "rows": rows,
-                        "summary": summary,
-                        "comparison": comparison,
-                    }
-                )
-                self._record_inner_rows(rows, accepted=False)
-
-            accepted = _choose_accepted_candidate(candidate_results)
-            self._record_decision(
-                outer_fold,
-                iteration,
-                "candidate_evaluations",
-                [
-                    {
-                        "candidate_id": item["candidate_id"],
-                        "proposals": [asdict(p) for p in item["proposal_group"]],
-                        "summary": item["summary"],
-                        "comparison": item["comparison"],
-                        "accepted": accepted is item,
-                    }
-                    for item in candidate_results
-                ],
-            )
-
-            if accepted is None:
-                logger.info(
-                    "Outer fold %s iteration %s: no candidate passed acceptance thresholds",
-                    outer_fold,
-                    iteration,
-                )
-                if self.search_config.stop_after_rejected_iteration:
-                    break
-                continue
-
-            current_specs = accepted["specs"]
-            baseline_rows = accepted["rows"]
-            baseline_summary = accepted["summary"]
-            accepted_additions += sum(
-                1 for proposal in accepted["proposal_group"] if proposal.action == "add"
-            )
-            self._record_inner_rows(accepted["rows"], accepted=True)
-            self.feature_set_rows.append(
-                {
-                    "outer_fold": outer_fold,
-                    "iteration": iteration,
-                    "stage": "accepted_inner",
-                    "candidate_id": accepted["candidate_id"],
-                    "features": [_spec_to_dict(spec) for spec in current_specs],
-                }
-            )
-            logger.info(
-                "Outer fold %s iteration %s: accepted %s",
-                outer_fold,
-                iteration,
-                accepted["candidate_id"],
-            )
-
-        return current_specs
-
-    def _search_outer_train_broad_screen(
-        self,
-        outer_fold: int,
-        outer_train_idx: np.ndarray,
-    ) -> List[ExplicitFeatureSpec]:
-        """Run broad-screen search for one fold.
-
-        The main run path prepares all broad-screen folds first so their proposal
-        union can be extracted once. This single-fold path is retained for direct
-        use and tests.
-        """
-        prepared = self._prepare_broad_screen_fold(outer_fold, outer_train_idx)
-        union_specs = _canonicalize_broad_screen_prepared_folds(
-            self.initial_specs,
-            [prepared],
-        )
-        if union_specs:
-            self.dataset = self.extraction_provider.ensure_features(
-                self.dataset,
-                union_specs,
-            )
-        return self._screen_and_refine_broad_candidates(prepared)
 
     def _search_all_outer_trains_broad_screen(
         self,
@@ -1176,45 +918,6 @@ class AgenticFeatureSearchRunner:
 
         return rows, aggregate_metric_rows(rows)
 
-    def _build_agent_context(
-        self,
-        outer_fold: int,
-        iteration: int,
-        train_idx: np.ndarray,
-        current_specs: List[ExplicitFeatureSpec],
-        current_summary: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Build the train-only summary sent to the proposal agent."""
-        train_only_df = self.dataset.iloc[train_idx]
-        recent_decisions = [
-            event for event in self.decision_events if event.get("outer_fold") == outer_fold
-        ][-8:]
-        return {
-            "outer_fold": outer_fold,
-            "iteration": iteration,
-            "prompt_version": AGENT_PROMPT_VERSION,
-            "clinical_question": _clinical_question_text(self.config),
-            "estimand": {
-                "treatment_column": self.config.treatment_column,
-                "outcome_column": self.config.outcome_column,
-                "outcome_type": self.config.outcome_type,
-            },
-            "current_features": [_spec_to_dict(spec) for spec in current_specs],
-            "current_inner_cv_metrics": _non_oracle_metrics(current_summary),
-            "extraction_summary": summarize_extractions(train_only_df, current_specs),
-            "clinical_text_examples": _clinical_text_examples(
-                train_only_df,
-                self.config.text_column,
-                n_examples=self.search_config.clinical_text_examples_per_prompt,
-                max_chars=self.search_config.clinical_text_example_chars,
-            ),
-            "iteration_feedback": build_iteration_feedback(
-                recent_decisions,
-                self.search_config,
-            ),
-            "recent_decisions": recent_decisions,
-        }
-
     def _build_broad_inventory_context(
         self,
         outer_fold: int,
@@ -1501,32 +1204,6 @@ class OpenAICompatibleFeatureSearchAgent:
         )
         is_concept_inventory = context.get("prompt_version") in _CONCEPT_INVENTORY_PROMPT_VERSIONS
         is_parsimony_factor = context.get("prompt_version") == _PARSIMONY_FACTOR_PROMPT_VERSION
-        is_tfidf_topic_label = context.get("prompt_version") in {
-            "tfidf_topic_label_v2",
-            "tfidf_topic_recovery_v2",
-            "tfidf_orphan_ngram_label_v1",
-        }
-        is_tfidf_topic_harmonization = context.get("prompt_version") in {
-            "tfidf_topic_name_harmonization_v2",
-            "tfidf_topic_global_dedup_v2",
-            "tfidf_topic_value_harmonization_v2",
-            "tfidf_topic_value_repair_v2",
-        }
-        is_neural_query_prompt = context.get("prompt_version") in {
-            "neural_query_feature_v1",
-            "neural_query_registry_v1",
-            "neural_query_review_v1",
-        }
-        from .all_evidence_post_extraction_review import (
-            POST_EXTRACTION_REVIEW_PROMPT_VERSION,
-        )
-
-        is_post_extraction_review = (
-            context.get("prompt_version") == POST_EXTRACTION_REVIEW_PROMPT_VERSION
-        )
-        from .all_evidence_fusion import FUSION_PROMPT_VERSION
-
-        is_all_evidence_fusion = context.get("prompt_version") == FUSION_PROMPT_VERSION
 
         for attempt_idx in range(max_repair_attempts + 1):
             response_kwargs = {
@@ -1535,17 +1212,8 @@ class OpenAICompatibleFeatureSearchAgent:
                 "temperature": self.search_config.agent_temperature,
                 "max_tokens": self.search_config.agent_max_tokens,
             }
-            if is_all_evidence_fusion or is_post_extraction_review:
-                # OpenAI-compatible servers, including current vLLM releases,
-                # can constrain generation to one syntactically valid JSON
-                # object. Semantic validation and repair still run below.
-                response_kwargs["response_format"] = {"type": "json_object"}
             enable_thinking = getattr(self.search_config, "agent_enable_thinking", None)
-            if (
-                enable_thinking is not None
-                and str(getattr(self.search_config, "agent_provider", "openai")).strip().lower()
-                == "openai"
-            ):
+            if enable_thinking is not None:
                 extra_body = {"chat_template_kwargs": {"enable_thinking": bool(enable_thinking)}}
                 thinking_token_budget = getattr(
                     self.search_config,
@@ -1586,11 +1254,6 @@ class OpenAICompatibleFeatureSearchAgent:
                     or is_value_harmonization
                     or is_concept_inventory
                     or is_parsimony_factor
-                    or is_tfidf_topic_label
-                    or is_tfidf_topic_harmonization
-                    or is_neural_query_prompt
-                    or is_post_extraction_review
-                    or is_all_evidence_fusion
                 ):
                     parsed = parse_agent_json_object(content)
                     parsed_json_object = True
@@ -1600,72 +1263,6 @@ class OpenAICompatibleFeatureSearchAgent:
                         issues = concept_inventory_response_issues(parsed, context)
                     elif is_parsimony_factor:
                         issues = parsimony_factor_response_issues(parsed, context)
-                    elif is_tfidf_topic_label:
-                        from .tfidf_topic_agentic_forest import topic_label_response_issues
-
-                        issues = topic_label_response_issues(parsed, context)
-                    elif is_tfidf_topic_harmonization:
-                        from .tfidf_topic_agentic_forest import (
-                            topic_harmonization_response_issues,
-                        )
-
-                        issues = topic_harmonization_response_issues(parsed, context)
-                    elif is_neural_query_prompt:
-                        from .neural_query_agentic_forest import (
-                            QUERY_FEATURE_PROMPT_VERSION,
-                            QUERY_REVIEW_PROMPT_VERSION,
-                            query_feature_response_issues,
-                            query_registry_response_issues,
-                            query_review_response_issues,
-                        )
-
-                        neural_prompt_version = context.get("prompt_version")
-                        if neural_prompt_version == QUERY_FEATURE_PROMPT_VERSION:
-                            issues = query_feature_response_issues(parsed, context)
-                        elif neural_prompt_version == QUERY_REVIEW_PROMPT_VERSION:
-                            issues = query_review_response_issues(parsed, context)
-                        else:
-                            issues = query_registry_response_issues(parsed, context)
-                    elif is_post_extraction_review:
-                        from .all_evidence_post_extraction_review import (
-                            _normalize_fresh_post_extraction_review_response,
-                            post_extraction_review_response_issues,
-                        )
-
-                        parsed, normalization_audit = (
-                            _normalize_fresh_post_extraction_review_response(
-                                parsed,
-                                context,
-                            )
-                        )
-                        trace["fresh_response_normalization"] = normalization_audit
-                        attempts[-1] = trace
-                        self.last_response_trace = _trace_with_repair_attempts(
-                            trace,
-                            attempts,
-                        )
-                        issues = post_extraction_review_response_issues(parsed, context)
-                    elif is_all_evidence_fusion:
-                        from .all_evidence_fusion import (
-                            _normalize_agent_response_citation_families,
-                            all_evidence_fusion_response_issues,
-                        )
-
-                        parsed, normalization_audit = _normalize_agent_response_citation_families(
-                            parsed, context
-                        )
-                        trace["fresh_response_normalization"] = normalization_audit
-                        # Retain the original trace field for consumers that
-                        # inspect citation-family correction specifically.
-                        trace["citation_family_normalization"] = normalization_audit[
-                            "citation_family_normalization"
-                        ]
-                        attempts[-1] = trace
-                        self.last_response_trace = _trace_with_repair_attempts(
-                            trace,
-                            attempts,
-                        )
-                        issues = all_evidence_fusion_response_issues(parsed, context)
                     else:
                         issues = consensus_disambiguation_response_issues(parsed)
                     if issues:
@@ -1693,47 +1290,6 @@ class OpenAICompatibleFeatureSearchAgent:
                         repair_prompt = build_concept_inventory_repair_prompt(issues)
                     elif is_parsimony_factor:
                         repair_prompt = build_parsimony_factor_repair_prompt(issues)
-                    elif is_tfidf_topic_label:
-                        repair_prompt = (
-                            "Repair the topic response as exactly one JSON object with "
-                            "general_topic, topic_quality, and proposals. Every proposal "
-                            "must cite one or more exact supplied supporting_terms. Problems: "
-                            + "; ".join(issues)
-                        )
-                    elif is_tfidf_topic_harmonization:
-                        repair_prompt = (
-                            "Repair the harmonization response as exactly one JSON object "
-                            "following the original response contract. Cover every required "
-                            "candidate exactly once, use only supplied ids/names, and never "
-                            "return a review state. Problems: " + "; ".join(issues)
-                        )
-                    elif is_neural_query_prompt:
-                        repair_prompt = (
-                            "Repair the neural-query response as exactly one JSON "
-                            "object following the original response contract. Use "
-                            "only supplied evidence/candidate ids, obey all count "
-                            "limits, and cover required candidates exactly once. "
-                            "Problems: " + "; ".join(issues)
-                        )
-                    elif is_post_extraction_review:
-                        from .all_evidence_post_extraction_review import (
-                            build_post_extraction_review_repair_prompt,
-                        )
-
-                        repair_prompt = build_post_extraction_review_repair_prompt(
-                            issues,
-                            context=context,
-                            failed_response=parsed if parsed_json_object else None,
-                        )
-                    elif is_all_evidence_fusion:
-                        from .all_evidence_fusion import (
-                            build_all_evidence_fusion_repair_prompt,
-                        )
-
-                        repair_prompt = build_all_evidence_fusion_repair_prompt(
-                            issues,
-                            context,
-                        )
                     elif is_consensus_disambiguation:
                         repair_prompt = build_consensus_disambiguation_repair_prompt(issues)
                     else:
@@ -1745,14 +1301,6 @@ class OpenAICompatibleFeatureSearchAgent:
                         ]
                     )
                     continue
-                if is_post_extraction_review:
-                    from .all_evidence_post_extraction_review import (
-                        PostExtractionReviewResponseExhausted,
-                    )
-
-                    raise PostExtractionReviewResponseExhausted(
-                        "remote post-extraction reviewer exhausted bounded response repair"
-                    ) from exc
                 raise ValueError(
                     "Agent response could not be parsed after "
                     f"{attempt_idx + 1} attempt(s): {issues[0]}"
@@ -1792,501 +1340,20 @@ class OpenAICompatibleFeatureSearchAgent:
         return []
 
 
-@dataclass
-class CodexCLIResponse:
-    content: str
-    command: List[str]
-    stdout: str
-    stderr: str
-    returncode: int
-
-
-def _codex_cli_provider(value: Any) -> bool:
-    normalized = str(value or "openai").strip().lower().replace("-", "_")
-    return normalized in {"codex", "codex_cli"}
-
-
-def _codex_optional_value(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text or text.lower() in {"none", "null", "profile", "default"}:
-        return None
-    return text
-
-
-def _codex_extra_args(value: Any) -> List[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return shlex.split(value)
-    args: List[str] = []
-    for item in value:
-        if item is None:
-            continue
-        if isinstance(item, str):
-            args.append(item)
-        else:
-            args.append(str(item))
-    return args
-
-
-def _codex_exec_command(
-    *,
-    executable: str,
-    model_name: Any,
-    reasoning_effort: Any,
-    extra_args: Any,
-    output_path: Path,
-) -> List[str]:
-    cmd = [
-        os.path.expanduser(str(executable or "codex")),
-        "exec",
-        "--skip-git-repo-check",
-        "--ephemeral",
-        "--ignore-rules",
-        "--sandbox",
-        "read-only",
-        "--color",
-        "never",
-    ]
-    model = _codex_optional_value(model_name)
-    if model is not None:
-        cmd.extend(["--model", model])
-    effort = _codex_optional_value(reasoning_effort)
-    if effort is not None:
-        cmd.extend(["-c", f"model_reasoning_effort={json.dumps(effort)}"])
-    cmd.extend(_codex_extra_args(extra_args))
-    cmd.extend(["--output-last-message", str(output_path), "-"])
-    return cmd
-
-
-def _tail_text(text: str, limit: int = 4000) -> str:
-    text = text or ""
-    if len(text) <= limit:
-        return text
-    return text[-limit:]
-
-
-def _run_codex_exec(
-    prompt: str,
-    *,
-    executable: str,
-    model_name: Any,
-    reasoning_effort: Any,
-    extra_args: Any,
-    timeout: Optional[float],
-) -> CodexCLIResponse:
-    with tempfile.TemporaryDirectory(prefix="oci_codex_cli_") as tmpdir:
-        output_path = Path(tmpdir) / "last_message.txt"
-        cmd = _codex_exec_command(
-            executable=executable,
-            model_name=model_name,
-            reasoning_effort=reasoning_effort,
-            extra_args=extra_args,
-            output_path=output_path,
-        )
-        completed = subprocess.run(
-            cmd,
-            input=prompt,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
-        content = ""
-        if output_path.exists():
-            content = output_path.read_text()
-        if not content.strip():
-            content = completed.stdout
-        response = CodexCLIResponse(
-            content=content.strip(),
-            command=cmd,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-            returncode=int(completed.returncode),
-        )
-        if completed.returncode != 0:
-            raise RuntimeError(
-                "codex exec failed with return code "
-                f"{completed.returncode}: {_tail_text(completed.stderr or completed.stdout)}"
-            )
-        if not response.content:
-            raise RuntimeError("codex exec returned an empty final message")
-        return response
-
-
-def _codex_backend_prompt(task_prompt: str, *, task_kind: str) -> str:
-    return f"""You are being used as a noninteractive JSON LLM backend for {task_kind}.
-Do not inspect files, run shell commands, browse, invoke tools, edit files, or use skills.
-Use only the information in this prompt. Think internally, then return only the requested JSON.
-Do not include markdown fences, comments, prose, or reasoning in the final answer.
-
-{task_prompt}
-"""
-
-
-def _codex_extraction_prompt(
-    clinical_text: str,
-    specs: List[ExplicitFeatureSpec],
-    *,
-    max_text_length: Optional[int] = None,
-    context_strategy: str = "full_record",
-    source_text_temporally_valid_by_design: bool = False,
-) -> str:
-    task_prompt = build_extraction_prompt(
-        clinical_text,
-        specs,
-        max_text_length=max_text_length,
-        context_strategy=context_strategy,
-        source_text_temporally_valid_by_design=source_text_temporally_valid_by_design,
-    )
-    complete_document = (
-        str(context_strategy).strip().lower().replace("-", "_") in {"full_record", "tail"}
-        and max_text_length is None
-        and not str(clinical_text).startswith("[oci_colbert_v1]")
-    )
-    reading_instruction = (
-        "Read the whole clinical note in the extraction prompt below from beginning " "to end."
-        if complete_document
-        else "Read every labeled verbatim excerpt in the extraction prompt below."
-    )
-    extraction_source = (
-        "the full note text" if complete_document else "the provided contract-guided excerpts"
-    )
-    return _codex_backend_prompt(
-        f"{reading_instruction} Do not use regex-only, keyword-only, or hand-coded "
-        f"rule shortcuts; perform the clinical extraction directly from "
-        f"{extraction_source}. If the "
-        "note does not support a value, return null for that field.\n\n"
-        f"{task_prompt}",
-        task_kind="clinical explicit-feature extraction",
-    )
-
-
-def _codex_response_trace(response: CodexCLIResponse, *, model_name: Any) -> Dict[str, Any]:
-    return {
-        "provider": "codex_cli",
-        "model": _codex_optional_value(model_name),
-        "raw_content": response.content,
-        "returncode": response.returncode,
-        "command": response.command,
-        "stdout_tail": _tail_text(response.stdout),
-        "stderr_tail": _tail_text(response.stderr),
-    }
-
-
-class CodexCLIFeatureSearchAgent:
-    """Proposal agent that shells out to `codex exec` for each LLM call."""
-
-    supports_alias_resolution = True
-    supports_value_harmonization = True
-
-    def __init__(self, search_config: AgenticFeatureSearchConfig):
-        self.search_config = search_config
-        self.last_raw_response: Optional[str] = None
-        self.last_response_trace: Optional[Dict[str, Any]] = None
-
-    def _run(self, prompt: str) -> CodexCLIResponse:
-        max_attempts = 1 + max(
-            0,
-            int(getattr(self.search_config, "agent_request_max_retries", 3)),
-        )
-        for attempt in range(max_attempts):
-            try:
-                return _run_codex_exec(
-                    prompt,
-                    executable=getattr(self.search_config, "codex_cli_executable", "codex"),
-                    model_name=getattr(
-                        self.search_config,
-                        "codex_cli_model_name",
-                        "gpt-5.4-mini",
-                    ),
-                    reasoning_effort=getattr(
-                        self.search_config,
-                        "codex_cli_reasoning_effort",
-                        "medium",
-                    ),
-                    extra_args=getattr(self.search_config, "codex_cli_extra_args", []),
-                    timeout=getattr(self.search_config, "agent_request_timeout", 900.0),
-                )
-            except Exception as exc:
-                if attempt >= max_attempts - 1:
-                    raise
-                delay = retry_delay(
-                    attempt,
-                    initial_delay=float(
-                        getattr(self.search_config, "agent_retry_initial_delay", 1.0)
-                    ),
-                    max_delay=float(getattr(self.search_config, "agent_retry_max_delay", 30.0)),
-                    backoff_factor=float(
-                        getattr(self.search_config, "agent_retry_backoff_factor", 2.0)
-                    ),
-                )
-                logger.warning(
-                    "Codex CLI agent request failed on attempt %s/%s with %s: %s. "
-                    "Retrying in %.2fs.",
-                    attempt + 1,
-                    max_attempts,
-                    exc.__class__.__name__,
-                    exc,
-                    delay,
-                )
-                import time
-
-                time.sleep(delay)
-        raise RuntimeError("Codex CLI agent request failed without an exception")
-
-    def propose(self, context: Dict[str, Any]) -> Any:
-        self.last_raw_response = None
-        self.last_response_trace = None
-        prompt_version = context.get("prompt_version")
-        task_kind = (
-            "clinical text concept inventory"
-            if prompt_version in _CONCEPT_INVENTORY_PROMPT_VERSIONS
-            else (
-                "clinical latent-factor parsimony review"
-                if prompt_version == _PARSIMONY_FACTOR_PROMPT_VERSION
-                else "agentic causal-feature proposal"
-            )
-        )
-        base_prompt = _codex_backend_prompt(
-            build_agent_prompt(context, self.search_config),
-            task_kind=task_kind,
-        )
-        prompt = base_prompt
-        attempts: List[Dict[str, Any]] = []
-        max_repair_attempts = max(
-            0,
-            int(getattr(self.search_config, "agent_schema_repair_attempts", 1)),
-        )
-        is_consensus_disambiguation = prompt_version in {
-            "agentic_attention_consensus_disambiguation_v1",
-            "multi_model_agentic_alias_resolution_v1",
-        }
-        is_value_harmonization = prompt_version == "multi_model_agentic_value_harmonization_v1"
-        is_concept_inventory = prompt_version in _CONCEPT_INVENTORY_PROMPT_VERSIONS
-        is_parsimony_factor = prompt_version == _PARSIMONY_FACTOR_PROMPT_VERSION
-        is_tfidf_topic_label = prompt_version in {
-            "tfidf_topic_label_v2",
-            "tfidf_topic_recovery_v2",
-            "tfidf_orphan_ngram_label_v1",
-        }
-        is_tfidf_topic_harmonization = prompt_version in {
-            "tfidf_topic_name_harmonization_v2",
-            "tfidf_topic_global_dedup_v2",
-            "tfidf_topic_value_harmonization_v2",
-            "tfidf_topic_value_repair_v2",
-        }
-        is_neural_query_prompt = prompt_version in {
-            "neural_query_feature_v1",
-            "neural_query_registry_v1",
-            "neural_query_review_v1",
-        }
-        from .all_evidence_post_extraction_review import (
-            POST_EXTRACTION_REVIEW_PROMPT_VERSION,
-        )
-
-        is_post_extraction_review = prompt_version == POST_EXTRACTION_REVIEW_PROMPT_VERSION
-
-        for attempt_idx in range(max_repair_attempts + 1):
-            response = self._run(prompt)
-            content = response.content
-            self.last_raw_response = content
-            trace = _codex_response_trace(
-                response,
-                model_name=getattr(self.search_config, "codex_cli_model_name", None),
-            )
-            attempts.append(trace)
-            self.last_response_trace = _trace_with_repair_attempts(trace, attempts)
-
-            parsed_json_object = False
-            parsed: Any = None
-            try:
-                if (
-                    is_consensus_disambiguation
-                    or is_value_harmonization
-                    or is_concept_inventory
-                    or is_parsimony_factor
-                    or is_tfidf_topic_label
-                    or is_tfidf_topic_harmonization
-                    or is_neural_query_prompt
-                    or is_post_extraction_review
-                ):
-                    parsed = parse_agent_json_object(content)
-                    parsed_json_object = True
-                    if is_value_harmonization:
-                        issues = value_harmonization_response_issues(parsed, context)
-                    elif is_concept_inventory:
-                        issues = concept_inventory_response_issues(parsed, context)
-                    elif is_parsimony_factor:
-                        issues = parsimony_factor_response_issues(parsed, context)
-                    elif is_tfidf_topic_label:
-                        from .tfidf_topic_agentic_forest import topic_label_response_issues
-
-                        issues = topic_label_response_issues(parsed, context)
-                    elif is_tfidf_topic_harmonization:
-                        from .tfidf_topic_agentic_forest import (
-                            topic_harmonization_response_issues,
-                        )
-
-                        issues = topic_harmonization_response_issues(parsed, context)
-                    elif is_neural_query_prompt:
-                        from .neural_query_agentic_forest import (
-                            QUERY_FEATURE_PROMPT_VERSION,
-                            QUERY_REVIEW_PROMPT_VERSION,
-                            query_feature_response_issues,
-                            query_registry_response_issues,
-                            query_review_response_issues,
-                        )
-
-                        if prompt_version == QUERY_FEATURE_PROMPT_VERSION:
-                            issues = query_feature_response_issues(parsed, context)
-                        elif prompt_version == QUERY_REVIEW_PROMPT_VERSION:
-                            issues = query_review_response_issues(parsed, context)
-                        else:
-                            issues = query_registry_response_issues(parsed, context)
-                    elif is_post_extraction_review:
-                        from .all_evidence_post_extraction_review import (
-                            _normalize_fresh_post_extraction_review_response,
-                            post_extraction_review_response_issues,
-                        )
-
-                        parsed, normalization_audit = (
-                            _normalize_fresh_post_extraction_review_response(
-                                parsed,
-                                context,
-                            )
-                        )
-                        trace["fresh_response_normalization"] = normalization_audit
-                        attempts[-1] = trace
-                        self.last_response_trace = _trace_with_repair_attempts(
-                            trace,
-                            attempts,
-                        )
-                        issues = post_extraction_review_response_issues(parsed, context)
-                    else:
-                        issues = consensus_disambiguation_response_issues(parsed)
-                    if issues:
-                        raise ValueError("; ".join(issues))
-                    return parsed
-                proposals = parse_agent_response(content)
-            except Exception as exc:
-                failure_kind = "semantic validation" if parsed_json_object else "malformed JSON"
-                issues = [f"{failure_kind}: {exc}"]
-                if attempt_idx < max_repair_attempts:
-                    logger.warning(
-                        "Codex CLI agent response had malformed JSON on attempt %s/%s; "
-                        "requesting repaired JSON.",
-                        attempt_idx + 1,
-                        max_repair_attempts + 1,
-                    )
-                    if is_value_harmonization:
-                        repair_prompt = build_value_harmonization_repair_prompt(issues)
-                    elif is_concept_inventory:
-                        repair_prompt = build_concept_inventory_repair_prompt(issues)
-                    elif is_parsimony_factor:
-                        repair_prompt = build_parsimony_factor_repair_prompt(issues)
-                    elif is_tfidf_topic_label:
-                        repair_prompt = (
-                            "Repair the topic response as exactly one JSON object with "
-                            "general_topic, topic_quality, and proposals. Every proposal "
-                            "must cite exact supplied supporting_terms. Problems: "
-                            + "; ".join(issues)
-                        )
-                    elif is_tfidf_topic_harmonization:
-                        repair_prompt = (
-                            "Repair the harmonization response as exactly one JSON object "
-                            "following the original response contract. Cover every required "
-                            "candidate exactly once, use only supplied ids/names, and never "
-                            "return a review state. Problems: " + "; ".join(issues)
-                        )
-                    elif is_neural_query_prompt:
-                        repair_prompt = (
-                            "Repair the neural-query response as exactly one JSON "
-                            "object following the original response contract. Use "
-                            "only supplied evidence/candidate ids, obey all count "
-                            "limits, and cover required candidates exactly once. "
-                            "Problems: " + "; ".join(issues)
-                        )
-                    elif is_post_extraction_review:
-                        from .all_evidence_post_extraction_review import (
-                            build_post_extraction_review_repair_prompt,
-                        )
-
-                        repair_prompt = build_post_extraction_review_repair_prompt(
-                            issues,
-                            context=context,
-                            failed_response=parsed if parsed_json_object else None,
-                        )
-                    elif is_consensus_disambiguation:
-                        repair_prompt = build_consensus_disambiguation_repair_prompt(issues)
-                    else:
-                        repair_prompt = build_agent_repair_prompt(issues)
-                    prompt = (
-                        f"{base_prompt}\n\nPrevious Codex response:\n{content}\n\n"
-                        f"{repair_prompt}\nReturn repaired JSON only."
-                    )
-                    continue
-                if is_post_extraction_review:
-                    from .all_evidence_post_extraction_review import (
-                        PostExtractionReviewResponseExhausted,
-                    )
-
-                    raise PostExtractionReviewResponseExhausted(
-                        "Codex post-extraction reviewer exhausted bounded response repair"
-                    ) from exc
-                raise ValueError(
-                    "Codex CLI agent response could not be parsed after "
-                    f"{attempt_idx + 1} attempt(s): {issues[0]}"
-                ) from exc
-
-            issues = agent_response_schema_issues(proposals, context=context)
-            if not issues:
-                return proposals
-
-            if attempt_idx < max_repair_attempts:
-                logger.warning(
-                    "Codex CLI agent response had schema issues on attempt %s/%s: %s. "
-                    "Requesting repaired JSON.",
-                    attempt_idx + 1,
-                    max_repair_attempts + 1,
-                    "; ".join(issues[:3]),
-                )
-                prompt = (
-                    f"{base_prompt}\n\nPrevious Codex response:\n{content}\n\n"
-                    f"{build_agent_repair_prompt(issues)}\nReturn repaired JSON only."
-                )
-                continue
-
-            logger.warning(
-                "Codex CLI proposal response still has schema issues after %s attempt(s): %s",
-                attempt_idx + 1,
-                "; ".join(issues),
-            )
-            return proposals
-
-        return []
-
-
 def make_feature_search_agent(search_config: AgenticFeatureSearchConfig) -> Any:
-    if _codex_cli_provider(getattr(search_config, "agent_provider", "openai")):
-        return CodexCLIFeatureSearchAgent(search_config)
     return OpenAICompatibleFeatureSearchAgent(search_config)
 
 
 def _proposal_agent_supports_value_harmonization(agent: Any) -> bool:
-    return isinstance(
-        agent,
-        (OpenAICompatibleFeatureSearchAgent, CodexCLIFeatureSearchAgent),
-    ) or bool(getattr(agent, "supports_value_harmonization", False))
+    return isinstance(agent, OpenAICompatibleFeatureSearchAgent) or bool(
+        getattr(agent, "supports_value_harmonization", False)
+    )
 
 
 def _proposal_agent_supports_alias_resolution(agent: Any) -> bool:
-    return isinstance(
-        agent,
-        (OpenAICompatibleFeatureSearchAgent, CodexCLIFeatureSearchAgent),
-    ) or bool(getattr(agent, "supports_alias_resolution", False))
+    return isinstance(agent, OpenAICompatibleFeatureSearchAgent) or bool(
+        getattr(agent, "supports_alias_resolution", False)
+    )
 
 
 class VLLMExplicitFeatureExtractionProvider:
@@ -2307,11 +1374,6 @@ class VLLMExplicitFeatureExtractionProvider:
         self._active_text_hash: Optional[str] = None
         self._active_patient_text_hashes: List[str] = []
         self._active_request_group_contracts_by_spec: Dict[str, List[Dict[str, Any]]] = {}
-
-    def adaptive_review_contract_local_extraction(self) -> bool:
-        """Whether one target has identical request semantics in every registry."""
-
-        return int(getattr(self.feature_config, "max_variables_per_extraction_request", 10)) == 1
 
     def ensure_features(
         self,
@@ -2403,8 +1465,7 @@ class VLLMExplicitFeatureExtractionProvider:
         specs: List[ExplicitFeatureSpec],
     ) -> List[List[ExplicitFeatureSpec]]:
         """Group related contracts while enforcing the hard ten-variable cap."""
-        if self.feature_config.extraction_context_strategy in {COMPLETE_PAGED_VERSION, "colbert"}:
-            # Retrieval selects evidence independently for each question.
+        if self.feature_config.extraction_context_strategy == COMPLETE_PAGED_VERSION:
             # Complete-page responses carry one closed feature contract so that
             # every page can later be reconciled without companion-variable
             # prompt effects.
@@ -2702,7 +1763,6 @@ class VLLMExplicitFeatureExtractionProvider:
             temperature=self.feature_config.extraction_temperature,
             max_tokens=self.feature_config.extraction_max_tokens,
             max_text_length=self.feature_config.extraction_max_text_length,
-            colbert=self.feature_config.colbert,
             context_strategy=getattr(
                 self.feature_config,
                 "extraction_context_strategy",
@@ -3077,9 +2137,6 @@ class VLLMExplicitFeatureExtractionProvider:
             ),
             "extraction_batch_size": int(self.feature_config.extraction_batch_size),
         }
-        if self.feature_config.extraction_context_strategy == "colbert":
-            from ..extraction.colbert import retrieval_identity
-            cache_config["colbert"] = retrieval_identity(self.feature_config.colbert)
         return cache_config
 
     def _spec_fingerprint(self, spec: ExplicitFeatureSpec) -> str:
@@ -3122,262 +2179,11 @@ class VLLMExplicitFeatureExtractionProvider:
         return self._resolved_vllm_model_name
 
 
-class CodexCLIExplicitFeatureExtractionProvider(VLLMExplicitFeatureExtractionProvider):
-    """Resumable explicit-feature provider backed by one `codex exec` call per note."""
-
-    reads_complete_documents = True
-
-    def _cache_config(self, specs: List[ExplicitFeatureSpec]) -> Dict[str, Any]:
-        context_strategy = (
-            str(getattr(self.feature_config, "extraction_context_strategy", "full_record"))
-            .strip()
-            .lower()
-            .replace("-", "_")
-        )
-        identity = {
-            "features": [_spec_extraction_contract_dict(spec) for spec in specs],
-            "prompt_template_version": EXTRACTION_PROMPT_VERSION,
-            "extraction_provider": "codex_cli",
-            "codex_cli_executable": getattr(
-                self.feature_config,
-                "codex_cli_executable",
-                "codex",
-            ),
-            "codex_cli_model_name": _codex_optional_value(
-                getattr(self.feature_config, "codex_cli_model_name", "gpt-5.4-mini")
-            ),
-            "codex_cli_reasoning_effort": _codex_optional_value(
-                getattr(self.feature_config, "codex_cli_reasoning_effort", "medium")
-            ),
-            "codex_cli_extra_args": _codex_extra_args(
-                getattr(self.feature_config, "codex_cli_extra_args", [])
-            ),
-            "complete_document": context_strategy in {"full_record", "tail"},
-            "extraction_max_text_length": self.feature_config.extraction_max_text_length,
-            "extraction_grouping_strategy": getattr(
-                self.feature_config,
-                "extraction_grouping_strategy",
-                "clinical_domain",
-            ),
-            "extraction_context_strategy": context_strategy,
-            "extraction_context_compactor_version": CONTRACT_LEXICAL_CONTEXT_VERSION,
-            "extraction_grouping_version": EXTRACTION_GROUPING_VERSION,
-            "patient_text_hash": self._active_text_hash,
-            "source_text_temporally_valid_by_design": bool(
-                getattr(
-                    self.feature_config,
-                    "source_text_temporally_valid_by_design",
-                    False,
-                )
-            ),
-            "temporal_boundary_enforced": not bool(
-                getattr(
-                    self.feature_config,
-                    "source_text_temporally_valid_by_design",
-                    False,
-                )
-            ),
-            "max_variables_per_extraction_request": int(
-                getattr(self.feature_config, "max_variables_per_extraction_request", 10)
-            ),
-            "extraction_batch_size": int(self.feature_config.extraction_batch_size),
-        }
-        if context_strategy == "colbert":
-            from ..extraction.colbert import retrieval_identity
-            identity["colbert"] = retrieval_identity(self.feature_config.colbert)
-        return identity
-
-    def _extract_spec_group(
-        self,
-        dataset: pd.DataFrame,
-        specs: List[ExplicitFeatureSpec],
-    ) -> pd.DataFrame:
-        logger.info(
-            "Extracting %s agentic feature(s) with Codex CLI: %s",
-            len(specs),
-            [spec.name for spec in specs],
-        )
-        texts = dataset[self.config.text_column].fillna("").astype(str).tolist()
-        max_workers = max(
-            1,
-            min(
-                len(texts),
-                int(getattr(self.feature_config, "codex_cli_parallelism", 4) or 4),
-            ),
-        )
-        if max_workers == 1:
-            results = [self._extract_one_text(text, specs) for text in texts]
-        else:
-            results = [None] * len(texts)
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_idx = {
-                    executor.submit(self._extract_one_text, text, specs): idx
-                    for idx, text in enumerate(texts)
-                }
-                for future in as_completed(future_to_idx):
-                    results[future_to_idx[future]] = future.result()
-            results = [
-                result if result is not None else _missing_values_for_specs(specs)
-                for result in results
-            ]
-        return _extraction_results_to_dataframe(results, specs)
-
-    def _extract_one_text(
-        self,
-        text: str,
-        specs: List[ExplicitFeatureSpec],
-    ) -> Dict[str, Any]:
-        context_strategy = (
-            str(getattr(self.feature_config, "extraction_context_strategy", "full_record"))
-            .strip()
-            .lower()
-            .replace("-", "_")
-        )
-        trusted_temporal_source = bool(
-            getattr(
-                self.feature_config,
-                "source_text_temporally_valid_by_design",
-                False,
-            )
-        )
-        if context_strategy == "colbert":
-            from ..extraction.colbert import get_retriever
-            text = get_retriever(self.feature_config.colbert).retrieve(
-                text, specs, top_k=self.feature_config.colbert.top_k)["context"]
-            if (self.feature_config.extraction_max_text_length is not None
-                    and len(text) > self.feature_config.extraction_max_text_length):
-                raise ValueError("ColBERT retrieved context exceeds extraction_max_text_length")
-            context_strategy = "tail"
-        base_prompt = _codex_extraction_prompt(
-            text,
-            specs,
-            max_text_length=(
-                self.feature_config.extraction_max_text_length
-                if context_strategy == "contract_lexical_rag"
-                else None
-            ),
-            context_strategy=context_strategy,
-            source_text_temporally_valid_by_design=trusted_temporal_source,
-        )
-        prompt = base_prompt
-        best_result = None
-        max_attempts = max(1, int(self.feature_config.extraction_max_retries))
-        for attempt in range(max_attempts):
-            try:
-                response = _run_codex_exec(
-                    prompt,
-                    executable=getattr(self.feature_config, "codex_cli_executable", "codex"),
-                    model_name=getattr(
-                        self.feature_config,
-                        "codex_cli_model_name",
-                        "gpt-5.4-mini",
-                    ),
-                    reasoning_effort=getattr(
-                        self.feature_config,
-                        "codex_cli_reasoning_effort",
-                        "medium",
-                    ),
-                    extra_args=getattr(self.feature_config, "codex_cli_extra_args", []),
-                    timeout=getattr(
-                        self.feature_config,
-                        "extraction_request_timeout",
-                        900.0,
-                    ),
-                )
-                parsed = _parse_extraction_response_with_issues(
-                    response.content,
-                    specs,
-                )
-                result = parsed.values
-                if best_result is None or sum(
-                    1 for value in result.values() if not value.is_missing
-                ) > sum(1 for value in best_result.values() if not value.is_missing):
-                    best_result = result
-                if not parsed.issues:
-                    return result
-                if attempt < max_attempts - 1:
-                    logger.warning(
-                        "Codex CLI extraction response had schema issues on attempt "
-                        "%s/%s: %s. Requesting repaired JSON.",
-                        attempt + 1,
-                        max_attempts,
-                        "; ".join(parsed.issues[:3]),
-                    )
-                    prompt = (
-                        f"{base_prompt}\n\nPrevious Codex response:\n{response.content}\n\n"
-                        f"{build_extraction_repair_prompt(parsed.issues, specs, source_text_temporally_valid_by_design=trusted_temporal_source)}"
-                    )
-                    continue
-            except Exception as exc:
-                if attempt >= max_attempts - 1:
-                    logger.warning(
-                        "Codex CLI extraction failed after %s attempt(s): %s",
-                        attempt + 1,
-                        exc,
-                    )
-                    break
-                delay = retry_delay(
-                    attempt,
-                    initial_delay=getattr(
-                        self.feature_config,
-                        "extraction_retry_initial_delay",
-                        1.0,
-                    ),
-                    max_delay=getattr(
-                        self.feature_config,
-                        "extraction_retry_max_delay",
-                        30.0,
-                    ),
-                    backoff_factor=getattr(
-                        self.feature_config,
-                        "extraction_retry_backoff_factor",
-                        2.0,
-                    ),
-                )
-                logger.warning(
-                    "Codex CLI extraction failed on attempt %s/%s with %s: %s. "
-                    "Retrying in %.2fs.",
-                    attempt + 1,
-                    max_attempts,
-                    exc.__class__.__name__,
-                    exc,
-                    delay,
-                )
-                import time
-
-                time.sleep(delay)
-
-        return best_result if best_result is not None else _missing_values_for_specs(specs)
-
-
-def _extraction_results_to_dataframe(
-    results: Sequence[Dict[str, Any]],
-    specs: List[ExplicitFeatureSpec],
-) -> pd.DataFrame:
-    data: Dict[str, List[Any]] = {}
-    for spec in specs:
-        values = []
-        missing_flags = []
-        for result in results:
-            val = result.get(spec.name)
-            if val:
-                values.append(val.value)
-                missing_flags.append(val.is_missing)
-            else:
-                values.append(None)
-                missing_flags.append(True)
-        data[f"explicit_feat_{spec.name}"] = values
-        data[f"explicit_feat_{spec.name}_missing"] = missing_flags
-    return pd.DataFrame(data)
-
-
 def make_explicit_feature_extraction_provider(
     *,
     config: AppliedInferenceConfig,
     output_dir: Path,
 ) -> Any:
-    if _codex_cli_provider(getattr(config.explicit_features, "extraction_provider", "openai")):
-        return CodexCLIExplicitFeatureExtractionProvider(config=config, output_dir=output_dir)
     return VLLMExplicitFeatureExtractionProvider(config=config, output_dir=output_dir)
 
 
@@ -3491,200 +2297,11 @@ class CausalForestExplicitEvaluator:
         return SplitEvaluation(predictions=predictions, metrics=metrics)
 
 
-class StructuredInteractionExplicitEvaluator:
-    """Nested-CV structured S-learner with treatment interactions.
-
-    The outer fit/test boundary is supplied by the calling runner.  Within the
-    fit frame, :class:`StructuredInteractionHead` selects regularization using
-    observed outcome loss only.  The held-out frame is scored once after that
-    choice and final fit are frozen.
-    """
-
-    def __init__(
-        self,
-        config: AppliedInferenceConfig,
-        cf_config: ExplicitFeatureForestConfig,
-    ) -> None:
-        self.config = config
-        self.cf_config = cf_config
-
-    def evaluate_split(
-        self,
-        train_df: pd.DataFrame,
-        test_df: pd.DataFrame,
-        specs: List[ExplicitFeatureSpec],
-        fold_id: int,
-    ) -> SplitEvaluation:
-        train_t = np.asarray(
-            train_df[self.config.treatment_column].values,
-            dtype=float,
-        ).reshape(-1)
-        train_y = np.asarray(
-            train_df[self.config.outcome_column].values,
-            dtype=float,
-        ).reshape(-1)
-        test_t = np.asarray(
-            test_df[self.config.treatment_column].values,
-            dtype=float,
-        ).reshape(-1)
-        test_y = np.asarray(
-            test_df[self.config.outcome_column].values,
-            dtype=float,
-        ).reshape(-1)
-
-        x_train, w_train, x_names, w_names, means, stds = _build_features(
-            train_df,
-            specs,
-        )
-        x_test, w_test, _, _, _, _ = _build_features(
-            test_df,
-            specs,
-            means,
-            stds,
-        )
-        actual_x_dim = 0 if x_train is None else int(x_train.shape[1])
-        if x_train is None:
-            # Keep an explicit zero column so a confounder-only registry is a
-            # valid main-effect model with a constant treatment effect.
-            x_train = np.zeros((len(train_df), 1), dtype=np.float32)
-            x_test = np.zeros((len(test_df), 1), dtype=np.float32)
-            x_names = ["intercept_effect"]
-
-        features_train = _hstack_present(x_train, w_train)
-        features_test = _hstack_present(x_test, w_test)
-        if features_train is None or features_test is None:
-            raise ValueError("Unable to build explicit-feature interaction matrices")
-
-        interact_all = bool(getattr(self.cf_config, "interaction_interact_all_features", True))
-        head = StructuredInteractionHead(
-            outcome_type=self.config.outcome_type,
-            regularization_grid=getattr(
-                self.cf_config,
-                "interaction_regularization_grid",
-                (0.003, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0),
-            ),
-            inner_folds=int(getattr(self.cf_config, "interaction_inner_folds", 3)),
-            interact_all_features=interact_all,
-            random_state=42 + int(fold_id),
-            max_iter=int(getattr(self.cf_config, "interaction_max_iter", 3000)),
-        )
-        modifier_indices = None if interact_all else np.arange(x_train.shape[1])
-        head.fit(
-            features_train,
-            train_t,
-            train_y,
-            modifier_indices=modifier_indices,
-        )
-        y0, y1 = head.predict_potential_outcomes(features_test)
-        tau = y1 - y0
-        outcome_prediction = head.predict_observed_outcome(features_test, test_t)
-
-        propensity = _fit_predict_propensity(
-            features_train,
-            train_t,
-            features_test,
-            self.cf_config,
-            random_state=142 + int(fold_id),
-        )
-        # Prediction artifacts are fail-closed against accidental synthetic
-        # oracle propagation even when a lower-level caller forgets to strip it.
-        prediction_input = test_df.drop(
-            columns=[column for column in test_df.columns if str(column).startswith("true_")],
-            errors="ignore",
-        )
-        predictions = prediction_input.copy()
-        predictions["pred_ite_prob"] = tau
-        predictions["pred_y0_prob"] = y0
-        predictions["pred_y1_prob"] = y1
-        predictions["pred_propensity_prob"] = propensity
-        predictions["pred_outcome_prob"] = outcome_prediction
-        predictions["cv_fold"] = int(fold_id)
-
-        tuning = head.tuning_result_
-        assert tuning is not None
-        metrics = {
-            "fold": int(fold_id),
-            "n_train": int(len(train_df)),
-            "n_test": int(len(test_df)),
-            "n_explicit_features": int(len(specs)),
-            "n_x_features": int(actual_x_dim),
-            "n_w_features": 0 if w_train is None else int(w_train.shape[1]),
-            "n_interaction_features": int(len(head.modifier_indices_)),
-            "interact_all_features": interact_all,
-            "ate_estimate": float(np.mean(tau)),
-            "r_loss": float(_r_loss(test_y, test_t, outcome_prediction, propensity, tau)),
-            "treatment_auroc": _safe_roc_auc(test_t, propensity),
-            "outcome_auroc": (
-                _safe_roc_auc(test_y, outcome_prediction)
-                if self.config.outcome_type == "binary"
-                else None
-            ),
-            "x_feature_names": x_names,
-            "w_feature_names": w_names,
-            "effect_estimator": "interaction_s_learner",
-            "interaction_selected_regularization": float(tuning.selected_regularization),
-            "interaction_selection_metric": tuning.selection_metric,
-            "interaction_inner_folds": int(tuning.n_splits),
-            "interaction_mean_validation_loss": {
-                str(key): float(value) for key, value in tuning.mean_validation_loss.items()
-            },
-        }
-        return SplitEvaluation(predictions=predictions, metrics=metrics)
-
-
 def build_agent_prompt(
     context: Dict[str, Any],
     search_config: AgenticFeatureSearchConfig,
 ) -> str:
     """Construct the proposal prompt sent to the LLM agent."""
-    from .all_evidence_fusion import FUSION_PROMPT_VERSION
-
-    if context.get("prompt_version") == FUSION_PROMPT_VERSION:
-        from .all_evidence_fusion import render_all_evidence_fusion_context_prompt
-
-        return render_all_evidence_fusion_context_prompt(context)
-    from .all_evidence_post_extraction_review import (
-        POST_EXTRACTION_REVIEW_PROMPT_VERSION,
-        render_post_extraction_review_prompt,
-    )
-
-    if context.get("prompt_version") == POST_EXTRACTION_REVIEW_PROMPT_VERSION:
-        return render_post_extraction_review_prompt(context)
-    if context.get("prompt_version") == "neural_query_feature_v1":
-        from .neural_query_agentic_forest import render_query_feature_prompt
-
-        return render_query_feature_prompt(context)
-    if context.get("prompt_version") == "neural_query_registry_v1":
-        from .neural_query_agentic_forest import render_query_registry_prompt
-
-        return render_query_registry_prompt(context)
-    if context.get("prompt_version") == "neural_query_review_v1":
-        from .neural_query_agentic_forest import render_query_review_prompt
-
-        return render_query_review_prompt(context)
-    if context.get("prompt_version") in {
-        "tfidf_topic_label_v2",
-        "tfidf_topic_recovery_v2",
-        "tfidf_orphan_ngram_label_v1",
-    }:
-        from .tfidf_topic_agentic_forest import render_topic_label_prompt
-
-        return render_topic_label_prompt(context)
-    if context.get("prompt_version") == "tfidf_topic_name_harmonization_v2":
-        from .tfidf_topic_agentic_forest import render_topic_name_harmonization_prompt
-
-        return render_topic_name_harmonization_prompt(context)
-    if context.get("prompt_version") == "tfidf_topic_global_dedup_v2":
-        from .tfidf_topic_agentic_forest import render_topic_global_dedup_prompt
-
-        return render_topic_global_dedup_prompt(context)
-    if context.get("prompt_version") in {
-        "tfidf_topic_value_harmonization_v2",
-        "tfidf_topic_value_repair_v2",
-    }:
-        from .tfidf_topic_agentic_forest import render_topic_value_harmonization_prompt
-
-        return render_topic_value_harmonization_prompt(context)
     if context.get("prompt_version") == "agentic_attention_consensus_disambiguation_v1":
         return build_attention_consensus_disambiguation_prompt(context, search_config)
 
@@ -3697,13 +2314,7 @@ def build_agent_prompt(
     if context.get("prompt_version") == "multi_model_agentic_value_harmonization_v1":
         return build_multi_model_agentic_value_harmonization_prompt(context, search_config)
 
-    if context.get("prompt_version") == "multi_model_agentic_concept_inventory_v1":
-        return build_multi_model_agentic_concept_inventory_prompt(context, search_config)
-
-    if context.get("prompt_version") in {
-        "multi_model_agentic_cluster_labeling_v1",
-        "multi_model_agentic_cluster_labeling_v2",
-    }:
+    if context.get("prompt_version") == "multi_model_agentic_cluster_labeling_v2":
         return build_multi_model_agentic_cluster_labeling_prompt(context, search_config)
 
     if context.get("prompt_version") == _PARSIMONY_FACTOR_PROMPT_VERSION:
@@ -3729,52 +2340,9 @@ def build_agent_prompt(
             return build_broad_selection_agent_prompt(context, search_config)
         return build_broad_agent_prompt(context, search_config)
 
-    context_json = json.dumps(context, indent=2, default=_json_default)
-    current_feature_count = len(context.get("current_features", []))
-    feature_status = (
-        "No variables are currently included; propose an initial variable to extract."
-        if current_feature_count == 0
-        else (
-            "The current variables are already included; propose additions, "
-            "removals, or role updates only when the nested-CV context and "
-            "prior feedback justify them."
-        )
+    raise ValueError(
+        f"Unsupported agent prompt_version: {context.get('prompt_version')!r}"
     )
-    return f"""You are helping design a causal inference feature set for a causal forest.
-
-{feature_status}
-Propose variables that are plausibly extractable from the text and could improve confounding adjustment or CATE heterogeneity.
-Use the clinical question, estimand metadata, nested-CV context, extraction summaries, clinical text examples, and prior feedback to decide which variables are worth trying. Define each extraction target precisely enough that the downstream feature extractor can operationalize it.
-Candidate feedback may include role_diagnostics from train-fold regressions adjusted for current confounders. Treat a candidate with both treatment and outcome association as a likely confounder. Treat a candidate with treatment-by-candidate interaction evidence in the outcome model as a likely effect modifier. Use those diagnostics to revise roles or extraction targets when a prior candidate was rejected.
-
-Return JSON only with this shape:
-{{
-  "proposals": [
-    {{
-      "action": "add|remove|update_role|none",
-      "name": "snake_case_variable_name",
-      "type": "categorical|continuous",
-      "categories": ["category_a", "category_b"],
-      "roles": ["confounder", "effect_modifier"],
-      "description": "exact extraction target",
-      "rationale": "why this may help",
-      "expected_signal": "treatment, outcome, or tau signal expected"
-    }}
-  ]
-}}
-
-Limits:
-- At most {search_config.max_additions_per_iter} add proposals.
-- At most {search_config.max_removals_per_iter} remove proposals.
-- Use "none" if no defensible variable is available.
-- For categorical variables, provide 2-8 mutually exclusive categories.
-- Review iteration_feedback and recent_decisions before proposing. Do not repeat
-  a rejected feature unchanged; if revisiting a rejected concept, change the
-  extraction target, type/categories, or role to directly address failed_checks.
-
-Current nested-CV context:
-{context_json}
-"""
 
 
 def build_attention_variable_agent_prompt(
@@ -4052,61 +2620,6 @@ Rules:
 - Prefer clinically meaningful thresholds over broad high/low categories when thresholds are available in the candidate category list or feature evidence.
 
 Current value-harmonization context:
-{context_json}
-"""
-
-
-def build_multi_model_agentic_concept_inventory_prompt(
-    context: Dict[str, Any],
-    search_config: AgenticFeatureSearchConfig,
-) -> str:
-    """Construct the source-grounded concept inventory prompt."""
-    del search_config
-    context_json = json.dumps(
-        context,
-        separators=(",", ":"),
-        default=_json_default,
-    )
-    max_concepts = int(context.get("max_concepts", 60))
-    return f"""You are analyzing evidence from clinical-note text models.
-
-Task: identify patient-level concepts that appear to be represented in common
-among the evidence families supplied in the context.
-
-Evidence families:
-- bow_feature_evidence: sparse text features and repeated phrase signals.
-- embedding_retrieved_text_evidence: retrieved real text chunks and concept scores.
-- htr_attended_text_evidence: tokens or spans highlighted by neural text models.
-
-Look for concepts that recur as the same patient-level field across at least two
-evidence families when possible. Concepts may be ordinary chart fields, clinical
-history, baseline lab values, demographics, staging, biomarkers, symptoms,
-performance status, comorbidities, treatment history, social history, or other
-extractable note-level fields.
-
-Do not rank concepts by downstream modeling usefulness. Do not ignore mundane
-or header-like variables when they are repeatedly represented. Collapse aliases
-that refer to the same field, and keep distinct fields separate.
-
-Return at most {max_concepts} concepts. Return JSON only with this shape:
-{{
-  "concepts": [
-    {{
-      "name": "snake_case_concept_name",
-      "label": "short human-readable label",
-      "value_kind": "binary|categorical|continuous|ordinal|text|unknown",
-      "source_families": ["bow", "embedding_contrast", "htr"],
-      "source_overlap": 2,
-      "supporting_phrases": ["short phrase or token evidence"],
-      "example_values_or_phrases": ["example values or note phrases"],
-      "extractability": "high|medium|low",
-      "notes": "brief source-grounded explanation"
-    }}
-  ],
-  "omitted_uncertain": ["optional short labels for weak one-source concepts"]
-}}
-
-Current concept-inventory context:
 {context_json}
 """
 
@@ -4845,10 +3358,7 @@ def concept_inventory_response_issues(
         except (TypeError, ValueError):
             max_concepts = None
     prompt_version = context.get("prompt_version") if isinstance(context, dict) else None
-    is_cluster_labeling = prompt_version in {
-        "multi_model_agentic_cluster_labeling_v1",
-        "multi_model_agentic_cluster_labeling_v2",
-    }
+    is_cluster_labeling = prompt_version == "multi_model_agentic_cluster_labeling_v2"
     known_cluster_ids = set()
     if isinstance(context, dict):
         for cluster in context.get("clusters") or []:
@@ -6790,14 +5300,6 @@ def _candidate_proposal_specs(
             proposal_specs.append(spec)
             seen.add(proposal.name)
     return proposal_specs
-
-
-def _candidate_role_diagnostic_specs(
-    current_specs: List[ExplicitFeatureSpec],
-    candidate_specs: List[ExplicitFeatureSpec],
-    proposal_group: Sequence[AgenticFeatureProposal],
-) -> List[ExplicitFeatureSpec]:
-    return _candidate_proposal_specs(current_specs, candidate_specs, proposal_group)
 
 
 def _choose_accepted_candidate(candidate_results: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

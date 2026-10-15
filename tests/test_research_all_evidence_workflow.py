@@ -19,7 +19,7 @@ from oci.inference.all_evidence_fusion import HTR_NEURAL, MATCHED_PAIR_UPLIFT
 from oci.inference.plain_handoff_stage2_evidence import SUPPORTED_STAGE2_ARCHITECTURES
 from oci.inference.stage1_architectures import DEFAULT_STAGE1_ARCHITECTURES
 from oci.inference.research_all_evidence_workflow import (
-    COMPONENT_ORDER,
+    STAGE1_COMPONENT_ORDER as COMPONENT_ORDER,
     ResearchAllEvidenceWorkflow,
     Stage1RunContext,
     _context_execution_lanes,
@@ -202,15 +202,14 @@ def test_disable_htr_keeps_bow_and_embedding_without_scheduling_htr(
     assert HTR_NEURAL not in required
     assert MATCHED_PAIR_UPLIFT in required
 
-    def run_contexts(**kwargs):
-        assert kwargs["plan"].htr_enabled is False
+    def run_context(**kwargs):
         assert kwargs["config"].architecture.multi_model_forest.htr_evidence_enabled is False
-        return [{"outer_fold": 1, "scope": "full_outer_train"}]
+        return {"outer_fold": 1, "scope": "full_outer_train"}
 
     monkeypatch.setattr(
         multi_model_stage1,
-        "run_multi_model_forest_handoff_contexts",
-        run_contexts,
+        "run_multi_model_forest_handoff_context",
+        run_context,
     )
     row = all_evidence_workflow._run_one_text_model_context(
         dataset=context.dataset,
@@ -238,25 +237,23 @@ def test_text_model_context_serializes_nonfinite_diagnostics_as_null(
     config = compile_config(raw, config_dir=tmp_path)
     context = ResearchAllEvidenceWorkflow(config)._resolved_context()
 
-    def run_contexts(**_kwargs):
-        return [
-            {
-                "outer_fold": 1,
-                "scope": "full_outer_train",
-                "metrics": {
-                    "undefined_correlation": float("nan"),
-                    "infinite_statistic": np.float64("inf"),
-                },
-                "importance": {
-                    "scores": np.asarray([1.25, float("-inf")]),
-                },
-            }
-        ]
+    def run_context(**_kwargs):
+        return {
+            "outer_fold": 1,
+            "scope": "full_outer_train",
+            "metrics": {
+                "undefined_correlation": float("nan"),
+                "infinite_statistic": np.float64("inf"),
+            },
+            "importance": {
+                "scores": np.asarray([1.25, float("-inf")]),
+            },
+        }
 
     monkeypatch.setattr(
         multi_model_stage1,
-        "run_multi_model_forest_handoff_contexts",
-        run_contexts,
+        "run_multi_model_forest_handoff_context",
+        run_context,
     )
     context_dir = tmp_path / "nonfinite_context"
     row = all_evidence_workflow._run_one_text_model_context(
@@ -289,15 +286,15 @@ def test_text_model_context_resumes_from_final_substep_checkpoint(tmp_path, monk
     context = ResearchAllEvidenceWorkflow(config)._resolved_context()
     calls = 0
 
-    def run_contexts(**_kwargs):
+    def run_context(**_kwargs):
         nonlocal calls
         calls += 1
-        return [{"outer_fold": 1, "scope": "full_outer_train", "metrics": {}}]
+        return {"outer_fold": 1, "scope": "full_outer_train", "metrics": {}}
 
     monkeypatch.setattr(
         multi_model_stage1,
-        "run_multi_model_forest_handoff_contexts",
-        run_contexts,
+        "run_multi_model_forest_handoff_context",
+        run_context,
     )
     context_dir = tmp_path / "resumable_context"
     spec = {
@@ -341,9 +338,8 @@ def test_text_model_context_resumes_from_final_substep_checkpoint(tmp_path, monk
 
 
 def test_text_model_handoff_row_omits_empty_htr_evidence():
-    from oci.inference.multi_model_agentic_forest import (
+    from oci.inference.stage1_modeling_support import (
         _agentic_discovery_handoff_row,
-        _build_evidence_digest_agent_context,
     )
 
     result = {
@@ -351,7 +347,6 @@ def test_text_model_handoff_row_omits_empty_htr_evidence():
         "importance": {},
         "embedding_contrast_evidence": {"available": True},
         "htr_evidence": {},
-        "context": {"feature_discovery_methods": ["bow", "embedding_contrast"]},
     }
 
     row = _agentic_discovery_handoff_row(
@@ -363,27 +358,8 @@ def test_text_model_handoff_row_omits_empty_htr_evidence():
     )
 
     assert "htr_evidence" not in row
+    assert "context" not in row
     assert row["embedding_contrast_evidence"] == {"available": True}
-
-    context = _build_evidence_digest_agent_context(
-        outer_fold=1,
-        feature_discovery_methods=["bow", "embedding_contrast"],
-        max_proposals=10,
-        clinical_question="test",
-        treatment_column="treatment_indicator",
-        outcome_column="outcome_indicator",
-        outcome_type="binary",
-        current_features=[],
-        metrics={},
-        importance={},
-        clinical_text_examples=[],
-        embedding_evidence={"available": True},
-        htr_evidence={},
-    )
-    digest = context["evidence_digest"]
-    assert "htr_blurbs" not in digest["confounders"]
-    assert "htr_blurbs" not in digest["effect_modifiers"]
-    assert all(not key.startswith("htr_") for key in digest["prompt_compaction"])
 
 
 def test_simple_runner_uses_processes_for_tfidf_contexts_by_default(tmp_path):
@@ -549,17 +525,14 @@ def test_legacy_handoff_references_sources_without_copy_or_architecture_expansio
     source.write_text(json.dumps(source_row) + "\n", encoding="utf-8")
     handoff_dir = context.component_dir("handoff")
     handoff_dir.mkdir(parents=True)
-    obsolete_copies = [
-        handoff_dir / f"{source_name}.jsonl"
-        for source_name in ("text_models", "tfidf", "neural_queries")
-    ]
-    for obsolete_copy in obsolete_copies:
-        obsolete_copy.write_text("obsolete duplicate\n", encoding="utf-8")
 
     result = all_evidence_workflow._handoff_component(context, handoff_dir)
 
     assert result["rows"] == 1
-    assert all(not obsolete_copy.exists() for obsolete_copy in obsolete_copies)
+    assert sorted(path.name for path in handoff_dir.iterdir()) == [
+        "evidence.jsonl",
+        "index.json",
+    ]
     assert not (context.output_dir / "stage1_architectures").exists()
     index = json.loads((handoff_dir / "index.json").read_text(encoding="utf-8"))
     assert index["source_storage"] == "referenced_without_copy"
@@ -693,31 +666,13 @@ def test_cpu_worker_budget_is_divided_without_being_duplicated():
     assert _lane_cpu_worker_budgets(0, workers=32) == []
 
 
-def test_handoff_context_config_parallelizes_bow_folds_with_threads(tmp_path):
-    _raw, config = _inputs(tmp_path, components=("text_models",))
-    context = ResearchAllEvidenceWorkflow(config)._resolved_context()
-
-    optimized = multi_model_stage1.config_for_multi_model_forest_handoff(
-        context.applied_config
-    )
-    text_config = optimized.architecture.multi_model_agentic_forest
-    primary_text_config = optimized.architecture.multi_model_forest
-
-    assert text_config.fold_parallelism == "auto"
-    assert text_config.bow_fold_parallelism == "auto"
-    assert text_config.bow_parallel_backend == "threads"
-    assert primary_text_config.fold_parallelism == "auto"
-    assert primary_text_config.bow_fold_parallelism == "auto"
-    assert primary_text_config.bow_parallel_backend == "threads"
-
-
 def test_handoff_context_uses_stage1_runner_and_exact_heldout_rows(tmp_path, monkeypatch):
     _raw, config = _inputs(tmp_path, components=("text_models",))
     context = ResearchAllEvidenceWorkflow(config)._resolved_context()
     captured: dict[str, object] = {}
 
     class FakeStage1Runner:
-        def __init__(self, *, dataset, config, output_path, device, gpu_ids, num_workers):
+        def __init__(self, *, dataset, config, output_path, device, num_workers, checkpoint_store):
             captured["runner"] = "stage1"
             captured["output_path"] = output_path
             captured["num_workers"] = num_workers
@@ -735,24 +690,20 @@ def test_handoff_context_uses_stage1_runner_and_exact_heldout_rows(tmp_path, mon
         "MultiModelForestStage1Runner",
         FakeStage1Runner,
     )
-    rows = multi_model_stage1._run_handoff_context_shard(
+    row = multi_model_stage1.run_multi_model_forest_handoff_context(
         dataset=context.dataset,
         config=context.applied_config,
-        shard=[
-            {
-                "fold_key": 1001,
-                "outer_fold": 1,
-                "scope": "candidate_consistency_inner_train",
-                "train_idx": np.asarray([0, 1, 2, 3]),
-                "heldout_idx": np.asarray([4, 5]),
-                "inner_fold": 1,
-                "heldout_rows": 2,
-            }
-        ],
+        context={
+            "fold_key": 1001,
+            "outer_fold": 1,
+            "scope": "candidate_consistency_inner_train",
+            "train_idx": np.asarray([0, 1, 2, 3]),
+            "heldout_idx": np.asarray([4, 5]),
+            "inner_fold": 1,
+            "heldout_rows": 2,
+        },
         handoff_dir=tmp_path / "handoff",
-        shard_index=0,
         device="cpu",
-        gpu_ids=None,
         num_workers=3,
     )
 
@@ -760,7 +711,7 @@ def test_handoff_context_uses_stage1_runner_and_exact_heldout_rows(tmp_path, mon
     assert captured["num_workers"] == 3
     assert np.asarray(captured["train_idx"]).tolist() == [0, 1, 2, 3]
     assert np.asarray(captured["heldout_idx"]).tolist() == [4, 5]
-    assert rows[0]["importance"]["matched_pair_uplift"] == {"views": []}
+    assert row["importance"]["matched_pair_uplift"] == {"views": []}
 
 
 @pytest.mark.parametrize("enable_optional", [False, True])
@@ -810,38 +761,36 @@ def test_explicit_architecture_selector_adds_optional_lanes_to_default_mix(tmp_p
 
 
 def test_handoff_context_receives_its_full_lane_cpu_budget(tmp_path, monkeypatch):
+    raw, _config = _inputs(tmp_path, components=("text_models",))
+    config = compile_config(raw, config_dir=tmp_path)
+    context = ResearchAllEvidenceWorkflow(config)._resolved_context()
     captured: list[int] = []
 
-    def run_shard(**kwargs):
+    def run_context(**kwargs):
         captured.append(int(kwargs["num_workers"]))
-        return []
+        return {"outer_fold": 1, "scope": "full_outer_train"}
 
     monkeypatch.setattr(
         multi_model_stage1,
-        "_run_handoff_context_shard",
-        run_shard,
-    )
-    plan = multi_model_stage1.resolve_multi_model_forest_stage1_parallel_plan(
-        cpus_total=4,
-        num_workers=4,
-        gpu_ids=[0],
-        htr_jobs_per_gpu=1,
-        htr_enabled=True,
-        embedding_enabled=True,
+        "run_multi_model_forest_handoff_context",
+        run_context,
     )
 
-    rows = multi_model_stage1.run_multi_model_forest_handoff_contexts(
-        dataset=pd.DataFrame({"clinical_text": ["one"]}),
-        config=None,
-        contexts=[{"fold_key": 1}],
-        handoff_dir=tmp_path,
-        plan=plan,
-        base_device=multi_model_stage1.torch.device("cpu"),
+    all_evidence_workflow._run_one_text_model_context(
+        dataset=context.dataset,
+        applied_config=context.applied_config,
+        spec={
+            "scope_id": "outer_001_full",
+            "fold_key": 1,
+            "outer_fold": 1,
+            "scope": "full_outer_train",
+        },
+        context_dir=tmp_path / "budget_context",
+        device="cpu",
+        cpu_workers=4,
     )
 
-    assert rows == []
     assert captured == [4]
-    assert multi_model_stage1._handoff_cpu_worker_budgets(23, 7) == [4, 4, 3, 3, 3, 3, 3]
 
 
 def test_cpu_context_lanes_are_bounded_by_workers():
@@ -994,16 +943,16 @@ def _completed_stage2_reselection_fixture(tmp_path: Path):
         ].reset_index(drop=True)
         selection_value = {
             "schema_version": (
-                all_evidence_workflow.LEGACY_STAGE2_SELECTION_SCHEMA_VERSION
+                all_evidence_workflow.STAGE2_ROLE_SELECTION_SCHEMA_VERSION
             ),
-            "extracted_fit_fingerprint": "legacy-in-memory-frame-fingerprint",
+            "extracted_fit_fingerprint": all_evidence_workflow._frame_fingerprint(matrix),
             "treatment_outcome_fingerprint": (
                 all_evidence_workflow._frame_fingerprint(treatment_outcome)
             ),
             "definitions": source_features,
             "inner_splits": inner_splits,
             "outcome_type": config.outcome_type,
-            "confounder_p_value_threshold": 0.05,
+            "preselection_matrix_path": "extraction/all_candidates_fit/extracted.csv",
         }
         selection_fingerprint = all_evidence_workflow._stage2_value_fingerprint(
             selection_value
@@ -1026,7 +975,7 @@ def _completed_stage2_reselection_fixture(tmp_path: Path):
             ),
             encoding="utf-8",
         )
-        (selection_dir / "statistical_selection.json").write_text(
+        (selection_dir / "elastic_net_selection.json").write_text(
             json.dumps({"schema_version": selection_value["schema_version"]}),
             encoding="utf-8",
         )
@@ -1044,6 +993,7 @@ def _completed_stage2_reselection_fixture(tmp_path: Path):
                 {
                     "schema_version": selection_value["schema_version"],
                     "features": source_features,
+                    "measurement_dependencies": source_features,
                     "all_candidate_features": 1,
                     "review_rounds": 1,
                     "evaluation_rounds": 1,
@@ -1142,41 +1092,6 @@ def test_stage2_reselection_archives_downstream_and_freezes_preselection(tmp_pat
     assert len(list((stage2_dir / "reselection_archives").iterdir())) == 1
 
 
-def test_stage2_reselection_backfills_heldout_cache_for_prepared_migration(tmp_path):
-    config = _completed_stage2_reselection_fixture(tmp_path)
-    state = all_evidence_workflow.prepare_stage2_reselection(config=config)
-    stage2_dir = config.output_dir / "stage2"
-    snapshot_path = stage2_dir / "outer_001" / "preselection" / "input.json"
-    completion_path = stage2_dir / "outer_001" / "preselection" / "complete.json"
-    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    snapshot.pop("input_fingerprint")
-    snapshot.pop("heldout_measurement_cache")
-    legacy_fingerprint = all_evidence_workflow._stage2_value_fingerprint(snapshot)
-    snapshot_path.write_text(
-        json.dumps({**snapshot, "input_fingerprint": legacy_fingerprint}),
-        encoding="utf-8",
-    )
-    completion = json.loads(completion_path.read_text(encoding="utf-8"))
-    completion["input_fingerprint"] = legacy_fingerprint
-    completion.pop("heldout_measurement_cache_schema_version", None)
-    completion_path.write_text(json.dumps(completion), encoding="utf-8")
-
-    resumed = all_evidence_workflow.prepare_stage2_reselection(config=config)
-
-    upgraded = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    assert resumed["reselection_id"] == state["reselection_id"]
-    assert upgraded["heldout_measurement_cache"]["heldout_row_ids"] == [4, 5]
-    assert upgraded["input_fingerprint"] == (
-        all_evidence_workflow._stage2_value_fingerprint(
-            {
-                key: value
-                for key, value in upgraded.items()
-                if key != "input_fingerprint"
-            }
-        )
-    )
-
-
 def test_stage2_reselection_fails_before_moving_incompatible_definitions(tmp_path):
     config = _completed_stage2_reselection_fixture(tmp_path)
     stage2_dir = config.output_dir / "stage2"
@@ -1238,157 +1153,6 @@ def test_stage2_only_runs_from_saved_handoff_and_resumes(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
-def test_completed_stage2_with_legacy_infrastructure_missingness_is_repaired(
-    tmp_path,
-    monkeypatch,
-):
-    raw, _config = _inputs(tmp_path, components=())
-    raw["run"]["mode"] = "stage2"
-    raw["stage2"] = {
-        "endpoint": "http://stage2.test/v1",
-        "model": "test-model",
-    }
-    config = compile_config(raw, config_dir=tmp_path)
-    handoff = config.output_dir / "handoff" / "evidence.jsonl"
-    handoff.parent.mkdir(parents=True)
-    handoff.write_text('{"source":"tfidf"}\n', encoding="utf-8")
-    (handoff.parent / "complete.json").write_text("{}", encoding="utf-8")
-    stage2_dir = config.output_dir / "stage2"
-    stage2_dir.mkdir(parents=True)
-    for name, content in (
-        ("causal_estimate.json", "{}"),
-        ("cross_fitted_predictions.csv", "_oci_row_id,aipw_score\n"),
-        ("posthoc_oracle_ite_metrics.json", '{"available":false}\n'),
-    ):
-        (stage2_dir / name).write_text(content, encoding="utf-8")
-    (stage2_dir / "complete.json").write_text(
-        json.dumps({"phase": "causal_estimation"}),
-        encoding="utf-8",
-    )
-    failure = (
-        stage2_dir
-        / "outer_001"
-        / "extraction"
-        / "heldout"
-        / "batches"
-        / "batch_00001"
-        / "extraction_failure.json"
-    )
-    failure.parent.mkdir(parents=True)
-    failure.write_text(
-        json.dumps(
-            {
-                "resolution": "conservative_all_null",
-                "validation_error": "Stage2RequestExhaustedError: endpoint unavailable",
-            }
-        ),
-        encoding="utf-8",
-    )
-    calls = []
-
-    def repair_stage2(*, output_dir, **kwargs):
-        calls.append(kwargs)
-        failure.rename(
-            failure.with_name("superseded_infrastructure_extraction_failure.json")
-        )
-        return {"phase": "causal_estimation"}
-
-    monkeypatch.setattr(all_evidence_workflow, "run_plain_handoff_stage2", repair_stage2)
-
-    result = ResearchAllEvidenceWorkflow(config).run()
-
-    assert result["components"]["stage2"]["status"] == "complete"
-    assert len(calls) == 1
-    assert (stage2_dir / "superseded_infrastructure_complete.json").is_file()
-
-
-def test_definition_only_stage2_marker_is_continued_after_upgrade(tmp_path, monkeypatch):
-    raw, _config = _inputs(tmp_path, components=())
-    raw["run"]["mode"] = "stage2"
-    raw["stage2"] = {
-        "endpoint": "http://stage2.test/v1",
-        "model": "test-model",
-    }
-    config = compile_config(raw, config_dir=tmp_path)
-    handoff = config.output_dir / "handoff" / "evidence.jsonl"
-    handoff.parent.mkdir(parents=True)
-    handoff.write_text('{"source":"tfidf"}\n', encoding="utf-8")
-    (handoff.parent / "complete.json").write_text("{}", encoding="utf-8")
-    stage2_dir = config.output_dir / "stage2"
-    stage2_dir.mkdir(parents=True)
-    (stage2_dir / "complete.json").write_text(
-        json.dumps({"status": "complete", "component": "stage2"}),
-        encoding="utf-8",
-    )
-    calls = []
-
-    def finish_stage2(*, output_dir, **kwargs):
-        calls.append(kwargs)
-        (output_dir / "causal_estimate.json").write_text("{}", encoding="utf-8")
-        (output_dir / "cross_fitted_predictions.csv").write_text(
-            "_oci_row_id,aipw_score\n", encoding="utf-8"
-        )
-        (output_dir / "posthoc_oracle_ite_metrics.json").write_text(
-            '{"available":false}\n', encoding="utf-8"
-        )
-        return {"phase": "causal_estimation"}
-
-    monkeypatch.setattr(all_evidence_workflow, "run_plain_handoff_stage2", finish_stage2)
-
-    result = ResearchAllEvidenceWorkflow(config).run()
-
-    assert result["components"]["stage2"]["status"] == "complete"
-    assert len(calls) == 1
-
-
-def test_completed_legacy_stage2_without_oracle_metrics_is_backfilled(
-    tmp_path,
-    monkeypatch,
-):
-    raw, _config = _inputs(tmp_path, components=())
-    raw["run"]["mode"] = "stage2"
-    raw["stage2"] = {
-        "endpoint": "http://stage2.test/v1",
-        "model": "test-model",
-    }
-    config = compile_config(raw, config_dir=tmp_path)
-    handoff = config.output_dir / "handoff" / "evidence.jsonl"
-    handoff.parent.mkdir(parents=True)
-    handoff.write_text('{"source":"tfidf"}\n', encoding="utf-8")
-    (handoff.parent / "complete.json").write_text("{}", encoding="utf-8")
-    stage2_dir = config.output_dir / "stage2"
-    stage2_dir.mkdir(parents=True)
-    (stage2_dir / "causal_estimate.json").write_text("{}", encoding="utf-8")
-    (stage2_dir / "cross_fitted_predictions.csv").write_text(
-        "_oci_row_id,aipw_score,estimated_cate\n", encoding="utf-8"
-    )
-    (stage2_dir / "complete.json").write_text(
-        json.dumps(
-            {
-                "status": "complete",
-                "component": "stage2",
-                "phase": "causal_estimation",
-            }
-        ),
-        encoding="utf-8",
-    )
-    calls = []
-
-    def backfill_stage2(*, output_dir, **kwargs):
-        calls.append(kwargs)
-        (output_dir / "posthoc_oracle_ite_metrics.json").write_text(
-            '{"available":false}\n', encoding="utf-8"
-        )
-        return {"phase": "causal_estimation"}
-
-    monkeypatch.setattr(all_evidence_workflow, "run_plain_handoff_stage2", backfill_stage2)
-
-    result = ResearchAllEvidenceWorkflow(config).run()
-
-    assert result["components"]["stage2"]["status"] == "complete"
-    assert len(calls) == 1
-
-
 def test_stage2_endpoint_makes_full_run_the_default(tmp_path):
     raw, _config = _inputs(tmp_path)
     raw["stage2"] = {
@@ -1416,22 +1180,20 @@ def test_saved_run_config_can_start_stage2_with_endpoint_only(tmp_path):
             "--config",
             str(saved_config),
             "--stage2-only",
-            "--stage2-endpoint",
-            "http://stage2.test/v1",
-            "--stage2-extraction-feature-batch-size",
-            "7",
-            "--stage2-cluster-similarity-threshold",
-            "0.7",
-            "--stage2-max-tokens",
-            "150000",
-            "--stage2-extraction-max-tokens",
-            "70000",
-            "--stage2-extraction-chunk-size-tokens",
-            "45000",
-            "--stage2-extraction-context-window-tokens",
-            "140000",
-            "--stage2-extraction-context-margin-tokens",
-            "1500",
+            "--set",
+            "stage2.endpoint=http://stage2.test/v1",
+            "--set",
+            "stage2.extraction_feature_batch_size=7",
+            "--set",
+            "stage2.max_tokens=150000",
+            "--set",
+            "stage2.extraction_max_tokens=70000",
+            "--set",
+            "stage2.extraction_chunk_size_tokens=45000",
+            "--set",
+            "stage2.extraction_context_window_tokens=140000",
+            "--set",
+            "stage2.extraction_context_margin_tokens=1500",
         ]
     )
 
@@ -1444,7 +1206,6 @@ def test_saved_run_config_can_start_stage2_with_endpoint_only(tmp_path):
     assert resumed.stage2.endpoint == "http://stage2.test/v1"
     assert resumed.stage2.model == ""
     assert resumed.stage2.extraction_feature_batch_size == 7
-    assert resumed.stage2.agentic_selection.cluster_similarity_threshold == 0.7
     assert resumed.stage2.max_tokens == 150_000
     assert resumed.stage2.extraction_max_tokens == 70_000
     assert resumed.stage2.extraction_chunk_size_tokens == 45_000
@@ -1455,45 +1216,46 @@ def test_saved_run_config_can_start_stage2_with_endpoint_only(tmp_path):
     assert resumed.htr_enabled == original.htr_enabled
 
 
-def test_reselection_migrates_retired_screen_fields_in_saved_full_run_config(tmp_path):
+def test_extraction_route_flag_replaces_the_saved_route(tmp_path):
     _raw, original = _inputs(tmp_path)
     saved = original.as_dict()
-    saved["components"] = [*saved["components"], "stage2"]
-    saved["mode"] = "full"
     saved["stage2"] = {
         "endpoint": "http://stage2.test/v1",
-        "model": "primary-model",
-        "extraction_llm": {
-            "endpoint": "http://extract.test/v1",
-            "model": "extractor-model",
-        },
-        "selection_workers": 8,
-        "confounder_p_value_threshold": 0.05,
-        "confounder_min_inner_fold_fraction": 0.75,
-        "effect_modifier_p_value_threshold": 0.05,
-        "effect_modifier_min_inner_fold_fraction": 0.75,
+        "extraction_llm": {"endpoint": "http://extract.test/v1", "model": "small"},
     }
-    saved_path = tmp_path / "completed_run_config.json"
-    saved_path.write_text(json.dumps(saved, default=str), encoding="utf-8")
+    saved_config = tmp_path / "run_config.json"
+    saved_config.write_text(json.dumps(saved, default=str), encoding="utf-8")
+    endpoints = [{"endpoint": "http://pool.test/v1", "max_concurrency": 4}]
     args = build_parser().parse_args(
         [
             "--config",
-            str(saved_path),
+            str(saved_config),
             "--stage2-only",
-            "--stage2-reselect",
+            "--stage2-extraction-endpoints",
+            json.dumps(endpoints),
+            "--stage2-extraction-vllm-extra-arg=--max-model-len",
+            "--stage2-extraction-vllm-extra-arg",
+            "4096",
         ]
     )
 
-    raw, config_dir = _raw_config_from_args(args)
-    resumed = compile_config(raw, config_dir=config_dir)
+    raw, _config_dir = _raw_config_from_args(args)
 
-    assert resumed.components == ("stage2",)
-    assert resumed.stage2 is not None
-    assert resumed.stage2.agentic_selection.cluster_similarity_threshold == 0.60
-    assert resumed.stage2.input_temporal_scope == "pre_index_treatment"
-    assert not set(raw["stage2"]).intersection(
-        all_evidence_workflow.RETIRED_STAGE2_SCREEN_CONFIG_KEYS
-    )
+    extraction = raw["stage2"]["extraction_llm"]
+    assert "endpoint" not in extraction
+    assert extraction["endpoints"] == endpoints
+    assert extraction["model"] == "small"
+    assert extraction["vllm"] == {"extra_args": ["--max-model-len", "4096"]}
+
+
+def test_every_cli_option_is_documented():
+    parser = build_parser()
+    undocumented = [
+        action.option_strings
+        for action in parser._actions
+        if action.option_strings and not action.help
+    ]
+    assert undocumented == []
 
 
 def test_old_stage2_command_is_rejected_instead_of_silently_ignored(tmp_path):

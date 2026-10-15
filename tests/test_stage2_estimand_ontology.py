@@ -325,6 +325,9 @@ def test_pipeline_freezes_winners_before_heldout_extraction_and_passes_to_select
     monkeypatch.setattr(analysis, "_request_aggregate_ontology_supervisor", lambda **kw: (kw["definitions"], False, {"changed_feature_ids": []}))
     monkeypatch.setattr(analysis, "extract_rows", measure)
     monkeypatch.setattr(analysis, "_run_stage2_statistical_selection", select)
+    from oci.inference import stage2_modifier_count
+    monkeypatch.setattr(stage2_modifier_count, "select_modifier_count",
+                        lambda **kw: (kw["selected"], kw["role_report"], None))
     monkeypatch.setattr(analysis, "estimate_outer_fold", estimate)
     monkeypatch.setattr(search, "refine_estimand_ontologies", refine)
     result = analysis.run_fold_analysis(
@@ -335,7 +338,7 @@ def test_pipeline_freezes_winners_before_heldout_extraction_and_passes_to_select
         request_json=lambda *a, **k: pytest.fail("unexpected LLM request"),
         config=PlainHandoffStage2Config(endpoint="http://test/v1", model="test", max_review_rounds=1,
             estimand_ontology=EstimandOntologyConfig(enabled=estimand_enabled),
-            role_adjudication=Stage2RoleAdjudicationConfig(enabled=False)),
+            role_adjudication=Stage2RoleAdjudicationConfig()),
     )
     assert events[-1] == ("estimated",)
     assert result["candidate_missingness_filter"]["dropped_feature_ids"] == ["private_rare"]

@@ -242,7 +242,7 @@ def unavailable_explicit_architectures(
 
     Naming either optional lexical lane explicitly opts into it. Its false
     default does not veto the selector that enables it in the applied mapping;
-    embedding availability and orphan score-test prerequisites still apply.
+    the semantic-retrieval lane still requires the embedding cache.
     """
 
     available = set(
@@ -254,8 +254,7 @@ def unavailable_explicit_architectures(
     mm_config = applied_config.architecture.multi_model_forest
     if bool(getattr(mm_config.embedding_contrast, "enabled", False)):
         available.add(TFIDF_SEMANTIC_RETRIEVAL)
-    if bool(getattr(mm_config.tfidf_topic, "score_test_enabled", True)):
-        available.add(TFIDF_ORPHAN_NGRAMS)
+    available.add(TFIDF_ORPHAN_NGRAMS)
     return tuple(name for name in STAGE1_ARCHITECTURES if name in set(selected) - available)
 
 

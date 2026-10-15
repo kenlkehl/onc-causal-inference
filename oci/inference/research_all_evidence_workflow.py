@@ -1,13 +1,25 @@
-"""A small, researcher-facing runner for the all-evidence workflow.
+"""Command-line runner for the two-stage all-evidence workflow.
 
-The production workflow in this repository grew a large control plane around
-the modeling code.  This module deliberately does not reproduce it.  A run is
-just an ordered set of component directories.  A component is complete when
-``complete.json`` exists in its directory; otherwise it is run again in place.
+A run is an ordered list of components, each writing into its own directory
+under the output directory: the Stage 1 evidence producers
+(``embedding_cache``, ``tfidf``, ``text_models``, ``neural_queries``), the
+``handoff`` that collects their fold-scoped evidence, and ``stage2``, which
+reviews that evidence, extracts the resulting features from patient text, and
+estimates treatment effects.  A component is complete when ``complete.json``
+exists in its directory.  Rerunning the same command skips complete components
+and re-enters incomplete ones, so the output directory is the checkpoint.
 
-This runner adds no run identities, artifact authentication, immutable
-manifests, checkpoint-adoption rules, or resume flags.  The output directory
-is the checkpoint.
+The module also provides:
+
+* configuration compilation from a JSON or YAML file plus command-line
+  overrides (``compile_config``).  The resolved settings are written to
+  ``run_config.json`` so that a later Stage 2-only run can reuse them;
+* the optional Stage 1 architecture selector, which is recorded in
+  ``stage1_architectures/manifest.json`` and cannot change on resume;
+* guarded Stage 2 reselection (``--stage2-reselect``).  It archives a completed
+  Stage 2 selection and everything downstream of it under
+  ``stage2/reselection_archives`` and reruns selection from the frozen feature
+  definitions and training-fold extractions.
 """
 
 from __future__ import annotations
@@ -40,7 +52,6 @@ from .plain_handoff_stage2_analysis import (
     _frame_fingerprint,
     frozen_measurement_definition_identity,
     frozen_preselection_review_policy,
-    infrastructure_failure_audit_paths,
 )
 from .stage2_elastic_net_selection import TEMPORAL_SCOPE as STAGE2_INPUT_TEMPORAL_SCOPE
 from .stage2_sequential_consolidation import (
@@ -57,7 +68,6 @@ from .stage1_architectures import (
     NEURAL_QUERY_MOMENTS,
     TFIDF_ORPHAN_NGRAMS,
     TFIDF_SEMANTIC_RETRIEVAL,
-    TFIDF_TOPICS,
     canonicalize_stage1_architectures,
     legacy_enabled_stage1_architectures,
     resolve_support_services,
@@ -82,37 +92,8 @@ STAGE1_COMPONENT_ORDER = (
     "neural_queries",
     "handoff",
 )
-COMPONENT_ORDER = STAGE1_COMPONENT_ORDER
 WORKFLOW_COMPONENT_ORDER = (*STAGE1_COMPONENT_ORDER, "stage2")
 STAGE2_RESELECTION_SCHEMA_VERSION = "stage2_reselection_migration_v1"
-LEGACY_STAGE2_SELECTION_SCHEMA_VERSION = (
-    "stage2_inner_fold_univariate_selection_v2_loky_omnibus"
-)
-RETIRED_AGENTIC_STAGE2_SELECTION_SCHEMA_VERSION = "stage2_agentic_role_selection_v1"
-RETIRED_ELASTIC_NET_STAGE2_SELECTION_SCHEMA_VERSION = (
-    "stage2_elastic_net_rlearner_selection_v1"
-)
-RETIRED_GROUP_ELASTIC_NET_STAGE2_SELECTION_SCHEMA_VERSION = (
-    "stage2_group_elastic_net_rlearner_selection_v3_any_fold_union"
-)
-RETIRED_ANY_INNER_FOLD_STAGE2_SELECTION_SCHEMA_VERSION = (
-    "stage2_group_elastic_net_rlearner_selection_v6_any_inner_fold_union"
-)
-RETIRED_UNIVARIABLE_STAGE2_SELECTION_SCHEMA_VERSION = (
-    "stage2_group_elastic_net_univariable_modifier_selection_v7_top_n_union"
-)
-RETIRED_CANDIDATE_AUGMENTED_STAGE2_SELECTION_SCHEMA_VERSION = (
-    "stage2_candidate_augmented_rlearner_selection_v8_elastic_net_nuisance_top_n_union"
-)
-RETIRED_STAGE2_SCREEN_CONFIG_KEYS = frozenset(
-    {
-        "selection_workers",
-        "confounder_p_value_threshold",
-        "confounder_min_inner_fold_fraction",
-        "effect_modifier_p_value_threshold",
-        "effect_modifier_min_inner_fold_fraction",
-    }
-)
 
 
 def _now() -> str:
@@ -884,12 +865,7 @@ def _run_one_text_model_context(
 ) -> dict[str, Any]:
     """Fit and immediately publish one independently resumable context."""
 
-    import torch
-
-    from .multi_model_forest_stage1 import (
-        resolve_multi_model_forest_stage1_parallel_plan,
-        run_multi_model_forest_handoff_contexts,
-    )
+    from .multi_model_forest_stage1 import run_multi_model_forest_handoff_context
     from .stage1_checkpointing import (
         Stage1CheckpointStore,
         dataset_file_identity,
@@ -965,27 +941,19 @@ def _run_one_text_model_context(
         },
         base_seed=int(getattr(applied_config, "seed", 0) or 0),
     )
-    mm_config = applied_config.architecture.multi_model_forest
-    gpu_ids = _cuda_ids((device,))
-    plan = resolve_multi_model_forest_stage1_parallel_plan(
-        cpus_total=max(1, int(cpu_workers)),
-        num_workers=max(1, int(cpu_workers)),
-        gpu_ids=gpu_ids,
-        htr_jobs_per_gpu=1,
-        htr_enabled=bool(mm_config.htr_evidence_enabled),
-        embedding_enabled=bool(mm_config.embedding_contrast.enabled),
-    )
     with checkpoint_store.context_lock():
         def compute_handoff_rows() -> list[dict[str, Any]]:
-            return run_multi_model_forest_handoff_contexts(
-                dataset=dataset,
-                config=applied_config,
-                contexts=[dict(spec)],
-                handoff_dir=context_dir,
-                plan=plan,
-                base_device=torch.device(device),
-                checkpoint_store=checkpoint_store,
-            )
+            return [
+                run_multi_model_forest_handoff_context(
+                    dataset=dataset,
+                    config=applied_config,
+                    context=dict(spec),
+                    handoff_dir=context_dir,
+                    device=device,
+                    num_workers=max(1, int(cpu_workers)),
+                    checkpoint_store=checkpoint_store,
+                )
+            ]
 
         def validate_handoff_rows(value: Any) -> None:
             if not isinstance(value, list) or len(value) != 1:
@@ -1448,8 +1416,6 @@ def _handoff_component(
     source_references: dict[str, str] = {}
     source_artifacts: dict[str, Path] = {}
     for source, source_path in sources.items():
-        # Remove obsolete full-size copies left by the legacy handoff writer.
-        (component_dir / f"{source}.jsonl").unlink(missing_ok=True)
         if not source_path.is_file() or source_path.stat().st_size == 0:
             continue
         source_artifacts[source] = source_path
@@ -1893,43 +1859,7 @@ class ResearchAllEvidenceWorkflow:
             for name in self.components:
                 component_dir = self._component_dir(name)
                 complete_path = component_dir / "complete.json"
-                stage2_is_final = True
-                if name == "stage2" and complete_path.is_file():
-                    try:
-                        stage2_completion = json.loads(
-                            complete_path.read_text(encoding="utf-8")
-                        )
-                    except (OSError, json.JSONDecodeError):
-                        stage2_completion = {}
-                    stage2_is_final = (
-                        stage2_completion.get("phase") == "causal_estimation"
-                        and (component_dir / "causal_estimate.json").is_file()
-                        and (component_dir / "cross_fitted_predictions.csv").is_file()
-                        and (component_dir / "posthoc_oracle_ite_metrics.json").is_file()
-                    )
-                    if not stage2_is_final:
-                        LOGGER.info(
-                            "continue incomplete or legacy Stage 2 output: %s",
-                            component_dir,
-                        )
-                    infrastructure_audits = infrastructure_failure_audit_paths(
-                        component_dir
-                    )
-                    if infrastructure_audits:
-                        LOGGER.warning(
-                            "continue Stage 2 to repair %s legacy infrastructure "
-                            "failure checkpoint(s): %s",
-                            len(infrastructure_audits),
-                            component_dir,
-                        )
-                        os.replace(
-                            complete_path,
-                            complete_path.with_name(
-                                "superseded_infrastructure_complete.json"
-                            ),
-                        )
-                        stage2_is_final = False
-                if complete_path.is_file() and stage2_is_final:
+                if complete_path.is_file():
                     LOGGER.info("component already complete: %s", name)
                     progress["components"][name] = {
                         "status": "already_complete",
@@ -1985,10 +1915,6 @@ class ResearchAllEvidenceWorkflow:
         return progress
 
 
-# Backward-compatible class name for callers that imported the Stage 1-era API.
-ResearchAllEvidenceStage1 = ResearchAllEvidenceWorkflow
-
-
 def _read_json_object(path: Path, *, description: str) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -2028,15 +1954,10 @@ def _stage2_reselection_policy_fingerprint(config: ResearchStage1Config) -> str:
                 else {}
             ),
             "role_selection_schema_version": STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
-            "input_temporal_scope": config.stage2.input_temporal_scope,
+            "input_temporal_scope": STAGE2_INPUT_TEMPORAL_SCOPE,
             "selection_consolidation": (config.stage2.selection_consolidation.scientific_dict()),
             "statistical_selection": (config.stage2.statistical_selection.public_dict()),
-            **(
-                {"modifier_count_estimation_trees": config.stage2.estimation_trees}
-                if config.stage2.statistical_selection.selection_mode == "multi_model"
-                and config.stage2.statistical_selection.multi_model.modifier_count.enabled
-                else {}
-            ),
+            "modifier_count_estimation_trees": config.stage2.estimation_trees,
             "review_policy": frozen_preselection_review_policy(config.stage2),
             **({"estimand_ontology": config.stage2.estimand_ontology.public_dict()}
                if config.stage2.estimand_ontology.enabled else {}),
@@ -2085,8 +2006,6 @@ def _heldout_measurement_cache_snapshot(
     if not raw_path.is_file():
         return None
     raw_dependencies = final_output.get("measurement_dependencies")
-    if raw_dependencies is None:
-        raw_dependencies = final_output.get("features")
     if not isinstance(raw_dependencies, list) or not all(
         isinstance(definition, Mapping) for definition in raw_dependencies
     ):
@@ -2235,140 +2154,17 @@ def _resume_reselection_archive_moves(
     return state
 
 
-def _backfill_reselection_heldout_caches(
-    *,
-    stage2_dir: Path,
-    state: Mapping[str, Any],
-    config: ResearchStage1Config,
-) -> dict[str, Any]:
-    """Upgrade an already-prepared v1 migration with held-out cache manifests."""
-
-    archive_relative = Path(str(state.get("archive_path") or ""))
-    if (
-        not archive_relative.parts
-        or archive_relative.is_absolute()
-        or ".." in archive_relative.parts
-    ):
-        raise RuntimeError("Stage 2 reselection archive path is invalid")
-    resolved_stage2 = stage2_dir.resolve()
-    archive_dir = (stage2_dir / archive_relative).resolve()
-    if resolved_stage2 not in archive_dir.parents:
-        raise RuntimeError("Stage 2 reselection archive escapes the Stage 2 directory")
-    archive_artifacts = archive_dir / "artifacts"
-    dataset = _load_reselection_dataset(config)
-    cached_folds: list[int] = []
-    unavailable_folds: list[int] = []
-    for raw_outer_fold in state.get("outer_folds") or []:
-        outer_fold = int(raw_outer_fold)
-        outer_name = f"outer_{outer_fold:03d}"
-        outer_dir = stage2_dir / outer_name
-        snapshot_path = outer_dir / "preselection" / "input.json"
-        completion_path = outer_dir / "preselection" / "complete.json"
-        snapshot = _read_json_object(
-            snapshot_path,
-            description=f"outer fold {outer_fold} frozen preselection snapshot",
-        )
-        completion = _read_json_object(
-            completion_path,
-            description=f"outer fold {outer_fold} frozen preselection completion",
-        )
-        snapshot_value = {
-            str(key): copy.deepcopy(value)
-            for key, value in snapshot.items()
-            if key != "input_fingerprint"
-        }
-        current_fingerprint = _stage2_value_fingerprint(snapshot_value)
-        if (
-            snapshot.get("schema_version") != PRESELECTION_SNAPSHOT_SCHEMA_VERSION
-            or completion.get("schema_version")
-            != PRESELECTION_SNAPSHOT_SCHEMA_VERSION
-            or snapshot.get("input_fingerprint") != current_fingerprint
-            or completion.get("input_fingerprint") != current_fingerprint
-        ):
-            raise RuntimeError(
-                f"outer fold {outer_fold} frozen preselection snapshot cannot be upgraded"
-            )
-        existing_cache = snapshot.get("heldout_measurement_cache")
-        if isinstance(existing_cache, Mapping):
-            if (
-                existing_cache.get("schema_version")
-                != HELDOUT_MEASUREMENT_CACHE_SCHEMA_VERSION
-            ):
-                raise RuntimeError(
-                    f"outer fold {outer_fold} has an incompatible held-out cache schema"
-                )
-            cached_folds.append(outer_fold)
-            continue
-
-        matrix_relative = Path(str(snapshot.get("matrix_path") or ""))
-        if (
-            not matrix_relative.parts
-            or matrix_relative.is_absolute()
-            or ".." in matrix_relative.parts
-        ):
-            raise RuntimeError(
-                f"outer fold {outer_fold} frozen matrix path is invalid"
-            )
-        matrix = pd.read_csv(outer_dir / matrix_relative)
-        fit_ids = pd.to_numeric(matrix["_oci_row_id"], errors="raise").astype(int).tolist()
-        archived_outer_dir = archive_artifacts / outer_name
-        archived_final_path = archived_outer_dir / "final_definitions.json"
-        if not archived_final_path.is_file():
-            unavailable_folds.append(outer_fold)
-            continue
-        final_output = _read_json_object(
-            archived_final_path,
-            description=f"outer fold {outer_fold} archived final definitions",
-        )
-        cache = _heldout_measurement_cache_snapshot(
-            source_outer_dir=archived_outer_dir,
-            dataset=dataset,
-            fit_ids=fit_ids,
-            final_output=final_output,
-            config=config,
-        )
-        if cache is None:
-            unavailable_folds.append(outer_fold)
-            continue
-        snapshot_value["heldout_measurement_cache"] = cache
-        upgraded_fingerprint = _stage2_value_fingerprint(snapshot_value)
-        _write_json(
-            snapshot_path,
-            {**snapshot_value, "input_fingerprint": upgraded_fingerprint},
-        )
-        completion["input_fingerprint"] = upgraded_fingerprint
-        completion["heldout_measurement_cache_schema_version"] = (
-            HELDOUT_MEASUREMENT_CACHE_SCHEMA_VERSION
-        )
-        _write_json(completion_path, completion)
-        cached_folds.append(outer_fold)
-
-    upgraded_state = dict(state)
-    upgraded_state["heldout_measurement_cache_schema_version"] = (
-        HELDOUT_MEASUREMENT_CACHE_SCHEMA_VERSION
-    )
-    upgraded_state["heldout_measurement_cache_folds"] = sorted(cached_folds)
-    upgraded_state["heldout_measurement_cache_unavailable_folds"] = sorted(
-        unavailable_folds
-    )
-    _write_json(archive_dir / "manifest.json", upgraded_state)
-    _write_json(stage2_dir / "reselection_state.json", upgraded_state)
-    return upgraded_state
-
-
 def prepare_stage2_reselection(
     *,
     config: ResearchStage1Config,
     dry_run: bool = False,
-    source_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Freeze verified preselection inputs and archive selection-and-later output.
 
     The operation is intentionally fail-closed.  Every fold is checked before
     any completed result is moved, and interrupted archival can be resumed from
     ``reselection_state.json``. ``dry_run`` performs the same compatibility
-    checks without writing snapshots or moving results. An archived ``source_dir``
-    is accepted only for that read-only validation.
+    checks without writing snapshots or moving results.
     """
 
     if config.components != ("stage2",):
@@ -2378,16 +2174,7 @@ def prepare_stage2_reselection(
         )
     if config.stage2 is None:
         raise ValueError("--stage2-reselect requires a Stage 2 configuration")
-    if config.stage2.input_temporal_scope != STAGE2_INPUT_TEMPORAL_SCOPE:
-        raise ValueError(
-            "--stage2-reselect requires input_temporal_scope="
-            f"{STAGE2_INPUT_TEMPORAL_SCOPE!r}"
-        )
     stage2_dir = config.output_dir / "stage2"
-    if source_dir is not None:
-        if not dry_run:
-            raise ValueError("source_dir requires read-only reselection validation")
-        stage2_dir = Path(source_dir).resolve(strict=True)
     if not stage2_dir.is_dir():
         raise RuntimeError(f"no existing Stage 2 output to reselect: {stage2_dir}")
     policy_fingerprint = _stage2_reselection_policy_fingerprint(config)
@@ -2409,19 +2196,12 @@ def prepare_stage2_reselection(
             if dry_run:
                 _validate_reselection_archive_moves(stage2_dir, prior_state)
                 return {**prior_state, "dry_run": True}
-            resumed = (
-                _resume_reselection_archive_moves(
+            if prior_state.get("status") == "preparing":
+                return _resume_reselection_archive_moves(
                     stage2_dir=stage2_dir,
                     state=prior_state,
                 )
-                if prior_state.get("status") == "preparing"
-                else prior_state
-            )
-            return _backfill_reselection_heldout_caches(
-                stage2_dir=stage2_dir,
-                state=resumed,
-                config=config,
-            )
+            return prior_state
         if (
             prior_state.get("status") == "complete"
             and prior_state.get("policy_fingerprint") == policy_fingerprint
@@ -2552,41 +2332,12 @@ def prepare_stage2_reselection(
             description=f"outer fold {outer_fold} selection completion",
         )
         source_schema = str(selection_input.get("schema_version") or "")
-        if source_schema not in {
-            LEGACY_STAGE2_SELECTION_SCHEMA_VERSION,
-            RETIRED_AGENTIC_STAGE2_SELECTION_SCHEMA_VERSION,
-            RETIRED_ELASTIC_NET_STAGE2_SELECTION_SCHEMA_VERSION,
-            RETIRED_GROUP_ELASTIC_NET_STAGE2_SELECTION_SCHEMA_VERSION,
-            RETIRED_ANY_INNER_FOLD_STAGE2_SELECTION_SCHEMA_VERSION,
-            RETIRED_UNIVARIABLE_STAGE2_SELECTION_SCHEMA_VERSION,
-            RETIRED_CANDIDATE_AUGMENTED_STAGE2_SELECTION_SCHEMA_VERSION,
-            STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
-        }:
+        if source_schema != STAGE2_ROLE_SELECTION_SCHEMA_VERSION:
             raise RuntimeError(
                 f"outer fold {outer_fold} has unsupported selection schema "
                 f"{source_schema!r}"
             )
-        report_name = {
-            LEGACY_STAGE2_SELECTION_SCHEMA_VERSION: "statistical_selection.json",
-            RETIRED_AGENTIC_STAGE2_SELECTION_SCHEMA_VERSION: "agentic_selection.json",
-            RETIRED_ELASTIC_NET_STAGE2_SELECTION_SCHEMA_VERSION: (
-                "elastic_net_selection.json"
-            ),
-            RETIRED_GROUP_ELASTIC_NET_STAGE2_SELECTION_SCHEMA_VERSION: (
-                "elastic_net_selection.json"
-            ),
-            RETIRED_ANY_INNER_FOLD_STAGE2_SELECTION_SCHEMA_VERSION: (
-                "elastic_net_selection.json"
-            ),
-            RETIRED_UNIVARIABLE_STAGE2_SELECTION_SCHEMA_VERSION: (
-                "elastic_net_selection.json"
-            ),
-            RETIRED_CANDIDATE_AUGMENTED_STAGE2_SELECTION_SCHEMA_VERSION: (
-                "elastic_net_selection.json"
-            ),
-            STAGE2_ROLE_SELECTION_SCHEMA_VERSION: "elastic_net_selection.json",
-        }[source_schema]
-        if not (outer_dir / "selection" / report_name).is_file():
+        if not (outer_dir / "selection" / "elastic_net_selection.json").is_file():
             raise RuntimeError(
                 f"outer fold {outer_fold} is missing its completed selection report"
             )
@@ -2620,8 +2371,7 @@ def prepare_stage2_reselection(
         ):
             raise RuntimeError(f"outer fold {outer_fold} selection feature names are invalid")
 
-        matrix_relative = Path(str(selection_input.get("preselection_matrix_path")
-                                   or "extraction/all_candidates_fit/extracted.csv"))
+        matrix_relative = Path(str(selection_input.get("preselection_matrix_path") or ""))
         if (matrix_relative.is_absolute() or ".." in matrix_relative.parts
                 or not matrix_relative.is_relative_to(Path("extraction"))):
             raise RuntimeError("preselection matrix path must remain under the fold extraction directory")
@@ -2671,18 +2421,12 @@ def prepare_stage2_reselection(
         )
         convergence = final_output.get("review_convergence")
         if not isinstance(convergence, Mapping):
-            convergence_path = outer_dir / "ontology_supervision" / "convergence.json"
-            convergence = _read_json_object(
-                convergence_path,
-                description=f"outer fold {outer_fold} review convergence",
+            raise RuntimeError(
+                f"outer fold {outer_fold} final definitions have no review convergence"
             )
         review_metadata = {
             "review_rounds": int(final_output.get("review_rounds") or 0),
-            "evaluation_rounds": int(
-                final_output.get("evaluation_rounds")
-                or final_output.get("review_rounds")
-                or 0
-            ),
+            "evaluation_rounds": int(final_output.get("evaluation_rounds") or 0),
             "review_converged": bool(final_output.get("review_converged")),
             "review_convergence": copy.deepcopy(dict(convergence)),
             "ontology_refinement_rounds": int(
@@ -2818,6 +2562,19 @@ def prepare_stage2_reselection(
         "outer_folds": [
             int(snapshot["outer_fold"]) for snapshot in snapshot_payloads.values()
         ],
+        "heldout_measurement_cache_schema_version": (
+            HELDOUT_MEASUREMENT_CACHE_SCHEMA_VERSION
+        ),
+        "heldout_measurement_cache_folds": sorted(
+            int(snapshot["outer_fold"])
+            for snapshot in snapshot_payloads.values()
+            if "heldout_measurement_cache" in snapshot
+        ),
+        "heldout_measurement_cache_unavailable_folds": sorted(
+            int(snapshot["outer_fold"])
+            for snapshot in snapshot_payloads.values()
+            if "heldout_measurement_cache" not in snapshot
+        ),
         "planned_artifacts": planned_paths,
         "preserved_artifacts": [
             "evidence_compilation",
@@ -2834,12 +2591,7 @@ def prepare_stage2_reselection(
     }
     _write_json(archive_dir / "manifest.json", state)
     _write_json(state_path, state)
-    prepared = _resume_reselection_archive_moves(stage2_dir=stage2_dir, state=state)
-    return _backfill_reselection_heldout_caches(
-        stage2_dir=stage2_dir,
-        state=prepared,
-        config=config,
-    )
+    return _resume_reselection_archive_moves(stage2_dir=stage2_dir, state=state)
 
 
 def finalize_stage2_reselection(
@@ -2883,44 +2635,97 @@ def iter_stage1_handoff(output_dir: Path | str) -> Iterable[Mapping[str, Any]]:
                 yield json.loads(line)
 
 
-def iter_stage1_architecture_evidence(
-    output_dir: Path | str,
-    architecture: str | None = None,
-) -> Iterable[Mapping[str, Any]]:
-    """Yield the additive per-architecture Stage 1 evidence rows."""
-
-    from .stage1_architecture_artifacts import iter_stage1_architecture_evidence as _iter
-
-    yield from _iter(output_dir, architecture)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run the simple, automatically resumable all-evidence workflow."
+        description=(
+            "Run or resume the all-evidence workflow: Stage 1 evidence producers, "
+            "the fold-scoped handoff, and Stage 2 review, extraction, selection, "
+            "and estimation.  Rerun the same command to continue an interrupted run."
+        ),
+        epilog=(
+            "Every configuration value, including all stage2.* settings, can be "
+            "changed with --set KEY=VALUE, for example "
+            "--set stage2.endpoint=http://127.0.0.1:8010/v1 "
+            "--set stage2.model=MODEL --set stage2.workers=16 "
+            "--set stage2.extraction_llm.model=MODEL "
+            "--set stage2.vllm.gpus=cuda:0,cuda:1 --set stage2.vllm.gpus_per_server=1."
+        ),
     )
-    parser.add_argument("--config", type=Path, help="JSON or YAML run configuration")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help=(
+            "JSON or YAML run configuration, for example "
+            "example_configs/research_all_evidence.json or a saved "
+            "OUTPUT_DIR/run_config.json"
+        ),
+    )
     parser.add_argument("--dataset", type=Path, help="input Parquet or CSV dataset")
-    parser.add_argument("--output-dir", type=Path, help="directory for all run output")
-    parser.add_argument("--unit-id-column")
-    parser.add_argument("--text-column")
-    parser.add_argument("--treatment-column")
-    parser.add_argument("--outcome-column")
-    parser.add_argument("--outcome-type", choices=("binary", "continuous"))
-    parser.add_argument("--clinical-question")
-    parser.add_argument("--outer-folds", type=int)
-    parser.add_argument("--inner-folds", type=int)
-    parser.add_argument("--seed", type=int)
-    parser.add_argument("--devices", help="comma-separated devices, for example cuda:0,cuda:1")
-    parser.add_argument("--workers", type=int)
-    parser.add_argument("--components", help="comma-separated component names")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="directory for all run output; it is also the resume checkpoint",
+    )
+    parser.add_argument(
+        "--unit-id-column", help="unique patient identifier column (default: patient_id)"
+    )
+    parser.add_argument(
+        "--text-column", help="clinical text column (default: clinical_text)"
+    )
+    parser.add_argument(
+        "--treatment-column",
+        help="binary treatment column (default: treatment_indicator)",
+    )
+    parser.add_argument(
+        "--outcome-column", help="outcome column (default: outcome_indicator)"
+    )
+    parser.add_argument(
+        "--outcome-type",
+        choices=("binary", "continuous"),
+        help="outcome scale (default: binary)",
+    )
+    parser.add_argument(
+        "--clinical-question",
+        help="study question given to the Stage 1 and Stage 2 language models",
+    )
+    parser.add_argument(
+        "--outer-folds", type=int, help="outer cross-fitting folds (default: 5)"
+    )
+    parser.add_argument(
+        "--inner-folds",
+        type=int,
+        help="inner folds within each outer training fold (default: 5)",
+    )
+    parser.add_argument(
+        "--seed", type=int, help="seed for fold splits and models (default: 42)"
+    )
+    parser.add_argument(
+        "--devices",
+        help="comma-separated Stage 1 devices, for example cuda:0,cuda:1 (default: cpu)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        help=(
+            "CPU worker budget for Stage 1; also the default Stage 2 request "
+            "concurrency (default: 1)"
+        ),
+    )
     parser.add_argument(
         "--architectures",
         help=(
-            "comma-separated Stage 1 architecture names, or 'all'; "
-            "defaults to the legacy enable-flag resolution"
+            "comma-separated Stage 1 architecture names, or 'all' for all ten. "
+            "When omitted, the lanes enabled by the Stage 1 template run; with the "
+            "bundled template these are the eight default lanes (every "
+            "architecture except tfidf_semantic_retrieval_contrasts and "
+            "tfidf_orphan_ngrams). A selection is recorded in the output "
+            "directory and cannot change on resume"
         ),
     )
-    parser.add_argument("--htr-model")
+    parser.add_argument(
+        "--htr-model",
+        help="encoder for the HTR Stage 1 lanes (default: prajjwal1/bert-tiny)",
+    )
     parser.add_argument(
         "--disable-htr",
         action="store_true",
@@ -2929,19 +2734,26 @@ def build_parser() -> argparse.ArgumentParser:
             "retaining the other configured evidence families"
         ),
     )
-    parser.add_argument("--embedding-model")
-    parser.add_argument("--stage1-template", type=Path)
-    parser.add_argument("--neural-query-template", type=Path)
+    parser.add_argument(
+        "--embedding-model",
+        help=(
+            "embedding model for the embedding Stage 1 lanes "
+            "(default: Qwen/Qwen3-Embedding-8B)"
+        ),
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--stage1-only",
         action="store_true",
-        help="run/resume Stage 1 through the handoff and stop",
+        help="run or resume Stage 1 through the handoff and stop",
     )
     mode.add_argument(
         "--stage2-only",
         action="store_true",
-        help="skip Stage 1 and run/resume Stage 2 from the saved handoff",
+        help=(
+            "skip Stage 1 and run or resume Stage 2 from the saved handoff, "
+            "usually with --config OUTPUT_DIR/run_config.json"
+        ),
     )
     parser.add_argument(
         "--stage2-reselect",
@@ -2955,152 +2767,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--preflight-only",
         action="store_true",
-        help="validate saved Stage 1 and Stage 2 reuse without writing or running models",
-    )
-    parser.add_argument(
-        "--stage2-source",
-        type=Path,
-        help="archived Stage 2 source to validate; preflight and reselection only",
-    )
-    parser.add_argument("--stage2-endpoint", help="OpenAI-compatible Stage 2 base URL")
-    parser.add_argument(
-        "--stage2-model",
         help=(
-            "Stage 2 model; auto-discovered for a single external endpoint, "
-            "required for managed vLLM"
+            "with --stage2-only, validate the saved Stage 1 output and the Stage 2 "
+            "reuse plan without writing files or running models, then print a "
+            "JSON report"
         ),
     )
-    parser.add_argument("--stage2-api-key", help="endpoint key; defaults to OCI_STAGE2_API_KEY")
     extraction_routes = parser.add_mutually_exclusive_group()
     extraction_routes.add_argument(
         "--stage2-extraction-endpoint",
         help=(
-            "OpenAI-compatible endpoint for the small extraction model; may equal "
-            "the primary endpoint"
+            "OpenAI-compatible base URL of the extraction model; replaces any "
+            "stage2.extraction_llm.endpoints list inherited from --config"
         ),
     )
     extraction_routes.add_argument(
         "--stage2-extraction-endpoints",
         type=json.loads,
-        help="JSON array of prestarted extraction servers, each with endpoint and max_concurrency",
-    )
-    parser.add_argument(
-        "--stage2-extraction-model",
-        help="small extraction model; auto-discovered when the endpoint serves exactly one",
-    )
-    parser.add_argument(
-        "--stage2-extraction-api-key",
-        help="small-model key; defaults to OCI_STAGE2_EXTRACTION_API_KEY",
-    )
-    parser.add_argument(
-        "--stage2-extraction-workers",
-        type=int,
-        help="maximum concurrent small-model extraction requests",
-    )
-    parser.add_argument(
-        "--stage2-max-tokens",
-        type=int,
         help=(
-            "completion-token ceiling sent to primary-model Stage 2 requests; must "
-            "be at least 100000 and does not force responses to reach that length"
+            'JSON array of prestarted extraction servers, each {"endpoint": URL, '
+            '"max_concurrency": N}; replaces any stage2.extraction_llm.endpoint '
+            "inherited from --config"
         ),
-    )
-    parser.add_argument(
-        "--stage2-extraction-max-tokens",
-        type=int,
-        help=(
-            "completion-token ceiling sent to patient-extraction requests; must be "
-            "at least 4096 and defaults to 75000"
-        ),
-    )
-    parser.add_argument("--stage2-extraction-context-strategy", choices=("colbert", "full_record"))
-    parser.add_argument("--stage2-decision-preparation-workers", type=int,
-        help="shared CPU processes for decision prompt packing/tokenization (default: 0, in-process)")
-    parser.add_argument("--stage2-vllm-co-resident-all-gpus", type=int, choices=(0, 1),
-        help="keep both managed models on their configured GPU union (requires explicit memory budgets)")
-    parser.add_argument("--stage2-colbert-model")
-    parser.add_argument("--stage2-colbert-revision")
-    parser.add_argument("--stage2-colbert-devices", help="auto, cpu, or comma-separated logical CUDA devices")
-    parser.add_argument(
-        "--stage2-colbert-workers-per-device", type=int,
-        help="independent retrieval encoder workers per device (default: 1)",
-    )
-    parser.add_argument("--stage2-colbert-cache-dir")
-    parser.add_argument("--stage2-colbert-query-cache-max-bytes", type=int,
-        help="shared host-vector query cache budget (default: 1 GiB; 0 disables retention)")
-    parser.add_argument("--stage2-colbert-chunk-size", type=int)
-    parser.add_argument("--stage2-colbert-chunk-overlap", type=int)
-    parser.add_argument("--stage2-colbert-query-length", type=int)
-    parser.add_argument("--stage2-colbert-batch-size", type=int)
-    parser.add_argument("--stage2-colbert-top-k", type=int)
-    parser.add_argument(
-        "--stage2-extraction-chunk-size-tokens",
-        type=int,
-        help="maximum source tokens per ordered patient-record chunk (default: 50000)",
-    )
-    parser.add_argument(
-        "--stage2-extraction-context-window-tokens",
-        type=int,
-        help="extraction model context window used for exact request planning (default: 131072)",
-    )
-    parser.add_argument(
-        "--stage2-extraction-context-margin-tokens",
-        type=int,
-        help="tokens reserved beyond prompt plus completion for extraction safety (default: 1024)",
-    )
-    parser.add_argument(
-        "--stage2-vllm-servers",
-        type=int,
-        help="launch this many pipeline-owned vLLM servers for Stage 2",
-    )
-    parser.add_argument(
-        "--stage2-vllm-gpus",
-        help="comma-separated logical GPUs assigned across managed vLLM servers",
-    )
-    parser.add_argument(
-        "--stage2-vllm-gpus-per-server",
-        type=int,
-        help=(
-            "logical GPUs assigned to each managed primary-model server; derives "
-            "the replica count when --stage2-vllm-servers is omitted"
-        ),
-    )
-    parser.add_argument(
-        "--stage2-vllm-rapid-switch-seconds",
-        type=float,
-        help=(
-            "after two managed-model switches closer than this interval, keep "
-            "both Stage 2 vLLM roles resident on their configured GPU splits "
-            "(default: 900; 0 disables the fallback)"
-        ),
-    )
-    parser.add_argument(
-        "--stage2-vllm-base-port",
-        type=int,
-        help="first port for pipeline-owned vLLM servers (default: 8010)",
-    )
-    parser.add_argument(
-        "--stage2-vllm-internal-port-base",
-        type=int,
-        help="first internal vLLM rendezvous-port range (default: 20000)",
-    )
-    parser.add_argument(
-        "--stage2-vllm-download-dir",
-        help="Hugging Face model download/cache directory passed to vLLM",
-    )
-    parser.add_argument(
-        "--stage2-vllm-reasoning-parser",
-        help="vLLM reasoning parser; family-specific when omitted",
-    )
-    parser.add_argument(
-        "--stage2-vllm-language-model-only",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="enable or disable vLLM's language-model-only mode",
-    )
-    parser.add_argument(
-        "--stage2-vllm-default-chat-template-kwargs",
-        help="JSON object passed to vLLM --default-chat-template-kwargs",
     )
     parser.add_argument(
         "--stage2-vllm-extra-arg",
@@ -3108,54 +2796,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="TOKEN",
         help=(
-            "one additional vLLM CLI token; repeat for flags and values, "
-            "using --stage2-vllm-extra-arg=--flag for tokens beginning with --"
+            "one additional vLLM CLI token for the managed primary-model servers; "
+            "repeat for flags and values, using --stage2-vllm-extra-arg=--flag "
+            "for tokens beginning with --; replaces stage2.vllm.extra_args"
         ),
-    )
-    parser.add_argument(
-        "--stage2-extraction-vllm-servers",
-        type=int,
-        help="launch this many pipeline-owned extraction-model vLLM servers",
-    )
-    parser.add_argument(
-        "--stage2-extraction-vllm-gpus",
-        help="comma-separated logical GPUs assigned to extraction-model servers",
-    )
-    parser.add_argument(
-        "--stage2-extraction-vllm-gpus-per-server",
-        type=int,
-        help=(
-            "logical GPUs assigned to each managed extraction-model server; derives "
-            "the replica count when its server count is omitted"
-        ),
-    )
-    parser.add_argument(
-        "--stage2-extraction-vllm-base-port",
-        type=int,
-        help="first port for pipeline-owned extraction servers (default: 8110)",
-    )
-    parser.add_argument(
-        "--stage2-extraction-vllm-internal-port-base",
-        type=int,
-        help="first internal extraction-vLLM rendezvous range (default: 40000)",
-    )
-    parser.add_argument(
-        "--stage2-extraction-vllm-download-dir",
-        help="Hugging Face model download/cache directory for extraction vLLM",
-    )
-    parser.add_argument(
-        "--stage2-extraction-vllm-reasoning-parser",
-        help="extraction vLLM reasoning parser; family-specific when omitted",
-    )
-    parser.add_argument(
-        "--stage2-extraction-vllm-language-model-only",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="enable or disable extraction vLLM's language-model-only mode",
-    )
-    parser.add_argument(
-        "--stage2-extraction-vllm-default-chat-template-kwargs",
-        help="JSON object passed to extraction vLLM --default-chat-template-kwargs",
     )
     parser.add_argument(
         "--stage2-extraction-vllm-extra-arg",
@@ -3163,66 +2807,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="TOKEN",
         help=(
-            "one additional extraction-vLLM CLI token; repeat for flags and values, "
-            "using --stage2-extraction-vllm-extra-arg=--flag for tokens beginning with --"
+            "one additional vLLM CLI token for the managed extraction-model "
+            "servers; repeat for flags and values, using "
+            "--stage2-extraction-vllm-extra-arg=--flag for tokens beginning "
+            "with --; replaces stage2.extraction_llm.vllm.extra_args"
         ),
-    )
-    parser.add_argument(
-        "--stage2-review-rounds",
-        type=int,
-        help=(
-            "maximum aggregate ontology-supervisor rounds"
-        ),
-    )
-    parser.add_argument(
-        "--stage2-cluster-similarity-threshold",
-        type=float,
-        help="mixed-association similarity cut for each inner-fold variable clustering",
-    )
-    parser.add_argument(
-        "--stage2-cluster-consensus-fraction",
-        type=float,
-        help="minimum inner-fold co-clustering fraction for outer-fold consensus clusters",
-    )
-    parser.add_argument(
-        "--stage2-cluster-max-size",
-        type=int,
-        help="maximum variables assigned to one Stage 2 cluster analyst",
-    )
-    parser.add_argument(
-        "--stage2-max-latents-per-cluster",
-        type=int,
-        help="maximum structured latent proposals retained across both role passes per cluster",
-    )
-    parser.add_argument(
-        "--stage2-cluster-tool-call-limit",
-        type=int,
-        help="typed statistical tool-call limit for each cluster analyst",
-    )
-    parser.add_argument(
-        "--stage2-adjudicator-tool-call-limit",
-        type=int,
-        help="typed statistical tool-call limit for each outer-fold role adjudicator",
-    )
-    parser.add_argument(
-        "--stage2-extraction-feature-batch-size",
-        type=int,
-        help=(
-            "maximum features in each single-patient extraction prompt "
-            "(default: 10)"
-        ),
-    )
-    parser.add_argument(
-        "--stage2-estimation-trees",
-        type=int,
-        help="trees in the final causal forest",
     )
     parser.add_argument(
         "--set",
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="override any nested config value; VALUE is parsed as JSON when possible",
+        help=(
+            "override any nested config value, for example "
+            "--set stage2.consolidation_max_rounds=12; VALUE is parsed as JSON "
+            "when possible; repeated --set options apply in order"
+        ),
     )
     parser.add_argument(
         "--rerun",
@@ -3235,6 +2835,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _mapping_child(
+    parent: MutableMapping[str, Any],
+    key: str,
+    description: str,
+) -> MutableMapping[str, Any]:
+    value = parent.get(key)
+    if value is None:
+        child: MutableMapping[str, Any] = {}
+        parent[key] = child
+        return child
+    if not isinstance(value, MutableMapping):
+        raise ValueError(f"{description} must be a configuration object")
+    return value
+
+
 def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     if args.config is None:
         raw: dict[str, Any] = {}
@@ -3244,13 +2859,7 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
         raw = _read_mapping(config_path)
         config_dir = config_path.parent
 
-    simple_overrides = {
-        "dataset": args.dataset,
-        "output_dir": args.output_dir,
-        "stage1_template": args.stage1_template,
-        "neural_query_template": args.neural_query_template,
-    }
-    for key, value in simple_overrides.items():
+    for key, value in {"dataset": args.dataset, "output_dir": args.output_dir}.items():
         if value is not None:
             raw[key] = str(value.expanduser().resolve())
     column_overrides = {
@@ -3277,7 +2886,7 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
     if args.architectures is not None:
         science["stage1_architectures"] = args.architectures
     run = raw.setdefault("run", {})
-    for key in ("devices", "workers", "components"):
+    for key in ("devices", "workers"):
         value = getattr(args, key)
         if value is not None:
             run[key] = value
@@ -3290,189 +2899,33 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
         # consult that Stage 1 list, so prevent it from being rejected before
         # the mode-specific component resolution below.
         run["components"] = []
-    stage2_value = raw.get("stage2")
-    if stage2_value is None:
-        stage2: MutableMapping[str, Any] = {}
-        raw["stage2"] = stage2
-    elif isinstance(stage2_value, MutableMapping):
-        stage2 = stage2_value
-    else:
+    if raw.get("stage2") is not None and not isinstance(raw["stage2"], MutableMapping):
         raise ValueError("stage2 must be a configuration object or null")
-    if args.stage2_reselect:
-        for key in RETIRED_STAGE2_SCREEN_CONFIG_KEYS:
-            stage2.pop(key, None)
-        stage2.setdefault("input_temporal_scope", STAGE2_INPUT_TEMPORAL_SCOPE)
-        stage2.setdefault("statistical_selection", {})
-    for key in ("endpoint", "model", "api_key"):
-        value = getattr(args, f"stage2_{key}")
-        if value is not None:
-            stage2[key] = value
-    extraction_overrides = {
-        "endpoint": args.stage2_extraction_endpoint,
-        "endpoints": args.stage2_extraction_endpoints,
-        "model": args.stage2_extraction_model,
-        "api_key": args.stage2_extraction_api_key,
-        "workers": args.stage2_extraction_workers,
-    }
-    if any(value is not None for value in extraction_overrides.values()):
-        extraction_value = stage2.get("extraction_llm")
-        if extraction_value is None:
-            extraction_llm: MutableMapping[str, Any] = {}
-            stage2["extraction_llm"] = extraction_llm
-        elif isinstance(extraction_value, MutableMapping):
-            extraction_llm = extraction_value
-        else:
-            raise ValueError("stage2.extraction_llm must be a configuration object")
+    if (
+        args.stage2_extraction_endpoint is not None
+        or args.stage2_extraction_endpoints is not None
+    ):
+        stage2 = _mapping_child(raw, "stage2", "stage2")
+        extraction_llm = _mapping_child(stage2, "extraction_llm", "stage2.extraction_llm")
         # An explicit external route replaces the other external route inherited
         # from a saved config. Managed vLLM settings still require explicit removal.
         if args.stage2_extraction_endpoints is not None:
             extraction_llm.pop("endpoint", None)
-        elif args.stage2_extraction_endpoint is not None:
+            extraction_llm["endpoints"] = args.stage2_extraction_endpoints
+        else:
             extraction_llm.pop("endpoints", None)
-        for key, value in extraction_overrides.items():
-            if value is not None:
-                extraction_llm[key] = value
-    managed_vllm_overrides = {
-        "server_count": args.stage2_vllm_servers,
-        "gpus": args.stage2_vllm_gpus,
-        "gpus_per_server": args.stage2_vllm_gpus_per_server,
-        "base_port": args.stage2_vllm_base_port,
-        "internal_port_base": args.stage2_vllm_internal_port_base,
-        "download_dir": args.stage2_vllm_download_dir,
-        "reasoning_parser": args.stage2_vllm_reasoning_parser,
-        "language_model_only": args.stage2_vllm_language_model_only,
-        "extra_args": args.stage2_vllm_extra_arg,
-    }
-    if args.stage2_vllm_default_chat_template_kwargs is not None:
-        try:
-            default_chat_template_kwargs = json.loads(
-                args.stage2_vllm_default_chat_template_kwargs
-            )
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                "--stage2-vllm-default-chat-template-kwargs must be valid JSON"
-            ) from exc
-        if not isinstance(default_chat_template_kwargs, Mapping):
-            raise ValueError(
-                "--stage2-vllm-default-chat-template-kwargs must contain one JSON object"
-            )
-        managed_vllm_overrides["default_chat_template_kwargs"] = (
-            default_chat_template_kwargs
+            extraction_llm["endpoint"] = args.stage2_extraction_endpoint
+    if args.stage2_vllm_extra_arg is not None:
+        stage2 = _mapping_child(raw, "stage2", "stage2")
+        vllm = _mapping_child(stage2, "vllm", "stage2.vllm")
+        vllm["extra_args"] = args.stage2_vllm_extra_arg
+    if args.stage2_extraction_vllm_extra_arg is not None:
+        stage2 = _mapping_child(raw, "stage2", "stage2")
+        extraction_llm = _mapping_child(stage2, "extraction_llm", "stage2.extraction_llm")
+        extraction_vllm = _mapping_child(
+            extraction_llm, "vllm", "stage2.extraction_llm.vllm"
         )
-    if any(value is not None for value in managed_vllm_overrides.values()):
-        vllm_value = stage2.get("vllm")
-        if vllm_value is None:
-            vllm: MutableMapping[str, Any] = {}
-            stage2["vllm"] = vllm
-        elif isinstance(vllm_value, MutableMapping):
-            vllm = vllm_value
-        else:
-            raise ValueError("stage2.vllm must be a configuration object or null")
-        for key, value in managed_vllm_overrides.items():
-            if value is not None:
-                vllm[key] = value
-    extraction_vllm_overrides = {
-        "server_count": args.stage2_extraction_vllm_servers,
-        "gpus": args.stage2_extraction_vllm_gpus,
-        "gpus_per_server": args.stage2_extraction_vllm_gpus_per_server,
-        "base_port": args.stage2_extraction_vllm_base_port,
-        "internal_port_base": args.stage2_extraction_vllm_internal_port_base,
-        "download_dir": args.stage2_extraction_vllm_download_dir,
-        "reasoning_parser": args.stage2_extraction_vllm_reasoning_parser,
-        "language_model_only": args.stage2_extraction_vllm_language_model_only,
-        "extra_args": args.stage2_extraction_vllm_extra_arg,
-    }
-    if args.stage2_extraction_vllm_default_chat_template_kwargs is not None:
-        try:
-            extraction_default_chat_template_kwargs = json.loads(
-                args.stage2_extraction_vllm_default_chat_template_kwargs
-            )
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                "--stage2-extraction-vllm-default-chat-template-kwargs must be valid JSON"
-            ) from exc
-        if not isinstance(extraction_default_chat_template_kwargs, Mapping):
-            raise ValueError(
-                "--stage2-extraction-vllm-default-chat-template-kwargs must contain "
-                "one JSON object"
-            )
-        extraction_vllm_overrides["default_chat_template_kwargs"] = (
-            extraction_default_chat_template_kwargs
-        )
-    if any(value is not None for value in extraction_vllm_overrides.values()):
-        extraction_value = stage2.get("extraction_llm")
-        if extraction_value is None:
-            extraction_llm = {}
-            stage2["extraction_llm"] = extraction_llm
-        elif isinstance(extraction_value, MutableMapping):
-            extraction_llm = extraction_value
-        else:
-            raise ValueError("stage2.extraction_llm must be a configuration object")
-        extraction_vllm_value = extraction_llm.get("vllm")
-        if extraction_vllm_value is None:
-            extraction_vllm: MutableMapping[str, Any] = {}
-            extraction_llm["vllm"] = extraction_vllm
-        elif isinstance(extraction_vllm_value, MutableMapping):
-            extraction_vllm = extraction_vllm_value
-        else:
-            raise ValueError("stage2.extraction_llm.vllm must be a configuration object")
-        for key, value in extraction_vllm_overrides.items():
-            if value is not None:
-                extraction_vllm[key] = value
-    if args.stage2_extraction_context_strategy is not None:
-        stage2["extraction_context_strategy"] = args.stage2_extraction_context_strategy
-    colbert_overrides = {
-        "model_name": args.stage2_colbert_model, "revision": args.stage2_colbert_revision,
-        "devices": args.stage2_colbert_devices, "cache_dir": args.stage2_colbert_cache_dir,
-        "workers_per_device": args.stage2_colbert_workers_per_device,
-        "query_cache_max_bytes": args.stage2_colbert_query_cache_max_bytes,
-        "chunk_size": args.stage2_colbert_chunk_size, "chunk_overlap": args.stage2_colbert_chunk_overlap,
-        "query_length": args.stage2_colbert_query_length, "batch_size": args.stage2_colbert_batch_size,
-        "top_k": args.stage2_colbert_top_k,
-    }
-    if any(value is not None for value in colbert_overrides.values()):
-        stage2.setdefault("colbert", {}).update({k: v for k, v in colbert_overrides.items() if v is not None})
-    if args.stage2_vllm_co_resident_all_gpus is not None:
-        stage2["vllm_co_resident_all_gpus"] = bool(args.stage2_vllm_co_resident_all_gpus)
-    stage2_numeric_overrides = {
-        "decision_preparation_workers": args.stage2_decision_preparation_workers,
-        "max_tokens": args.stage2_max_tokens,
-        "extraction_max_tokens": args.stage2_extraction_max_tokens,
-        "vllm_rapid_switch_seconds": args.stage2_vllm_rapid_switch_seconds,
-        "extraction_chunk_size_tokens": args.stage2_extraction_chunk_size_tokens,
-        "extraction_context_window_tokens": (
-            args.stage2_extraction_context_window_tokens
-        ),
-        "extraction_context_margin_tokens": (
-            args.stage2_extraction_context_margin_tokens
-        ),
-        "max_review_rounds": args.stage2_review_rounds,
-        "extraction_feature_batch_size": args.stage2_extraction_feature_batch_size,
-        "estimation_trees": args.stage2_estimation_trees,
-    }
-    for key, value in stage2_numeric_overrides.items():
-        if value is not None:
-            stage2[key] = value
-    agentic_selection_overrides = {
-        "cluster_similarity_threshold": args.stage2_cluster_similarity_threshold,
-        "cluster_consensus_fraction": args.stage2_cluster_consensus_fraction,
-        "cluster_max_size": args.stage2_cluster_max_size,
-        "max_latents_per_cluster": args.stage2_max_latents_per_cluster,
-        "cluster_tool_call_limit": args.stage2_cluster_tool_call_limit,
-        "adjudicator_tool_call_limit": args.stage2_adjudicator_tool_call_limit,
-    }
-    if any(value is not None for value in agentic_selection_overrides.values()):
-        current_agentic = stage2.get("agentic_selection")
-        if current_agentic is None:
-            agentic_selection: MutableMapping[str, Any] = {}
-            stage2["agentic_selection"] = agentic_selection
-        elif isinstance(current_agentic, MutableMapping):
-            agentic_selection = current_agentic
-        else:
-            raise ValueError("stage2.agentic_selection must be a configuration object")
-        for key, value in agentic_selection_overrides.items():
-            if value is not None:
-                agentic_selection[key] = value
+        extraction_vllm["extra_args"] = args.stage2_extraction_vllm_extra_arg
     models = raw.setdefault("models", {})
     if args.htr_model is not None:
         models["htr"] = args.htr_model
@@ -3550,17 +3003,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             "run.mode=stage2)"
         )
 
-    if args.stage2_source is not None and not (args.preflight_only and args.stage2_reselect):
-        parser.error("--stage2-source requires --preflight-only --stage2-reselect")
     if args.preflight_only:
         if args.rerun:
             parser.error("--preflight-only cannot be combined with --rerun")
         from .stage2_preflight import preflight_stage2
 
         try:
-            result = preflight_stage2(
-                config, reselect=args.stage2_reselect, source_dir=args.stage2_source
-            )
+            result = preflight_stage2(config, reselect=args.stage2_reselect)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             parser.error(str(exc))
         print(json.dumps(result, indent=2, default=_json_default))
@@ -3584,17 +3033,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = [
-    "COMPONENT_ORDER",
     "STAGE1_COMPONENT_ORDER",
     "WORKFLOW_COMPONENT_ORDER",
-    "ResearchAllEvidenceStage1",
     "ResearchAllEvidenceWorkflow",
     "ResearchStage1Config",
     "Stage1RunContext",
     "build_parser",
     "compile_config",
     "finalize_stage2_reselection",
-    "iter_stage1_architecture_evidence",
     "iter_stage1_handoff",
     "main",
     "prepare_stage2_reselection",

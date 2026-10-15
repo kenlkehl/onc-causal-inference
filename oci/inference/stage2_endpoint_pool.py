@@ -128,7 +128,7 @@ class EndpointPool:
     Metrics refresh in short-lived background threads; network monitoring never
     blocks an extraction request. Missing/stale metrics fall back to local load.
     HTTP transport failures impose bounded cooldowns with one recovery probe.
-    Homogeneous decision replicas can ignore historical response latency so
+    Homogeneous managed replicas can ignore historical response latency so
     slow startup samples do not permanently exclude otherwise idle capacity.
     """
 

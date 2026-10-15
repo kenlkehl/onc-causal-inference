@@ -45,11 +45,11 @@ class TextDesign:
 
 def encode(texts, *, view=None, explicit=None, specs=None):
     from ..config import BoWViewConfig
-    from .multi_model_agentic_forest import _make_bow_vectorizer, _bow_vectorizer_params
+    from .sparse_text_modeling import bow_vectorizer_params, make_bow_vectorizer
 
     # HTR-only runs use this fixed, explicitly named auxiliary nuisance view.
     view = view or BoWViewConfig(name="dina_auxiliary", min_df=1, max_df=1.0)
-    vectorizer = _make_bow_vectorizer(_bow_vectorizer_params(view))
+    vectorizer = make_bow_vectorizer(bow_vectorizer_params(view))
     x = vectorizer.fit_transform(list(texts))
     names = vectorizer.get_feature_names_out().tolist()
     groups = ["text:" + name for name in names]

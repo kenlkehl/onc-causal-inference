@@ -320,10 +320,8 @@ def _compute(definitions, report, maximum, sources, folds, repeats, rows, identi
             "formal_error_guarantee": False}}
 
 
-def rank_modifier_candidates(*, definitions, statistical_report, output_dir, maximum,
-    request_json=None, role_policy=None, maximum_chars=None, model_identity=None,
-    compatible_output_dirs=()):
-    """Rank numerical cells; LLM arguments are accepted for caller compatibility only."""
+def rank_modifier_candidates(*, definitions, statistical_report, output_dir, maximum):
+    """Rank numerical modifier evidence cells; no LLM is involved."""
     if type(maximum) is not int or maximum < 0:
         raise ValueError("ranking maximum must be a nonnegative integer")
     sources, folds, repeats, rows = _inputs(definitions, statistical_report)

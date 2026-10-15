@@ -5,9 +5,7 @@ from oci.extraction.complete_paged import (
     CompleteFeatureContract,
     CompletePageResponse,
     CompletePagingGeometry,
-    bounded_recursive_reconcile,
     build_complete_paged_coverage_ledger,
-    execute_zero_retry_with_one_schema_repair,
     plan_complete_note_pages,
     plan_complete_paged_requests,
     reconcile_complete_page_responses,
@@ -93,13 +91,6 @@ def test_authenticated_normalized_citation_schema_is_separate_and_hash_checked()
         )
 
 
-def test_recursive_reconciliation_accounts_for_all_leaves():
-    result, ledger = bounded_recursive_reconcile(list(range(35)), lambda values: sum(values), fan_in=4)
-    assert result == sum(range(35))
-    assert ledger["leaf_count"] == 35
-    assert ledger["every_child_accounted_for_exactly_once"] is True
-
-
 def _positive_response(*, start: int, text: str) -> CompletePageResponse:
     quote = text[start : start + 1]
     return CompletePageResponse.validate(
@@ -119,6 +110,34 @@ def _positive_response(*, start: int, text: str) -> CompletePageResponse:
         text=text,
         page=None,
     )
+
+
+def test_recursive_reconciliation_accounts_for_all_leaves():
+    text = "abcdefghijk"
+    leaves = tuple(
+        (f"leaf-{index}", _positive_response(start=index, text=text))
+        for index in range(len(text))
+    )
+    seen_child_ids = []
+
+    def keep_first(children):
+        seen_child_ids.extend(child["node_id"] for child in children)
+        return {
+            "child_ids": [child["node_id"] for child in children],
+            **children[0]["response"],
+        }
+
+    result, ledger = reconcile_complete_page_responses(
+        leaves,
+        reducer=keep_first,
+        fan_in=4,
+    )
+    assert result.status == "positive"
+    assert ledger["leaf_count"] == len(text)
+    assert max(node["depth"] for node in ledger["nodes"]) == 1
+    assert ledger["every_child_referenced_exactly_once"] is True
+    assert set(f"leaf-{index}" for index in range(len(text))) <= set(seen_child_ids)
+    assert len(seen_child_ids) == len(set(seen_child_ids))
 
 
 def test_reconciliation_cannot_invent_or_mutate_authenticated_citations():
@@ -320,60 +339,4 @@ def test_empty_note_cannot_disappear_from_the_page_ledger():
             {"patient-with-unprepared-empty-note": ""},
             (feature,),
             geometry=geometry,
-        )
-
-
-def test_transport_has_zero_retry_and_only_one_fixed_schema_repair():
-    calls = []
-    responses = [
-        {
-            "model": "configured/model",
-            "choices": [
-                {
-                    "finish_reason": "stop",
-                    "message": {"content": "invalid"},
-                }
-            ],
-        },
-        {
-            "model": "configured/model",
-            "choices": [
-                {
-                    "finish_reason": "stop",
-                    "message": {"content": "valid"},
-                }
-            ],
-        },
-    ]
-
-    def call(request):
-        calls.append(request)
-        return responses[len(calls) - 1]
-
-    result, audit = execute_zero_retry_with_one_schema_repair(
-        call=call,
-        initial_request={"kind": "initial"},
-        repair_request={"kind": "fixed-repair"},
-        configured_model="configured/model",
-        validator=lambda content: (
-            "accepted"
-            if content == "valid"
-            else (_ for _ in ()).throw(ValueError("schema"))
-        ),
-    )
-    assert result == "accepted"
-    assert [value["kind"] for value in calls] == ["initial", "fixed-repair"]
-    assert audit["transport_retry_count"] == 0
-    assert audit["schema_repair_count"] == 1
-
-    def transport_failure(_request):
-        raise ConnectionError("network failed")
-
-    with pytest.raises(ConnectionError, match="network failed"):
-        execute_zero_retry_with_one_schema_repair(
-            call=transport_failure,
-            initial_request={"kind": "initial"},
-            repair_request={"kind": "fixed-repair"},
-            configured_model="configured/model",
-            validator=lambda content: content,
         )

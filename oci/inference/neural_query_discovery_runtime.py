@@ -12,10 +12,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import copy
-import hashlib
-import json
 import logging
-from dataclasses import asdict, is_dataclass
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -40,9 +37,6 @@ from .tfidf_topic_discovery import (
 
 LOGGER = logging.getLogger(__name__)
 
-NEURAL_QUERY_DISCOVERY_RUNTIME_ID = "neural_query_in_memory_discovery_runtime_v3_dina"
-NEURAL_QUERY_DISCOVERY_SUBFOLD_SCHEMA = "neural_query_in_memory_subfold_v3_dina"
-
 BANKS = ("treatment", "outcome", "effect")
 
 
@@ -51,28 +45,6 @@ def _validate_cpu_workers(cpu_workers: int) -> None:
         raise TypeError("cpu_workers must be a positive integer")
     if cpu_workers < 1:
         raise ValueError("cpu_workers must be a positive integer")
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    if is_dataclass(value) and not isinstance(value, type):
-        return asdict(value)
-    raise TypeError(f"not JSON serializable: {type(value).__name__}")
-
-
-def _stable_hash(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=_json_default,
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
 
 
 def _witness_config(
@@ -100,8 +72,6 @@ def _witness_config(
         kmeans_iterations=int(config.kmeans_iterations),
         kmeans_sample_chunks=int(config.kmeans_sample_chunks),
         initialization_max_cosine=float(config.initialization_max_cosine),
-        consensus_min_prototypes=config.query_count(bank),
-        consensus_max_prototypes=config.query_count(bank),
         epsilon=float(config.witness_epsilon),
         optimizer_beta1=float(config.optimizer_beta1),
         optimizer_beta2=float(config.optimizer_beta2),
@@ -169,7 +139,6 @@ def _fit_subfold(
     config: NeuralQueryAgenticForestConfig,
     seed: int,
     device: str,
-    parent_input_binding_sha256: str,
     cpu_workers: int = 1,
 ) -> dict[str, Any]:
     """Fit one nested subfold entirely in memory.
@@ -184,26 +153,6 @@ def _fit_subfold(
         texts=texts,
         chunks=chunks,
     )
-    identity_payload = {
-        "schema": NEURAL_QUERY_DISCOVERY_SUBFOLD_SCHEMA,
-        "runtime": NEURAL_QUERY_DISCOVERY_RUNTIME_ID,
-        "fold": int(fold),
-        "train_row_ids": [int(row_ids[index]) for index in train_indices],
-        "validation_row_ids": [int(row_ids[index]) for index in validation_indices],
-        "train_treatment": np.asarray(treatment[train_indices], dtype=float).tolist(),
-        "train_outcome": np.asarray(outcome[train_indices], dtype=float).tolist(),
-        "train_text_hash": _stable_hash([texts[index] for index in train_indices]),
-        "outcome_binary": bool(outcome_binary),
-        "parent_input_binding_sha256": str(parent_input_binding_sha256),
-        "nuisance_folds": int(nuisance_folds),
-        "nuisance_stack_scientific": asdict(nuisance_stack_config),
-        "nuisance_views_sha256": _stable_hash(list(nuisance_views)),
-        "query_config": config.to_dict(),
-        "seed": int(seed),
-        "executable_checkpoint_io": False,
-    }
-    identity = _stable_hash(identity_payload)
-
     LOGGER.info(
         "fold=%s device=%s fitting strict nuisances on %s rows; audit=%s rows; "
         "cpu_budget=%s nuisance_workers=%s",
@@ -232,7 +181,6 @@ def _fit_subfold(
         random_state=int(seed + 10_000),
         nuisance_stack_config=nuisance_stack_config,
         tfidf_workers=cpu_workers,
-        tfidf_parallel_backend="threads",
         owner_cpu_budget=cpu_workers,
     )
     validation_e, _ = nuisance["treatment"]["fitted"].predict(validation_texts)
@@ -241,10 +189,6 @@ def _fit_subfold(
     train_m = np.asarray(nuisance["outcome"]["stacked_oof"], dtype=float)
     validation_e = np.asarray(validation_e, dtype=float)
     validation_m = np.asarray(validation_m, dtype=float)
-    nuisance_metrics = {
-        "treatment": nuisance["treatment"]["metrics"],
-        "outcome": nuisance["outcome"]["metrics"],
-    }
     dn = dv = None
     if outcome_binary:
         from ..models import dina
@@ -383,13 +327,7 @@ def _fit_subfold(
         LOGGER.info("fold=%s completed %s query bank", fold, bank)
 
     return {
-        "identity": identity,
-        "identity_payload": identity_payload,
         "fold": int(fold),
-        "training_prediction_scope": "strict_subsubfold_oof",
-        "validation_prediction_scope": "subfold_train_to_external_validation",
-        "validation_audit_does_not_gate_queries": True,
-        "nuisance_metrics": nuisance_metrics,
         "banks": fitted,
     }
 
@@ -648,23 +586,6 @@ def fit_in_memory_query_discovery(
             "neural-query discovery requires unique rows, exact texts, and "
             "finite aligned vectors"
         )
-    parent_binding = _stable_hash(
-        {
-            "scope": "in_memory_query_discovery",
-            "runtime": NEURAL_QUERY_DISCOVERY_RUNTIME_ID,
-            "row_ids": list(row_ids),
-            "texts_sha256": _stable_hash(list(texts)),
-            "treatment": treatment_values.tolist(),
-            "outcome": outcome_values.tolist(),
-            "fit_e": fit_e_values.tolist(),
-            "fit_m": fit_m_values.tolist(),
-            "fit_dina": fit_dina,
-            "outcome_binary": bool(outcome_binary),
-            "nuisance_views_sha256": _stable_hash(list(nuisance_views)),
-            "nuisance_stack_scientific": asdict(nuisance_stack_config),
-            "query_config": config.to_dict(),
-        }
-    )
     strata = _strata(
         treatment_values,
         outcome_values,
@@ -676,17 +597,12 @@ def fit_in_memory_query_discovery(
         random_state=int(seed),
     )
     canonical_tasks: list[dict[str, Any]] = []
-    expected_splits: dict[
-        int,
-        tuple[np.ndarray, np.ndarray],
-    ] = {}
     for fold, (train_indices, validation_indices) in enumerate(
         splitter.split(np.zeros(row_count), strata),
         start=1,
     ):
         train = np.asarray(train_indices, dtype=int)
         validation = np.asarray(validation_indices, dtype=int)
-        expected_splits[int(fold)] = (train, validation)
         canonical_tasks.append(
             {
                 "fold": int(fold),
@@ -703,7 +619,6 @@ def fit_in_memory_query_discovery(
                 "nuisance_stack_config": nuisance_stack_config,
                 "config": config,
                 "seed": int(seed + fold),
-                "parent_input_binding_sha256": parent_binding,
             }
         )
 
@@ -744,23 +659,12 @@ def fit_in_memory_query_discovery(
             "neural-query inner-fold execution omitted a canonical fold"
         )
     for expected_fold, subfold in enumerate(subfolds, start=1):
-        train, validation = expected_splits[expected_fold]
-        identity = subfold.get("identity_payload")
         if (
             int(subfold.get("fold", -1)) != expected_fold
-            or not isinstance(identity, Mapping)
-            or int(identity.get("fold", -1)) != expected_fold
-            or int(identity.get("seed", -1))
-            != int(seed + expected_fold)
-            or identity.get("train_row_ids")
-            != [int(row_ids[index]) for index in train]
-            or identity.get("validation_row_ids")
-            != [int(row_ids[index]) for index in validation]
             or set(subfold.get("banks") or {}) != set(BANKS)
         ):
             raise RuntimeError(
-                "neural-query inner-fold result changed rows, seed, "
-                "identity, or banks"
+                "neural-query inner-fold result changed fold order or banks"
             )
 
     final_tasks: list[dict[str, Any]] = []
@@ -815,34 +719,7 @@ def fit_in_memory_query_discovery(
             )
         final_banks[bank] = dict(row["result"])
 
-    return {
-        "runtime": NEURAL_QUERY_DISCOVERY_RUNTIME_ID,
-        "fit_input_binding_sha256": parent_binding,
-        "fit_nuisance_output_binding": {
-            "schema_version": "context_fit_neural_query_nuisance_output_binding_v1",
-            "fit_row_ids": list(row_ids),
-            "fit_e_sha256": _stable_hash(fit_e_values.tolist()),
-            "fit_m_sha256": _stable_hash(fit_m_values.tolist()),
-            "heldout_labels_accessed": False,
-        },
-        "banks": final_banks,
-        "subfold_audit": [
-            {key: value for key, value in subfold.items() if key != "banks"}
-            | {
-                "bank_candidates": {
-                    bank: [
-                        {key: value for key, value in candidate.items() if key != "query"}
-                        for candidate in subfold["banks"][bank]["candidates"]
-                    ]
-                    for bank in BANKS
-                }
-            }
-            for subfold in subfolds
-        ],
-        "all_queries_retained": True,
-        "validation_audits_used_for_selection": False,
-        "executable_checkpoint_io": False,
-    }
+    return {"banks": final_banks}
 
 
 def fit_context_query_discovery(
@@ -882,7 +759,6 @@ def fit_context_query_discovery(
         random_state=int(seed + 10_000),
         nuisance_stack_config=nuisance_stack_config,
         tfidf_workers=cpu_workers,
-        tfidf_parallel_backend="threads",
         owner_cpu_budget=cpu_workers,
     )
     fit_e = np.asarray(nuisance["treatment"]["stacked_oof"], dtype=float)
@@ -917,7 +793,6 @@ def fit_context_query_discovery(
 
 __all__ = [
     "BANKS",
-    "NEURAL_QUERY_DISCOVERY_RUNTIME_ID",
     "fit_context_query_discovery",
     "fit_in_memory_query_discovery",
 ]

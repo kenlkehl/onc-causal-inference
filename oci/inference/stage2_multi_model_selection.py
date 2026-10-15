@@ -16,7 +16,7 @@ from functools import partial
 from hashlib import sha256
 import logging
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping
 import json
 import warnings
 
@@ -33,17 +33,10 @@ from .stage2_statistical_selection import _modifier_test_chunk
 from . import stage2_modeling_pool as modeling
 from . import stage2_evidence_stability as stability
 from . import stage2_interaction_screen as interaction_screen
-from .stage2_modeling_identity import scientific_source_sha256
 from . import stage2_nuisance_selection as nuisance_selection
 
 LOGGER = logging.getLogger(__name__)
 ROLES = ("treatment", "outcome", "effect")
-
-
-def _matched_batch_enabled(config):
-    # A long-running extraction process may still hold the pre-extension policy
-    # class when it lazily imports numerical selection after extraction finishes.
-    return bool(getattr(getattr(config, "matched_batch", None), "enabled", False))
 
 
 class NotEstimable(ValueError):
@@ -85,20 +78,19 @@ def numerical_identity(
         "dina_adapter_source_sha256": sha256(
             Path(__file__).with_name("stage2_dina.py").read_bytes()
         ).hexdigest(),
-        "component_source_sha256": scientific_source_sha256(__file__),
+        "component_source_sha256": sha256(Path(__file__).read_bytes()).hexdigest(),
         "stability_source_sha256": sha256(Path(stability.__file__).read_bytes()).hexdigest(),
         "linear_component_source_sha256": sha256(Path(linear.__file__).read_bytes()).hexdigest(),
         "nuisance_selection_source_sha256": sha256(Path(nuisance_selection.__file__).read_bytes()).hexdigest(),
         "interaction_screen_source_sha256": sha256(Path(interaction_screen.__file__).read_bytes()).hexdigest(),
         "interaction_tests_source_sha256": sha256(Path(__file__).with_name("stage2_statistical_selection.py").read_bytes()).hexdigest(),
-        "taskwise_routing_source_sha256": sha256(Path(__file__).with_name("stage2_taskwise_policy.py").read_bytes()).hexdigest(),
         **(
             {
                 "matched_batch_source_sha256": sha256(
                     Path(matched_batch.__file__).read_bytes()
                 ).hexdigest()
             }
-            if _matched_batch_enabled(policy.multi_model)
+            if policy.multi_model.matched_batch.enabled
             else {}
         ),
     }
@@ -414,62 +406,61 @@ def _nuisances(train, valid, definitions, t, y, *, binary, policy, seed):
         raise RuntimeError("nuisance cross-fitting did not predict every training row")
     arm_predictions = {}
     support_models = {"treatment": full[0], "outcome": full[1]}
-    if binary or policy.selection_mode == "multi_model":
-        try:
-            for arm in (0, 1):
-                oof = np.full(len(y), np.nan)
-                for j, (fit, hold) in enumerate(subfolds):
-                    rows = fit[t[fit] == arm]
-                    if not len(rows):
-                        raise NotEstimable("missing_treatment_arm_for_dina_nuisance")
-                    fitted = _fit_linear(
-                        train.iloc[rows],
-                        train.iloc[hold],
-                        definitions,
-                        y[rows],
-                        binary=binary,
-                        kind="main",
-                        treatment=t[rows],
-                        valid_treatment=t[hold],
-                        policy=policy,
-                        seed=seed + 1000 + arm * 100 + j,
-                        ratio=policy.l1_ratio,
-                    )
-                    oof[hold] = fitted["prediction"]
-                    audits[j].setdefault("arm_outcome_models", []).append(
-                        {
-                            "arm": arm,
-                            "fit_row_ids": train.iloc[rows]._oci_row_id.astype(int).tolist(),
-                            "validation_row_ids": train.iloc[hold]._oci_row_id.astype(int).tolist(),
-                            **fitted["audit"],
-                        }
-                    )
-                rows = np.flatnonzero(t == arm)
+    try:
+        for arm in (0, 1):
+            oof = np.full(len(y), np.nan)
+            for j, (fit, hold) in enumerate(subfolds):
+                rows = fit[t[fit] == arm]
+                if not len(rows):
+                    raise NotEstimable("missing_treatment_arm_for_dina_nuisance")
                 fitted = _fit_linear(
                     train.iloc[rows],
-                    valid,
+                    train.iloc[hold],
                     definitions,
                     y[rows],
                     binary=binary,
                     kind="main",
                     treatment=t[rows],
-                    valid_treatment=np.zeros(len(valid)),
+                    valid_treatment=t[hold],
                     policy=policy,
-                    seed=seed + 2000 + arm,
+                    seed=seed + 1000 + arm * 100 + j,
                     ratio=policy.l1_ratio,
                 )
-                if not np.isfinite(oof).all():
-                    raise RuntimeError(
-                        "DINA arm nuisance cross-fitting did not predict every training row"
-                    )
-                arm_predictions[f"training_mu{arm}"] = oof.tolist()
-                arm_predictions[f"validation_mu{arm}"] = fitted["prediction"].tolist()
-                support_models[f"mu{arm}"] = fitted
-        except NotEstimable as exc:
-            arm_predictions = {
-                "dina_nuisance_status": "not_estimable",
-                "dina_nuisance_reason": str(exc),
-            }
+                oof[hold] = fitted["prediction"]
+                audits[j].setdefault("arm_outcome_models", []).append(
+                    {
+                        "arm": arm,
+                        "fit_row_ids": train.iloc[rows]._oci_row_id.astype(int).tolist(),
+                        "validation_row_ids": train.iloc[hold]._oci_row_id.astype(int).tolist(),
+                        **fitted["audit"],
+                    }
+                )
+            rows = np.flatnonzero(t == arm)
+            fitted = _fit_linear(
+                train.iloc[rows],
+                valid,
+                definitions,
+                y[rows],
+                binary=binary,
+                kind="main",
+                treatment=t[rows],
+                valid_treatment=np.zeros(len(valid)),
+                policy=policy,
+                seed=seed + 2000 + arm,
+                ratio=policy.l1_ratio,
+            )
+            if not np.isfinite(oof).all():
+                raise RuntimeError(
+                    "DINA arm nuisance cross-fitting did not predict every training row"
+                )
+            arm_predictions[f"training_mu{arm}"] = oof.tolist()
+            arm_predictions[f"validation_mu{arm}"] = fitted["prediction"].tolist()
+            support_models[f"mu{arm}"] = fitted
+    except NotEstimable as exc:
+        arm_predictions = {
+            "dina_nuisance_status": "not_estimable",
+            "dina_nuisance_reason": str(exc),
+        }
     support_records = {
         role: _coefficient_records(model, definitions, block="main", role=role, policy=policy)
         for role, model in support_models.items()
@@ -541,19 +532,6 @@ def _subsample(treatment, fraction, rng):
             count = min(len(group), max(2, int(np.ceil(fraction * len(group)))))
             indices.extend(rng.choice(group, count, replace=False).tolist())
     return np.asarray(sorted(indices), dtype=int)
-
-
-def candidate_subsets(feature_ids, *, repeat, subset_size, seed):
-    """Full candidate pool once, then balanced random partitions with full coverage."""
-    if repeat == 0:
-        return [list(feature_ids)]
-    shuffled = np.random.default_rng(seed).permutation(feature_ids).tolist()
-    return [shuffled[i : i + subset_size] for i in range(0, len(shuffled), subset_size)]
-
-
-def grouped_permutation_gain(x, column_ids, score, *, repeats, seed):
-    """Permute all encoded columns of a candidate together on validation rows."""
-    return stability.permutation_evidence(x, column_ids, score, repeats=repeats, seed=seed)
 
 
 def _univariable(train, definitions, t, y, *, binary, policy, nuisance, effect_keep=None):
@@ -1288,22 +1266,9 @@ def select_stage2_features_multi_model(
     }
     if not any(availability.values()):
         raise NotEstimable("all_model_families_were_unevaluable")
-    # With count search disabled, use joint orthogonal-model group support for
-    # modifiers. The default path leaves all unlocked modifier choices to the
-    # existing nested ranking/count/architecture search.
-    effect_votes = None
-    if not cfg.modifier_count.enabled:
-        effect_votes = dict.fromkeys(by_id, 0)
-        for fold in nuisance_folds:
-            supported = {
-                r["feature_id"] for cell in cells
-                if cell["inner_fold"] == fold["inner_fold"] and cell["family"] == "orthogonal_linear"
-                for r in cell["records"] if r["role"] == "effect" and r["selected"] is True
-            }
-            for key in supported:
-                effect_votes[key] += 1
+    # Modifier selection is left to the separate nested ranking/count search.
     selected, decisions, nuisance_report = nuisance_selection.select_predictive_nuisances(
-        definitions, nuisance_folds, effect_votes=effect_votes,
+        definitions, nuisance_folds,
     )
     report = {
         "schema_version": SCHEMA_VERSION,

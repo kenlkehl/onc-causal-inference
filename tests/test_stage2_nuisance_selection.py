@@ -1,7 +1,6 @@
 """Predictive routing, immutable overrides, fold honesty and final refits."""
 
 from copy import deepcopy
-from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -168,26 +167,3 @@ def test_final_crossfit_uses_unscreened_catalog_and_dina_reuses_honest_nuisances
         nuisance_candidate_fit=all_fit,
     )
     assert resumed == result and len(crossfit_calls) == 1
-
-
-def test_no_count_search_uses_numerical_effect_support():
-    args = sample_inputs()
-    args["policy"] = replace(
-        args["policy"],
-        multi_model=replace(
-            args["policy"].multi_model,
-            modifier_count=replace(args["policy"].multi_model.modifier_count, enabled=False),
-        ),
-    )
-    selected, report, _, _ = numerical.select_stage2_features_multi_model(**args)
-    assert (
-        report["nuisance_selection"]["effect_selection_source"] == "joint_orthogonal_model_support"
-    )
-    expected = {
-        r["feature_id"]
-        for c in report["cells"]
-        if c["family"] == "orthogonal_linear"
-        for r in c["records"]
-        if r["role"] == "effect" and r["selected"]
-    }
-    assert {f["feature_id"] for f in selected if "effect_modifier" in f["roles"]} == expected

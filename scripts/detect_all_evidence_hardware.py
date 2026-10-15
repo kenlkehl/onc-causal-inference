@@ -60,22 +60,40 @@ def _visible_gpus() -> list[GPU]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--stage2-only",
-        action="store_true",
-        help="size an endpoint-backed Stage 2 resume without inspecting local GPUs",
+        "--gpu-count",
+        type=_positive_int_or_auto,
+        default="auto",
+        help="number of eligible GPUs to select, or auto for all of them",
     )
-    parser.add_argument("--gpu-count", type=_positive_int_or_auto, default="auto")
-    parser.add_argument("--workers", type=_positive_int_or_auto, default="auto")
+    parser.add_argument(
+        "--workers",
+        type=_positive_int_or_auto,
+        default="auto",
+        help="Stage 1 CPU workers, or auto to size from CPUs, folds, and GPU memory",
+    )
     parser.add_argument(
         "--stage2-workers",
         type=_positive_int_or_auto,
         default=str(DEFAULT_STAGE2_WORKERS),
+        help=(
+            f"Stage 2 request concurrency (default: {DEFAULT_STAGE2_WORKERS}); "
+            "auto caps it at the CPU count"
+        ),
     )
-    parser.add_argument("--outer-folds", type=int, required=True)
-    parser.add_argument("--inner-folds", type=int, required=True)
-    parser.add_argument("--min-free-vram-gib", type=float, default=20.0)
-    parser.add_argument("--stage1-vram-gib-per-worker", type=float, default=8.0)
-    parser.add_argument("--stage2-vram-gib-per-worker", type=float, default=24.0)
+    parser.add_argument("--outer-folds", type=int, required=True, help="outer folds")
+    parser.add_argument("--inner-folds", type=int, required=True, help="inner folds")
+    parser.add_argument(
+        "--min-free-vram-gib",
+        type=float,
+        default=20.0,
+        help="minimum free memory for a GPU to be eligible",
+    )
+    parser.add_argument(
+        "--stage1-vram-gib-per-worker",
+        type=float,
+        default=8.0,
+        help="GPU memory assumed per concurrent Stage 1 context",
+    )
     return parser
 
 
@@ -85,34 +103,11 @@ def main() -> int:
         raise SystemExit("fold counts must be positive")
     if args.min_free_vram_gib < 0:
         raise SystemExit("--min-free-vram-gib must be nonnegative")
-    if args.stage1_vram_gib_per_worker <= 0 or args.stage2_vram_gib_per_worker <= 0:
+    if args.stage1_vram_gib_per_worker <= 0:
         raise SystemExit("VRAM-per-worker estimates must be positive")
 
     cpu_count = _available_cpu_count()
     context_capacity = args.outer_folds * (args.inner_folds + 1)
-    if args.stage2_only:
-        automatic_workers = min(cpu_count, context_capacity)
-        worker_count = automatic_workers if args.workers == "auto" else int(args.workers)
-        automatic_stage2_workers = min(cpu_count, DEFAULT_STAGE2_WORKERS)
-        stage2_workers = (
-            automatic_stage2_workers
-            if args.stage2_workers == "auto"
-            else int(args.stage2_workers)
-        )
-        print(
-            "\t".join(
-                [
-                    "0",
-                    "cpu",
-                    str(worker_count),
-                    str(stage2_workers),
-                    str(cpu_count),
-                    "not inspected (endpoint-backed Stage 2 only)",
-                ]
-            )
-        )
-        return 0
-
     visible = _visible_gpus()
     if not visible:
         raise SystemExit("no CUDA GPUs are visible to PyTorch")

@@ -48,16 +48,14 @@ import re
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from dataclasses import dataclass
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 import pandas as pd
 from tqdm import tqdm
 
 from ..config import ExplicitFeatureSpec
-from ..colbert_config import ColBERTConfig, colbert_config_from_mapping
 from .contract_lexical_context import (
-    CONTRACT_LEXICAL_CONTEXT_VERSION,
     compact_contract_lexical_context,
 )
 from .complete_paged import (
@@ -196,7 +194,6 @@ def build_extraction_prompt(
     max_text_length: Optional[int] = None,
     context_strategy: str = "full_record",
     source_text_temporally_valid_by_design: bool = False,
-    colbert: ColBERTConfig | None = None,
 ) -> str:
     """Build prompt for feature extraction.
 
@@ -205,7 +202,7 @@ def build_extraction_prompt(
         specs: List of feature specifications
         max_text_length: Maximum context characters to include
         context_strategy: ``full_record`` (default), or an explicitly selected
-            truncation, paging, or retrieval strategy
+            truncation, paging, or lexical-retrieval strategy
         source_text_temporally_valid_by_design: Trust source-text timing and do
             not impose a treatment-time eligibility boundary
 
@@ -260,12 +257,6 @@ def build_extraction_prompt(
     if strategy == "full_record":
         if max_text_length is not None and len(text) > int(max_text_length):
             raise ValueError("full_record exceeds extraction_max_text_length; increase the budget or select complete_paged_v1")
-    elif strategy == "colbert":
-        from .colbert import get_retriever
-        retrieval_config = colbert or ColBERTConfig()
-        text = get_retriever(retrieval_config).retrieve(text, specs, top_k=retrieval_config.top_k)["context"]
-        if max_text_length is not None and len(text) > int(max_text_length):
-            raise ValueError("ColBERT retrieved context exceeds extraction_max_text_length; increase the budget or reduce top_k")
     elif strategy == "tail":
         # Preserve the historical behavior exactly for backward compatibility.
         if max_text_length is not None and len(text) > int(max_text_length):
@@ -285,29 +276,16 @@ def build_extraction_prompt(
             raise ValueError("complete_paged_v1 received an oversized unpaged input")
     else:
         raise ValueError(
-            "context_strategy must be 'full_record', 'colbert', 'tail', 'contract_lexical_rag', or "
+            "context_strategy must be 'full_record', 'tail', 'contract_lexical_rag', or "
             "'complete_paged_v1'"
         )
 
-    if strategy == "colbert" or text.startswith("[oci_colbert_v1]"):
-        document_instruction = (
-            "Read the retrieved excerpts and extract the declared characteristics. "
-            "These excerpts are a subset of the patient's record; missing values do not "
-            "establish absence from the complete record. Follow temporal and aggregation rules."
-        )
-        document_label = "ColBERT-retrieved excerpts"
-    elif strategy == "contract_lexical_rag":
+    if strategy == "contract_lexical_rag":
         document_instruction = (
             "Read every contract-guided verbatim excerpt below and extract the "
             "following characteristics. Excerpts retain their original source order."
         )
         document_label = "Contract-guided retrieved excerpts"
-    elif "[neural_query_rag_v1]" in text:
-        document_instruction = (
-            "Read every retrieved excerpt below and extract the following patient "
-            "characteristics according to each contract."
-        )
-        document_label = "Query-retrieved excerpts"
     else:
         document_instruction = (
             "Read this complete clinical note and extract the following patient " "characteristics."
@@ -573,7 +551,6 @@ class VLLMFeatureExtractor:
         source_text_temporally_valid_by_design: bool = False,
         schema_repair_attempts: Optional[int] = None,
         fail_closed: bool = False,
-        colbert: ColBERTConfig | None = None,
         max_variables_per_extraction_request: int = 10,
     ):
         """Initialize extractor.
@@ -600,7 +577,8 @@ class VLLMFeatureExtractor:
             temperature: LLM temperature (0 for deterministic)
             max_tokens: Maximum tokens in response
             max_text_length: Maximum clinical text characters included in prompt
-            context_strategy: ``full_record`` (default), or an explicit retrieval/paging strategy
+            context_strategy: ``full_record`` (default), or an explicit truncation,
+                lexical-retrieval, or paging strategy
             source_text_temporally_valid_by_design: Trust source-text timing
                 instead of imposing a treatment-time eligibility boundary
         """
@@ -647,7 +625,6 @@ class VLLMFeatureExtractor:
         self.max_tokens = max_tokens
         self.max_text_length = max_text_length
         self.context_strategy = str(context_strategy)
-        self.colbert = colbert_config_from_mapping(colbert)
         self.source_text_temporally_valid_by_design = bool(source_text_temporally_valid_by_design)
         self.schema_repair_attempts = (
             None if schema_repair_attempts is None else int(schema_repair_attempts)
@@ -785,7 +762,6 @@ class VLLMFeatureExtractor:
             specs,
             max_text_length=self.max_text_length,
             context_strategy=self.context_strategy,
-            colbert=self.colbert,
             source_text_temporally_valid_by_design=(self.source_text_temporally_valid_by_design),
         )
         messages = [{"role": "user", "content": prompt}]
@@ -1119,15 +1095,11 @@ class VLLMFeatureExtractor:
         def prepare(text):
             return build_extraction_prompt(
                 text, specs, max_text_length=self.max_text_length,
-                context_strategy=self.context_strategy, colbert=self.colbert,
+                context_strategy=self.context_strategy,
                 source_text_temporally_valid_by_design=self.source_text_temporally_valid_by_design,
             )
 
-        if self.context_strategy == "colbert" and len(texts) > 1:
-            with ThreadPoolExecutor(max_workers=min(32, len(texts))) as pool:
-                user_contents = list(pool.map(prepare, texts))
-        else:
-            user_contents = [prepare(text) for text in texts]
+        user_contents = [prepare(text) for text in texts]
         prompts = []
         for user_content in user_contents:
             tokenizer = self._llm.get_tokenizer()
@@ -1270,87 +1242,3 @@ class VLLMFeatureExtractor:
     def __del__(self):
         """Destructor to ensure cleanup."""
         self.cleanup()
-
-
-def extract_explicit_features(
-    texts: List[str],
-    specs: List[ExplicitFeatureSpec],
-    mode: str = "server",
-    server_url: str = "http://localhost:8000/v1",
-    model_name: str = "Qwen/Qwen2.5-7B-Instruct",
-    tensor_parallel_size: int = 1,
-    gpu_memory_utilization: float = 0.9,
-    download_dir: Optional[str] = None,
-    max_model_len: Optional[int] = None,
-    vllm_reasoning_parser: Optional[str] = "auto",
-    vllm_enable_thinking: Optional[bool] = None,
-    max_retries: int = 3,
-    retry_initial_delay: float = 1.0,
-    retry_max_delay: float = 30.0,
-    retry_backoff_factor: float = 2.0,
-    request_timeout: Optional[float] = 900.0,
-    temperature: float = 0.0,
-    max_tokens: int = 1024,
-    max_text_length: Optional[int] = None,
-    context_strategy: str = "full_record",
-    batch_size: int = 32,
-    colbert: ColBERTConfig | None = None,
-    max_variables_per_extraction_request: int = 10,
-) -> pd.DataFrame:
-    """Convenience function to extract features from texts.
-
-    Args:
-        texts: List of clinical text strings
-        specs: List of feature specifications
-        mode: vLLM mode ("server", "start_server", or "python_api")
-        server_url: URL for vLLM server
-        model_name: Model name/path
-        tensor_parallel_size: Number of GPUs
-        gpu_memory_utilization: GPU memory fraction
-        download_dir: Model download directory
-        max_model_len: Maximum model context length (for start_server/python_api)
-        vllm_reasoning_parser: vLLM reasoning parser name, "auto", or disabled with None/"none"
-        vllm_enable_thinking: Optional chat-template reasoning switch for server requests
-        max_retries: Retries per patient before marking as missing
-        retry_initial_delay: Initial exponential backoff delay after request failures
-        retry_max_delay: Maximum exponential backoff delay after request failures
-        retry_backoff_factor: Exponential backoff multiplier
-        request_timeout: OpenAI-compatible client request timeout in seconds
-        temperature: LLM temperature
-        max_tokens: Max response tokens
-        max_text_length: Maximum clinical text characters included in prompt
-        context_strategy: ``full_record`` (default), or an explicit retrieval/paging strategy
-        batch_size: Batch size for processing
-        max_variables_per_extraction_request: Variable count per request (default 10)
-
-    Returns:
-        DataFrame with columns: explicit_feat_{name}, explicit_feat_{name}_missing
-    """
-    extractor = VLLMFeatureExtractor(
-        specs=specs,
-        mode=mode,
-        server_url=server_url,
-        model_name=model_name,
-        tensor_parallel_size=tensor_parallel_size,
-        gpu_memory_utilization=gpu_memory_utilization,
-        download_dir=download_dir,
-        max_model_len=max_model_len,
-        vllm_reasoning_parser=vllm_reasoning_parser,
-        vllm_enable_thinking=vllm_enable_thinking,
-        max_retries=max_retries,
-        retry_initial_delay=retry_initial_delay,
-        retry_max_delay=retry_max_delay,
-        retry_backoff_factor=retry_backoff_factor,
-        request_timeout=request_timeout,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        max_text_length=max_text_length,
-        context_strategy=context_strategy,
-        colbert=colbert,
-        max_variables_per_extraction_request=max_variables_per_extraction_request,
-    )
-
-    try:
-        return extractor.extract_to_dataframe(texts, batch_size=batch_size)
-    finally:
-        extractor.cleanup()

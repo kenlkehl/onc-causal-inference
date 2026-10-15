@@ -19,6 +19,7 @@ from oci.inference.plain_handoff_stage2_analysis import (
     ESTIMATION_CHECKPOINT_SCHEMA_VERSION,
     Stage2RequestExhaustedError,
 )
+from oci.inference.stage2_elastic_net_selection import TEMPORAL_SCOPE
 from oci.inference.stage2_sequential_consolidation import SELECTION_SCHEMA_VERSION
 from oci.inference.vllm_server_pool import (
     ManagedVLLMConfig,
@@ -123,7 +124,7 @@ def test_completed_outer_fold_revalidates_selection_and_estimation_inputs(
     selection_dir.mkdir()
     stale_selection_input = {
         "schema_version": SELECTION_SCHEMA_VERSION,
-        "temporal_scope": runner.config.input_temporal_scope,
+        "temporal_scope": TEMPORAL_SCOPE,
         "extracted_fit_fingerprint": "stale-extraction",
         "treatment_outcome_fingerprint": "stale-outcomes",
         "stage1_packets_fingerprint": stage2_workflow._value_fingerprint([]),
@@ -790,34 +791,6 @@ def test_transport_feedback_fails_closed_when_prompt_is_full():
             prompt_token_counter=None, context_window_tokens=None, context_margin_tokens=0,
         )
     assert original == [{"role": "user", "content": "x" * 100}]
-
-
-def test_default_deadline_allows_six_long_attempts(monkeypatch):
-    clock = [0.0]
-    timeouts = []
-
-    def completion(messages, config):
-        if timeouts:
-            assert f"timeout {len(timeouts)}" in messages[-1]["content"]
-            assert len(messages) == 2
-        timeouts.append(config.request_timeout)
-        clock[0] += 1800.0
-        if len(timeouts) == 6:
-            return '{"ok": true}'
-        raise stage2_workflow._RetryableStage2ResponseError(f"timeout {len(timeouts)}")
-
-    monkeypatch.setattr(stage2_workflow.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(
-        stage2_workflow.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay)
-    )
-    assert stage2_workflow._request_json(
-        messages=[{"role": "user", "content": "Return JSON."}],
-        config=_runner().config,
-        completion=completion,
-        validate=dict,
-    ) == {"ok": True}
-    assert timeouts == [3600.0] * 6
-    assert clock[0] == 10862.0
 
 
 def test_extraction_failure_is_logged_before_executor_shutdown(tmp_path, monkeypatch, caplog):

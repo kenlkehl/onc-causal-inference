@@ -315,7 +315,7 @@ def test_cli_can_replace_saved_single_route_with_pool_and_back(tmp_path):
     endpoints = [server.public_dict() for server in config().extraction_llm.endpoints]
     arguments = launch.build_parser().parse_args([
         "--config", str(source), "--stage2-only", "--stage2-extraction-endpoints", json.dumps(endpoints),
-        "--stage2-extraction-workers", "3",
+        "--set", "stage2.extraction_llm.workers=3",
     ])
     raw, _ = launch._raw_config_from_args(arguments)
     assert "endpoint" not in raw["stage2"]["extraction_llm"]

@@ -15,7 +15,7 @@ def test_large_selector_runs_from_python_c_without_main_guard():
         import oci.inference.plain_handoff_stage2_analysis as stage2_analysis
 
         parent_pid = os.getpid()
-        stage2_analysis.select_stage2_features_elastic_net = lambda **arguments: (
+        stage2_analysis.select_stage2_features_multi_model = lambda **arguments: (
             arguments["definitions"][:1],
             {"worker_pid": os.getpid()},
             [],

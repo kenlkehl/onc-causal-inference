@@ -301,11 +301,6 @@ def _materialize_or_load_manifest(run_dir: Path) -> dict[str, Any]:
                     continue
                 if path.is_file():
                     source_artifacts[str(source)] = path
-    # Retain compatibility with handoffs written before sources were kept by
-    # reference in index.json.
-    for path in handoff_path.parent.glob("*.jsonl"):
-        if path.name != handoff_path.name:
-            source_artifacts.setdefault(path.stem, path)
     _rows, manifest = materialize_stage1_architecture_artifacts(
         output_dir=run_dir,
         raw_handoff_rows=rows,
@@ -330,21 +325,7 @@ def _load_score_frames(
     architecture_entry = (manifest.get("architectures") or {}).get(architecture) or {}
     output: list[tuple[Path, pd.DataFrame, pd.DataFrame]] = []
     cache = cache if cache is not None else {}
-    score_artifacts = list(architecture_entry.get("score_artifacts") or [])
-    if STAGE1_ARCHITECTURE_REGISTRY[architecture].component == "tfidf":
-        # Older manifests registered every context parquet.  Those paths mix
-        # inner heldouts with a duplicate full-outer nuisance file, whereas
-        # predictions.parquet is the single canonical outer-heldout sidecar.
-        if architecture != TFIDF_TOPICS:
-            score_artifacts = []
-        else:
-            canonical = (run_dir / "components" / "tfidf" / "predictions.parquet").resolve()
-            score_artifacts = [
-                relative
-                for relative in score_artifacts
-                if (run_dir / str(relative)).resolve() == canonical
-            ]
-    for relative in score_artifacts:
+    for relative in architecture_entry.get("score_artifacts") or []:
         path = run_dir / str(relative)
         if not path.is_file():
             continue

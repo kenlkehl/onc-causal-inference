@@ -12,9 +12,6 @@ from oci.inference import stage2_modifier_count as count
 from oci.inference import stage2_modifier_ranking as ranking
 from oci.inference import stage2_multi_model_selection as numerical
 from oci.inference.stage2_multi_model_config import MatchedBatchConfig, ModifierCountConfig
-from oci.inference.stage2_elastic_net_selection import (
-    statistical_selection_config_from_mapping,
-)
 from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
 from tests.test_stage2_multi_model import sample_inputs
 
@@ -23,78 +20,32 @@ def ranking_request(*args, **kwargs):
     pytest.fail("statistical modifier ranking must not request an LLM")
 
 
-def test_count_rule_and_configuration_keep_legacy_policies_separate():
+def test_count_rule_and_balanced_architecture_choice():
     losses = {0: [1.2, 1.3, 1.2], 8: [0.99, 1.02, 1.00], 16: [1.0, 1.0, 1.0]}
-    assert (
-        count.choose_modifier_count(losses, rule="minimum_r_loss")["chosen_additional_count"] == 16
-    )
-    assert (
-        count.choose_modifier_count(losses, rule="one_standard_error")["chosen_additional_count"]
-        == 8
-    )
-    assert (
-        count.choose_modifier_count({0: [1.0, 1.0], 4: [1.0, 1.0]}, rule="minimum_r_loss")[
-            "chosen_additional_count"
-        ]
-        == 0
-    )
+    assert count.choose_modifier_count(losses)["chosen_additional_count"] == 16
+    assert count.choose_modifier_count({0: [1.0, 1.0], 4: [1.0, 1.0]})["chosen_additional_count"] == 0
     with pytest.raises(ValueError, match="two finite"):
-        count.choose_modifier_count({0: [1.0]}, rule="minimum_r_loss")
+        count.choose_modifier_count({0: [1.0]})
     with pytest.raises(ValueError, match="identical"):
-        count.choose_modifier_count({0: [1.0, 1.0], 4: [1.0, 1.0, 1.0]}, rule="minimum_r_loss")
+        count.choose_modifier_count({0: [1.0, 1.0], 4: [1.0, 1.0, 1.0]})
     architecture_losses = {
         ("causal_forest", 0): [1.2, 1.3, 1.2],
         ("linear_interactions", 8): [0.99, 1.02, 1.0],
         ("causal_forest", 16): [1.0, 1.0, 1.0],
     }
-    best = count.choose_effect_model(architecture_losses, rule="minimum_r_loss")
-    assert (best["chosen_estimator"], best["chosen_additional_count"]) == ("causal_forest", 16)
-    simpler = count.choose_effect_model(architecture_losses, rule="one_standard_error")
-    assert (simpler["chosen_estimator"], simpler["chosen_additional_count"]) == (
+    # Without interaction evidence every guardrail-eligible budget ties, so the
+    # smallest eligible budget wins over the minimum-loss forest.
+    balanced = count.choose_effect_model(architecture_losses)
+    assert (balanced["best_mean_estimator"], balanced["best_mean_count"]) == ("causal_forest", 16)
+    assert (balanced["chosen_estimator"], balanced["chosen_additional_count"]) == (
         "linear_interactions",
         8,
     )
+    assert balanced["rule"] == "balanced_evidence"
     tied = count.choose_effect_model(
-        {("causal_forest", 0): [1.0, 1.0], ("linear_interactions", 0): [1.0, 1.0]},
-        rule="minimum_r_loss",
+        {("causal_forest", 0): [1.0, 1.0], ("linear_interactions", 0): [1.0, 1.0]}
     )
     assert tied["chosen_estimator"] == "linear_interactions"
-    for estimators in ([], ["unknown"], ["causal_forest", "causal_forest"], [True]):
-        with pytest.raises(ValueError, match="estimators"):
-            statistical_selection_config_from_mapping(
-                {
-                    "selection_mode": "multi_model",
-                    "multi_model": {"modifier_count": {"estimators": estimators}},
-                }
-            )
-    config = statistical_selection_config_from_mapping({"selection_mode": "multi_model"})
-    assert config.multi_model.modifier_count.enabled
-    assert config.multi_model.modifier_count.estimators == (
-        "causal_forest",
-        "linear_interactions",
-        "dina",
-    )
-    assert config.multi_model.modifier_count.selection_rule == "balanced_evidence"
-    assert statistical_selection_config_from_mapping(config.public_dict()) == config
-    disabled = replace(
-        config,
-        multi_model=replace(config.multi_model, modifier_count=ModifierCountConfig(enabled=False)),
-    )
-    assert statistical_selection_config_from_mapping(disabled.public_dict()) == disabled
-    assert "multi_model" not in statistical_selection_config_from_mapping({}).public_dict()
-    for change in (
-        {"candidate_counts": [4, 0]},
-        {"candidate_counts": [0, True]},
-        {"selection_rule": "oracle"},
-        {"enabled": "yes"},
-    ):
-        with pytest.raises(ValueError):
-            statistical_selection_config_from_mapping(
-                {
-                    "selection_mode": "multi_model",
-                    "multi_model": {"modifier_count": change},
-                }
-            )
 
 
 def test_zero_budget_preserves_confounders_and_exact_investigator_roles():
@@ -192,7 +143,7 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
                 assert set(cell["validation_row_ids"]) <= expected_rows
             concept_inputs.append(expected_rows)
             assert kwargs["top_n"] == 100
-            ranking_args = {k: v for k, v in kwargs.items() if k != "top_n"}
+            ranking_args = {k: kwargs[k] for k in ("definitions", "statistical_report", "maximum")}
             ranking_args['output_dir'] = Path(kwargs['output_dir']) / 'representative_ranking'
             return ranking.rank_modifier_candidates(**ranking_args)
         monkeypatch.setattr(count.concepts, "infer_modifier_concepts", concept_review)
@@ -202,7 +153,7 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
         role_report=role_report,
         statistical_report=report,
         request_json=ranking_request,
-        role_policy=Stage2RoleAdjudicationConfig(enabled=False, max_candidates_per_request=2),
+        role_policy=Stage2RoleAdjudicationConfig(),
         output_dir=tmp_path / "count",
         numerical_checkpoint_dir=numerical_root,
         model_identity="controlled-response",
@@ -292,7 +243,7 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
         arguments["policy"],
         multi_model=replace(
             arguments["policy"].multi_model,
-            modifier_count=replace(cfg, selection_rule="one_standard_error"),
+            modifier_count=replace(cfg, relative_r_loss_tolerance=1e-3),
             interaction_ranking_weight=.25,
         ),
     )

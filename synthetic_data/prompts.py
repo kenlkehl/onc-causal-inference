@@ -167,61 +167,6 @@ Respond with JSON in this exact format:
 
 
 # =============================================================================
-# Patient History Generation Prompt  
-# =============================================================================
-
-PATIENT_HISTORY_PROMPT = """You are generating a realistic synthetic clinical history document for a cancer patient.
-This document should simulate concatenated clinical notes, radiology reports, and pathology reports.
-
-Patient Characteristics (YOU MUST ACCURATELY REPRESENT THESE VALUES):
-{patient_characteristics}
-
-Clinical Context: {clinical_question}
-
-Generate a comprehensive clinical history document that:
-1. Simulates at least 5 clinical documents, concatenated together
-2. Includes sections from different note types:
-   - Initial oncology consultation note
-   - At least one radiology report (CT, PET, or MRI)
-   - At least one pathology report
-   - One or more follow-up notes
-3. **CRITICAL: ACCURATELY incorporates ALL the patient characteristics listed above**
-4. Uses realistic medical terminology and abbreviations
-5. Includes dates (use relative dates like "3 months prior", "at diagnosis")
-6. Contains typical clinical details like vital signs, lab values, physical exam findings
-7. Reflects the clinical decision-making around treatment selection
-
-CRITICAL REQUIREMENT #1: Do NOT mention which specific treatment the patient was ultimately assigned to or received.
-The clinical history should describe the patient's condition, characteristics, and the treatment decision-making process,
-but should END BEFORE the actual treatment is selected or administered. This is essential because the document
-will be used for causal inference and the treatment assignment must be predicted from the confounders, not read from the text.
-
-CRITICAL REQUIREMENT #2: FAITHFULLY REPRESENT CONFOUNDER VALUES IN NATURAL CLINICAL LANGUAGE.
-- If the patient has 2 metastatic sites, describe EXACTLY 2 specific sites (e.g., "bone and liver metastases")
-- If the patient's age is 58 years, state the patient is 58 years old
-- If ECOG performance status is 1, describe functional status consistent with ECOG 1
-- For numeric variables, the count in the text MUST MATCH the specified value
-- Do NOT embellish, add extra sites/conditions, or change any values
-
-CRITICAL REQUIREMENT #3: EXPRESS CATEGORICAL VARIABLES NATURALLY - NO UNDERSCORES OR CODES.
-- NEVER insert literal category codes with underscores (e.g., do NOT write "completed_more_than_12_months_ago")
-- Instead, express the concept in natural clinical prose
-- Examples of CORRECT natural expression:
-  * "completed more than 12 months ago" → "completed adjuvant letrozole approximately 18 months prior to presentation"
-  * "completed 12 months or less ago" → "recently finished adjuvant anastrozole 8 months ago"
-  * "none" → "no prior adjuvant endocrine therapy" or "patient declined adjuvant hormonal treatment"
-  * "high" → "elevated" or describe the specific finding
-- The semantic meaning must be preserved, but expressed as a clinician would naturally write it
-
-The document should read as if it captures the patient's state at the moment of treatment decision, before the treatment is revealed.
-
-Write the document as if it were real clinical notes, imaging reports, and pathology reports that have been concatenated together.
-The confounder values should appear naturally in the clinical narrative (e.g., "58-year-old female", "ECOG PS 1", "metastatic disease involving bone and liver").
-
-Begin the clinical history document now:"""
-
-
-# =============================================================================
 # Two-Stage Generation: Event Timeline Prompt
 # =============================================================================
 
@@ -588,47 +533,6 @@ def format_confounder_list(confounders: list) -> str:
         else:
             lines.append(f"- {c['name']} (continuous): {c['description']}.{role_text}")
     return "\n".join(lines)
-
-
-def validate_clinical_text(text: str, characteristics: dict, confounders: list) -> dict:
-    """
-    Validate that generated clinical text doesn't contain literal category codes.
-
-    Checks for:
-    1. Underscore-connected phrases that look like category codes
-    2. Exact category values that should have been naturalized
-
-    Args:
-        text: Generated clinical text
-        characteristics: Patient characteristics dict
-        confounders: List of confounder definitions
-
-    Returns:
-        Dict with 'valid' bool and 'issues' list of problems found
-    """
-    import re
-
-    issues = []
-
-    # Check for underscore-connected multi-word phrases (likely category codes)
-    underscore_patterns = re.findall(r'\b[a-z]+(?:_[a-z0-9]+){2,}\b', text.lower())
-    if underscore_patterns:
-        issues.append(f"Found underscore-connected phrases (likely category codes): {underscore_patterns[:5]}")
-
-    # Check for exact category values from categorical confounders
-    for conf in confounders:
-        if conf.get("type") == "categorical":
-            name = conf["name"]
-            value = characteristics.get(name, "")
-            if isinstance(value, str) and "_" in value:
-                # This is a multi-word category code - it should NOT appear verbatim
-                if value.lower() in text.lower():
-                    issues.append(f"Found literal category code '{value}' for confounder '{name}'")
-
-    return {
-        "valid": len(issues) == 0,
-        "issues": issues
-    }
 
 
 def format_patient_characteristics(characteristics: dict, confounders: list) -> str:

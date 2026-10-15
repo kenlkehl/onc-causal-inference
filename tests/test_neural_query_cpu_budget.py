@@ -114,7 +114,6 @@ def test_lane_passes_budget_through_context_to_discovery(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "cpu_workers,devices,expected_nested",
     [
-        (1, ("cpu",), [1, 1]),
         (30, ("cpu",), [30, 30]),
         (5, ("cuda:0", "cuda:1"), [2, 3]),
         (1, ("cuda:0", "cuda:1"), [1, 1]),
@@ -176,7 +175,7 @@ def test_context_and_nested_nuisances_use_budget_with_real_fits(
     )
     monkeypatch.setattr(runtime, "_fit_final_bank", final_bank)
     n = 48
-    result = runtime.fit_context_query_discovery(
+    runtime.fit_context_query_discovery(
         row_ids=tuple(range(n)),
         chunks=[np.ones((1, 2), dtype=np.float32) for _ in range(n)],
         texts=tuple(
@@ -200,8 +199,6 @@ def test_context_and_nested_nuisances_use_budget_with_real_fits(
     )
     assert calls[0] == cpu_workers
     assert sorted(calls[1:]) == expected_nested
-    assert [row["fold"] for row in result["subfold_audit"]] == [1, 2]
-    assert result["validation_audits_used_for_selection"] is False
 
 
 @pytest.mark.parametrize(

@@ -88,9 +88,6 @@ Repository = "https://github.com/kenlkehl/onc-causal-inference"
 [tool.setuptools.packages.find]
 include = ["oci", "oci.*", "synthetic_data", "synthetic_data.*"]
 
-[tool.setuptools.package-data]
-"oci.inference" = ["stage2_modeling_source_aliases.json"]
-
 [tool.black]
 line-length = 100
 target-version = ["py312"]

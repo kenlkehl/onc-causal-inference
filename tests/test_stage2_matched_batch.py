@@ -1,8 +1,6 @@
 """Patient boundaries, batch evidence, and its path into clinical review."""
 from dataclasses import replace
 import json
-import pickle
-from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -10,10 +8,9 @@ import pytest
 
 from oci.inference import stage2_matched_batch as batch
 from oci.inference.stage2_multi_model_config import MatchedBatchConfig, multi_model_config_from_mapping
-from oci.inference.stage2_multi_model_selection import aggregate_evidence, _matched_batch_enabled
+from oci.inference.stage2_multi_model_selection import aggregate_evidence
 from oci.inference.stage2_multi_model_adjudication import build_multi_model_role_evidence
 from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
-from oci.inference import stage2_clinical_prompts as prompts
 from oci.inference.stage2_modifier_concepts import _concept_input
 from tests.test_stage2_multi_model import feature, small_policy
 
@@ -90,7 +87,7 @@ def test_ridge_uses_bin_baseline_and_mean_loss_penalty():
     np.testing.assert_allclose(model.predict(x, groups), repeated.predict(x, groups), atol=1e-12)
 
 
-def test_signal_recovers_on_separate_patients_and_reaches_role_and_concept_prompts():
+def test_signal_recovers_on_separate_patients_and_reaches_concept_prompt():
     args = cohort()
     result = batch.score_candidates(**args)
     assert result == batch.score_candidates(**args)
@@ -109,11 +106,10 @@ def test_signal_recovers_on_separate_patients_and_reaches_role_and_concept_promp
     evidence = build_multi_model_role_evidence(definitions=args["definitions"],
         statistical_report={"multi_model_evidence": summary, "policy": args["policy"].public_dict()},
         policy=Stage2RoleAdjudicationConfig())
-    for text in (prompts.evidence_input(evidence, evidence["candidates"]),
-                 _concept_input(evidence, evidence["candidates"], dict.fromkeys(ids, 1), 1)):
-        assert "DO_NOT_LEAK" not in text
-        assert "10% error reduction" in text and "Shuffles reuse patients" in text
-        assert "Filtered and unfiltered" in text
+    text = _concept_input(evidence, evidence["candidates"], dict.fromkeys(ids, 1), 1)
+    assert "DO_NOT_LEAK" not in text
+    assert "10% error reduction" in text and "Shuffles reuse patients" in text
+    assert "Filtered and unfiltered" in text
     assert "patient_ids" not in json.dumps(evidence)
 
 
@@ -134,14 +130,9 @@ def test_sparse_bins_empty_tail_and_constant_outcomes_are_unavailable_not_negati
 
 
 def test_configuration_preserves_saved_defaults_and_rejects_ontology_options():
-    assert not _matched_batch_enabled(SimpleNamespace())  # An in-memory policy from an older running process.
-    old = multi_model_config_from_mapping({})
-    assert "matched_batch" not in old.public_dict()
-    del old.__dict__["matched_batch"]
-    restored = pickle.loads(pickle.dumps(old))
-    restored.validate()
-    assert not restored.matched_batch.enabled
-    assert "matched_batch" not in restored.public_dict()
+    default = multi_model_config_from_mapping({})
+    assert not default.matched_batch.enabled
+    assert "matched_batch" not in default.public_dict()
     enabled = multi_model_config_from_mapping({"matched_batch": {"enabled": True}})
     assert multi_model_config_from_mapping(enabled.public_dict()) == enabled
     disabled_custom = replace(enabled, matched_batch=replace(enabled.matched_batch, enabled=False, train_passes=7))

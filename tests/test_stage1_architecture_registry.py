@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 from oci.inference.neural_query_evidence_contract import query_retrieval_policy

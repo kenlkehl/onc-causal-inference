@@ -16,7 +16,6 @@ import time
 import numpy as np
 import pandas as pd
 
-from .config import SyntheticDataConfig
 from .llm_client import LLMClient
 from . import generator as g
 from .prompts import CLINICAL_SYSTEM_PROMPT, NOTE_EXPANSION_PROMPT, build_event_timeline_prompt
@@ -156,8 +155,6 @@ def generate_from_saved_dgp(config, metadata_path, num_workers=4, show_progress=
     changes require a different output directory.
     """
     config.validate()
-    if config.generation_mode != "two_stage":
-        raise ValueError("Saved-DGP API generation currently requires two_stage mode")
     if num_workers < 1:
         raise ValueError("num_workers must be positive")
     output = Path(config.output_dir)

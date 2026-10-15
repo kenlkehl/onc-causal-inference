@@ -13,10 +13,7 @@ from .explicit_features import (
     parse_extraction_response,
     resolve_vllm_reasoning_parser,
     strip_reasoning_trace,
-    extract_explicit_features,
 )
-from ..colbert_config import ColBERTConfig
-from .colbert import ColBERTRetriever, get_retriever
 from .cache import ExtractionCache
 from .contract_lexical_context import (
     CONTRACT_LEXICAL_CONTEXT_VERSION,
@@ -30,7 +27,6 @@ from .complete_paged import (
     COMPLETE_PAGED_RECONCILIATION_SCHEMA,
     COMPLETE_PAGED_REQUEST_PLAN_SCHEMA,
     COMPLETE_PAGED_RESPONSE_SCHEMA,
-    COMPLETE_PAGED_TRANSPORT_SCHEMA,
     COMPLETE_PAGED_VERSION,
     CompleteFeatureContract,
     CompleteNotePage,
@@ -38,32 +34,14 @@ from .complete_paged import (
     CompletePagingGeometry,
     CompletePagedRequest,
     CompletePagedRequestPlan,
-    bounded_recursive_reconcile,
     build_complete_page_prompt,
     build_complete_paged_coverage_ledger,
-    execute_zero_retry_with_one_schema_repair,
-    parse_complete_page_response,
     plan_complete_note_pages,
     plan_complete_paged_requests,
     reconcile_complete_page_responses,
     validate_absolute_citations,
     validate_complete_note_page_plan,
     validate_complete_paged_request_plan,
-    validate_response_envelope,
-)
-from .numeric_inventory import (
-    AgenticNumericInventoryExtractor,
-    CompletionResult,
-    NumericInventoryConfig,
-    NumericInventoryLLMClient,
-    NumericTextChunk,
-    build_chunk_extraction_prompt,
-    build_ontology_harmonization_prompt,
-    build_patient_reconciliation_prompt,
-    chunk_dataset_documents,
-    parse_numeric_values_response,
-    parse_ontology_mapping_response,
-    split_text_into_all_word_chunks,
 )
 from .llm_routing import (
     OpenAIClientPool,
@@ -71,15 +49,7 @@ from .llm_routing import (
     parse_server_urls,
 )
 
-# Backward-compatible import aliases. Old config keys are still rejected.
-ExplicitConfounderValue = ExplicitFeatureValue
-VLLMConfounderExtractor = VLLMFeatureExtractor
-extract_explicit_confounders = extract_explicit_features
-
 __all__ = [
-    "ColBERTConfig",
-    "ColBERTRetriever",
-    "get_retriever",
     "ExplicitFeatureValue",
     "VLLMFeatureExtractor",
     "build_extraction_prompt",
@@ -88,7 +58,6 @@ __all__ = [
     "parse_extraction_response",
     "resolve_vllm_reasoning_parser",
     "strip_reasoning_trace",
-    "extract_explicit_features",
     "ExtractionCache",
     "CONTRACT_LEXICAL_CONTEXT_VERSION",
     "EXTRACTION_GROUPING_VERSION",
@@ -100,41 +69,21 @@ __all__ = [
     "COMPLETE_PAGED_RECONCILIATION_SCHEMA",
     "COMPLETE_PAGED_REQUEST_PLAN_SCHEMA",
     "COMPLETE_PAGED_RESPONSE_SCHEMA",
-    "COMPLETE_PAGED_TRANSPORT_SCHEMA",
     "CompleteFeatureContract",
     "CompleteNotePage",
     "CompletePageResponse",
     "CompletePagingGeometry",
     "CompletePagedRequest",
     "CompletePagedRequestPlan",
-    "bounded_recursive_reconcile",
     "build_complete_page_prompt",
     "build_complete_paged_coverage_ledger",
-    "execute_zero_retry_with_one_schema_repair",
-    "parse_complete_page_response",
     "plan_complete_note_pages",
     "plan_complete_paged_requests",
     "reconcile_complete_page_responses",
     "validate_absolute_citations",
     "validate_complete_note_page_plan",
     "validate_complete_paged_request_plan",
-    "validate_response_envelope",
-    "AgenticNumericInventoryExtractor",
-    "CompletionResult",
-    "NumericInventoryConfig",
-    "NumericInventoryLLMClient",
-    "NumericTextChunk",
-    "build_chunk_extraction_prompt",
-    "build_ontology_harmonization_prompt",
-    "build_patient_reconciliation_prompt",
-    "chunk_dataset_documents",
-    "parse_numeric_values_response",
-    "parse_ontology_mapping_response",
-    "split_text_into_all_word_chunks",
     "OpenAIClientPool",
     "call_with_exponential_backoff",
     "parse_server_urls",
-    "ExplicitConfounderValue",
-    "VLLMConfounderExtractor",
-    "extract_explicit_confounders",
 ]

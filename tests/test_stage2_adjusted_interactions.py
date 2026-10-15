@@ -1,7 +1,6 @@
 """Conventional score-adjusted tests and their role in modifier selection."""
 
 from copy import deepcopy
-from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -13,7 +12,6 @@ from oci.inference import stage2_interaction_screen as screen
 from oci.inference import stage2_modifier_count as count
 from oci.inference import stage2_multi_model_selection as numerical
 from oci.inference import stage2_statistical_selection as tests
-from oci.inference.stage2_elastic_net_selection import statistical_selection_config_from_mapping
 from tests.test_stage2_multi_model import feature, small_policy
 from tests.test_stage2_statistical_ranking import inputs, run, by_id
 
@@ -173,7 +171,6 @@ def test_interaction_supported_budget_cannot_override_predictive_guardrail():
     }
     result = count.choose_effect_model(
         losses,
-        rule="balanced_evidence",
         interaction_utilities={0: [0, 0, 0], 4: [0.1, 0.1, 0.1], 8: [1, 1, 1]},
     )
     assert result["chosen_additional_count"] == 4
@@ -183,32 +180,18 @@ def test_interaction_supported_budget_cannot_override_predictive_guardrail():
     losses[("linear_interactions", 4)] = [0.200000001] * 3
     tiny = count.choose_effect_model(
         losses,
-        rule="balanced_evidence",
         interaction_utilities={0: [0] * 3, 4: [0.1] * 3, 8: [1] * 3},
     )
     assert tiny["chosen_additional_count"] == 4
     weak = count.choose_effect_model(
         losses,
-        rule="balanced_evidence",
         interaction_utilities={0: [0] * 3, 4: [-0.1] * 3, 8: [1] * 3},
     )
     assert weak["chosen_additional_count"] == 0
     assert not weak["formal_error_guarantee"]
 
 
-def test_configuration_roundtrip_and_invalid_weights():
-    cfg = statistical_selection_config_from_mapping({"selection_mode": "multi_model"})
-    assert cfg.multi_model.interaction_ranking_weight == 0.5
-    assert cfg.multi_model.modifier_count.selection_rule == "balanced_evidence"
-    assert statistical_selection_config_from_mapping(cfg.public_dict()) == cfg
-    for value in [-0.1, 1.1, True, float("nan")]:
-        with pytest.raises(ValueError):
-            replace(cfg.multi_model, interaction_ranking_weight=value).validate()
-        with pytest.raises(ValueError):
-            replace(cfg.multi_model.modifier_count, relative_r_loss_tolerance=value).validate()
-
-
-def test_balanced_architecture_choice_and_legacy_configuration():
+def test_balanced_architecture_choice():
     losses = {
         ("linear_interactions", 0): [0.2] * 3,
         ("linear_interactions", 4): [0.2005, 0.1995, 0.2],
@@ -217,26 +200,16 @@ def test_balanced_architecture_choice_and_legacy_configuration():
     }
     utility = {0: [0] * 3, 4: [0.1] * 3}
     selected = count.choose_effect_model(
-        losses, rule="balanced_evidence", interaction_utilities=utility
+        losses, interaction_utilities=utility
     )
     assert selected["chosen_estimator"] == "linear_interactions"
     assert selected["chosen_additional_count"] == 4
     # With the same eligible budget, a material fit advantage selects the forest.
     losses[("causal_forest", 4)] = [0.2003, 0.1993, 0.1998]
     selected = count.choose_effect_model(
-        losses, rule="balanced_evidence", interaction_utilities=utility
+        losses, interaction_utilities=utility
     )
     assert selected["chosen_estimator"] == "causal_forest"
-    old = statistical_selection_config_from_mapping(
-        {
-            "selection_mode": "multi_model",
-            "multi_model": {
-                "schema_version": "stage2_multi_model_selection_v6_predictive_nuisances",
-                "modifier_count": {"selection_rule": "minimum_r_loss"},
-            },
-        }
-    )
-    assert old.multi_model.modifier_count.selection_rule == "minimum_r_loss"
 
 
 def test_configured_interaction_family_controls_weight_and_cache(tmp_path):

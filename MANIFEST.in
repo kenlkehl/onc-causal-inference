@@ -1,12 +1,10 @@
 include README.md
 include LICENSE
 include pyproject.toml
-include run_*.sh
+include run_synthetic.sh
 recursive-include example_configs *.json
 recursive-include docs *.md
-recursive-include lessons *.md *.txt
-recursive-include scripts *.py *.sh *.md
-recursive-include experiments/plumb_feasibility *.json
+recursive-include scripts *.py *.env
 recursive-include synthetic_data *.py
 include synthetic_data/example_usage.txt
 prune synthetic_data/example_synthetic_datasets/*/.oci_cache

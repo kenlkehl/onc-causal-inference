@@ -22,7 +22,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, MutableMapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 import numpy as np
 import pandas as pd
@@ -36,10 +36,6 @@ from .nuisance_diagnostics import (
 )
 from . import stage2_request_audit as request_audit
 from . import stage2_clinical_prompts as clinical_prompts
-from . import stage2_note_search as note_search_extraction
-from .stage2_note_search import NoteSearchConfig
-from ..colbert_config import ColBERTConfig
-from . import stage2_colbert
 from . import stage2_modeling_pool as modeling
 
 from ..models.causal_forest_head import CausalForestHead
@@ -47,15 +43,8 @@ from ..models.elastic_net_nuisance import (
     ElasticNetLogisticClassifier,
     ElasticNetRegressor,
 )
-from .stage2_elastic_net_selection import (
-    SCHEMA_VERSION as ELASTIC_NET_COMPONENT_SCHEMA_VERSION,
-    TEMPORAL_SCOPE,
-    select_stage2_features_elastic_net,
-)
-from .stage2_role_adjudication import (
-    SCHEMA_VERSION as ROLE_ADJUDICATION_COMPONENT_SCHEMA_VERSION,
-    adjudicate_stage2_roles,
-)
+from .stage2_elastic_net_selection import TEMPORAL_SCOPE
+from .stage2_multi_model_selection import select_stage2_features_multi_model
 from .stage2_sequential_consolidation import (
     SELECTION_SCHEMA_VERSION,
     consolidate_stage2_candidates,
@@ -99,11 +88,6 @@ INCREMENTAL_REFINEMENT_EXTRACTION_SCHEMA_VERSION = (
 )
 HARMONIZATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mixed_value_harmonization_v1_llm_training_only_clinical_prompts_20260923'
 HARMONIZATION_FALLBACK_SCHEMA_VERSION = "stage2_mixed_value_harmonization_fallback_v1"
-# Compatibility defaults for Stage 2 config objects created before ontology
-# refinement was added.  Keeping this boundary tolerant also protects a
-# long-running workflow if an older caller passes a config object directly.
-DEFAULT_ONTOLOGY_REFINEMENT_MIN_FAILURE_PATIENTS = 3
-DEFAULT_MAX_ONTOLOGY_REFINEMENT_ROUNDS = 2
 DEFAULT_EXTRACTION_FEATURE_BATCH_SIZE = 10
 DEFAULT_EXTRACTION_CHUNK_SIZE_TOKENS = 50_000
 DEFAULT_EXTRACTION_CONTEXT_WINDOW_TOKENS = 131_072
@@ -112,12 +96,6 @@ DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS = 1_024
 SERIAL_EXTRACTION_CHUNK_CHECKPOINT_SCHEMA_VERSION = 'stage2_serial_patient_feature_chunk_v1_carried_validated_state_clinical_prompts_20260923'
 SERIAL_EXTRACTION_MANIFEST_SCHEMA_VERSION = 'stage2_serial_patient_feature_extraction_v1_lossless_ordered_chunks_clinical_prompts_20260923'
 MAX_SERIAL_FEATURE_STATE_CHARS = 2_048
-DEFAULT_SCREENING_TREES = 200
-DEFAULT_MAX_EVALUATION_ROUNDS = 10
-DEFAULT_STABILITY_SELECTION_ROUNDS = 3
-DEFAULT_STABILITY_SELECTION_FREQUENCY = 2.0 / 3.0
-DEFAULT_EFFECT_MODIFIER_NEGATIVE_MARGIN_FRACTION = 0.01
-DEFAULT_EFFECT_MODIFIER_NEGATIVE_FOLD_FRACTION = 0.6
 
 
 class RequestJSON(Protocol):
@@ -157,16 +135,6 @@ class _ExtractionFieldError(ValueError):
 class _ExtractionCancelledError(RuntimeError):
     """Cooperatively stop sibling extraction tasks after one task fails."""
 
-
-_SCALAR_EXTRACTION_RULES = (
-    "Return one scalar value or null per feature; never return an object or array.",
-    "For a continuous feature, return one JSON number whenever the record supplies the "
-    "requested numeric measurement. If the record supplies only a documented categorical "
-    "or threshold representation of that same measurement, return that one concise string "
-    "instead of discarding it or inventing a number. From a composite such as 147/93, use "
-    "only a component explicitly named by the feature; if the definition requests multiple "
-    "components, return null rather than a ratio string or aggregate.",
-)
 
 CONFLICT_RESOLUTION_STRATEGIES = frozenset(
     {
@@ -210,192 +178,20 @@ def _write_frame(path: Path, frame: pd.DataFrame) -> None:
     os.replace(temporary, path)
 
 
-_INFRASTRUCTURE_FAILURE_MARKERS = (
-    "Stage2InfrastructureError",
-    "Stage2RequestExhaustedError",
-    "Stage 2 logical request deadline",
-    "Stage 2 transport exhausted",
-)
-_INFRASTRUCTURE_AUDIT_FILENAMES = {
-    "extraction_failure.json",
-    "category_ontology_repair.json",
-    "fallback.json",
-}
-
-
-def _records_infrastructure_failure(path: Path) -> bool:
-    try:
-        rendered = path.read_text(encoding="utf-8")
-    except OSError:
-        return False
-    return any(marker in rendered for marker in _INFRASTRUCTURE_FAILURE_MARKERS)
-
-
-def _is_archived_audit_path(path: Path, *, root: Path) -> bool:
-    try:
-        parts = path.relative_to(root).parts[:-1]
-    except ValueError:
-        return False
-    for part in parts:
-        normalized = part.lower()
-        if "archive" in normalized or "backup" in normalized:
-            return True
-    return False
-
-
-def infrastructure_failure_audit_paths(root: Path) -> tuple[Path, ...]:
-    """Find legacy checkpoints that mislabeled request failure as model output."""
-
-    root = Path(root)
-    if not root.is_dir():
-        return ()
-    paths: list[Path] = []
-    for current, directory_names, filenames in os.walk(root):
-        directory_names[:] = [
-            name
-            for name in directory_names
-            if "archive" not in name.lower() and "backup" not in name.lower()
-        ]
-        current_path = Path(current)
-        candidates = set(filenames).intersection(_INFRASTRUCTURE_AUDIT_FILENAMES)
-        if (
-            "result.json" in filenames
-            and current_path.name.startswith("feature_")
-            and current_path.parent.name == "supervisor"
-        ):
-            candidates.add("result.json")
-        for name in candidates:
-            path = current_path / name
-            if (
-                not _is_archived_audit_path(path, root=root)
-                and _records_infrastructure_failure(path)
-            ):
-                paths.append(path)
-    return tuple(sorted(paths))
-
-
-def _infrastructure_affected_directories(root: Path) -> set[Path]:
-    root = Path(root)
-    affected: set[Path] = set()
-    for audit_path in infrastructure_failure_audit_paths(root):
-        directory = audit_path.parent
-        while directory == root or root in directory.parents:
-            affected.add(directory)
-            if directory == root:
-                break
-            directory = directory.parent
-    return affected
-
-
-def _supersede_infrastructure_checkpoint(directory: Path) -> None:
-    """Retain a legacy bad leaf for audit while making it ineligible for reuse."""
-
-    for name in (
-        "complete.json",
-        "result.json",
-        "extraction_failure.json",
-        "extraction_issues.json",
-        "category_ontology_repair.json",
-        "fallback.json",
-    ):
-        path = directory / name
-        if path.is_file():
-            os.replace(
-                path,
-                path.with_name(f"superseded_infrastructure_{name}"),
-            )
-
-
-def _ontology_refinement_limits(config: Any) -> tuple[int, int]:
-    """Read refinement limits from current or pre-refinement config objects."""
-
-    missing = [
-        name
-        for name in (
-            "ontology_refinement_min_failure_patients",
-            "max_ontology_refinement_rounds",
-        )
-        if not hasattr(config, name)
-    ]
-    if missing:
-        LOGGER.warning(
-            "Stage 2 received a pre-ontology-refinement config without %s; "
-            "using compatibility defaults",
-            ", ".join(missing),
-        )
-    return (
-        int(
-            getattr(
-                config,
-                "ontology_refinement_min_failure_patients",
-                DEFAULT_ONTOLOGY_REFINEMENT_MIN_FAILURE_PATIENTS,
-            )
-        ),
-        int(
-            getattr(
-                config,
-                "max_ontology_refinement_rounds",
-                DEFAULT_MAX_ONTOLOGY_REFINEMENT_ROUNDS,
-            )
-        ),
-    )
-
-
-def _configured_extraction_feature_batch_size(config: Any) -> int:
-    """Read the feature prompt cap from current or pre-batching configs."""
-
-    if getattr(getattr(config, "decision_extraction", None), "enabled", False):
-        return 1
-    if not hasattr(config, "extraction_feature_batch_size"):
-        LOGGER.warning(
-            "Stage 2 received a pre-feature-batching config; using the default "
-            "extraction feature batch size of %s",
-            DEFAULT_EXTRACTION_FEATURE_BATCH_SIZE,
-        )
-    return int(
-        getattr(
-            config,
-            "extraction_feature_batch_size",
-            DEFAULT_EXTRACTION_FEATURE_BATCH_SIZE,
-        )
-    )
-
-
 def _configured_serial_extraction(config: Any) -> dict[str, Any]:
-    """Read extraction settings while preserving older callers' defaults."""
+    """Read the token-aware full-record extraction settings from a Stage 2 config."""
 
-    defaults = {
-        "chunk_size_tokens": DEFAULT_EXTRACTION_CHUNK_SIZE_TOKENS,
-        "context_window_tokens": DEFAULT_EXTRACTION_CONTEXT_WINDOW_TOKENS,
-        "max_output_tokens": DEFAULT_EXTRACTION_MAX_TOKENS,
-        "context_margin_tokens": DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
-        "deferred_retry_passes": 1,
+    return {
+        "chunk_size_tokens": int(config.extraction_chunk_size_tokens),
+        "context_window_tokens": int(config.extraction_context_window_tokens),
+        # Reserve room for a reasoning-enabled repair of the same lossless chunk.
+        "max_output_tokens": max(
+            int(config.extraction_max_tokens),
+            int(config.extraction_reasoning_max_tokens or 0),
+        ),
+        "context_margin_tokens": int(config.extraction_context_margin_tokens),
+        "deferred_retry_passes": int(config.extraction_deferred_retry_passes),
     }
-    names = {
-        "chunk_size_tokens": "extraction_chunk_size_tokens",
-        "context_window_tokens": "extraction_context_window_tokens",
-        "max_output_tokens": "extraction_max_tokens",
-        "context_margin_tokens": "extraction_context_margin_tokens",
-        "deferred_retry_passes": "extraction_deferred_retry_passes",
-    }
-    settings = {
-        key: int(getattr(config, attribute, defaults[key]))
-        for key, attribute in names.items()
-    }
-    # Reserve room for a reasoning-enabled repair of the same lossless chunk.
-    settings["max_output_tokens"] = max(
-        settings["max_output_tokens"],
-        int(getattr(config, "extraction_reasoning_max_tokens", None) or 0),
-    )
-    search = getattr(config, "extraction_note_search", NoteSearchConfig())
-    if search.enabled:
-        settings["note_search"] = search
-    settings["context_strategy"] = getattr(config, "extraction_context_strategy", "full_record")
-    settings["colbert"] = getattr(config, "colbert", ColBERTConfig())
-    decision = getattr(config, "decision_extraction", None)
-    if decision is not None and decision.enabled:
-        settings["decision_extraction"] = decision
-    return settings
 
 
 def _value_fingerprint(value: Any) -> str:
@@ -430,33 +226,19 @@ def _frame_fingerprint(frame: pd.DataFrame) -> str:
 def frozen_preselection_review_policy(config: Any) -> dict[str, Any]:
     """Return the ontology-review policy that produced a reusable fit matrix."""
 
-    minimum_failure_patients, maximum_refinement_rounds = (
-        _ontology_refinement_limits(config)
-    )
-    policy = {
+    return {
         "review_schema_version": REVIEW_CHECKPOINT_SCHEMA_VERSION,
         "review_convergence_schema_version": REVIEW_CONVERGENCE_SCHEMA_VERSION,
         "ontology_refinement_schema_version": (
             ONTOLOGY_REFINEMENT_CHECKPOINT_SCHEMA_VERSION
         ),
         "harmonization_schema_version": HARMONIZATION_CHECKPOINT_SCHEMA_VERSION,
-        "max_review_rounds": int(getattr(config, "max_review_rounds", 1)),
+        "max_review_rounds": int(config.max_review_rounds),
         "ontology_refinement_min_failure_patients": int(
-            minimum_failure_patients
+            config.ontology_refinement_min_failure_patients
         ),
-        "max_ontology_refinement_rounds": int(maximum_refinement_rounds),
+        "max_ontology_refinement_rounds": int(config.max_ontology_refinement_rounds),
     }
-    search = getattr(config, "extraction_note_search", NoteSearchConfig())
-    if search.enabled:
-        policy["extraction_note_search"] = note_search_extraction.policy_identity(search)
-    if not search.enabled and getattr(config, "extraction_context_strategy", "full_record") == "colbert":
-        policy["colbert"] = stage2_colbert.policy_identity(getattr(config, "colbert", ColBERTConfig()))
-    decision = getattr(config, "decision_extraction", None)
-    if decision is not None and decision.enabled:
-        from .stage2_decision import SCHEMA
-
-        policy["decision_extraction"] = {"schema": SCHEMA, **decision.public_dict()}
-    return policy
 
 
 def _load_frozen_preselection_snapshot(
@@ -844,8 +626,6 @@ def _prompt_feature_definitions(
         row["conflict_resolution"] = _resolved_conflict_resolution(definition)
         if definition.get("clinical_label"):
             row["clinical_label"] = definition["clinical_label"]
-        if definition.get("decision_ontology") is not None:
-            row["decision_ontology"] = copy.deepcopy(definition["decision_ontology"])
         output.append(row)
     return output
 
@@ -1399,14 +1179,6 @@ def _request_validated_extraction(
                 ]
                 if not pending_issues:
                     raise ValueError("pending category ontology checkpoint has no issues")
-                if validate_response is not None:
-                    # A legacy pending value/category error may have been raised
-                    # before serial metadata was checked. Re-extract incompatible
-                    # responses instead of crashing after note-free mapping.
-                    try:
-                        validate_candidate(pending["response"])
-                    except (_ExtractionCategoryError, _ExtractionValueError):
-                        pass
                 raise _ExtractionCategoryError(
                     issues=pending_issues,
                     response=pending["response"],
@@ -1720,115 +1492,6 @@ def _request_validated_extraction(
     )
     pending_path.unlink(missing_ok=True)
     return validated
-
-
-def _legacy_extraction_issue_audit(directory: Path) -> dict[str, Any]:
-    """Reconstruct the issue ledger from pre-ledger extraction audit files."""
-
-    events: list[dict[str, Any]] = []
-
-    def read_mapping(filename: str) -> Mapping[str, Any] | None:
-        path = directory / filename
-        if not path.is_file():
-            return None
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            return None
-        return value if isinstance(value, Mapping) else None
-
-    value_audit = read_mapping("invalid_feature_value_repair.json")
-    if value_audit is not None:
-        for issue in value_audit.get("issues") or []:
-            if not isinstance(issue, Mapping):
-                continue
-            try:
-                row_id = int(issue["row_id"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            events.append(
-                {
-                    "failure_kind": "invalid_scalar_or_value_type",
-                    "row_id": row_id,
-                    "feature_name": str(issue.get("feature_name") or ""),
-                    "reason": str(issue.get("reason") or ""),
-                    "prior_extracted_value": copy.deepcopy(issue.get("prior_extracted_value")),
-                }
-            )
-
-    category_audit = read_mapping("category_ontology_repair.json")
-    if category_audit is not None:
-        items_by_id = {
-            str(item.get("mapping_id") or ""): item
-            for item in category_audit.get("items") or []
-            if isinstance(item, Mapping) and str(item.get("mapping_id") or "")
-        }
-        targets_by_id = category_audit.get("targets") or {}
-        if isinstance(targets_by_id, Mapping):
-            for mapping_id, raw_targets in targets_by_id.items():
-                item = items_by_id.get(str(mapping_id))
-                if item is None or not isinstance(raw_targets, list):
-                    continue
-                for target in raw_targets:
-                    if not isinstance(target, Mapping):
-                        continue
-                    try:
-                        row_id = int(target["row_id"])
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    events.append(
-                        {
-                            "failure_kind": "out_of_ontology_category",
-                            "row_id": row_id,
-                            "feature_name": str(
-                                target.get("feature_name") or item.get("feature_name") or ""
-                            ),
-                            "reason": ("extracted value is outside the declared closed ontology"),
-                            "prior_extracted_value": copy.deepcopy(
-                                item.get("prior_extracted_value")
-                            ),
-                            "allowed_categories": list(item.get("allowed_categories") or []),
-                        }
-                    )
-
-    structural_audit = read_mapping("extraction_failure.json")
-    if structural_audit is not None:
-        for raw_row_id in structural_audit.get("row_ids") or []:
-            try:
-                row_id = int(raw_row_id)
-            except (TypeError, ValueError):
-                continue
-            events.append(
-                {
-                    "failure_kind": "structural_response_failure",
-                    "row_id": row_id,
-                    "feature_name": None,
-                    "reason": str(structural_audit.get("validation_error") or ""),
-                }
-            )
-
-    return {
-        "schema_version": EXTRACTION_ISSUE_SCHEMA_VERSION,
-        "completed_at": _now(),
-        "reconstructed_from_legacy_audits": True,
-        "events": events,
-    }
-
-
-def _ensure_extraction_issue_audit(directory: Path) -> dict[str, Any]:
-    """Return an issue ledger, reconstructing it for a compatible old checkpoint."""
-
-    path = directory / "extraction_issues.json"
-    if path.is_file():
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(value, Mapping) and isinstance(value.get("events"), list):
-                return dict(value)
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            pass
-    reconstructed = _legacy_extraction_issue_audit(directory)
-    _write_json(path, reconstructed)
-    return reconstructed
 
 
 def _extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
@@ -2958,39 +2621,6 @@ def _resolve_page_observations(
     return values, decisions
 
 
-def _partition_rows_for_prompt(
-    rows: Sequence[Mapping[str, Any]],
-    *,
-    max_prompt_chars: int,
-    definition_batches: Sequence[Sequence[Mapping[str, Any]]],
-) -> tuple[list[list[Mapping[str, Any]]], list[Mapping[str, Any]]]:
-    """Create only singleton extraction requests, measured at exact prompt size.
-
-    Rows that cannot fit even by themselves are returned separately for
-    lossless page planning.  This avoids the old oversized-singleton hole in
-    the approximate JSON-size partitioner.  Multi-patient prompts are forbidden
-    by construction as well as by ``_extraction_prompt``.
-    """
-
-    batches: list[list[Mapping[str, Any]]] = []
-    oversized: list[Mapping[str, Any]] = []
-    for row in rows:
-        prompt_sizes = (
-            _prompt_chars(
-                _extraction_prompt(
-                    definitions=batch_definitions,
-                    rows=[row],
-                )
-            )
-            for batch_definitions in definition_batches
-        )
-        if any(size > int(max_prompt_chars) for size in prompt_sizes):
-            oversized.append(row)
-        else:
-            batches.append([row])
-    return batches, oversized
-
-
 def _preferred_lossless_page_end(source: str, *, start: int, hard_end: int) -> tuple[int, str]:
     """Prefer a nearby clinical-note or text boundary without dropping characters."""
 
@@ -3298,15 +2928,6 @@ def _serial_extract_feature_batch(
         input_path = chunk_dir / "input.json"
         ontology_audit_path = chunk_dir / "category_ontology_repair.json"
         failure_path = chunk_dir / "extraction_failure.json"
-        if any(
-            _records_infrastructure_failure(chunk_dir / name)
-            for name in (
-                "extraction_failure.json",
-                "category_ontology_repair.json",
-                "fallback.json",
-            )
-        ):
-            _supersede_infrastructure_checkpoint(chunk_dir)
         chunk_input = {
             "schema_version": SERIAL_EXTRACTION_CHUNK_CHECKPOINT_SCHEMA_VERSION,
             "serial_input_fingerprint": serial_fingerprint,
@@ -3351,7 +2972,6 @@ def _serial_extract_feature_batch(
                         row_id=row_id,
                         definitions=definitions,
                     )
-                    _ensure_extraction_issue_audit(chunk_dir)
             except (
                 KeyError,
                 OSError,
@@ -3628,41 +3248,11 @@ def extract_rows(
     max_output_tokens: int = DEFAULT_EXTRACTION_MAX_TOKENS,
     context_margin_tokens: int = DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
     deferred_retry_passes: int = 1,
-    note_search: NoteSearchConfig | None = None,
-    context_strategy: str = "full_record",
-    colbert: ColBERTConfig | None = None,
-    decision_extraction: Any | None = None,
-    decision_client: Any | None = None,
     _source_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> pd.DataFrame:
-    """Extract patient/feature batches with full-record or optional note-search reading."""
+    """Extract patient/feature batches by full-record LLM reading."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    if decision_extraction is not None and decision_extraction.enabled:
-        from . import stage2_decision
-
-        if context_strategy != "colbert" or (note_search and note_search.enabled):
-            raise ValueError("decision extraction requires ColBERT")
-        return stage2_decision.extract_rows(
-            dataset=dataset, row_ids=row_ids, text_column=text_column, definitions=definitions,
-            output_dir=output_dir, workers=workers, request_identity=request_identity,
-            policy=decision_extraction, client=decision_client, colbert=colbert or ColBERTConfig(),
-        )
-    if context_strategy == "colbert" and not (note_search and note_search.enabled):
-        return stage2_colbert.extract_rows(
-            dataset=dataset, row_ids=row_ids, text_column=text_column, definitions=definitions,
-            output_dir=output_dir, request_json=request_json, workers=workers,
-            max_prompt_chars=max_prompt_chars, feature_batch_size=feature_batch_size,
-            request_identity=request_identity, tokenizer=tokenizer,
-            chunk_size_tokens=chunk_size_tokens, context_window_tokens=context_window_tokens,
-            max_output_tokens=max_output_tokens, context_margin_tokens=context_margin_tokens,
-            deferred_retry_passes=deferred_retry_passes, colbert=colbert or ColBERTConfig(),
-        )
-    if context_strategy not in {"full_record", "colbert"}:
-        raise ValueError("Stage 2 extraction context_strategy must be colbert or full_record")
-    note_search = note_search or NoteSearchConfig()
-    note_search.validate()
-    measurement_method = note_search_extraction.claim_output_method(output_dir, note_search)
     if (isinstance(deferred_retry_passes, bool) or not isinstance(deferred_retry_passes, int)
             or deferred_retry_passes < 0):
         raise ValueError("deferred_retry_passes must be a nonnegative integer")
@@ -3702,8 +3292,6 @@ def extract_rows(
                 chunk_size_tokens=chunk_size_tokens, context_window_tokens=context_window_tokens,
                 max_output_tokens=max_output_tokens, context_margin_tokens=context_margin_tokens,
                 deferred_retry_passes=deferred_retry_passes,
-                note_search=note_search,
-                context_strategy=context_strategy, colbert=colbert,
             )
 
         frames = []
@@ -3731,15 +3319,6 @@ def extract_rows(
             "structural_failure_patients": summary["structural_failure_patient_count"],
         })
         return frame
-    infrastructure_affected = _infrastructure_affected_directories(output_dir)
-    if infrastructure_affected:
-        LOGGER.warning(
-            "superseding legacy Stage 2 infrastructure-failure checkpoints "
-            "directories=%s root=%s",
-            len(infrastructure_affected),
-            output_dir,
-        )
-        _supersede_infrastructure_checkpoint(output_dir)
     cancellation = threading.Event()
 
     def guarded_request_json(
@@ -3761,24 +3340,6 @@ def extract_rows(
                if initial_reasoning_effort is not None else {}),
         )
     extraction_request_identity = dict(request_identity or {})
-    if note_search.enabled:
-        extraction_request_identity["measurement_method"] = measurement_method
-
-    def note_search_fallback(row, selected, directory):
-        serial = _serial_extraction_required(row=row, definitions=selected, tokenizer=tokenizer,
-            chunk_size_tokens=int(chunk_size_tokens), max_prompt_chars=int(max_prompt_chars),
-            input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens))
-        if serial:
-            return _serial_extract_feature_batch(parent_dir=directory, row=row, definitions=selected,
-                request_json=guarded_request_json, request_identity=extraction_request_identity,
-                tokenizer=tokenizer, chunk_size_tokens=int(chunk_size_tokens),
-                context_window_tokens=int(context_window_tokens), max_output_tokens=int(max_output_tokens),
-                context_margin_tokens=int(context_margin_tokens), max_prompt_chars=int(max_prompt_chars))
-        return _request_validated_extraction(
-            messages=_extraction_prompt(definitions=selected, rows=[row]), row_ids=[int(row["row_id"])],
-            definitions=selected, request_json=guarded_request_json,
-            ontology_audit_path=directory / "category_ontology_repair.json",
-            messages_for_definitions=lambda subset: _extraction_prompt(definitions=subset, rows=[row]))
     feature_names = [str(feature["name"]) for feature in definitions]
     definition_batches = _partition_feature_definitions(
         definitions,
@@ -3863,68 +3424,6 @@ def extract_rows(
             len(oversized_rows),
         )
 
-    # Snapshot every saved singleton result before concurrent workers begin
-    # rewriting the newly numbered batch directories.  Removing an old
-    # multi-patient batch shifts every later singleton's batch number, but its
-    # row_id remains a stable identity that lets us safely relocate it.
-    singleton_checkpoints: dict[int, list[dict[str, Any]]] = {}
-    for saved_dir in sorted((output_dir / "batches").glob("batch_*")):
-        if not saved_dir.is_dir() or saved_dir.is_symlink():
-            continue
-        if saved_dir in infrastructure_affected:
-            _supersede_infrastructure_checkpoint(saved_dir)
-            continue
-        saved_complete_path = saved_dir / "complete.json"
-        saved_result_path = saved_dir / "result.json"
-        saved_manifest_path = saved_dir / "row_ids.json"
-        saved_audit_path = saved_dir / "category_ontology_repair.json"
-        saved_issue_path = saved_dir / "extraction_issues.json"
-        if not (
-            saved_complete_path.is_file()
-            and saved_result_path.is_file()
-            and saved_manifest_path.is_file()
-        ):
-            continue
-        if _stale_category_ontology_audit(saved_audit_path) is not None:
-            continue
-        try:
-            saved_completion = json.loads(saved_complete_path.read_text(encoding="utf-8"))
-            saved_result = json.loads(saved_result_path.read_text(encoding="utf-8"))
-            saved_row_ids = json.loads(saved_manifest_path.read_text(encoding="utf-8"))
-            saved_audit = (
-                json.loads(saved_audit_path.read_text(encoding="utf-8"))
-                if saved_audit_path.is_file()
-                else None
-            )
-            saved_issues = (
-                json.loads(saved_issue_path.read_text(encoding="utf-8"))
-                if saved_issue_path.is_file()
-                else _legacy_extraction_issue_audit(saved_dir)
-            )
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            continue
-        if (
-            not isinstance(saved_completion, Mapping)
-            or saved_completion.get("status") != "complete"
-            or not isinstance(saved_result, Mapping)
-            or not isinstance(saved_row_ids, list)
-            or len(saved_row_ids) != 1
-        ):
-            continue
-        try:
-            saved_row_id = int(saved_row_ids[0])
-        except (TypeError, ValueError):
-            continue
-        singleton_checkpoints.setdefault(saved_row_id, []).append(
-            {
-                "source_dir": saved_dir,
-                "completion": dict(saved_completion),
-                "result": dict(saved_result),
-                "category_ontology_audit": saved_audit,
-                "extraction_issues": saved_issues,
-            }
-        )
-
     def request_feature_batches(
         *,
         parent_dir: Path,
@@ -3942,8 +3441,6 @@ def extract_rows(
             start=1,
         ):
             feature_dir = parent_dir / "feature_batches" / f"batch_{feature_batch_index:05d}"
-            if feature_dir in infrastructure_affected:
-                _supersede_infrastructure_checkpoint(feature_dir)
             result_path = feature_dir / "result.json"
             complete_path = feature_dir / "complete.json"
             ontology_audit_path = feature_dir / "category_ontology_repair.json"
@@ -3973,7 +3470,6 @@ def extract_rows(
                             row_ids=[row_id],
                             definitions=batch_definitions,
                         )
-                        _ensure_extraction_issue_audit(feature_dir)
                 except (
                     KeyError,
                     OSError,
@@ -3998,7 +3494,7 @@ def extract_rows(
                     feature_dir / "input.json",
                     {**batch_input, "input_fingerprint": input_fingerprint},
                 )
-                use_serial = not note_search.enabled and _serial_extraction_required(
+                use_serial = _serial_extraction_required(
                     row=row,
                     definitions=batch_definitions,
                     tokenizer=tokenizer,
@@ -4010,16 +3506,7 @@ def extract_rows(
                     ),
                     max_prompt_chars=int(max_prompt_chars),
                 )
-                if note_search.enabled:
-                    result = note_search_extraction.extract_feature_batch(
-                        row=row, definitions=batch_definitions, parent_dir=feature_dir,
-                        request_json=guarded_request_json, request_identity=extraction_request_identity,
-                        config=note_search, max_prompt_chars=int(max_prompt_chars), tokenizer=tokenizer,
-                        plan_directory=output_dir / "note_search_plans",
-                        fallback_extract=lambda selected, directory: note_search_fallback(row, selected, directory),
-                        input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens),
-                    )
-                elif use_serial:
+                if use_serial:
                     result = _serial_extract_feature_batch(
                         parent_dir=feature_dir,
                         row=row,
@@ -4105,8 +3592,6 @@ def extract_rows(
             start=1,
         ):
             feature_dir = parent_dir / "feature_batches" / f"batch_{feature_batch_index:05d}"
-            if feature_dir in infrastructure_affected:
-                _supersede_infrastructure_checkpoint(feature_dir)
             result_path = feature_dir / "result.json"
             complete_path = feature_dir / "complete.json"
             batch_input = {
@@ -4134,7 +3619,6 @@ def extract_rows(
                             page=page,
                             definitions=batch_definitions,
                         )
-                        _ensure_extraction_issue_audit(feature_dir)
                 except (
                     KeyError,
                     OSError,
@@ -4207,10 +3691,9 @@ def extract_rows(
         if len(batch) != 1:  # pragma: no cover - enforced by the planner
             raise RuntimeError("Stage 2 extraction planner created a multi-patient batch")
         batch_dir = output_dir / "batches" / f"batch_{index:05d}"
-        if batch_dir in infrastructure_affected:
-            _supersede_infrastructure_checkpoint(batch_dir)
         result_path = batch_dir / "result.json"
         complete_path = batch_dir / "complete.json"
+        manifest_path = batch_dir / "row_ids.json"
         ontology_audit_path = batch_dir / "category_ontology_repair.json"
         row_ids = [int(row["row_id"]) for row in batch]
         input_fingerprint = _value_fingerprint(
@@ -4222,94 +3705,30 @@ def extract_rows(
             }
         )
         stale_audit = _stale_category_ontology_audit(ontology_audit_path)
-        candidates = list(singleton_checkpoints.get(row_ids[0], []))
-        candidates.sort(
-            key=lambda candidate: (
-                (
-                    0
-                    if (
-                        candidate["completion"].get("schema_version")
-                        == EXTRACTION_CHECKPOINT_SCHEMA_VERSION
-                        and candidate["completion"].get("input_fingerprint") == input_fingerprint
-                    )
-                    else 1
-                ),
-                str(candidate["source_dir"]),
-            )
-        )
-        for candidate in candidates:
-            completion = candidate["completion"]
-            schema_version = completion.get("schema_version")
-            if schema_version == EXTRACTION_CHECKPOINT_SCHEMA_VERSION:
-                if completion.get("input_fingerprint") != input_fingerprint:
-                    continue
-            elif schema_version is not None:
-                continue
-            elif note_search.enabled:
-                continue  # Unversioned historical measurements used full-record extraction.
+        if (
+            stale_audit is None
+            and complete_path.is_file()
+            and result_path.is_file()
+            and manifest_path.is_file()
+        ):
             try:
-                validated = _validate_extraction(
-                    candidate["result"],
-                    row_ids=row_ids,
-                    definitions=definitions,
-                )
-            except (KeyError, TypeError, ValueError):
-                continue
-            source_dir = Path(candidate["source_dir"])
-            legacy = schema_version is None
-            relocated = source_dir != batch_dir
-            if not legacy and not relocated and stale_audit is None:
-                if isinstance(candidate.get("extraction_issues"), Mapping):
-                    _write_json(
-                        batch_dir / "extraction_issues.json",
-                        candidate["extraction_issues"],
+                completion = json.loads(complete_path.read_text(encoding="utf-8"))
+                cached = json.loads(result_path.read_text(encoding="utf-8"))
+                saved_row_ids = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if (
+                    isinstance(completion, Mapping)
+                    and completion.get("status") == "complete"
+                    and completion.get("schema_version") == EXTRACTION_CHECKPOINT_SCHEMA_VERSION
+                    and completion.get("input_fingerprint") == input_fingerprint
+                    and isinstance(cached, Mapping)
+                    and isinstance(saved_row_ids, list)
+                    and [int(value) for value in saved_row_ids] == row_ids
+                ):
+                    return list(
+                        _validate_extraction(cached, row_ids=row_ids, definitions=definitions)["rows"]
                     )
-                return list(validated["rows"])
-
-            batch_dir.mkdir(parents=True, exist_ok=True)
-            _write_json(batch_dir / "row_ids.json", row_ids)
-            _write_json(result_path, validated)
-            source_audit = candidate.get("category_ontology_audit")
-            if isinstance(source_audit, Mapping):
-                _write_json(ontology_audit_path, source_audit)
-            elif ontology_audit_path.is_file():
-                try:
-                    previous_audit = json.loads(ontology_audit_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    previous_audit = None
-                _write_json(
-                    ontology_audit_path,
-                    {
-                        "schema_version": "stage2_category_ontology_repair_v1",
-                        "resolution": "superseded_by_single_patient_checkpoint_reindex",
-                        "superseded_at": _now(),
-                        "previous_audit": previous_audit,
-                    },
-                )
-            source_issues = candidate.get("extraction_issues")
-            if isinstance(source_issues, Mapping):
-                _write_json(batch_dir / "extraction_issues.json", source_issues)
-            _write_json(
-                complete_path,
-                {
-                    "status": "complete",
-                    "schema_version": EXTRACTION_CHECKPOINT_SCHEMA_VERSION,
-                    "input_fingerprint": input_fingerprint,
-                    "completed_at": completion.get("completed_at") or _now(),
-                    "rows": 1,
-                    "adopted_legacy_single_patient_checkpoint": legacy,
-                    "relocated_single_patient_checkpoint": relocated,
-                    "checkpoint_source": str(source_dir),
-                    "adopted_at": _now(),
-                },
-            )
-            LOGGER.info(
-                "%s single-patient Stage 2 extraction checkpoint: %s -> %s",
-                "relocate" if relocated else "adopt legacy",
-                source_dir,
-                batch_dir,
-            )
-            return list(validated["rows"])
+            except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+                pass
 
         if complete_path.is_file() or result_path.is_file():
             LOGGER.info("rerun incompatible Stage 2 extraction checkpoint: %s", batch_dir)
@@ -4318,7 +3737,7 @@ def extract_rows(
         batch_dir.mkdir(parents=True, exist_ok=True)
         _write_json(batch_dir / "row_ids.json", row_ids)
         if len(definition_batches) == 1:
-            use_serial = not note_search.enabled and _serial_extraction_required(
+            use_serial = _serial_extraction_required(
                 row=batch[0],
                 definitions=definitions,
                 tokenizer=tokenizer,
@@ -4330,16 +3749,7 @@ def extract_rows(
                 ),
                 max_prompt_chars=int(max_prompt_chars),
             )
-            if note_search.enabled:
-                result = note_search_extraction.extract_feature_batch(
-                    row=batch[0], definitions=definitions, parent_dir=batch_dir,
-                    request_json=guarded_request_json, request_identity=extraction_request_identity,
-                    config=note_search, max_prompt_chars=int(max_prompt_chars), tokenizer=tokenizer,
-                    plan_directory=output_dir / "note_search_plans",
-                    fallback_extract=lambda selected, directory: note_search_fallback(batch[0], selected, directory),
-                    input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens),
-                )
-            elif use_serial:
+            if use_serial:
                 result = _serial_extract_feature_batch(
                     parent_dir=batch_dir,
                     row=batch[0],
@@ -4401,8 +3811,6 @@ def extract_rows(
         row_id = int(page["row_id"])
         page_index = int(page_meta["page_index"])
         page_dir = output_dir / "pages" / f"row_{row_id:08d}" / f"page_{page_index:05d}"
-        if page_dir in infrastructure_affected:
-            _supersede_infrastructure_checkpoint(page_dir)
         result_path = page_dir / "result.json"
         complete_path = page_dir / "complete.json"
         ontology_audit_path = page_dir / "category_ontology_repair.json"
@@ -4428,7 +3836,6 @@ def extract_rows(
                         page=page,
                         definitions=definitions,
                     )
-                    _ensure_extraction_issue_audit(page_dir)
                     return page_meta, dict(validated["rows"][0])
             except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
                 pass
@@ -4641,7 +4048,6 @@ def extract_rows(
                         row_ids=[row_id],
                         definitions=definitions,
                     )
-                    _ensure_extraction_issue_audit(reconciliation_dir)
                     return dict(validated["rows"][0]["values"])
             except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
                 pass
@@ -5323,8 +4729,6 @@ def _request_harmonization_plan(
     result_path = output_dir / "result.json"
     fallback_path = output_dir / "fallback.json"
     complete_path = output_dir / "complete.json"
-    if _records_infrastructure_failure(fallback_path):
-        _supersede_infrastructure_checkpoint(output_dir)
     if complete_path.is_file():
         try:
             completion = json.loads(complete_path.read_text(encoding="utf-8"))
@@ -5974,20 +5378,11 @@ def _definitions_for_nuisance_role(
     definitions: Sequence[Mapping[str, Any]],
     role: str,
 ) -> list[Mapping[str, Any]]:
-    """Use persisted treatment/outcome supports with legacy-safe fallbacks."""
+    """Use the persisted treatment/outcome supports of the retained features."""
 
     if role not in {"treatment", "outcome"}:
         raise ValueError("nuisance role must be treatment or outcome")
     definitions = list(definitions)
-    has_separate_supports = any(
-        "nuisance_model_roles" in feature for feature in definitions
-    )
-    if not has_separate_supports:
-        return (
-            _definitions_for_roles(definitions, {"confounder"})
-            if role == "treatment"
-            else definitions
-        )
     selected = [
         feature
         for feature in definitions
@@ -6057,100 +5452,6 @@ def _fit_regressor(
     return model
 
 
-@dataclass
-class _OutcomeModels:
-    control: Any
-    treated: Any
-    binary: bool
-
-
-def _fit_outcome_models(
-    x: np.ndarray,
-    treatment: np.ndarray,
-    outcome: np.ndarray,
-    *,
-    binary: bool,
-    seed: int,
-) -> _OutcomeModels:
-    models = []
-    for arm in (0, 1):
-        mask = treatment.astype(int) == arm
-        if not mask.any():
-            mask = np.ones(len(treatment), dtype=bool)
-        if binary:
-            models.append(
-                _fit_classifier(
-                    x[mask],
-                    outcome[mask],
-                    seed=seed + arm,
-                )
-            )
-        else:
-            models.append(
-                _fit_regressor(
-                    x[mask],
-                    outcome[mask],
-                    seed=seed + arm,
-                )
-            )
-    return _OutcomeModels(control=models[0], treated=models[1], binary=binary)
-
-
-def _predict_outcomes(models: _OutcomeModels, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    if models.binary:
-        return _predict_probability(models.control, x), _predict_probability(models.treated, x)
-    return (
-        np.asarray(models.control.predict(x), dtype=float),
-        np.asarray(models.treated.predict(x), dtype=float),
-    )
-
-
-@dataclass
-class _EffectModel:
-    constant: float
-    model: Any | None = None
-
-    def predict(self, x: np.ndarray) -> np.ndarray:
-        if self.model is None:
-            return np.full(len(x), self.constant, dtype=float)
-        return np.asarray(self.model.predict(x), dtype=float)
-
-
-def _fit_effect_model(
-    x: np.ndarray,
-    pseudo_outcome: np.ndarray,
-    *,
-    seed: int,
-    trees: int | None,
-) -> _EffectModel:
-    finite = np.isfinite(pseudo_outcome)
-    if not finite.any():
-        return _EffectModel(constant=0.0)
-    target = pseudo_outcome[finite]
-    if len(target) >= 20:
-        lower, upper = np.quantile(target, [0.01, 0.99])
-        target = np.clip(target, lower, upper)
-    constant = float(np.mean(target))
-    if x.shape[1] == 0 or len(target) < 12:
-        return _EffectModel(constant=constant)
-    if trees is None:
-        from sklearn.linear_model import Ridge
-
-        model: Any = Ridge(alpha=2.0)
-    else:
-        from sklearn.ensemble import RandomForestRegressor
-
-        model = RandomForestRegressor(
-            n_estimators=int(trees),
-            min_samples_leaf=max(2, min(20, len(target) // 10)),
-            max_features="sqrt",
-            n_jobs=1,
-            random_state=seed,
-        )
-    model.fit(x[finite], target)
-    return _EffectModel(constant=constant, model=model)
-
-
 def _dr_score(
     outcome: np.ndarray,
     treatment: np.ndarray,
@@ -6168,377 +5469,6 @@ def _dr_score(
         - (1.0 - treatment) * (outcome - mu0) / (1.0 - e)
     )
     return np.where(np.isfinite(score), score, np.nan)
-
-
-def _safe_auc(y: np.ndarray, probability: np.ndarray) -> float | None:
-    from sklearn.metrics import roc_auc_score
-
-    if len(np.unique(y)) < 2:
-        return None
-    return float(roc_auc_score(y, probability))
-
-
-def _prediction_metrics(
-    *,
-    treatment: np.ndarray,
-    outcome: np.ndarray,
-    propensity: np.ndarray,
-    observed_outcome: np.ndarray,
-    binary_outcome: bool,
-    r_loss: float,
-) -> dict[str, Any]:
-    from sklearn.metrics import log_loss, mean_squared_error
-
-    e = np.clip(propensity, 1e-6, 1.0 - 1e-6)
-    metrics: dict[str, Any] = {
-        "treatment_log_loss": float(log_loss(treatment.astype(int), e, labels=[0, 1])),
-        "treatment_brier": float(np.mean((treatment - e) ** 2)),
-        "treatment_auc": _safe_auc(treatment, e),
-        "r_loss": float(r_loss),
-    }
-    if binary_outcome:
-        probability = np.clip(observed_outcome, 1e-6, 1.0 - 1e-6)
-        metrics.update(
-            {
-                "outcome_log_loss": float(
-                    log_loss(outcome.astype(int), probability, labels=[0, 1])
-                ),
-                "outcome_brier": float(np.mean((outcome - probability) ** 2)),
-                "outcome_auc": _safe_auc(outcome, probability),
-            }
-        )
-    else:
-        rmse = float(math.sqrt(mean_squared_error(outcome, observed_outcome)))
-        variance = float(np.var(outcome))
-        metrics.update(
-            {
-                "outcome_rmse": rmse,
-                "outcome_r2": (
-                    float(1.0 - np.mean((outcome - observed_outcome) ** 2) / variance)
-                    if variance > 0
-                    else None
-                ),
-            }
-        )
-    return metrics
-
-
-def _metric_improvements(
-    baseline: Mapping[str, Any],
-    enhanced: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Orient every validation metric so positive values mean improvement."""
-
-    improvements: dict[str, Any] = {}
-    for key in sorted(set(baseline).intersection(enhanced)):
-        if baseline[key] is None or enhanced[key] is None:
-            improvements[key] = None
-        elif key.endswith("auc") or key.endswith("r2"):
-            improvements[key] = float(enhanced[key] - baseline[key])
-        else:
-            improvements[key] = float(baseline[key] - enhanced[key])
-    return improvements
-
-
-def _heldout_signal_diagnostic(
-    performance: Mapping[str, Any],
-    *,
-    metric: str,
-    minimum_positive_fold_fraction: float = 0.5,
-) -> dict[str, Any]:
-    fold_values = [
-        row.get("improvement_positive_is_better", {}).get(metric)
-        for row in performance.get("inner_fold_performance") or []
-    ]
-    finite = [float(value) for value in fold_values if value is not None and math.isfinite(value)]
-    aggregate = performance.get("improvement_positive_is_better", {}).get(metric)
-    aggregate = (
-        float(aggregate) if aggregate is not None and math.isfinite(float(aggregate)) else None
-    )
-    positive_folds = sum(value > 0.0 for value in finite)
-    positive_fraction = float(positive_folds / len(finite)) if finite else 0.0
-    return {
-        "metric": metric,
-        "aggregate_improvement": aggregate,
-        "fold_improvements": finite,
-        "positive_folds": int(positive_folds),
-        "evaluated_folds": int(len(finite)),
-        "positive_fold_fraction": positive_fraction,
-        "minimum_positive_fold_fraction": float(minimum_positive_fold_fraction),
-        "supported": bool(
-            aggregate is not None
-            and aggregate > 0.0
-            and positive_fraction >= float(minimum_positive_fold_fraction)
-        ),
-    }
-
-
-def _feature_role_signal_diagnostics(
-    feature: Mapping[str, Any],
-    performance: Mapping[str, Any],
-    *,
-    binary_outcome: bool,
-) -> dict[str, Any]:
-    """Evaluate each claimed causal role using predictions on inner held-out rows."""
-
-    outcome_metric = "outcome_brier" if binary_outcome else "outcome_rmse"
-    treatment = _heldout_signal_diagnostic(performance, metric="treatment_brier")
-    outcome = _heldout_signal_diagnostic(performance, metric=outcome_metric)
-    effect = _heldout_signal_diagnostic(performance, metric="effect_model_r_loss")
-    claimed_roles = list(map(str, feature.get("roles") or []))
-    role_signals: dict[str, Any] = {}
-    if "confounder" in claimed_roles:
-        role_signals["confounder"] = {
-            "supported": bool(treatment["supported"] and outcome["supported"]),
-            "requires_treatment_and_outcome_signal": True,
-            "treatment_signal": treatment,
-            "outcome_signal": outcome,
-        }
-    if "prognostic" in claimed_roles:
-        role_signals["prognostic"] = {
-            "supported": bool(outcome["supported"]),
-            "outcome_signal": outcome,
-        }
-    if "effect_modifier" in claimed_roles:
-        role_signals["effect_modifier"] = {
-            "supported": bool(effect["supported"]),
-            "residual_effect_signal": effect,
-        }
-    return {
-        "claimed_roles": claimed_roles,
-        "role_signals": role_signals,
-        "has_any_claimed_role_signal": any(
-            bool(signal.get("supported")) for signal in role_signals.values()
-        ),
-    }
-
-
-def _selection_representation_fingerprint(feature: Mapping[str, Any]) -> str:
-    """Identify the measured representation to which selection votes apply."""
-
-    fields = (
-        "value_type",
-        "categories_or_unit",
-        "measurement_definition",
-        "missing_value_rule",
-        "modeling_strategy",
-        "harmonization_plan",
-    )
-    representation = {field: copy.deepcopy(feature.get(field)) for field in fields}
-    plan = representation.get("harmonization_plan")
-    if isinstance(plan, dict):
-        plan.pop("training_observations_fingerprint", None)
-    return _value_fingerprint(representation)
-
-
-def _stability_selection_policy(config: Any) -> dict[str, Any]:
-    """Read role-stability settings from current or older config objects."""
-
-    return {
-        "minimum_evaluations": int(
-            getattr(
-                config,
-                "stability_selection_rounds",
-                DEFAULT_STABILITY_SELECTION_ROUNDS,
-            )
-        ),
-        "selection_frequency": float(
-            getattr(
-                config,
-                "stability_selection_frequency",
-                DEFAULT_STABILITY_SELECTION_FREQUENCY,
-            )
-        ),
-        "effect_modifier_negative_margin_fraction": float(
-            getattr(
-                config,
-                "effect_modifier_negative_margin_fraction",
-                DEFAULT_EFFECT_MODIFIER_NEGATIVE_MARGIN_FRACTION,
-            )
-        ),
-        "effect_modifier_negative_fold_fraction": float(
-            getattr(
-                config,
-                "effect_modifier_negative_fold_fraction",
-                DEFAULT_EFFECT_MODIFIER_NEGATIVE_FOLD_FRACTION,
-            )
-        ),
-    }
-
-
-def _modifier_negative_vote(
-    signal: Mapping[str, Any],
-    *,
-    margin_fraction: float,
-    minimum_negative_fold_fraction: float,
-) -> dict[str, Any]:
-    role_signal = (signal.get("role_signals") or {}).get("effect_modifier") or {}
-    diagnostic = role_signal.get("residual_effect_signal") or {}
-    aggregate = diagnostic.get("aggregate_improvement")
-    aggregate = (
-        float(aggregate) if aggregate is not None and math.isfinite(float(aggregate)) else None
-    )
-    baseline = (signal.get("baseline") or {}).get("effect_model_r_loss")
-    baseline = (
-        abs(float(baseline)) if baseline is not None and math.isfinite(float(baseline)) else None
-    )
-    fold_values = [
-        float(value)
-        for value in diagnostic.get("fold_improvements") or []
-        if value is not None and math.isfinite(float(value))
-    ]
-    negative_folds = sum(value < 0.0 for value in fold_values)
-    negative_fraction = float(negative_folds / len(fold_values)) if fold_values else 0.0
-    required_margin = (
-        max(1e-12, float(margin_fraction) * baseline) if baseline is not None else None
-    )
-    vote = bool(
-        aggregate is not None
-        and required_margin is not None
-        and aggregate <= -required_margin
-        and negative_fraction >= float(minimum_negative_fold_fraction)
-    )
-    return {
-        "aggregate_improvement": aggregate,
-        "baseline_effect_model_r_loss": baseline,
-        "required_negative_margin": required_margin,
-        "negative_folds": int(negative_folds),
-        "evaluated_folds": int(len(fold_values)),
-        "negative_fold_fraction": negative_fraction,
-        "minimum_negative_fold_fraction": float(minimum_negative_fold_fraction),
-        "meaningfully_negative": vote,
-    }
-
-
-def _update_stability_selection(
-    *,
-    definitions: Sequence[Mapping[str, Any]],
-    performance: Mapping[str, Any],
-    history: MutableMapping[str, list[dict[str, Any]]],
-    evaluation_round: int,
-    config: Any,
-) -> dict[str, Any]:
-    """Accumulate repeated forest-screen votes for each feature representation."""
-
-    policy = _stability_selection_policy(config)
-    signal_by_id = {
-        str(row["feature_id"]): row for row in performance.get("individual_feature_signal") or []
-    }
-    features: list[dict[str, Any]] = []
-    for feature in definitions:
-        feature_id = str(feature["feature_id"])
-        representation = _selection_representation_fingerprint(feature)
-        signal = signal_by_id.get(feature_id)
-        if signal is None:
-            raise ValueError(
-                "Stage 2 stability selection is missing inner-held-out diagnostics "
-                f"for {feature_id!r}"
-            )
-        role_signals = signal.get("role_signals") or {}
-        role_rows: dict[str, Any] = {}
-        for role in map(str, feature.get("roles") or []):
-            role_signal = role_signals.get(role) or {}
-            history_key = f"{feature_id}:{representation}:{role}"
-            observation: dict[str, Any] = {
-                "evaluation_round": int(evaluation_round),
-                "supported": bool(role_signal.get("supported")),
-            }
-            if role == "effect_modifier":
-                observation["negative_margin_diagnostic"] = _modifier_negative_vote(
-                    signal,
-                    margin_fraction=policy["effect_modifier_negative_margin_fraction"],
-                    minimum_negative_fold_fraction=policy["effect_modifier_negative_fold_fraction"],
-                )
-            observations = history.setdefault(history_key, [])
-            if not any(
-                int(row.get("evaluation_round") or -1) == int(evaluation_round)
-                for row in observations
-            ):
-                observations.append(observation)
-            evaluations = len(observations)
-            support_votes = sum(bool(row.get("supported")) for row in observations)
-            support_frequency = float(support_votes / evaluations)
-            negative_votes = sum(
-                bool((row.get("negative_margin_diagnostic") or {}).get("meaningfully_negative"))
-                for row in observations
-            )
-            negative_frequency = float(negative_votes / evaluations)
-            pending = evaluations < int(policy["minimum_evaluations"])
-            stable_positive = bool(
-                not pending and support_frequency >= float(policy["selection_frequency"])
-            )
-            stable_meaningfully_negative = bool(
-                role == "effect_modifier"
-                and not pending
-                and negative_frequency >= float(policy["selection_frequency"])
-            )
-            role_rows[role] = {
-                "evaluations": int(evaluations),
-                "support_votes": int(support_votes),
-                "support_frequency": support_frequency,
-                "meaningfully_negative_votes": int(negative_votes),
-                "meaningfully_negative_frequency": negative_frequency,
-                "pending": pending,
-                "stable_positive": stable_positive,
-                "stable_meaningfully_negative": stable_meaningfully_negative,
-                "observations": copy.deepcopy(observations),
-            }
-        features.append(
-            {
-                "feature_id": feature_id,
-                "name": str(feature["name"]),
-                "representation_fingerprint": representation,
-                "roles": role_rows,
-            }
-        )
-    return {
-        "schema_version": "stage2_role_stability_selection_v1",
-        "model_family": "elastic_net_nuisance_plus_random_forest_effect_model",
-        "nuisance_model_family": "elastic_net",
-        "effect_model_family": "random_forest",
-        "evaluation_round": int(evaluation_round),
-        "policy": policy,
-        "features": features,
-    }
-
-
-def _stable_roles_for_feature(
-    feature: Mapping[str, Any],
-    stability_selection: Mapping[str, Any],
-) -> tuple[list[str], list[str]]:
-    """Return retained roles and explanations under asymmetric stability rules."""
-
-    feature_id = str(feature["feature_id"])
-    row = next(
-        (
-            item
-            for item in stability_selection.get("features") or []
-            if str(item.get("feature_id") or "") == feature_id
-        ),
-        None,
-    )
-    if row is None:
-        raise ValueError(f"stability selection is missing feature {feature_id!r}")
-    retained: list[str] = []
-    reasons: list[str] = []
-    role_rows = row.get("roles") or {}
-    for role in map(str, feature.get("roles") or []):
-        role_row = role_rows.get(role) or {}
-        if bool(role_row.get("pending")):
-            retained.append(role)
-            reasons.append(f"{role}: pending repeated forest screens")
-        elif role == "effect_modifier":
-            if bool(role_row.get("stable_meaningfully_negative")):
-                reasons.append("effect_modifier: pruned after stable, margin-negative R-loss")
-            else:
-                retained.append(role)
-                reasons.append("effect_modifier: retained without stable, margin-negative R-loss")
-        elif bool(role_row.get("stable_positive")):
-            retained.append(role)
-            reasons.append(f"{role}: retained by stability selection")
-        else:
-            reasons.append(f"{role}: lacked stable positive support")
-    return retained, reasons
 
 
 def _fallback_inner_splits(
@@ -6559,1069 +5489,6 @@ def _fallback_inner_splits(
         }
         for index, (fit, heldout) in enumerate(splitter.split(row_ids), start=1)
     ]
-
-
-def evaluate_definitions(
-    *,
-    dataset: pd.DataFrame,
-    extracted: pd.DataFrame,
-    definitions: Sequence[Mapping[str, Any]],
-    split: Mapping[str, Any],
-    treatment_column: str,
-    outcome_column: str,
-    outcome_type: str,
-    inner_folds: int,
-    seed: int,
-    propensity_clip: float,
-    forest_trees: int = DEFAULT_SCREENING_TREES,
-    include_ablation: bool = True,
-) -> dict[str, Any]:
-    fit_ids = [int(value) for value in split["fit_row_ids"]]
-    extraction_by_id = extracted.set_index("_oci_row_id", drop=False)
-    supplied = list(split.get("inner_splits") or [])
-    inner = supplied or _fallback_inner_splits(
-        fit_ids,
-        folds=inner_folds,
-        seed=seed,
-    )
-    predictions: dict[str, list[np.ndarray]] = {
-        key: []
-        for key in (
-            "t",
-            "y",
-            "base_e",
-            "feature_e",
-            "base_y",
-            "feature_y",
-            "base_r_residual",
-            "feature_null_effect_r_residual",
-            "feature_r_residual",
-        )
-    }
-    all_defs = list(definitions)
-    propensity_defs = _definitions_for_roles(all_defs, {"confounder"})
-    effect_defs = _definitions_for_roles(all_defs, {"effect_modifier"})
-    binary = str(outcome_type) == "binary"
-    fold_performance: list[dict[str, Any]] = []
-
-    for fold_index, fold in enumerate(inner, start=1):
-        train_ids = [int(value) for value in fold["fit_row_ids"] if int(value) in fit_ids]
-        valid_ids = [int(value) for value in fold["heldout_row_ids"] if int(value) in fit_ids]
-        if not train_ids or not valid_ids:
-            continue
-        train_features = extraction_by_id.loc[train_ids].reset_index(drop=True)
-        valid_features = extraction_by_id.loc[valid_ids].reset_index(drop=True)
-        train_data = dataset.iloc[train_ids]
-        valid_data = dataset.iloc[valid_ids]
-        t_train = train_data[treatment_column].to_numpy(dtype=float)
-        y_train = train_data[outcome_column].to_numpy(dtype=float)
-        t_valid = valid_data[treatment_column].to_numpy(dtype=float)
-        y_valid = valid_data[outcome_column].to_numpy(dtype=float)
-
-        base_x_train = np.empty((len(train_ids), 0), dtype=float)
-        base_x_valid = np.empty((len(valid_ids), 0), dtype=float)
-        base_t_model = _fit_classifier(
-            base_x_train,
-            t_train,
-            seed=seed + fold_index,
-        )
-        base_outcome = _fit_outcome_models(
-            base_x_train,
-            t_train,
-            y_train,
-            binary=binary,
-            seed=seed + fold_index,
-        )
-        base_e_train = _predict_probability(base_t_model, base_x_train)
-        base_e_valid = _predict_probability(base_t_model, base_x_valid)
-        base_mu0_train, base_mu1_train = _predict_outcomes(base_outcome, base_x_train)
-        base_mu0_valid, base_mu1_valid = _predict_outcomes(base_outcome, base_x_valid)
-        base_m_train = base_e_train * base_mu1_train + (1 - base_e_train) * base_mu0_train
-        base_m_valid = base_e_valid * base_mu1_valid + (1 - base_e_valid) * base_mu0_valid
-        base_pseudo = (y_train - base_m_train) / np.where(
-            np.abs(t_train - base_e_train) < propensity_clip,
-            np.where(t_train - base_e_train < 0, -propensity_clip, propensity_clip),
-            t_train - base_e_train,
-        )
-        base_effect = _fit_effect_model(
-            np.empty((len(train_ids), 0)),
-            base_pseudo,
-            seed=seed + fold_index,
-            trees=forest_trees,
-        )
-        base_tau = base_effect.predict(np.empty((len(valid_ids), 0)))
-
-        t_encoder = _FeatureEncoder(propensity_defs).fit(train_features)
-        x_t_train = t_encoder.transform(train_features)
-        x_t_valid = t_encoder.transform(valid_features)
-        y_encoder = _FeatureEncoder(all_defs).fit(train_features)
-        x_y_train = y_encoder.transform(train_features)
-        x_y_valid = y_encoder.transform(valid_features)
-        effect_encoder = _FeatureEncoder(effect_defs).fit(train_features)
-        x_effect_train = effect_encoder.transform(train_features)
-        x_effect_valid = effect_encoder.transform(valid_features)
-        feature_t_model = _fit_classifier(
-            x_t_train,
-            t_train,
-            seed=seed + 100 + fold_index,
-        )
-        feature_outcome = _fit_outcome_models(
-            x_y_train,
-            t_train,
-            y_train,
-            binary=binary,
-            seed=seed + 100 + fold_index,
-        )
-        feature_e_train = _predict_probability(feature_t_model, x_t_train)
-        feature_e_valid = _predict_probability(feature_t_model, x_t_valid)
-        feature_mu0_train, feature_mu1_train = _predict_outcomes(feature_outcome, x_y_train)
-        feature_mu0_valid, feature_mu1_valid = _predict_outcomes(feature_outcome, x_y_valid)
-        feature_m_train = (
-            feature_e_train * feature_mu1_train + (1 - feature_e_train) * feature_mu0_train
-        )
-        feature_m_valid = (
-            feature_e_valid * feature_mu1_valid + (1 - feature_e_valid) * feature_mu0_valid
-        )
-        feature_pseudo = (y_train - feature_m_train) / np.where(
-            np.abs(t_train - feature_e_train) < propensity_clip,
-            np.where(t_train - feature_e_train < 0, -propensity_clip, propensity_clip),
-            t_train - feature_e_train,
-        )
-        feature_effect = _fit_effect_model(
-            x_effect_train,
-            feature_pseudo,
-            seed=seed + 200 + fold_index,
-            trees=forest_trees,
-        )
-        feature_null_effect = _fit_effect_model(
-            np.empty((len(train_ids), 0)),
-            feature_pseudo,
-            seed=seed + 200 + fold_index,
-            trees=forest_trees,
-        )
-        feature_tau = feature_effect.predict(x_effect_valid)
-        feature_null_tau = feature_null_effect.predict(np.empty((len(valid_ids), 0)))
-
-        predictions["t"].append(t_valid)
-        predictions["y"].append(y_valid)
-        predictions["base_e"].append(base_e_valid)
-        predictions["feature_e"].append(feature_e_valid)
-        predictions["base_y"].append(np.where(t_valid == 1, base_mu1_valid, base_mu0_valid))
-        predictions["feature_y"].append(
-            np.where(t_valid == 1, feature_mu1_valid, feature_mu0_valid)
-        )
-        base_r_residual = (y_valid - base_m_valid) - (t_valid - base_e_valid) * base_tau
-        feature_r_residual = (y_valid - feature_m_valid) - (t_valid - feature_e_valid) * feature_tau
-        feature_null_effect_r_residual = (y_valid - feature_m_valid) - (
-            t_valid - feature_e_valid
-        ) * feature_null_tau
-        predictions["base_r_residual"].append(base_r_residual)
-        predictions["feature_null_effect_r_residual"].append(feature_null_effect_r_residual)
-        predictions["feature_r_residual"].append(feature_r_residual)
-        fold_base = _prediction_metrics(
-            treatment=t_valid,
-            outcome=y_valid,
-            propensity=base_e_valid,
-            observed_outcome=np.where(t_valid == 1, base_mu1_valid, base_mu0_valid),
-            binary_outcome=binary,
-            r_loss=float(np.mean(base_r_residual**2)),
-        )
-        fold_enhanced = _prediction_metrics(
-            treatment=t_valid,
-            outcome=y_valid,
-            propensity=feature_e_valid,
-            observed_outcome=np.where(t_valid == 1, feature_mu1_valid, feature_mu0_valid),
-            binary_outcome=binary,
-            r_loss=float(np.mean(feature_r_residual**2)),
-        )
-        fold_base["effect_model_r_loss"] = float(np.mean(feature_null_effect_r_residual**2))
-        fold_enhanced["effect_model_r_loss"] = float(np.mean(feature_r_residual**2))
-        fold_performance.append(
-            {
-                "inner_fold": int(fold.get("inner_fold") or fold_index),
-                "evaluation_rows": int(len(valid_ids)),
-                "baseline": fold_base,
-                "with_extracted_features": fold_enhanced,
-                "improvement_positive_is_better": _metric_improvements(
-                    fold_base,
-                    fold_enhanced,
-                ),
-            }
-        )
-    if not predictions["t"]:
-        raise ValueError("Stage 2 empirical review has no usable inner validation folds")
-    joined = {key: np.concatenate(value) for key, value in predictions.items()}
-    base = _prediction_metrics(
-        treatment=joined["t"],
-        outcome=joined["y"],
-        propensity=joined["base_e"],
-        observed_outcome=joined["base_y"],
-        binary_outcome=binary,
-        r_loss=float(np.mean(joined["base_r_residual"] ** 2)),
-    )
-    enhanced = _prediction_metrics(
-        treatment=joined["t"],
-        outcome=joined["y"],
-        propensity=joined["feature_e"],
-        observed_outcome=joined["feature_y"],
-        binary_outcome=binary,
-        r_loss=float(np.mean(joined["feature_r_residual"] ** 2)),
-    )
-    base["effect_model_r_loss"] = float(np.mean(joined["feature_null_effect_r_residual"] ** 2))
-    enhanced["effect_model_r_loss"] = float(np.mean(joined["feature_r_residual"] ** 2))
-    improvements = _metric_improvements(base, enhanced)
-    result: dict[str, Any] = {
-        "model_family": "elastic_net_nuisance_plus_random_forest_effect_model",
-        "nuisance_model_family": "elastic_net",
-        "effect_model_family": "random_forest",
-        "forest_trees": int(forest_trees),
-        "evaluation_rows": int(len(joined["t"])),
-        "inner_folds": int(len(fold_performance)),
-        "inner_fold_performance": fold_performance,
-        "baseline": base,
-        "with_extracted_features": enhanced,
-        "improvement_positive_is_better": improvements,
-    }
-    if include_ablation and definitions:
-        ablations = []
-        individual_signals = []
-        for feature in definitions:
-            singleton_result = evaluate_definitions(
-                dataset=dataset,
-                extracted=extracted,
-                definitions=[feature],
-                split=split,
-                treatment_column=treatment_column,
-                outcome_column=outcome_column,
-                outcome_type=outcome_type,
-                inner_folds=inner_folds,
-                seed=seed,
-                propensity_clip=propensity_clip,
-                forest_trees=forest_trees,
-                include_ablation=False,
-            )
-            individual_signals.append(
-                {
-                    "feature_id": str(feature["feature_id"]),
-                    "name": str(feature["name"]),
-                    **_feature_role_signal_diagnostics(
-                        feature,
-                        singleton_result,
-                        binary_outcome=binary,
-                    ),
-                    "baseline": singleton_result["baseline"],
-                    "with_feature": singleton_result["with_extracted_features"],
-                    "improvement_positive_is_better": singleton_result[
-                        "improvement_positive_is_better"
-                    ],
-                    "inner_fold_performance": singleton_result["inner_fold_performance"],
-                }
-            )
-            without = [
-                candidate
-                for candidate in definitions
-                if str(candidate["feature_id"]) != str(feature["feature_id"])
-            ]
-            without_result = evaluate_definitions(
-                dataset=dataset,
-                extracted=extracted,
-                definitions=without,
-                split=split,
-                treatment_column=treatment_column,
-                outcome_column=outcome_column,
-                outcome_type=outcome_type,
-                inner_folds=inner_folds,
-                seed=seed,
-                propensity_clip=propensity_clip,
-                forest_trees=forest_trees,
-                include_ablation=False,
-            )
-            without_metrics = without_result["with_extracted_features"]
-            contribution = _metric_improvements(without_metrics, enhanced)
-            ablations.append(
-                {
-                    "feature_id": str(feature["feature_id"]),
-                    "name": str(feature["name"]),
-                    "metrics_without_feature": without_metrics,
-                    "feature_contribution_positive_is_better": contribution,
-                }
-            )
-        result["individual_feature_signal"] = individual_signals
-        result["leave_one_feature_out"] = ablations
-    return result
-
-
-def _review_prompt(
-    *,
-    clinical_question: str,
-    definitions: Sequence[Mapping[str, Any]],
-    summaries: Sequence[Mapping[str, Any]],
-    performance: Mapping[str, Any],
-    allow_measurement_revision: bool,
-    min_nonmissing_fraction: float,
-    max_dominant_fraction: float,
-    feature_set_index: Sequence[Mapping[str, Any]] | None = None,
-) -> list[dict[str, str]]:
-    detailed_feature_ids = [str(feature["feature_id"]) for feature in definitions]
-    configured_feature_ids = [
-        str(feature["feature_id"])
-        for feature in definitions
-        if feature.get("configured_explicit_feature") is True
-    ]
-    body = {
-        "job": "review_stage2_variables_against_training_fold_performance",
-        "clinical_question": clinical_question,
-        "information_boundary": (
-            "All extraction summaries and performance metrics come only from the outer training fold. "
-            "No outer-heldout outcomes are included."
-        ),
-        "allow_measurement_revision": allow_measurement_revision,
-        "quality_guides": {
-            "minimum_nonmissing_fraction": min_nonmissing_fraction,
-            "maximum_dominant_value_fraction": max_dominant_fraction,
-        },
-        "review_scope": {
-            "detailed_feature_ids": detailed_feature_ids,
-            "configured_explicit_feature_ids": configured_feature_ids,
-            "feature_count_in_entire_set": len(feature_set_index or definitions),
-        },
-        "rules": [
-            "Give every detailed feature exactly one decision.",
-            "Do not return decisions for index-only features; they are reviewed in other requests.",
-            "Use the feature-set index to recognize related or potentially redundant variables.",
-            "Keep a feature when extraction is usable and its scientific role remains plausible.",
-            "Drop a feature when it is essentially unmeasured, invariant, or unsupported after extraction.",
-            "Individual signals use random forests scored on inner-held-out rows.",
-            "Stability selection requires ordinary roles to earn stable positive support; "
-            "effect modifiers are removed only after stable, margin-negative R-loss. "
-            "Do not bypass that asymmetric gate.",
-            "Use leave-one-feature-out metrics to distinguish a feature's contribution from overall model performance.",
-            "For every retained continuous feature, choose a modeling_strategy. Use "
-            "continuous for numeric measurements and categorical for stable categories. "
-            "Use a hybrid only when both remain and no harmonization_plan exists. Never "
-            "invent a numeric value for a category or threshold.",
-            *(
-                [
-                    "A harmonization_plan was learned from mixed outer-training values. "
-                    "Keep its target_representation as modeling_strategy unless revising "
-                    "the underlying measurement definition."
-                ]
-                if any(
-                    isinstance(feature.get("harmonization_plan"), Mapping)
-                    for feature in definitions
-                )
-                else []
-            ),
-            *(
-                [
-                    "A harmonization_fallback means no validated common plan was "
-                    "available after bounded repairs. Keep the current safe modeling "
-                    "strategy unless the training summaries support another declared "
-                    "strategy; never invent a value mapping."
-                ]
-                if any(
-                    isinstance(feature.get("harmonization_fallback"), Mapping)
-                    for feature in definitions
-                )
-                else []
-            ),
-            "Use revise only to clarify how the same evidence-supported measurement is extracted.",
-            "For a revised binary variable, provide exactly two distinct scalar ontology values as separate categories_or_unit array items.",
-            "For a revised categorical or ordinal variable, provide at least two distinct scalar ontology values as separate categories_or_unit array items.",
-            "Do not add a new feature, change a causal role, or change supporting evidence.",
-            "A feature listed in configured_explicit_feature_ids was required by the investigator with a supplied ontology; return keep and do not revise or drop it.",
-            "Predictive performance is diagnostic evidence, not permission to use a post-treatment variable.",
-            (
-                "Measurement revision is permitted and will be evaluated in another round."
-                if allow_measurement_revision
-                else "This is the final review round; choose only keep or drop."
-            ),
-        ],
-        "feature_set_index": list(feature_set_index or []),
-        "features": [
-            {
-                **dict(feature),
-                **(
-                    {
-                        "harmonization_plan": {
-                            key: copy.deepcopy(feature["harmonization_plan"].get(key))
-                            for key in (
-                                "target_representation",
-                                "reason",
-                                "canonical_categories",
-                            )
-                        }
-                    }
-                    if isinstance(feature.get("harmonization_plan"), Mapping)
-                    else {}
-                ),
-                **(
-                    {
-                        "harmonization_fallback": {
-                            key: copy.deepcopy(feature["harmonization_fallback"].get(key))
-                            for key in (
-                                "status",
-                                "retained_prior_plan",
-                                "unresolved_value_rule",
-                                "modeling_strategy",
-                            )
-                        }
-                    }
-                    if isinstance(feature.get("harmonization_fallback"), Mapping)
-                    else {}
-                ),
-            }
-            for feature in definitions
-        ],
-        "extraction_summaries": list(summaries),
-        "inner_validation_performance": dict(performance),
-        "response": {
-            "feature_decisions": [
-                {
-                    "feature_id": "one supplied feature_id",
-                    "action": "keep|drop|revise",
-                    "reason": "scientific and empirical reason",
-                    "modeling_strategy": (
-                        "required for every kept or revised continuous feature: "
-                        "continuous|categorical|continuous_with_categorical_fallback"
-                    ),
-                    "value_type": "required only for revise",
-                    "categories_or_unit": ["required only for revise"],
-                    "measurement_definition": "required only for revise",
-                    "missing_value_rule": "required only for revise",
-                }
-            ],
-            "overall_assessment": "brief assessment of the feature set",
-        },
-    }
-    return [
-        {
-            "role": "system",
-            "content": "You review prespecified variables using training-fold evidence only. Return JSON only.",
-        },
-        {"role": "user", "content": json.dumps(body, sort_keys=True)},
-    ]
-
-
-def _review_feature_set_index(
-    definitions: Sequence[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    """Retain compact whole-set context in every partitioned review request."""
-
-    return [
-        {
-            "feature_id": str(feature["feature_id"]),
-            "name": str(feature["name"]),
-            "description": str(feature.get("description") or ""),
-            "roles": list(feature.get("roles") or []),
-            "value_type": str(feature.get("value_type") or ""),
-            "modeling_strategy": str(feature.get("modeling_strategy") or ""),
-        }
-        for feature in definitions
-    ]
-
-
-def _review_performance_for_features(
-    performance: Mapping[str, Any],
-    *,
-    feature_ids: set[str],
-) -> dict[str, Any]:
-    """Return global metrics plus each detailed feature's own ablation metrics."""
-
-    per_feature_keys = {
-        "individual_feature_signal",
-        "leave_one_feature_out",
-        "stability_selection",
-    }
-    selected = {
-        key: copy.deepcopy(value)
-        for key, value in performance.items()
-        if key not in per_feature_keys
-    }
-    selected["individual_feature_signal"] = [
-        copy.deepcopy(row)
-        for row in performance.get("individual_feature_signal") or []
-        if str(row.get("feature_id") or "") in feature_ids
-    ]
-    selected["leave_one_feature_out"] = [
-        copy.deepcopy(row)
-        for row in performance.get("leave_one_feature_out") or []
-        if str(row.get("feature_id") or "") in feature_ids
-    ]
-    stability = performance.get("stability_selection")
-    if isinstance(stability, Mapping):
-        compact_features: list[dict[str, Any]] = []
-        for row in stability.get("features") or []:
-            if str(row.get("feature_id") or "") not in feature_ids:
-                continue
-            compact_roles = {
-                str(role): {
-                    key: copy.deepcopy(role_row.get(key))
-                    for key in (
-                        "evaluations",
-                        "support_frequency",
-                        "pending",
-                        "stable_positive",
-                        "meaningfully_negative_frequency",
-                        "stable_meaningfully_negative",
-                    )
-                }
-                for role, role_row in (row.get("roles") or {}).items()
-            }
-            compact_features.append(
-                {
-                    "feature_id": str(row.get("feature_id") or ""),
-                    "name": str(row.get("name") or ""),
-                    "roles": compact_roles,
-                }
-            )
-        selected["stability_selection"] = {
-            "features": compact_features,
-        }
-    return selected
-
-
-def _review_prompt_for_features(
-    *,
-    clinical_question: str,
-    definitions: Sequence[Mapping[str, Any]],
-    summaries_by_id: Mapping[str, Mapping[str, Any]],
-    performance: Mapping[str, Any],
-    feature_set_index: Sequence[Mapping[str, Any]],
-    allow_measurement_revision: bool,
-    min_nonmissing_fraction: float,
-    max_dominant_fraction: float,
-) -> list[dict[str, str]]:
-    feature_ids = {str(feature["feature_id"]) for feature in definitions}
-    return _review_prompt(
-        clinical_question=clinical_question,
-        definitions=definitions,
-        summaries=[summaries_by_id[str(feature["feature_id"])] for feature in definitions],
-        performance=_review_performance_for_features(
-            performance,
-            feature_ids=feature_ids,
-        ),
-        allow_measurement_revision=allow_measurement_revision,
-        min_nonmissing_fraction=min_nonmissing_fraction,
-        max_dominant_fraction=max_dominant_fraction,
-        feature_set_index=feature_set_index,
-    )
-
-
-def _partition_review_features(
-    *,
-    clinical_question: str,
-    definitions: Sequence[Mapping[str, Any]],
-    summaries: Sequence[Mapping[str, Any]],
-    performance: Mapping[str, Any],
-    allow_measurement_revision: bool,
-    min_nonmissing_fraction: float,
-    max_dominant_fraction: float,
-    max_prompt_chars: int,
-) -> list[list[dict[str, Any]]]:
-    """Partition detailed review inputs while preserving every per-feature diagnostic.
-
-    The soft limit leaves space for validation-repair turns. A single unusually
-    verbose feature may exceed that soft limit, but it must still fit the configured
-    hard transport limit.
-    """
-
-    hard_limit = int(max_prompt_chars)
-    if hard_limit < 1:
-        raise ValueError("Stage 2 max_prompt_chars must be positive")
-    soft_limit = min(hard_limit, max(20_000, int(hard_limit * 0.6)))
-    summaries_by_id = {str(row["feature_id"]): row for row in summaries}
-    expected_ids = {str(feature["feature_id"]) for feature in definitions}
-    missing_summaries = sorted(expected_ids - set(summaries_by_id))
-    if missing_summaries:
-        raise ValueError(
-            "Stage 2 review is missing extraction summaries for feature ID(s): "
-            f"{missing_summaries[:8]}"
-        )
-    feature_set_index = _review_feature_set_index(definitions)
-    batches: list[list[dict[str, Any]]] = []
-    current: list[dict[str, Any]] = []
-    for raw_feature in definitions:
-        feature = dict(raw_feature)
-        proposed = [*current, feature]
-        messages = _review_prompt_for_features(
-            clinical_question=clinical_question,
-            definitions=proposed,
-            summaries_by_id=summaries_by_id,
-            performance=performance,
-            feature_set_index=feature_set_index,
-            allow_measurement_revision=allow_measurement_revision,
-            min_nonmissing_fraction=min_nonmissing_fraction,
-            max_dominant_fraction=max_dominant_fraction,
-        )
-        prompt_chars = _prompt_chars(messages)
-        if current and prompt_chars > soft_limit:
-            batches.append(current)
-            current = [feature]
-            singleton_messages = _review_prompt_for_features(
-                clinical_question=clinical_question,
-                definitions=current,
-                summaries_by_id=summaries_by_id,
-                performance=performance,
-                feature_set_index=feature_set_index,
-                allow_measurement_revision=allow_measurement_revision,
-                min_nonmissing_fraction=min_nonmissing_fraction,
-                max_dominant_fraction=max_dominant_fraction,
-            )
-            prompt_chars = _prompt_chars(singleton_messages)
-        else:
-            current = proposed
-        if prompt_chars > hard_limit:
-            raise ValueError(
-                "Stage 2 cannot review one complete feature within max_prompt_chars "
-                f"({prompt_chars} > {hard_limit}); shorten that feature's metadata or "
-                "increase the prompt budget"
-            )
-    if current:
-        batches.append(current)
-    return batches
-
-
-def _validate_review(
-    value: Mapping[str, Any],
-    *,
-    definitions: Sequence[Mapping[str, Any]],
-    allow_measurement_revision: bool,
-    summaries: Sequence[Mapping[str, Any]] | None = None,
-) -> dict[str, Any]:
-    decisions = value.get("feature_decisions")
-    if not isinstance(decisions, list):
-        raise ValueError("review response requires feature_decisions")
-    by_id = {str(feature["feature_id"]): dict(feature) for feature in definitions}
-    clean: dict[str, dict[str, Any]] = {}
-    for decision in decisions:
-        if not isinstance(decision, Mapping):
-            raise ValueError("each feature decision must be an object")
-        feature_id = str(decision.get("feature_id") or "")
-        if feature_id not in by_id or feature_id in clean:
-            raise ValueError("review named an unknown or duplicate feature_id")
-        action = str(decision.get("action") or "")
-        if action not in {"keep", "drop", "revise"}:
-            raise ValueError("review action must be keep, drop, or revise")
-        if by_id[feature_id].get("configured_explicit_feature") is True and action != "keep":
-            raise ValueError(
-                f"investigator-configured feature {feature_id!r} must be kept without revision"
-            )
-        if action == "revise" and not allow_measurement_revision:
-            raise ValueError("measurement revision is not permitted in the final review round")
-        row: dict[str, Any] = {
-            "feature_id": feature_id,
-            "action": action,
-            "reason": str(decision.get("reason") or ""),
-        }
-        if action == "revise":
-            value_type = str(decision.get("value_type") or "")
-            categories = decision.get("categories_or_unit")
-            if value_type not in {"binary", "categorical", "continuous", "ordinal"}:
-                raise ValueError("a revised variable requires an operational value_type")
-            if not isinstance(categories, list) or not categories:
-                raise ValueError("a revised variable requires categories_or_unit")
-            if value_type in {"binary", "categorical", "ordinal"}:
-                categories = _validated_closed_category_values(
-                    value_type=value_type,
-                    values=categories,
-                    source=f"revised feature {feature_id!r}",
-                )
-            for key in ("measurement_definition", "missing_value_rule"):
-                if not str(decision.get(key) or "").strip():
-                    raise ValueError(f"a revised variable requires {key}")
-            row.update(
-                {
-                    "value_type": value_type,
-                    "categories_or_unit": [str(item) for item in categories],
-                    "measurement_definition": str(decision["measurement_definition"]),
-                    "missing_value_rule": str(decision["missing_value_rule"]),
-                }
-            )
-        resulting_value_type = str(
-            row.get("value_type") or by_id[feature_id].get("value_type") or "ambiguous"
-        )
-        if action != "drop" and resulting_value_type == "continuous":
-            modeling_strategy = str(decision.get("modeling_strategy") or "").strip().lower()
-            if not modeling_strategy and summaries is None:
-                modeling_strategy = _feature_modeling_strategy(by_id[feature_id])
-            if modeling_strategy not in CONTINUOUS_MODELING_STRATEGIES:
-                raise ValueError(
-                    "a retained continuous variable requires modeling_strategy to be "
-                    "continuous, categorical, or continuous_with_categorical_fallback"
-                )
-            row["modeling_strategy"] = modeling_strategy
-        clean[feature_id] = row
-    if set(clean) != set(by_id):
-        raise ValueError("review must decide every supplied feature")
-    return {
-        "feature_decisions": [clean[feature_id] for feature_id in by_id],
-        "overall_assessment": str(value.get("overall_assessment") or ""),
-    }
-
-
-def _request_partitioned_review(
-    *,
-    clinical_question: str,
-    definitions: Sequence[Mapping[str, Any]],
-    summaries: Sequence[Mapping[str, Any]],
-    performance: Mapping[str, Any],
-    allow_measurement_revision: bool,
-    min_nonmissing_fraction: float,
-    max_dominant_fraction: float,
-    max_prompt_chars: int,
-    output_dir: Path,
-    request_json: RequestJSON,
-) -> dict[str, Any]:
-    """Review every feature in resumable prompt-sized groups."""
-
-    batches = _partition_review_features(
-        clinical_question=clinical_question,
-        definitions=definitions,
-        summaries=summaries,
-        performance=performance,
-        allow_measurement_revision=allow_measurement_revision,
-        min_nonmissing_fraction=min_nonmissing_fraction,
-        max_dominant_fraction=max_dominant_fraction,
-        max_prompt_chars=max_prompt_chars,
-    )
-    summaries_by_id = {str(row["feature_id"]): row for row in summaries}
-    feature_set_index = _review_feature_set_index(definitions)
-    prompt_sizes: list[int] = []
-    decisions: list[dict[str, Any]] = []
-    assessments: list[str] = []
-    for batch_index, batch_definitions in enumerate(batches, start=1):
-        messages = _review_prompt_for_features(
-            clinical_question=clinical_question,
-            definitions=batch_definitions,
-            summaries_by_id=summaries_by_id,
-            performance=performance,
-            feature_set_index=feature_set_index,
-            allow_measurement_revision=allow_measurement_revision,
-            min_nonmissing_fraction=min_nonmissing_fraction,
-            max_dominant_fraction=max_dominant_fraction,
-        )
-        prompt_chars = _prompt_chars(messages)
-        prompt_sizes.append(prompt_chars)
-        if prompt_chars > int(max_prompt_chars):  # pragma: no cover - planner invariant
-            raise RuntimeError("Stage 2 review partition exceeded max_prompt_chars")
-        batch_dir = output_dir / f"batch_{batch_index:05d}"
-        input_value = {
-            "schema_version": REVIEW_CHECKPOINT_SCHEMA_VERSION,
-            "clinical_question": clinical_question,
-            "allow_measurement_revision": allow_measurement_revision,
-            "feature_set_index": feature_set_index,
-            "definitions": list(batch_definitions),
-            "summaries": [
-                summaries_by_id[str(feature["feature_id"])] for feature in batch_definitions
-            ],
-            "performance": _review_performance_for_features(
-                performance,
-                feature_ids={str(feature["feature_id"]) for feature in batch_definitions},
-            ),
-            "quality_guides": {
-                "minimum_nonmissing_fraction": min_nonmissing_fraction,
-                "maximum_dominant_value_fraction": max_dominant_fraction,
-            },
-        }
-        input_fingerprint = _value_fingerprint(input_value)
-        result_path = batch_dir / "result.json"
-        complete_path = batch_dir / "complete.json"
-        batch_review: dict[str, Any] | None = None
-        if result_path.is_file() and complete_path.is_file():
-            try:
-                completion = json.loads(complete_path.read_text(encoding="utf-8"))
-                cached = json.loads(result_path.read_text(encoding="utf-8"))
-                if (
-                    completion.get("schema_version") == REVIEW_CHECKPOINT_SCHEMA_VERSION
-                    and completion.get("input_fingerprint") == input_fingerprint
-                ):
-                    batch_review = _validate_review(
-                        cached,
-                        definitions=batch_definitions,
-                        allow_measurement_revision=allow_measurement_revision,
-                        summaries=[
-                            summaries_by_id[str(feature["feature_id"])]
-                            for feature in batch_definitions
-                        ],
-                    )
-            except (
-                KeyError,
-                OSError,
-                TypeError,
-                ValueError,
-                json.JSONDecodeError,
-            ):
-                batch_review = None
-        if batch_review is None:
-            batch_dir.mkdir(parents=True, exist_ok=True)
-            _write_json(
-                batch_dir / "input.json",
-                {**input_value, "input_fingerprint": input_fingerprint},
-            )
-            batch_review = request_json(
-                messages,
-                lambda value, batch_definitions=batch_definitions: _validate_review(
-                    value,
-                    definitions=batch_definitions,
-                    allow_measurement_revision=allow_measurement_revision,
-                    summaries=[
-                        summaries_by_id[str(feature["feature_id"])] for feature in batch_definitions
-                    ],
-                ),
-            )
-            _write_json(result_path, batch_review)
-            _write_json(
-                complete_path,
-                {
-                    "status": "complete",
-                    "schema_version": REVIEW_CHECKPOINT_SCHEMA_VERSION,
-                    "input_fingerprint": input_fingerprint,
-                    "completed_at": _now(),
-                    "batch_index": batch_index,
-                    "batches": len(batches),
-                    "features": len(batch_definitions),
-                    "prompt_chars": prompt_chars,
-                },
-            )
-        decisions.extend(batch_review["feature_decisions"])
-        assessment = str(batch_review.get("overall_assessment") or "").strip()
-        if assessment:
-            assessments.append(f"Review group {batch_index}/{len(batches)}: {assessment}")
-    LOGGER.info(
-        "Stage 2 feature review groups=%s features=%s prompt_chars=%s",
-        len(batches),
-        len(definitions),
-        prompt_sizes,
-    )
-    return _validate_review(
-        {
-            "feature_decisions": decisions,
-            "overall_assessment": "\n".join(assessments),
-        },
-        definitions=definitions,
-        allow_measurement_revision=allow_measurement_revision,
-        summaries=summaries,
-    )
-
-
-def _review_drop_stability_guards(
-    definitions: Sequence[Mapping[str, Any]],
-    review: Mapping[str, Any],
-    stability_selection: Mapping[str, Any],
-) -> tuple[set[str], dict[str, Any]]:
-    """Prevent one LLM review from bypassing repeated empirical selection."""
-
-    decisions = {str(row["feature_id"]): row for row in review["feature_decisions"]}
-    protected: set[str] = set()
-    audit_rows: list[dict[str, Any]] = []
-    for feature in definitions:
-        feature_id = str(feature["feature_id"])
-        if decisions[feature_id]["action"] != "drop":
-            continue
-        stable_roles, reasons = _stable_roles_for_feature(feature, stability_selection)
-        is_protected = bool(stable_roles)
-        if is_protected:
-            protected.add(feature_id)
-        audit_rows.append(
-            {
-                "feature_id": feature_id,
-                "name": str(feature["name"]),
-                "llm_action": "drop",
-                "action": (
-                    "override_drop_until_stability_rule_allows"
-                    if is_protected
-                    else "allow_drop_after_stability_rule"
-                ),
-                "roles_retained_by_stability_rule": stable_roles,
-                "reasons": reasons,
-            }
-        )
-    return protected, {
-        "schema_version": "stage2_review_drop_stability_guard_v1",
-        "llm_drop_decisions": len(audit_rows),
-        "drop_decisions_overridden": len(protected),
-        "decisions": audit_rows,
-    }
-
-
-def _apply_review(
-    definitions: Sequence[Mapping[str, Any]],
-    review: Mapping[str, Any],
-    *,
-    protected_drop_feature_ids: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], bool]:
-    decisions = {str(row["feature_id"]): row for row in review["feature_decisions"]}
-    protected = set(protected_drop_feature_ids or set())
-    revised: list[dict[str, Any]] = []
-    measurement_changed = False
-    for feature in definitions:
-        feature_id = str(feature["feature_id"])
-        decision = decisions[feature_id]
-        if decision["action"] == "drop" and feature_id not in protected:
-            continue
-        updated = dict(feature)
-        if decision["action"] == "revise":
-            measurement_changed = True
-            updated.pop("harmonization_plan", None)
-            updated.pop("harmonization_fallback", None)
-            for key in (
-                "value_type",
-                "categories_or_unit",
-                "measurement_definition",
-                "missing_value_rule",
-            ):
-                updated[key] = decision[key]
-            updated = _refresh_conflict_resolution(updated)
-        if "modeling_strategy" in decision:
-            updated["modeling_strategy"] = decision["modeling_strategy"]
-        revised.append(_normalized_feature_modeling_definition(updated))
-    return revised, measurement_changed
-
-
-def _changed_feature_representation_ids(
-    before: Sequence[Mapping[str, Any]],
-    after: Sequence[Mapping[str, Any]],
-) -> set[str]:
-    """Identify retained features that need evaluation under a changed representation."""
-
-    before_by_id = {str(feature["feature_id"]): feature for feature in before}
-    fields = (
-        "value_type",
-        "categories_or_unit",
-        "measurement_definition",
-        "missing_value_rule",
-        "modeling_strategy",
-        "harmonization_plan",
-    )
-    changed: set[str] = set()
-    for feature in after:
-        feature_id = str(feature["feature_id"])
-        previous = before_by_id.get(feature_id)
-        if previous is None:
-            changed.add(feature_id)
-            continue
-        prior_view = {key: copy.deepcopy(previous.get(key)) for key in fields}
-        current_view = {key: copy.deepcopy(feature.get(key)) for key in fields}
-        if _value_fingerprint(prior_view) != _value_fingerprint(current_view):
-            changed.add(feature_id)
-    return changed
-
-
-def _apply_empirical_signal_pruning(
-    definitions: Sequence[Mapping[str, Any]],
-    performance: Mapping[str, Any],
-    *,
-    defer_feature_ids: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Remove unsupported causal roles using inner-held-out singleton models.
-
-    A dual-role feature may remain under the role that validates even when its
-    other proposed role does not. Investigator-configured features are audited
-    but remain immutable.
-    """
-
-    deferred = set(defer_feature_ids or set())
-    stability_selection = performance.get("stability_selection")
-    use_stability_selection = isinstance(stability_selection, Mapping)
-    signal_by_id = {
-        str(row["feature_id"]): row for row in performance.get("individual_feature_signal") or []
-    }
-    retained: list[dict[str, Any]] = []
-    decisions: list[dict[str, Any]] = []
-    for raw_feature in definitions:
-        feature = dict(raw_feature)
-        feature_id = str(feature["feature_id"])
-        roles = list(map(str, feature.get("roles") or []))
-        signal = signal_by_id.get(feature_id)
-        if signal is None:
-            raise ValueError(
-                f"Stage 2 signal pruning is missing inner-held-out diagnostics for {feature_id!r}"
-            )
-        role_signals = signal.get("role_signals") or {}
-        stability_reasons: list[str] = []
-        if use_stability_selection:
-            supported_roles, stability_reasons = _stable_roles_for_feature(
-                feature,
-                stability_selection,
-            )
-        else:
-            supported_roles = [
-                role for role in roles if bool((role_signals.get(role) or {}).get("supported"))
-            ]
-        if feature.get("configured_explicit_feature") is True:
-            retained.append(feature)
-            action = "keep_configured"
-            retained_roles = roles
-        elif feature_id in deferred:
-            retained.append(feature)
-            action = "defer_until_re_evaluated"
-            retained_roles = roles
-        elif supported_roles:
-            feature["roles"] = supported_roles
-            retained.append(feature)
-            retained_roles = supported_roles
-            action = "keep" if supported_roles == roles else "prune_unsupported_roles"
-        else:
-            retained_roles = []
-            action = "drop_no_heldout_role_signal"
-        decisions.append(
-            {
-                "feature_id": feature_id,
-                "name": str(feature["name"]),
-                "action": action,
-                "claimed_roles": roles,
-                "retained_roles": retained_roles,
-                "role_signals": copy.deepcopy(role_signals),
-                "stability_reasons": stability_reasons,
-            }
-        )
-    selection_complete = True
-    if use_stability_selection:
-        for decision in decisions:
-            if decision["action"] == "defer_until_re_evaluated":
-                selection_complete = False
-                break
-            if decision["action"] == "keep_configured":
-                continue
-            feature_row = next(
-                (
-                    row
-                    for row in stability_selection.get("features") or []
-                    if str(row.get("feature_id") or "") == decision["feature_id"]
-                ),
-                None,
-            )
-            if feature_row is not None and any(
-                bool((feature_row.get("roles") or {}).get(role, {}).get("pending"))
-                for role in decision["retained_roles"]
-            ):
-                selection_complete = False
-                break
-    report = {
-        "schema_version": (
-            "stage2_inner_heldout_signal_pruning_v2_stability_selection"
-            if use_stability_selection
-            else "stage2_inner_heldout_signal_pruning_v1"
-        ),
-        "selection_complete": selection_complete,
-        "stability_selection": (
-            copy.deepcopy(stability_selection) if use_stability_selection else None
-        ),
-        "features_evaluated": len(definitions),
-        "features_retained": len(retained),
-        "features_dropped": sum(
-            decision["action"] == "drop_no_heldout_role_signal" for decision in decisions
-        ),
-        "features_with_roles_pruned": sum(
-            decision["action"] == "prune_unsupported_roles" for decision in decisions
-        ),
-        "features_deferred_for_re_evaluation": sum(
-            decision["action"] == "defer_until_re_evaluated" for decision in decisions
-        ),
-        "decisions": decisions,
-    }
-    return retained, report
 
 
 def _ontology_refinement_prompt(*, feature: Mapping[str, Any], failure_patterns: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
@@ -7750,14 +5617,14 @@ def _apply_ontology_decision(feature, decision):
                      "clinical_label": f"{clinical_prompts.label(feature)}: {component['name']}",
                      "ontology_parent_feature_id": feature["feature_id"],
                      "ontology_split_reason": decision["reason"]}
-            for field in ("harmonization_plan", "harmonization_fallback", "decision_ontology"):
+            for field in ("harmonization_plan", "harmonization_fallback"):
                 child.pop(field, None)
             result.append(_refresh_conflict_resolution(child))
         return result
     revised = {**feature, **{k: decision[k] for k in ONTOLOGY_DEFINITION_FIELDS}}
     if all(revised.get(k) == feature.get(k) for k in ONTOLOGY_DEFINITION_FIELDS):
         return [dict(feature)]
-    for field in ("harmonization_plan", "harmonization_fallback", "decision_ontology"):
+    for field in ("harmonization_plan", "harmonization_fallback"):
         revised.pop(field, None)
     return [_refresh_conflict_resolution(revised)]
 
@@ -7891,9 +5758,6 @@ def _request_aggregate_ontology_supervisor(
         result_path = directory / "result.json"
         complete_path = directory / "complete.json"
         if not result_path.is_file() or not complete_path.is_file():
-            return None
-        if _records_infrastructure_failure(result_path):
-            _supersede_infrastructure_checkpoint(directory)
             return None
         try:
             completion = json.loads(complete_path.read_text(encoding="utf-8"))
@@ -8182,8 +6046,6 @@ def _request_ontology_refinements(
         result_path = feature_dir / "result.json"
         complete_path = feature_dir / "complete.json"
         if result_path.is_file() and complete_path.is_file():
-            if _records_infrastructure_failure(result_path):
-                _supersede_infrastructure_checkpoint(feature_dir)
             try:
                 completion = json.loads(complete_path.read_text(encoding="utf-8"))
                 cached = json.loads(result_path.read_text(encoding="utf-8"))
@@ -8421,23 +6283,6 @@ def _merge_incremental_failure_summaries(
     }
 
 
-def _has_legacy_full_refinement_checkpoints(output_dir: Path) -> bool:
-    """Detect a full re-extraction started by code predating feature deltas."""
-
-    if (output_dir / "changed_features").exists():
-        return False
-    return any(
-        (output_dir / name).exists()
-        for name in (
-            "batches",
-            "pages",
-            "extracted.csv",
-            "failure_summary.json",
-            "complete.json",
-        )
-    )
-
-
 def _extract_changed_features_and_merge(
     *,
     dataset: pd.DataFrame,
@@ -8459,55 +6304,11 @@ def _extract_changed_features_and_merge(
     max_output_tokens: int,
     context_margin_tokens: int,
     deferred_retry_passes: int = 1,
-    note_search: NoteSearchConfig | None = None,
-    context_strategy: str = "full_record",
-    colbert: ColBERTConfig | None = None,
-    decision_extraction: Any | None = None,
-    decision_client: Any | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Extract changed features only and materialize a complete merged matrix."""
 
-    decision_settings = (
-        {"decision_extraction": decision_extraction, "decision_client": decision_client}
-        if decision_extraction is not None and decision_extraction.enabled else {}
-    )
     current = [dict(feature) for feature in definitions]
     current_names = [str(feature["name"]) for feature in current]
-
-    # A long-running workflow may already have started a full pass under the
-    # historical directory layout.  Resume that work rather than abandoning
-    # valid checkpoints halfway through a patient cohort.
-    if _has_legacy_full_refinement_checkpoints(output_dir):
-        LOGGER.info(
-            "resume legacy full Stage 2 refinement extraction before enabling "
-            "feature-delta checkpoints: %s",
-            output_dir,
-        )
-        extracted = extract_rows(
-            dataset=dataset,
-            row_ids=row_ids,
-            text_column=text_column,
-            definitions=current,
-            output_dir=output_dir,
-            request_json=request_json,
-            workers=workers,
-            max_prompt_chars=max_prompt_chars,
-            feature_batch_size=feature_batch_size,
-            request_identity=request_identity,
-            tokenizer=tokenizer,
-            chunk_size_tokens=chunk_size_tokens,
-            context_window_tokens=context_window_tokens,
-            max_output_tokens=max_output_tokens,
-            context_margin_tokens=context_margin_tokens,
-            deferred_retry_passes=deferred_retry_passes,
-            note_search=note_search,
-            context_strategy=context_strategy, colbert=colbert,
-            **decision_settings,
-        )
-        summary = json.loads(
-            (output_dir / "failure_summary.json").read_text(encoding="utf-8")
-        )
-        return extracted, summary
 
     changed_definitions = _features_requiring_reextraction(
         prior_definitions=prior_definitions,
@@ -8539,9 +6340,6 @@ def _extract_changed_features_and_merge(
         max_output_tokens=max_output_tokens,
         context_margin_tokens=context_margin_tokens,
         deferred_retry_passes=deferred_retry_passes,
-        note_search=note_search,
-        context_strategy=context_strategy, colbert=colbert,
-        **decision_settings,
     )
     prior_names = [str(feature["name"]) for feature in prior_definitions]
     prior_indexed = _validated_extraction_index(
@@ -8657,35 +6455,12 @@ def _extract_training_with_ontology_feedback(
     max_output_tokens: int = DEFAULT_EXTRACTION_MAX_TOKENS,
     context_margin_tokens: int = DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
     deferred_retry_passes: int = 1,
-    note_search: NoteSearchConfig | None = None,
-    context_strategy: str = "full_record",
-    colbert: ColBERTConfig | None = None,
     interpretation_workers: int = 1,
-    decision_extraction: Any | None = None,
-    decision_client: Any | None = None,
     prior_extracted: pd.DataFrame | None = None,
     prior_definitions: Sequence[Mapping[str, Any]] | None = None,
     prior_failure_summary: Mapping[str, Any] | None = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], int]:
     """Extract training rows and incrementally repair changed feature ontologies."""
-
-    if decision_extraction is not None and decision_extraction.enabled:
-        from .stage2_decision_ontology import extract_training
-
-        return extract_training(
-            dataset=dataset, row_ids=row_ids, text_column=text_column, definitions=definitions,
-            output_dir=output_dir, feedback_dir=feedback_dir, request_json=request_json,
-            workers=workers, max_prompt_chars=max_prompt_chars, feature_batch_size=1,
-            max_refinement_rounds=max_refinement_rounds, request_identity=request_identity,
-            tokenizer=tokenizer, chunk_size_tokens=chunk_size_tokens,
-            context_window_tokens=context_window_tokens, max_output_tokens=max_output_tokens,
-            context_margin_tokens=context_margin_tokens, deferred_retry_passes=deferred_retry_passes,
-            note_search=note_search, context_strategy=context_strategy, colbert=colbert,
-            decision_extraction=decision_extraction, decision_client=decision_client,
-            ontology_workers=interpretation_workers,
-            prior_extracted=prior_extracted, prior_definitions=prior_definitions,
-            prior_failure_summary=prior_failure_summary,
-        )
 
     supplied_prior = (
         prior_extracted is not None,
@@ -8734,8 +6509,6 @@ def _extract_training_with_ontology_feedback(
                 max_output_tokens=max_output_tokens,
                 context_margin_tokens=context_margin_tokens,
                 deferred_retry_passes=deferred_retry_passes,
-                note_search=note_search,
-                context_strategy=context_strategy, colbert=colbert,
             )
             summary = json.loads(
                 (extraction_dir / "failure_summary.json").read_text(encoding="utf-8")
@@ -8763,8 +6536,6 @@ def _extract_training_with_ontology_feedback(
                 max_output_tokens=max_output_tokens,
                 context_margin_tokens=context_margin_tokens,
                 deferred_retry_passes=deferred_retry_passes,
-                note_search=note_search,
-                context_strategy=context_strategy, colbert=colbert,
             )
         repeated = _repeated_ontology_failure_patterns(
             summary,
@@ -8931,8 +6702,8 @@ def estimate_outer_fold(
     max_propensity: float | None = None,
     estimator: str = "causal_forest",
     statistical_policy: Any = None,
-    nuisance_candidate_definitions: Sequence[Mapping[str, Any]] | None = None,
-    nuisance_candidate_fit: pd.DataFrame | None = None,
+    nuisance_candidate_definitions: Sequence[Mapping[str, Any]],
+    nuisance_candidate_fit: pd.DataFrame,
 ) -> dict[str, Any]:
     from .stage2_effect_estimators import effect_model_family, fit_interaction_effect
 
@@ -8942,8 +6713,6 @@ def estimate_outer_fold(
             raise ValueError("linear interaction or DINA estimation requires a statistical policy")
         statistical_policy.validate()
     validate_propensity_bounds(min_propensity, max_propensity)
-    if (nuisance_candidate_definitions is None) != (nuisance_candidate_fit is None):
-        raise ValueError("nuisance candidate definitions and training measurements must be supplied together")
     complete_path = output_dir / "complete.json"
     diagnostics_path = output_dir / "diagnostics.json"
     estimation_input_fingerprint = _value_fingerprint(
@@ -8995,11 +6764,10 @@ def estimate_outer_fold(
             ),
             "extracted_fit_fingerprint": _frame_fingerprint(extracted_fit),
             "extracted_heldout_fingerprint": _frame_fingerprint(extracted_heldout),
-            "nuisance_candidates": (
-                {"definitions": list(nuisance_candidate_definitions),
-                 "training_measurements": _frame_fingerprint(nuisance_candidate_fit)}
-                if nuisance_candidate_definitions is not None else None
-            ),
+            "nuisance_candidates": {
+                "definitions": list(nuisance_candidate_definitions),
+                "training_measurements": _frame_fingerprint(nuisance_candidate_fit),
+            },
         }
     )
     if complete_path.is_file() and diagnostics_path.is_file():
@@ -9052,8 +6820,8 @@ def estimate_outer_fold(
     )
     fit_propensity, fit_mu0, fit_mu1 = _cross_fitted_nuisance(
         dataset=dataset,
-        extracted=nuisance_candidate_fit if nuisance_candidate_fit is not None else extracted_fit,
-        definitions=nuisance_candidate_definitions if nuisance_candidate_definitions is not None else definitions,
+        extracted=nuisance_candidate_fit,
+        definitions=nuisance_candidate_definitions,
         fit_ids=fit_ids,
         inner_splits=supplied_inner,
         treatment_column=treatment_column,
@@ -9064,7 +6832,7 @@ def estimate_outer_fold(
         checkpoint_fingerprint=final_fit_fingerprint,
         # The pooled support was learned across all outer-training patients.
         # It must not screen predictors for their own OOF nuisance predictions.
-        all_candidates=nuisance_candidate_definitions is not None,
+        all_candidates=True,
     )
     fit_keep = propensity_eligibility(fit_propensity, min_propensity, max_propensity)
     _write_frame(
@@ -9181,14 +6949,14 @@ def estimate_outer_fold(
             outcome=y_fit[fit_keep],
             policy=statistical_policy,
             seed=seed + 20_000,
-            **({"nuisance": unpack_nuisances({
+            nuisance=unpack_nuisances({
                 "training_propensity": fit_propensity[fit_keep],
                 "training_mu0": fit_mu0[fit_keep],
                 "training_mu1": fit_mu1[fit_keep],
                 "validation_propensity": propensity[heldout_keep],
                 "validation_mu0": mu0[heldout_keep],
                 "validation_mu1": mu1[heldout_keep],
-            })} if nuisance_candidate_definitions is not None else {}),
+            }),
         ))
         effect_predictions = {
             "tau_pred": result["tau"],
@@ -9333,14 +7101,9 @@ def estimate_outer_fold(
         "nuisance_routing": {
             "treatment_feature_ids": [str(f["feature_id"]) for f in propensity_defs],
             "outcome_feature_ids": [str(f["feature_id"]) for f in outcome_defs],
-            "training_crossfit_design": (
-                "all_candidates_with_fold_local_regularization"
-                if nuisance_candidate_definitions is not None else "retained_definitions"
-            ),
-            "training_crossfit_candidates": (
-                len(nuisance_candidate_definitions) if nuisance_candidate_definitions is not None else len(definitions)
-            ),
-            "dina_reuses_external_nuisances": estimator == "dina" and nuisance_candidate_definitions is not None,
+            "training_crossfit_design": "all_candidates_with_fold_local_regularization",
+            "training_crossfit_candidates": len(nuisance_candidate_definitions),
+            "dina_reuses_external_nuisances": estimator == "dina",
         },
         "effect_modifiers": len(effect_defs),
         "ate_aipw": ate,
@@ -9353,9 +7116,6 @@ def estimate_outer_fold(
         "mean_estimated_cate": float(np.nanmean(cate)) if np.isfinite(cate).any() else None,
         **(
             {
-                "mean_causal_forest_effect": float(np.nanmean(cate))
-                if np.isfinite(cate).any()
-                else None,
                 "mean_causal_forest_lower_95": (
                     float(np.nanmean(cate_lower_values))
                     if np.isfinite(cate_lower_values).any()
@@ -9397,449 +7157,6 @@ def estimate_outer_fold(
         },
     )
     return diagnostics
-
-
-def _run_fold_analysis_legacy(
-    *,
-    dataset: pd.DataFrame,
-    definitions: Sequence[Mapping[str, Any]],
-    split: Mapping[str, Any],
-    clinical_question: str,
-    unit_id_column: str,
-    text_column: str,
-    treatment_column: str,
-    outcome_column: str,
-    outcome_type: str,
-    inner_folds: int,
-    seed: int,
-    output_dir: Path,
-    request_json: RequestJSON,
-    config: Any,
-) -> dict[str, Any]:
-    """Run bounded training-fold review and held-out causal estimation."""
-
-    (
-        ontology_refinement_min_failure_patients,
-        max_ontology_refinement_rounds,
-    ) = _ontology_refinement_limits(config)
-    extraction_feature_batch_size = _configured_extraction_feature_batch_size(config)
-    fit_ids = [int(value) for value in split["fit_row_ids"]]
-    heldout_ids = [int(value) for value in split["heldout_row_ids"]]
-    current: list[dict[str, Any]] = []
-    for raw_feature in definitions:
-        feature = dict(raw_feature)
-        value_type = str(feature.get("value_type") or "ambiguous").strip().lower()
-        if value_type in {"binary", "categorical", "ordinal"}:
-            feature["categories_or_unit"] = _validated_closed_category_values(
-                value_type=value_type,
-                values=feature.get("categories_or_unit") or [],
-                source=f"feature {feature.get('name')!r}",
-            )
-        current.append(_normalized_feature_modeling_definition(feature))
-    final_fit_extraction: pd.DataFrame | None = None
-    final_fit_definitions: list[dict[str, Any]] | None = None
-    agent_review_rounds = 0
-    evaluation_rounds = 0
-    ontology_refinement_rounds = 0
-    selection_history: dict[str, list[dict[str, Any]]] = {}
-    review_converged = False
-    final_round_definitions_changed: bool | None = None
-    final_round_selection_complete: bool | None = None
-    screening_trees = int(getattr(config, "screening_trees", DEFAULT_SCREENING_TREES))
-    selection_policy = _stability_selection_policy(config)
-    maximum_evaluation_rounds = int(
-        getattr(
-            config,
-            "max_evaluation_rounds",
-            DEFAULT_MAX_EVALUATION_ROUNDS,
-        )
-    )
-    for round_index in range(1, maximum_evaluation_rounds + 1):
-        evaluation_rounds = round_index
-        round_dir = output_dir / "review" / f"round_{round_index:03d}"
-        _write_json(round_dir / "definitions.json", {"features": current})
-        extracted, current, feedback_rounds = _extract_training_with_ontology_feedback(
-            dataset=dataset,
-            row_ids=fit_ids,
-            text_column=text_column,
-            definitions=current,
-            output_dir=round_dir / "extraction",
-            feedback_dir=round_dir / "ontology_refinement",
-            request_json=request_json,
-            interpretation_workers=int(getattr(config, "workers", 1)),
-            workers=config.workers,
-            max_prompt_chars=config.extraction_max_prompt_chars,
-            feature_batch_size=extraction_feature_batch_size,
-            minimum_failure_patients=ontology_refinement_min_failure_patients,
-            max_refinement_rounds=max_ontology_refinement_rounds,
-        )
-        ontology_refinement_rounds += feedback_rounds
-        current = [_normalized_feature_modeling_definition(feature) for feature in current]
-        _write_json(
-            round_dir / "definitions_after_ontology_refinement.json",
-            {"features": current, "ontology_refinement_rounds": feedback_rounds},
-        )
-        extracted, current, harmonization = _harmonize_training_extraction(
-            extracted=extracted,
-            definitions=current,
-            output_dir=round_dir / "harmonization",
-            request_json=request_json,
-            workers=int(getattr(config, "workers", 1)),
-            max_prompt_chars=config.max_prompt_chars,
-        )
-        _write_json(
-            round_dir / "definitions_after_harmonization.json",
-            {"features": current, "harmonization": harmonization},
-        )
-        extraction_definitions = [dict(feature) for feature in current]
-        summaries = feature_summaries(extracted, current)
-        performance = evaluate_definitions(
-            dataset=dataset,
-            extracted=extracted,
-            definitions=current,
-            split=split,
-            treatment_column=treatment_column,
-            outcome_column=outcome_column,
-            outcome_type=outcome_type,
-            inner_folds=inner_folds,
-            seed=seed + 1_000 * round_index,
-            propensity_clip=config.propensity_clip,
-            forest_trees=screening_trees,
-        )
-        performance["stability_selection"] = _update_stability_selection(
-            definitions=current,
-            performance=performance,
-            history=selection_history,
-            evaluation_round=round_index,
-            config=config,
-        )
-        _write_json(round_dir / "extraction_summary.json", summaries)
-        _write_json(round_dir / "performance.json", performance)
-        review_path = round_dir / "review.json"
-        complete_path = round_dir / "complete.json"
-        review_performed = bool(current) and agent_review_rounds < int(config.max_review_rounds)
-        review_input_fingerprint: str | None = None
-        if review_performed:
-            agent_review_rounds += 1
-            allow_revision = agent_review_rounds < int(config.max_review_rounds)
-            review_input_fingerprint = _value_fingerprint(
-                {
-                    "schema_version": REVIEW_CHECKPOINT_SCHEMA_VERSION,
-                    "clinical_question": clinical_question,
-                    "definitions": current,
-                    "summaries": summaries,
-                    "performance": performance,
-                    "allow_measurement_revision": allow_revision,
-                    "minimum_nonmissing_fraction": config.min_nonmissing_fraction,
-                    "maximum_dominant_value_fraction": config.max_dominant_fraction,
-                }
-            )
-            review: dict[str, Any] | None = None
-            if complete_path.is_file() and review_path.is_file():
-                try:
-                    completion = json.loads(complete_path.read_text(encoding="utf-8"))
-                    if (
-                        completion.get("review_schema_version") == REVIEW_CHECKPOINT_SCHEMA_VERSION
-                        and completion.get("review_input_fingerprint") == review_input_fingerprint
-                    ):
-                        review = _validate_review(
-                            json.loads(review_path.read_text(encoding="utf-8")),
-                            definitions=current,
-                            allow_measurement_revision=allow_revision,
-                            summaries=summaries,
-                        )
-                except (
-                    AttributeError,
-                    OSError,
-                    TypeError,
-                    ValueError,
-                    json.JSONDecodeError,
-                ):
-                    review = None
-            if review is None:
-                review = _request_partitioned_review(
-                    clinical_question=clinical_question,
-                    definitions=current,
-                    summaries=summaries,
-                    performance=performance,
-                    allow_measurement_revision=allow_revision,
-                    min_nonmissing_fraction=config.min_nonmissing_fraction,
-                    max_dominant_fraction=config.max_dominant_fraction,
-                    max_prompt_chars=config.max_prompt_chars,
-                    output_dir=round_dir / "review_batches",
-                    request_json=request_json,
-                )
-                _write_json(review_path, review)
-            protected_drop_ids, review_drop_guard = _review_drop_stability_guards(
-                current,
-                review,
-                performance["stability_selection"],
-            )
-            _write_json(
-                round_dir / "review_drop_stability_guard.json",
-                review_drop_guard,
-            )
-            reviewed, _measurement_changed = _apply_review(
-                current,
-                review,
-                protected_drop_feature_ids=protected_drop_ids,
-            )
-        else:
-            review = {
-                "feature_decisions": [],
-                "overall_assessment": (
-                    "Evaluation-only convergence round after the final allowed agent review."
-                    if current
-                    else "No retained features to review."
-                ),
-                "evaluation_only": True,
-            }
-            _write_json(review_path, review)
-            _write_json(
-                round_dir / "review_drop_stability_guard.json",
-                {
-                    "schema_version": "stage2_review_drop_stability_guard_v1",
-                    "llm_drop_decisions": 0,
-                    "drop_decisions_overridden": 0,
-                    "decisions": [],
-                },
-            )
-            reviewed = [dict(feature) for feature in current]
-        representation_changed_ids = _changed_feature_representation_ids(current, reviewed)
-        updated, signal_pruning = _apply_empirical_signal_pruning(
-            reviewed,
-            performance,
-            defer_feature_ids=representation_changed_ids,
-        )
-        _write_json(round_dir / "signal_pruning.json", signal_pruning)
-        definitions_changed = _value_fingerprint(current) != _value_fingerprint(updated)
-        selection_complete = bool(signal_pruning.get("selection_complete", True))
-        final_round_definitions_changed = definitions_changed
-        final_round_selection_complete = selection_complete
-        final_fit_extraction = extracted
-        final_fit_definitions = extraction_definitions
-        current = updated
-        _write_json(
-            complete_path,
-            {
-                "status": "complete",
-                "completed_at": _now(),
-                "evaluation_round": round_index,
-                "agent_review_performed": review_performed,
-                "agent_review_rounds": agent_review_rounds,
-                "review_schema_version": (
-                    REVIEW_CHECKPOINT_SCHEMA_VERSION if review_performed else None
-                ),
-                "review_input_fingerprint": review_input_fingerprint,
-                "definitions_changed": definitions_changed,
-                "selection_complete": selection_complete,
-                "features_retained": len(current),
-            },
-        )
-        if not definitions_changed and selection_complete:
-            review_converged = True
-            break
-    pending_conditions = []
-    if final_round_definitions_changed:
-        pending_conditions.append("definitions_changed_in_final_round")
-    if final_round_selection_complete is False:
-        pending_conditions.append("stability_selection_incomplete")
-    review_convergence = {
-        "schema_version": REVIEW_CONVERGENCE_SCHEMA_VERSION,
-        "status": "converged" if review_converged else "non_converged",
-        "converged": review_converged,
-        "recorded_at": _now(),
-        "evaluation_rounds": evaluation_rounds,
-        "max_evaluation_rounds": maximum_evaluation_rounds,
-        "definitions_changed_in_final_round": final_round_definitions_changed,
-        "selection_complete_in_final_round": final_round_selection_complete,
-        "features_retained_at_review_exit": len(current),
-        "reason": None if review_converged else "max_evaluation_rounds_reached",
-        "pending_conditions": pending_conditions,
-        "continued_after_non_convergence": not review_converged,
-        "continuation_policy": (
-            "use_converged_definitions"
-            if review_converged
-            else "use_latest_retained_definitions"
-        ),
-    }
-    _write_json(output_dir / "review" / "convergence.json", review_convergence)
-    if not review_converged:
-        LOGGER.warning(
-            "Stage 2 empirical feature pruning did not converge within "
-            "max_evaluation_rounds=%s; continuing with the latest retained "
-            "definitions and flagging the fold (pending=%s)",
-            maximum_evaluation_rounds,
-            pending_conditions or ["convergence_criteria_not_met"],
-        )
-
-    if final_fit_extraction is None or final_fit_definitions is None:
-        raise RuntimeError("Stage 2 review did not produce a training-fold extraction")
-    names = [str(feature["name"]) for feature in current]
-    if _value_fingerprint(final_fit_definitions) == _value_fingerprint(current):
-        fit_selected = final_fit_extraction[["_oci_row_id", *names]].copy()
-        _write_frame(output_dir / "extraction" / "fit" / "extracted.csv", fit_selected)
-        _write_frame(output_dir / "extraction" / "fit" / "harmonized.csv", fit_selected)
-        _write_json(
-            output_dir / "extraction" / "fit" / "complete.json",
-            {
-                "status": "complete",
-                "completed_at": _now(),
-                "rows": len(fit_selected),
-                "features": len(current),
-                "reused_from_evaluation_round": evaluation_rounds,
-            },
-        )
-        fit_harmonization = {
-            "schema_version": "stage2_applied_value_harmonization_v1",
-            "scope": "outer_training_final",
-            "rows": int(len(fit_selected)),
-            "features_harmonized": sum(
-                isinstance(feature.get("harmonization_plan"), Mapping) for feature in current
-            ),
-            "reused_already_harmonized_from_evaluation_round": evaluation_rounds,
-        }
-        _write_json(
-            output_dir / "extraction" / "fit" / "harmonization.json",
-            fit_harmonization,
-        )
-    else:
-        LOGGER.info(
-            "Stage 2 final feature set changed during review; re-extracting %s "
-            "training rows against the %s retained definition(s)",
-            len(fit_ids),
-            len(current),
-        )
-        fit_selected, current, feedback_rounds = _extract_training_with_ontology_feedback(
-            dataset=dataset,
-            row_ids=fit_ids,
-            text_column=text_column,
-            definitions=current,
-            output_dir=output_dir / "extraction" / "fit",
-            feedback_dir=output_dir / "extraction" / "fit_ontology_refinement",
-            request_json=request_json,
-            interpretation_workers=int(getattr(config, "workers", 1)),
-            workers=config.workers,
-            max_prompt_chars=config.extraction_max_prompt_chars,
-            feature_batch_size=extraction_feature_batch_size,
-            minimum_failure_patients=ontology_refinement_min_failure_patients,
-            max_refinement_rounds=max_ontology_refinement_rounds,
-        )
-        ontology_refinement_rounds += feedback_rounds
-        fit_selected, current, _ = _harmonize_training_extraction(
-            extracted=fit_selected,
-            definitions=current,
-            output_dir=output_dir / "extraction" / "fit" / "harmonization",
-            request_json=request_json,
-            workers=int(getattr(config, "workers", 1)),
-            max_prompt_chars=config.max_prompt_chars,
-        )
-        _write_frame(
-            output_dir / "extraction" / "fit" / "harmonized.csv",
-            fit_selected,
-        )
-        names = [str(feature["name"]) for feature in current]
-    harmonization_validation_fallbacks = [
-        {
-            "feature_id": str(feature["feature_id"]),
-            "name": str(feature["name"]),
-            **copy.deepcopy(feature["harmonization_fallback"]),
-        }
-        for feature in current
-        if isinstance(feature.get("harmonization_fallback"), Mapping)
-    ]
-    _write_json(
-        output_dir / "final_definitions.json",
-        {
-            "features": current,
-            "review_rounds": agent_review_rounds,
-            "evaluation_rounds": evaluation_rounds,
-            "review_converged": review_converged,
-            "review_convergence": review_convergence,
-            "ontology_refinement_rounds": ontology_refinement_rounds,
-            "screening_model_family": (
-                "elastic_net_nuisance_plus_random_forest_effect_model"
-            ),
-            "screening_trees": screening_trees,
-            "stability_selection_policy": selection_policy,
-            "harmonization_validation_fallbacks": harmonization_validation_fallbacks,
-        },
-    )
-    _assert_extraction_health(
-        fit_selected,
-        current,
-        scope="training",
-        minimum_row_nonmissing_fraction=config.min_nonmissing_fraction,
-        audit_path=output_dir / "extraction" / "fit_health.json",
-    )
-    heldout_raw_extraction = extract_rows(
-        dataset=dataset,
-        row_ids=heldout_ids,
-        text_column=text_column,
-        definitions=current,
-        output_dir=output_dir / "extraction" / "heldout",
-        request_json=request_json,
-        workers=config.workers,
-        max_prompt_chars=config.extraction_max_prompt_chars,
-        feature_batch_size=extraction_feature_batch_size,
-    )
-    heldout_extraction, heldout_harmonization = _apply_harmonization_plans(
-        heldout_raw_extraction,
-        current,
-        scope="outer_heldout",
-    )
-    _write_frame(
-        output_dir / "extraction" / "heldout" / "harmonized.csv",
-        heldout_extraction,
-    )
-    _write_json(
-        output_dir / "extraction" / "heldout" / "harmonization.json",
-        heldout_harmonization,
-    )
-    _assert_extraction_health(
-        heldout_extraction,
-        current,
-        scope="heldout",
-        minimum_row_nonmissing_fraction=config.min_nonmissing_fraction,
-        audit_path=output_dir / "extraction" / "heldout_health.json",
-    )
-    combined = pd.concat([fit_selected, heldout_extraction], ignore_index=True).sort_values(
-        "_oci_row_id"
-    )
-    _write_frame(output_dir / "extraction" / "extracted_features.csv", combined)
-    diagnostics = estimate_outer_fold(
-        dataset=dataset,
-        extracted_fit=fit_selected,
-        extracted_heldout=heldout_extraction,
-        definitions=current,
-        split=split,
-        unit_id_column=unit_id_column,
-        treatment_column=treatment_column,
-        outcome_column=outcome_column,
-        outcome_type=outcome_type,
-        inner_folds=inner_folds,
-        seed=seed,
-        propensity_clip=config.propensity_clip,
-        min_propensity=getattr(config, "min_propensity", None),
-        max_propensity=getattr(config, "max_propensity", None),
-        estimation_trees=config.estimation_trees,
-        output_dir=output_dir / "estimation",
-    )
-    return {
-        "features": current,
-        "review_rounds": agent_review_rounds,
-        "evaluation_rounds": evaluation_rounds,
-        "review_converged": review_converged,
-        "review_convergence": review_convergence,
-        "ontology_refinement_rounds": ontology_refinement_rounds,
-        "screening_model_family": (
-            "elastic_net_nuisance_plus_random_forest_effect_model"
-        ),
-        "screening_trees": screening_trees,
-        "stability_selection_policy": selection_policy,
-        "harmonization_validation_fallbacks": harmonization_validation_fallbacks,
-        "estimation": diagnostics,
-    }
 
 
 def _validated_heldout_measurement_frame(
@@ -10116,15 +7433,14 @@ def _run_stage2_statistical_selection(
     arguments = dict(selector_arguments)
     from . import stage2_modeling_pool as modeling
 
-    if modeling.enabled():
-        # The multi-model coordinator submits leaf jobs to the shared run pool.
-        # Putting the coordinator in another process would create nested pools.
-        if arguments["policy"].selection_mode == "multi_model":
-            return select_stage2_features_elastic_net(**arguments)
-        return modeling.call(lambda: select_stage2_features_elastic_net(**arguments))
+    # The multi-model coordinator submits leaf jobs to the shared run pool.
+    # Putting the coordinator in another process would create nested pools.
     candidate_count = len(arguments.get("definitions") or [])
-    if candidate_count < STATISTICAL_SELECTION_PROCESS_ISOLATION_MIN_CANDIDATES:
-        return select_stage2_features_elastic_net(**arguments)
+    if (
+        modeling.enabled()
+        or candidate_count < STATISTICAL_SELECTION_PROCESS_ISOLATION_MIN_CANDIDATES
+    ):
+        return select_stage2_features_multi_model(**arguments)
     LOGGER.info(
         "Stage 2 statistical selection process isolation candidates=%s threshold=%s",
         candidate_count,
@@ -10136,7 +7452,7 @@ def _run_stage2_statistical_selection(
     # stdin, where the stdlib spawn executor cannot safely bootstrap.
     with LokyProcessPoolExecutor(max_workers=1) as executor:
         return executor.submit(
-            select_stage2_features_elastic_net,
+            select_stage2_features_multi_model,
             **arguments,
         ).result()
 
@@ -10175,31 +7491,15 @@ def run_fold_analysis(
     selection_consolidation_request_json: RequestJSON | None = None,
     config: Any,
     extraction_tokenizer: Any | None = None,
-    decision_client: Any | None = None,
     stage1_packets: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Run extraction supervision, fold-local selection, and causal-forest estimation."""
 
-    search = getattr(config, "extraction_note_search", NoteSearchConfig())
-    decision = getattr(config, "decision_extraction", None)
-    decision_enabled = decision is not None and decision.enabled
-    if decision_enabled:
-        from .stage2_decision import claim_output_method
-
-        claim_output_method(output_dir, decision, config.colbert, fold_root=True)
-    elif not search.enabled and getattr(config, "extraction_context_strategy", "full_record") == "colbert":
-        stage2_colbert.claim_output_method(output_dir, getattr(config, "colbert", ColBERTConfig()), fold_root=True)
-    else:
-        note_search_extraction.claim_output_method(output_dir, search, fold_root=True)
     # Study context is supplied only to modeling reviews, never extraction supervision.
-    (
-        ontology_refinement_min_failure_patients,
-        max_ontology_refinement_rounds,
-    ) = _ontology_refinement_limits(config)
-    extraction_feature_batch_size = _configured_extraction_feature_batch_size(config)
+    ontology_refinement_min_failure_patients = int(config.ontology_refinement_min_failure_patients)
+    max_ontology_refinement_rounds = int(config.max_ontology_refinement_rounds)
+    extraction_feature_batch_size = int(config.extraction_feature_batch_size)
     serial_extraction = _configured_serial_extraction(config)
-    if decision_enabled:
-        serial_extraction["decision_client"] = decision_client
     fit_ids = [int(value) for value in split["fit_row_ids"]]
     heldout_ids = [int(value) for value in split["heldout_row_ids"]]
     inner_splits = list(split.get("inner_splits") or []) or _fallback_inner_splits(
@@ -10217,9 +7517,6 @@ def run_fold_analysis(
         "configured_checkpoint_model": configured_extraction_model,
         "runtime_continuation_model": runtime_extraction_model or None,
     }
-    search_config = getattr(config, "extraction_note_search", NoteSearchConfig())
-    if search_config.enabled:
-        extraction_identity["measurement_method"] = note_search_extraction.policy_identity(search_config)
     primary_identity = {
         "model": str(getattr(config, "model", "")),
     }
@@ -10341,23 +7638,15 @@ def run_fold_analysis(
         )
         summaries = feature_summaries(extracted, extracted_definitions)
         _write_json(round_dir / "aggregate_extraction_summary.json", summaries)
-        if decision_enabled:
-            # Decision ontology review has already run, conditional on the NOTA
-            # rate. Do not invoke the unconditional generative-extractor review.
-            reviewed, changed = extracted_definitions, False
-            review_report = {"changed_feature_ids": [], "policy": "decision_none_above_threshold"}
-            _write_json(round_dir / "supervisor" / "result.json", review_report)
-            _write_json(round_dir / "supervisor" / "complete.json", {"status": "complete", **review_report})
-        else:
-            reviewed, changed, review_report = _request_aggregate_ontology_supervisor(
-                definitions=extracted_definitions,
-                summaries=summaries,
-                failure_summary=failure_summary,
-                output_dir=round_dir / "supervisor",
-                request_json=request_json,
-                workers=int(getattr(config, "workers", 1)),
-                request_identity=primary_identity,
-            )
+        reviewed, changed, review_report = _request_aggregate_ontology_supervisor(
+            definitions=extracted_definitions,
+            summaries=summaries,
+            failure_summary=failure_summary,
+            output_dir=round_dir / "supervisor",
+            request_json=request_json,
+            workers=int(getattr(config, "workers", 1)),
+            request_identity=primary_identity,
+        )
         final_fit_all = extracted
         final_fit_raw = raw_extracted
         final_fit_definitions = extracted_definitions
@@ -10387,11 +7676,6 @@ def run_fold_analysis(
         )
         if not changed:
             review_converged = True
-            if decision_enabled:
-                feedback_report = json.loads(
-                    (round_dir / "failure_ontology_refinement" / "result.json").read_text()
-                )
-                review_converged = feedback_report["stopped_reason"] != "maximum_refinement_rounds_reached"
             break
 
     if (
@@ -10521,18 +7805,6 @@ def run_fold_analysis(
         _write_frame(output_dir / preselection_matrix_relative, final_fit_all)
 
     selection_dir = output_dir / "selection"
-    legacy_selection_path = selection_dir / "statistical_selection.json"
-    if legacy_selection_path.exists():
-        raise RuntimeError(
-            "this outer fold contains a retired Stage 2 p-value-screen checkpoint. "
-            "Preserve it for audit and use guarded reselection for the group-elastic-net "
-            "selection schema."
-        )
-    if str(getattr(config, "input_temporal_scope", "")) != TEMPORAL_SCOPE:
-        raise ValueError(
-            f"Stage 2 requires input_temporal_scope={TEMPORAL_SCOPE!r}; it does not "
-            "perform semantic temporal filtering"
-        )
     statistical_policy = getattr(config, "statistical_selection", None)
     if statistical_policy is None:
         raise ValueError("Stage 2 config is missing statistical_selection policy")
@@ -10572,29 +7844,22 @@ def run_fold_analysis(
         "selection_consolidation_llm_model": str(getattr(config, "model", "")),
         "statistical_component_schema_version": (
             statistical_policy.multi_model.public_dict()["schema_version"]
-            if statistical_policy.selection_mode == "multi_model"
-            else ELASTIC_NET_COMPONENT_SCHEMA_VERSION
         ),
         "statistical_selection_policy": statistical_policy.public_dict(),
         "role_adjudication_policy": config.role_adjudication.public_dict(),
         "role_adjudication_llm_model": str(getattr(config, "model", "")),
-    }
-    if statistical_policy.selection_mode == "multi_model":
-        selection_input["predictive_nuisance_sources"] = {
+        "predictive_nuisance_sources": {
             name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-            for name in ("stage2_nuisance_selection.py", "stage2_taskwise_policy.py", "stage2_multi_model_selection.py")
-        }
-    if (
-        statistical_policy.selection_mode == "multi_model"
-        and statistical_policy.multi_model.modifier_count.enabled
-    ):
-        selection_input["modifier_count_estimation_trees"] = int(config.estimation_trees)
+            for name in ("stage2_nuisance_selection.py", "stage2_multi_model_selection.py")
+        },
+        "modifier_count_estimation_trees": int(config.estimation_trees),
         # A completed selection must not bypass a changed ranking criterion.
         # Numerical evidence has its own independent identity and remains reusable.
-        selection_input["modifier_ranking_source_sha256"] = hashlib.sha256(
+        "modifier_ranking_source_sha256": hashlib.sha256(
             Path(__file__).with_name("stage2_modifier_ranking.py").read_bytes()
-        ).hexdigest()
-    if statistical_policy.selection_mode == "multi_model" and getattr(
+        ).hexdigest(),
+    }
+    if getattr(
         getattr(statistical_policy.multi_model, "matched_batch", None), "enabled", False
     ):
         selection_input["matched_batch_source_sha256"] = hashlib.sha256(
@@ -10621,7 +7886,7 @@ def run_fold_analysis(
         and latent_states_path.is_file()
         and selection_complete_path.is_file()
         and selection_input_path.is_file()
-        and (statistical_policy.selection_mode != "multi_model" or nuisance_candidates_path.is_file())
+        and nuisance_candidates_path.is_file()
     ):
         try:
             completion = json.loads(selection_complete_path.read_text(encoding="utf-8"))
@@ -10645,16 +7910,15 @@ def run_fold_analysis(
                     dict(feature) for feature in cached_dependencies["features"]
                 ]
                 latent_states = [dict(item) for item in cached_latent_states["latents"]]
-                if statistical_policy.selection_mode == "multi_model":
-                    nuisance_candidates = json.loads(nuisance_candidates_path.read_text(encoding="utf-8"))
-                    if (nuisance_candidates.get("input_fingerprint") != selection_fingerprint
-                            or not isinstance(nuisance_candidates.get("features"), list)
-                            or not isinstance(nuisance_candidates.get("latents"), list)):
-                        raise ValueError("incompatible nuisance candidate checkpoint")
+                nuisance_candidates = json.loads(nuisance_candidates_path.read_text(encoding="utf-8"))
+                if (nuisance_candidates.get("input_fingerprint") != selection_fingerprint
+                        or not isinstance(nuisance_candidates.get("features"), list)
+                        or not isinstance(nuisance_candidates.get("latents"), list)):
+                    raise ValueError("incompatible nuisance candidate checkpoint")
                 modeling_fit_frame = materialize_selected_latents(
                     frame=final_fit_all,
-                    latent_states=nuisance_candidates["latents"] if nuisance_candidates is not None else latent_states,
-                    measurement_definitions=current if nuisance_candidates is not None else measurement_definitions,
+                    latent_states=nuisance_candidates["latents"],
+                    measurement_definitions=current,
                 )
                 LOGGER.info(
                     "skip completed Stage 2 all-evidence role selection: %s",
@@ -10711,13 +7975,12 @@ def run_fold_analysis(
                 else None
             ),
         )
-        if statistical_policy.selection_mode == "multi_model":
-            nuisance_candidates = {
-                "input_fingerprint": selection_fingerprint,
-                "features": consolidated_definitions,
-                "latents": all_latent_entries,
-            }
-            _write_json(nuisance_candidates_path, nuisance_candidates)
+        nuisance_candidates = {
+            "input_fingerprint": selection_fingerprint,
+            "features": consolidated_definitions,
+            "latents": all_latent_entries,
+        }
+        _write_json(nuisance_candidates_path, nuisance_candidates)
         (
             statistically_selected,
             elastic_net_report,
@@ -10734,10 +7997,7 @@ def run_fold_analysis(
                 "outcome_type": outcome_type,
                 "seed": seed,
                 "policy": statistical_policy,
-                **(
-                    {"checkpoint_dir": selection_dir / "multi_model"}
-                    if statistical_policy.selection_mode == "multi_model" else {}
-                ),
+                "checkpoint_dir": selection_dir / "multi_model",
             }
         )
         elastic_net_report["study_context"] = {"clinical_question": str(clinical_question), "outcome_type": str(outcome_type)}
@@ -10750,49 +8010,19 @@ def run_fold_analysis(
         )
         if nuisance_rows:
             _write_frame(selection_dir / "nuisance_predictions.csv", pd.DataFrame(nuisance_rows))
-        if statistical_policy.selection_mode == "multi_model":
-            # Saved configurations can still have enabled=true. It cannot give
-            # an LLM authority over numerical nuisance retention in this mode.
-            selected = statistically_selected
-            role_adjudication_report = {
-                "schema_version": "stage2_predictive_nuisance_selection_v1",
-                "status": "replaced_by_statistical_nuisance_selection",
-                "selection_authority": "multi_model",
-                "llm_roles_are_binding": False,
-                "llm_requests": 0,
-                "decisions": elastic_net_report.get("decisions", []),
-                "retained_feature_ids": [str(f["feature_id"]) for f in selected],
-            }
-        elif consolidated_definitions and config.role_adjudication.enabled:
-            selected, role_adjudication_report, _role_evidence = (
-                adjudicate_stage2_roles(
-                    definitions=consolidated_definitions,
-                    statistical_report=elastic_net_report,
-                    request_json=request_json,
-                    workers=int(getattr(config, "workers", 1)),
-                    output_dir=selection_dir / "role_adjudication",
-                    policy=config.role_adjudication,
-                )
-            )
-        else:
-            selected = statistically_selected
-            role_adjudication_report = {
-                "schema_version": ROLE_ADJUDICATION_COMPONENT_SCHEMA_VERSION,
-                "status": (
-                    "complete_no_candidates"
-                    if not consolidated_definitions
-                    else "disabled_by_configuration"
-                ),
-                "retained_feature_ids": [
-                    str(feature["feature_id"]) for feature in selected
-                ],
-            }
+        # Numerical nuisance retention is final; no LLM decides causal roles.
+        selected = statistically_selected
+        role_adjudication_report = {
+            "schema_version": "stage2_predictive_nuisance_selection_v1",
+            "status": "replaced_by_statistical_nuisance_selection",
+            "selection_authority": "multi_model",
+            "llm_roles_are_binding": False,
+            "llm_requests": 0,
+            "decisions": elastic_net_report.get("decisions", []),
+            "retained_feature_ids": [str(f["feature_id"]) for f in selected],
+        }
         modifier_count_report = None
-        if (
-            statistical_policy.selection_mode == "multi_model"
-            and statistical_policy.multi_model.modifier_count.enabled
-            and consolidated_definitions
-        ):
+        if consolidated_definitions:
             from .stage2_modifier_count import select_modifier_count
 
             (
@@ -10828,25 +8058,15 @@ def run_fold_analysis(
         selection_report = {
             **elastic_net_report,
             "schema_version": STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
-            "elastic_net_component_schema_version": ELASTIC_NET_COMPONENT_SCHEMA_VERSION,
-            "statistical_component_schema_version": elastic_net_report.get(
-                "schema_version", ELASTIC_NET_COMPONENT_SCHEMA_VERSION
-            ),
+            "statistical_component_schema_version": elastic_net_report["schema_version"],
             "statistical_provisional_decisions": elastic_net_report.get(
                 "decisions", []
-            ),
-            "role_adjudication_component_schema_version": (
-                ROLE_ADJUDICATION_COMPONENT_SCHEMA_VERSION
             ),
             "role_adjudication": role_adjudication_report,
             "final_role_assignment": (
                 "predictive_nuisances_and_nested_r_loss_modifiers"
                 if modifier_count_report is not None
                 else "predictive_nuisances_and_joint_orthogonal_modifiers"
-                if statistical_policy.selection_mode == "multi_model"
-                else "llm_all_evidence_adjudication"
-                if consolidated_definitions and config.role_adjudication.enabled
-                else "statistical_provisional_roles"
             ),
             "decisions": role_adjudication_report.get(
                 "decisions", elastic_net_report.get("decisions", [])
@@ -11039,11 +8259,7 @@ def run_fold_analysis(
             "selection_artifact": str(selection_dir / "elastic_net_selection.json"),
             "candidate_missingness_filter": missingness_report,
             **({"estimand_ontology": estimand_report} if estimand_policy.enabled else {}),
-            "screening_model_family": (
-                "multi_model_evidence_with_predictive_nuisance_selection"
-                if statistical_policy.selection_mode == "multi_model" else
-                "all_evidence_univariable_and_elastic_net_with_llm_role_adjudication"
-            ),
+            "screening_model_family": "multi_model_evidence_with_predictive_nuisance_selection",
             "final_model_family": effect_model_family(final_estimator, outcome_type),
             "final_estimator": final_estimator,
             "harmonization_validation_fallbacks": harmonization_validation_fallbacks,
@@ -11072,10 +8288,8 @@ def run_fold_analysis(
         estimator=final_estimator,
         statistical_policy=statistical_policy,
         output_dir=output_dir / "estimation",
-        **({
-            "nuisance_candidate_definitions": nuisance_candidates["features"],
-            "nuisance_candidate_fit": modeling_fit_frame,
-        } if nuisance_candidates is not None else {}),
+        nuisance_candidate_definitions=nuisance_candidates["features"],
+        nuisance_candidate_fit=modeling_fit_frame,
     )
     return {
         "features": selected,
@@ -11084,11 +8298,7 @@ def run_fold_analysis(
         "review_converged": review_converged,
         "review_convergence": review_convergence,
         "ontology_refinement_rounds": ontology_refinement_rounds,
-        "screening_model_family": (
-            "multi_model_evidence_with_predictive_nuisance_selection"
-            if statistical_policy.selection_mode == "multi_model" else
-            "all_evidence_univariable_and_elastic_net_with_llm_role_adjudication"
-        ),
+        "screening_model_family": "multi_model_evidence_with_predictive_nuisance_selection",
         "selection": selection_report,
         "candidate_missingness_filter": missingness_report,
         "measurement_dependencies": measurement_definitions,
@@ -11107,6 +8317,5 @@ __all__ = [
     "Stage2ResponseValidationError",
     "frozen_measurement_definition_identity",
     "frozen_preselection_review_policy",
-    "infrastructure_failure_audit_paths",
     "run_fold_analysis",
 ]

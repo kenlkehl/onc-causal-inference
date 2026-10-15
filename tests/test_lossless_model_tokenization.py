@@ -4,64 +4,8 @@ import ast
 from pathlib import Path
 
 import pytest
-import torch
 
-from oci.models.lossless_tokenization import (
-    SemanticTruncationError,
-    require_nonbinding_chunk_capacity,
-    required_overlapping_chunks,
-    tokenize_losslessly,
-)
-
-
-class _Tokenizer:
-    pad_token = "[PAD]"
-    pad_token_id = 0
-    eos_token = "[EOS]"
-    eos_token_id = 0
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def __call__(
-        self,
-        texts,
-        *,
-        padding=False,
-        truncation=None,
-        max_length=None,
-        return_tensors=None,
-        return_length=False,
-        **_kwargs,
-    ):
-        self.calls.append(
-            {
-                "padding": padding,
-                "truncation": truncation,
-                "max_length": max_length,
-            }
-        )
-        is_single = isinstance(texts, str)
-        values = [texts] if is_single else list(texts)
-        rows = [list(range(1, len(str(value).split()) + 3)) for value in values]
-        lengths = [len(row) for row in rows]
-        if padding:
-            target = int(max_length) if padding == "max_length" else max(lengths, default=0)
-            rows = [row + [0] * (target - len(row)) for row in rows]
-        masks = [
-            [1] * length + [0] * (len(row) - length)
-            for row, length in zip(rows, lengths)
-        ]
-        result = {
-            "input_ids": rows[0] if is_single and return_tensors is None else rows,
-            "attention_mask": masks[0] if is_single and return_tensors is None else masks,
-        }
-        if return_length:
-            result["length"] = lengths[0] if is_single else lengths
-        if return_tensors == "pt":
-            result["input_ids"] = torch.as_tensor(rows, dtype=torch.long)
-            result["attention_mask"] = torch.as_tensor(masks, dtype=torch.long)
-        return result
+from oci.models.lossless_tokenization import SemanticTruncationError
 
 
 class _CharacterTokenizer:
@@ -120,46 +64,6 @@ class _RoundTripExpandingTokenizer:
     def num_special_tokens_to_add(self, pair=False):
         del pair
         return 2
-
-
-def test_lossless_tokenizer_never_enables_truncation():
-    tokenizer = _Tokenizer()
-    encoded = tokenize_losslessly(
-        tokenizer,
-        ["one two", "three"],
-        configured_max_length=4,
-        context="test input",
-        padding=True,
-        return_tensors="pt",
-    )
-    assert tuple(encoded["input_ids"].shape) == (2, 4)
-    assert tokenizer.calls == [
-        {"padding": True, "truncation": False, "max_length": None}
-    ]
-
-
-def test_lossless_tokenizer_rejects_a_binding_limit():
-    with pytest.raises(SemanticTruncationError, match="semantic truncation is forbidden"):
-        tokenize_losslessly(
-            _Tokenizer(),
-            ["one two", "one two three"],
-            configured_max_length=3,
-            context="test input",
-            padding=True,
-            return_tensors="pt",
-        )
-
-
-def test_overlapping_chunk_capacity_accounts_for_overlap():
-    assert required_overlapping_chunks(10, chunk_size=4, chunk_overlap=1) == 3
-    with pytest.raises(SemanticTruncationError, match="requires 4 chunks"):
-        require_nonbinding_chunk_capacity(
-            11,
-            chunk_size=4,
-            chunk_overlap=1,
-            max_chunks=3,
-            context="test document",
-        )
 
 
 def test_concept_word_chunking_rejects_prefix_or_suffix_selection():

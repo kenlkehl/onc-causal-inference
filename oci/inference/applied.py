@@ -9,16 +9,13 @@ auditable dispatch branch.
 from __future__ import annotations
 
 import logging
-import hashlib
-import json
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import pandas as pd
 import torch
 
-from ..config import AppliedInferenceConfig, ExplicitFeatureSpec
-from ..extraction import ExtractionCache, VLLMFeatureExtractor, resolve_vllm_reasoning_parser
+from ..config import AppliedInferenceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -30,93 +27,30 @@ STANDALONE_MODEL_TYPES = (
 )
 
 
-def _get_explicit_feature_specs(
-    config: AppliedInferenceConfig,
-) -> Optional[List[ExplicitFeatureSpec]]:
-    """Return configured explicit-feature contracts when extraction is enabled."""
-
-    if config.explicit_features.enabled:
-        return list(config.explicit_features.features)
-    return None
-
-
 def _run_explicit_feature_extraction(
     dataset: pd.DataFrame,
     config: AppliedInferenceConfig,
     output_path: Path,
 ) -> Tuple[pd.DataFrame, List[str]]:
-    """Materialize investigator-specified explicit features, with caching."""
+    """Materialize investigator-specified explicit features, with caching.
 
-    del output_path  # The extraction cache owns its configured location.
-    feature_config = config.explicit_features
-    specs = list(feature_config.features)
+    Uses the shared explicit-feature extraction provider, so endpoint, retry,
+    reasoning, temporal, grouping, and context-strategy settings are honored
+    exactly as in the agentic explicit-feature runners.
+    """
+
+    from .agentic_explicit_feature_forest import VLLMExplicitFeatureExtractionProvider
+
+    specs = list(config.explicit_features.features)
     if not specs:
         raise ValueError(
             "explicit_feature_forest requires at least one explicit feature contract"
         )
-
-    cache = ExtractionCache(cache_dir=feature_config.cache_dir)
-    cache_config = {
-        "features": specs,
-        "prompt_template_version": "explicit_features_v2",
-        "vllm_model_name": feature_config.vllm_model_name,
-        "vllm_max_model_len": feature_config.vllm_max_model_len,
-        "vllm_reasoning_parser": resolve_vllm_reasoning_parser(
-            feature_config.vllm_reasoning_parser,
-            feature_config.vllm_model_name,
-        ),
-        "extraction_temperature": feature_config.extraction_temperature,
-        "extraction_max_tokens": feature_config.extraction_max_tokens,
-        "extraction_max_text_length": feature_config.extraction_max_text_length,
-    }
-    cache_config["patient_text_hash"] = hashlib.sha256(json.dumps(
-        dataset[config.text_column].fillna("").astype(str).tolist(),
-        ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
-    cache_config["max_variables_per_extraction_request"] = feature_config.max_variables_per_extraction_request
-    cache_config["extraction_context_strategy"] = feature_config.extraction_context_strategy
-    if feature_config.extraction_context_strategy == "colbert":
-        from ..extraction.colbert import retrieval_identity
-        cache_config["colbert"] = retrieval_identity(feature_config.colbert)
-    cached = None
-    if feature_config.cache_enabled:
-        cached = cache.load_if_valid(
-            config.dataset_path,
-            cache_config,
-            expected_rows=len(dataset),
-        )
-
-    if cached is None:
-        extractor = VLLMFeatureExtractor(
-            specs=specs,
-            mode=feature_config.vllm_mode,
-            server_url=feature_config.vllm_server_url or "http://localhost:8000/v1",
-            model_name=feature_config.vllm_model_name,
-            tensor_parallel_size=feature_config.vllm_tensor_parallel_size,
-            gpu_memory_utilization=feature_config.vllm_gpu_memory_utilization,
-            download_dir=feature_config.vllm_download_dir,
-            max_model_len=feature_config.vllm_max_model_len,
-            vllm_reasoning_parser=feature_config.vllm_reasoning_parser,
-            max_retries=feature_config.extraction_max_retries,
-            temperature=feature_config.extraction_temperature,
-            max_tokens=feature_config.extraction_max_tokens,
-            max_text_length=feature_config.extraction_max_text_length,
-            context_strategy=feature_config.extraction_context_strategy,
-            colbert=feature_config.colbert,
-            max_variables_per_extraction_request=feature_config.max_variables_per_extraction_request,
-        )
-        try:
-            cached = extractor.extract_to_dataframe(
-                dataset[config.text_column].tolist(),
-                batch_size=feature_config.extraction_batch_size,
-            )
-        finally:
-            extractor.cleanup()
-        if feature_config.cache_enabled:
-            cache.save(config.dataset_path, cache_config, cached)
-
-    enriched = dataset.copy()
-    for column in cached.columns:
-        enriched[column] = cached[column].to_numpy()
+    provider = VLLMExplicitFeatureExtractionProvider(
+        config=config,
+        output_dir=Path(output_path).parent / "explicit_feature_extraction",
+    )
+    enriched = provider.ensure_features(dataset, specs)
     return enriched, [f"explicit_feat_{spec.name}" for spec in specs]
 
 
