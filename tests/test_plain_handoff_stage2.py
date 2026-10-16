@@ -5893,7 +5893,7 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     heterogeneity_text = heterogeneity_path.read_text(encoding="utf-8")
     heterogeneity = json.loads(heterogeneity_text)
     assert heterogeneity["schema_version"] == (
-        "stage2_heterogeneity_diagnostics_v2_modifier_confirmation"
+        "stage2_heterogeneity_diagnostics_v3_cate_variance_decomposition"
     )
     assert heterogeneity["oracle_columns_consumed"] is False
     assert "true_ite" not in heterogeneity_text
@@ -5901,11 +5901,15 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     assert heterogeneity["inputs"]["rows"] == 40
     assert heterogeneity["inputs"]["recomputed_psi_max_abs_difference_from_aipw_score"] < 1e-9
     assert set(heterogeneity["pooling_rules"]) == {
-        "blp", "gates", "clan", "rate", "overlap", "balance", "modifier_confirmation"
+        "blp", "gates", "clan", "rate", "overlap", "balance", "modifier_confirmation",
+        "cate_variance_decomposition",
     }
     # Reporting-only held-out confirmation also covers balanced_evidence selections.
     assert heterogeneity["modifier_confirmation"]["status"] == "ok"
     assert set(heterogeneity["modifier_confirmation"]["per_fold"]) == {"1", "2"}
+    decomposition = heterogeneity["cate_variance_decomposition"]
+    assert decomposition["status"] in {"ok", "unavailable"} and decomposition["interpretation"]
+    assert set(decomposition["per_fold"]) == {"1", "2"}
     for name in (
         "blp", "gates", "clan", "rate", "overlap_weighted_ate", "ipw_weights", "trimming_curve"
     ):

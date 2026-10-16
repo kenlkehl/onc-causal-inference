@@ -28,6 +28,10 @@ Diagnostics (all reported per outer fold and pooled):
   (:mod:`oci.inference.stage2_modifier_tests`), with Benjamini-Hochberg within
   the fold's selected set. Sample splitting makes these tests valid conditional
   on the selection.
+* CATE variance decomposition (reporting only): the share of each fold's
+  held-out CATE variance (and of each ensemble component's) that a linear
+  projection attributes to the prognostic score, to the selected modifiers'
+  grouped design, to both jointly, or to neither.
 
 Pooling rules (also written into the output under ``pooling_rules``):
 
@@ -52,6 +56,8 @@ Pooling rules (also written into the output under ``pooling_rules``):
   cross-fold summary matches exact normalized names only, and a Stouffer
   combination of held-out z-scores is reported for names selected in several
   folds.
+* The CATE variance decomposition is computed per fold; pooled shares are
+  row-weighted means of the fold partitions, reported with the fold range.
 
 Every function below the I/O layer is pure. The I/O layer
 (:func:`write_heterogeneity_diagnostics`) never raises for a missing input: the
@@ -78,7 +84,7 @@ from scipy.stats import norm
 
 LOGGER = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "stage2_heterogeneity_diagnostics_v2_modifier_confirmation"
+SCHEMA_VERSION = "stage2_heterogeneity_diagnostics_v3_cate_variance_decomposition"
 DIAGNOSTICS_FILENAME = "heterogeneity_diagnostics.json"
 TRIMMING_THRESHOLDS = (0.0, 0.01, 0.025, 0.05, 0.1, 0.15)
 SMD_THRESHOLD = 0.1
@@ -107,15 +113,22 @@ INTERPRETATIONS = {
         "evidence that tau_hat captures heterogeneity; beta2 near 1 means "
         "tau_hat is calibrated in scale; beta2 near 0 means no detectable "
         "heterogeneity signal; 0 < beta2 < 1 suggests the CATEs are too "
-        "spread out, beta2 > 1 that they are too compressed."
+        "spread out, beta2 > 1 that they are too compressed. The pooled beta2 "
+        "with its one-sided p-value is the pre-specified primary heterogeneity "
+        "test; per-fold estimates use only one fold's held-out rows and are "
+        "low-powered."
     ),
     "gates": (
         "Group average treatment effects: mean psi within quintiles of tau_hat "
         "formed inside each outer fold (G1 lowest, G5 highest predicted "
-        "effect). An increasing pattern, a positive linear trend and a "
-        "positive top-minus-bottom difference indicate that the ranking "
-        "separates patients with larger and smaller effects; similar group "
-        "means indicate no detectable heterogeneity."
+        "effect), each reported with the group's mean tau_hat. An increasing "
+        "pattern, a positive linear trend and a positive top-minus-bottom "
+        "difference indicate that the ranking separates patients with larger and "
+        "smaller effects; similar group means indicate no detectable "
+        "heterogeneity. calibration is the HC3 slope of psi on the patient's "
+        "group mean tau_hat: near 1, the group effects match the predicted group "
+        "means; near 0, the predicted spread is not detectably real. GATES is a "
+        "secondary analysis; the pooled BLP beta2 is the primary test."
     ),
     "clan": (
         "Classification analysis: mean of each retained effect modifier and "
@@ -132,7 +145,7 @@ INTERPRETATIONS = {
         "(sensitive to the top of the ranking); Qini weights by u (more power "
         "for diffuse heterogeneity). Positive values whose confidence interval "
         "excludes 0 indicate useful prioritization; values near 0 indicate "
-        "none."
+        "none. RATE is a secondary analysis."
     ),
     "overlap_weighted_ate": (
         "ATE in the overlap population (ATO; weights e(1-e)), which emphasizes "
@@ -192,7 +205,40 @@ CONFIRMATION_POOLING_RULE = (
     "more folds"
 )
 
+CATE_COMPONENT_COLUMNS = (
+    "estimated_cate_causal_forest",
+    "estimated_cate_linear_interactions",
+    "estimated_cate_dina",
+)
+DECOMPOSITION_KEYS = (
+    "r2_prognosis", "r2_modifiers", "r2_both",
+    "unique_prognosis", "unique_modifiers", "shared", "unexplained",
+)
+DECOMPOSITION_INTERPRETATION = (
+    "Reporting only: no selection or estimation step reads these results. Descriptive "
+    "partition of the variance of each outer fold's held-out estimated_cate (and of each "
+    "ensemble component's CATE column) by ordinary least squares with an intercept on "
+    "(a) the prognostic score alone (logit of the held-out mu0 for binary outcomes, mu0 "
+    "for continuous outcomes: the baseline-risk input of the causal forest's X and of the "
+    "interaction model's adjustment), (b) the selected modifiers' grouped design alone "
+    "(the modifier tests' encoding of the held-out measurements), and (c) both. "
+    "unique_prognosis = R2(c) - R2(b); unique_modifiers = R2(c) - R2(a); shared = R2(a) + "
+    "R2(b) - R2(c) (negative when one input suppresses the other); unexplained = 1 - "
+    "R2(c). A large prognosis share explains wide CATE spread with few modifiers: on the "
+    "risk-difference scale the effect varies with baseline risk even under a constant "
+    "odds ratio. The partition is descriptive, not causal: it attributes predicted "
+    "variation, not treatment-effect mechanisms. Nonlinear or interaction structure that "
+    "a linear projection does not capture (for example a forest's splits) lands in "
+    "unexplained, and many modifier columns relative to rows inflate R2(b)."
+)
+DECOMPOSITION_POOLING_RULE = (
+    "per fold; pooled values are row-weighted means of the fold partitions, with the "
+    "fold range; folds whose CATE is constant or whose design cannot be estimated are "
+    "excluded"
+)
+
 POOLING_RULES = {
+    "cate_variance_decomposition": DECOMPOSITION_POOLING_RULE,
     "modifier_confirmation": CONFIRMATION_POOLING_RULE,
     "blp": (
         "fixed-effect inverse-variance weighting of fold estimates (disjoint "
@@ -496,6 +542,7 @@ def group_average_treatment_effects(
     top, bottom = rows[-1], rows[0]
     if top["rows"] < 2 or bottom["rows"] < 2:
         return unavailable("top or bottom group has fewer than 2 rows", groups=rows)
+    calibration = _gates_calibration(score, cate, group, rows)
     difference = top["estimate"] - bottom["estimate"]
     se = _float(math.hypot(top["standard_error"] or 0.0, bottom["standard_error"] or 0.0))
     z = _ratio(difference, se) if se else None
@@ -514,6 +561,35 @@ def group_average_treatment_effects(
             **_ols_slope_hc3(score, group.astype(float)),
             "covariance": "HC3",
         },
+        "calibration": calibration,
+    }
+
+
+def _gates_calibration(score, cate, group, rows) -> dict[str, Any]:
+    """HC3 OLS of each patient's psi on [1, mean tau_hat of the patient's group].
+
+    A slope near 1 means the group effects track the predicted group means; a
+    slope near 0 means the predicted spread carries no detectable signal. This
+    group-level summary is secondary to the BLP beta2.
+    """
+
+    means = {row["group"]: row["mean_estimated_cate"] for row in rows}
+    predicted = np.array([means.get(int(label)) for label in group], dtype=float)
+    if not np.isfinite(predicted).all() or _is_constant(predicted):
+        return unavailable("group mean estimated CATEs are constant or missing")
+    slope = _ols_slope_hc3(score, predicted)
+    z_one = (
+        _float((slope["estimate"] - 1.0) / slope["standard_error"])
+        if slope["standard_error"] else None
+    )
+    return {
+        "status": "ok",
+        "method": "hc3_ols_of_psi_on_group_mean_estimated_cate",
+        "slope": slope["estimate"],
+        "standard_error": slope["standard_error"],
+        "confidence_interval_95": slope["confidence_interval_95"],
+        "p_value_one_sided_greater_than_0": slope["p_value_one_sided_greater_than_0"],
+        "p_value_two_sided_equal_1": _p_two_sided(z_one),
     }
 
 
@@ -1510,6 +1586,188 @@ def _confirmation_section(
     }
 
 
+def _r_squared(target: np.ndarray, design: np.ndarray) -> float:
+    """OLS R^2 with an intercept; an empty or constant design explains nothing."""
+
+    design = np.asarray(design, dtype=float).reshape(len(target), -1)
+    columns = [design[:, j] for j in range(design.shape[1]) if not _is_constant(design[:, j])]
+    if not columns:
+        return 0.0
+    x = np.column_stack([np.ones(len(target)), *columns])
+    beta = np.linalg.lstsq(x, target, rcond=None)[0]
+    residual = target - x @ beta
+    total = float(np.sum((target - target.mean()) ** 2))
+    return float(min(max(1.0 - float(residual @ residual) / total, 0.0), 1.0))
+
+
+def cate_variance_decomposition(
+    cate: Any, prognosis: Any, modifiers: Any, *, min_rows: int = 10
+) -> dict[str, Any]:
+    """Partition CATE variance between the prognostic score and the modifier design.
+
+    ``modifiers`` is an ``(n, p)`` design (``p`` may be 0). Returns the three
+    R^2 values and the unique, shared and unexplained shares (see
+    ``DECOMPOSITION_INTERPRETATION``).
+    """
+
+    cate = np.asarray(cate, dtype=float)
+    prognosis = np.asarray(prognosis, dtype=float)
+    modifiers = np.asarray(modifiers, dtype=float).reshape(len(cate), -1)
+    finite = np.isfinite(cate) & np.isfinite(prognosis) & np.isfinite(modifiers).all(axis=1)
+    cate, prognosis, modifiers = cate[finite], prognosis[finite], modifiers[finite]
+    rows, columns = len(cate), modifiers.shape[1]
+    if rows < max(int(min_rows), columns + 3):
+        return unavailable("too few rows for the prognostic score and the modifier design",
+                           rows=rows, modifier_columns=columns)
+    if _is_constant(cate):
+        return unavailable("the estimated CATE is constant, so there is no variance to "
+                           "decompose", rows=rows, cate_variance=0.0)
+    r2_prognosis = _r_squared(cate, prognosis)
+    r2_modifiers = _r_squared(cate, modifiers)
+    r2_both = _r_squared(cate, np.column_stack([prognosis, modifiers]))
+    return {
+        "status": "ok",
+        "rows": rows,
+        "modifier_columns": columns,
+        "cate_variance": float(np.var(cate, ddof=1)),
+        "cate_sd": float(np.std(cate, ddof=1)),
+        "r2_prognosis": r2_prognosis,
+        "r2_modifiers": r2_modifiers,
+        "r2_both": r2_both,
+        "unique_prognosis": r2_both - r2_modifiers,
+        "unique_modifiers": r2_both - r2_prognosis,
+        "shared": r2_prognosis + r2_modifiers - r2_both,
+        "unexplained": 1.0 - r2_both,
+    }
+
+
+def _decompose_fold(
+    rows: pd.DataFrame,
+    confirmation: ConfirmationInput | str,
+    *,
+    columns: Sequence[str],
+    binary: bool,
+    min_count: int,
+) -> dict[str, Any]:
+    from . import stage2_modifier_tests as modifier_tests
+    from .stage2_effect_estimators import prognostic_score
+
+    if isinstance(confirmation, str):
+        return unavailable(confirmation)
+    rows = rows.reset_index(drop=True)
+    mu0 = pd.to_numeric(rows["mu0"], errors="coerce").to_numpy(dtype=float)
+    definitions = list(confirmation.definitions)
+    if definitions and confirmation.frame is None:
+        return unavailable("held-out measurements of the selected modifiers are missing")
+    joined = _join_rows(rows, confirmation.frame) if definitions else None
+    result: dict[str, Any] = {
+        "status": "ok",
+        "heldout_rows": len(rows),
+        "selected_modifiers": [str(feature["name"]) for feature in definitions],
+        "missing_measurement_columns": list(confirmation.missing_measurement_columns),
+        "measurement_source": dict(confirmation.sources),
+        "columns": {},
+    }
+    for column in columns:
+        if column not in rows.columns:
+            continue
+        cate = pd.to_numeric(rows[column], errors="coerce").to_numpy(dtype=float)
+        keep = np.isfinite(cate) & np.isfinite(mu0)
+        if not keep.any():
+            result["columns"][column] = unavailable("no held-out row has this CATE")
+            continue
+        design_parts, names, dropped = [], [], []
+        for feature in definitions:
+            design, feature_names, feature_dropped = modifier_tests.grouped_design(
+                joined.loc[keep].reset_index(drop=True), feature, min_count=min_count
+            )
+            design_parts.append(design)
+            names.extend(feature_names)
+            dropped.extend(feature_dropped)
+        design = (
+            np.column_stack(design_parts) if design_parts
+            else np.empty((int(keep.sum()), 0), dtype=float)
+        )
+        decomposition = cate_variance_decomposition(
+            cate[keep], prognostic_score(mu0[keep], binary=binary), design
+        )
+        result["columns"][column] = {
+            **decomposition, "modifier_design_columns": names, "dropped_sparse_columns": dropped,
+        }
+    return result
+
+
+def _pool_decompositions(per_fold: Mapping[str, Any], column: str) -> dict[str, Any]:
+    usable = {
+        fold: result["columns"][column]
+        for fold, result in per_fold.items()
+        if result.get("status") == "ok"
+        and (result.get("columns") or {}).get(column, {}).get("status") == "ok"
+    }
+    if not usable:
+        return unavailable("no fold has a decomposable CATE in this column")
+    weights = np.array([item["rows"] for item in usable.values()], dtype=float)
+    pooled: dict[str, Any] = {
+        "status": "ok",
+        "folds": sorted(usable, key=_fold_key),
+        "rows": int(weights.sum()),
+        "range": {},
+    }
+    for key in DECOMPOSITION_KEYS:
+        values = np.array([item[key] for item in usable.values()], dtype=float)
+        pooled[key] = float(np.sum(weights * values) / weights.sum())
+        pooled["range"][key] = [float(values.min()), float(values.max())]
+    return pooled
+
+
+def _decomposition_section(
+    predictions: pd.DataFrame,
+    artifacts: Mapping[str, FoldArtifacts],
+    *,
+    policy: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    header = {
+        "interpretation": DECOMPOSITION_INTERPRETATION,
+        "pooling_rule": DECOMPOSITION_POOLING_RULE,
+        "prognostic_score": (
+            "logit of the held-out mu0 (binary outcomes) or mu0 (continuous outcomes), "
+            "as in the causal forest's X and the interaction model's adjustment"
+        ),
+    }
+    if policy is None:
+        return {**header, **unavailable(
+            "no outcome type was supplied (the modifier confirmation policy is missing)")}
+    try:
+        resolved = resolve_confirmation_policy(policy)
+    except (KeyError, TypeError, ValueError) as error:
+        return {**header, **unavailable(f"invalid modifier confirmation policy: {error}")}
+    if "mu0" not in predictions.columns:
+        return {**header, **unavailable("cross-fitted predictions lack mu0")}
+    columns = ["estimated_cate", *(c for c in CATE_COMPONENT_COLUMNS if c in predictions.columns)]
+    per_fold: dict[str, Any] = {}
+    for fold, rows in predictions.groupby("outer_fold", sort=True):
+        fold = str(int(fold))
+        source = artifacts.get(fold)
+        item = source.confirmation if source is not None else "no fold artifacts were found"
+        per_fold[fold] = _guarded(
+            f"cate variance decomposition fold {fold}", _decompose_fold, rows, item,
+            columns=columns, binary=resolved["outcome_type"] == "binary",
+            min_count=resolved["min_count"],
+        )
+    per_fold = dict(sorted(per_fold.items(), key=lambda entry: _fold_key(entry[0])))
+    pooled = {column: _pool_decompositions(per_fold, column) for column in columns}
+    status = "ok" if any(item.get("status") == "ok" for item in pooled.values()) else "unavailable"
+    return {
+        **header,
+        "status": status,
+        **({} if status == "ok" else {"reason": "no fold has a decomposable CATE"}),
+        "outcome_type": resolved["outcome_type"],
+        "columns": columns,
+        "per_fold": per_fold,
+        "pooled": pooled,
+    }
+
+
 def build_heterogeneity_diagnostics(
     predictions: pd.DataFrame,
     *,
@@ -1687,12 +1945,48 @@ def build_heterogeneity_diagnostics(
         "modifier confirmation", _confirmation_section, confirmation_rows, artifacts,
         policy=modifier_confirmation_policy, propensity_clip=propensity_clip,
     )
+    diagnostics["cate_variance_decomposition"] = _guarded(
+        "cate variance decomposition", _decomposition_section, confirmation_rows, artifacts,
+        policy=modifier_confirmation_policy,
+    )
+    diagnostics["primary_heterogeneity_test"] = primary_heterogeneity_test(diagnostics)
     return json_safe(diagnostics)
 
 
 def _pick(mapping: Any, *keys: str) -> dict[str, Any]:
     mapping = mapping if isinstance(mapping, Mapping) else {}
     return {key: mapping.get(key) for key in keys if key in mapping}
+
+
+PRIMARY_HETEROGENEITY_TEST = (
+    "Pre-specified primary heterogeneity test: the pooled BLP beta2 (fixed-effect "
+    "inverse-variance pooling of the outer folds), one-sided test of beta2 > 0. GATES "
+    "and RATE are secondary; CLAN, the CATE variance decomposition and the modifier "
+    "confirmation are descriptive. No diagnostic is used for selection or estimation."
+)
+
+
+def primary_heterogeneity_test(diagnostics: Mapping[str, Any]) -> dict[str, Any]:
+    """The pooled BLP beta2 > 0 test, labeled as the pre-specified primary test."""
+
+    section = diagnostics.get("blp")
+    pooled = section.get("pooled", {}) if isinstance(section, Mapping) else {}
+    if not isinstance(pooled, Mapping) or pooled.get("status") != "ok":
+        return {"description": PRIMARY_HETEROGENEITY_TEST, "pre_specified": True,
+                **unavailable((pooled or {}).get("reason") or "pooled BLP is unavailable")}
+    return {
+        "status": "ok",
+        "description": PRIMARY_HETEROGENEITY_TEST,
+        "pre_specified": True,
+        "test": "pooled_blp_beta2_greater_than_0_one_sided",
+        "beta2": pooled.get("beta2_heterogeneity"),
+        "standard_error": pooled.get("beta2_standard_error"),
+        "confidence_interval_95": pooled.get("beta2_confidence_interval_95"),
+        "p_value_one_sided": pooled.get("beta2_p_value_one_sided_greater_than_0"),
+        "folds": pooled.get("folds"),
+        "secondary_tests": ["gates", "rate"],
+        "descriptive": ["clan", "cate_variance_decomposition", "modifier_confirmation"],
+    }
 
 
 def summarize_diagnostics(diagnostics: Mapping[str, Any]) -> dict[str, Any]:
@@ -1712,6 +2006,7 @@ def summarize_diagnostics(diagnostics: Mapping[str, Any]) -> dict[str, Any]:
     heldout_pooled = heldout.get("pooled") or {}
     return {
         "schema_version": diagnostics.get("schema_version"),
+        "primary_heterogeneity_test": primary_heterogeneity_test(diagnostics),
         "blp_pooled": _pick(
             blp, "status", "reason", "folds", "beta1_ate", "beta1_standard_error",
             "beta2_heterogeneity", "beta2_standard_error",
@@ -1723,6 +2018,13 @@ def summarize_diagnostics(diagnostics: Mapping[str, Any]) -> dict[str, Any]:
                 gates.get("top_minus_bottom"), "estimate", "standard_error", "p_value_two_sided"
             ),
             "group_means": [group.get("estimate") for group in gates.get("groups") or []],
+            "group_mean_estimated_cate": [
+                group.get("mean_estimated_cate") for group in gates.get("groups") or []
+            ],
+            "calibration": _pick(
+                gates.get("calibration"), "status", "slope", "standard_error",
+                "p_value_one_sided_greater_than_0", "p_value_two_sided_equal_1",
+            ),
         },
         "rate_pooled": {
             **_pick(rate, "status", "reason"),
@@ -1754,6 +2056,22 @@ def summarize_diagnostics(diagnostics: Mapping[str, Any]) -> dict[str, Any]:
                     "features_above_threshold_weighted", "max_abs_smd_weighted"),
         },
         "modifier_confirmation": _confirmation_summary(diagnostics.get("modifier_confirmation")),
+        "cate_variance_decomposition": _decomposition_summary(
+            diagnostics.get("cate_variance_decomposition")
+        ),
+    }
+
+
+def _decomposition_summary(section: Any) -> dict[str, Any]:
+    section = section if isinstance(section, Mapping) else {}
+    pooled = section.get("pooled") or {}
+    return {
+        **_pick(section, "status", "reason"),
+        **{
+            column: _pick(value, "status", "folds", "rows", *DECOMPOSITION_KEYS)
+            for column, value in pooled.items()
+            if isinstance(value, Mapping)
+        },
     }
 
 
@@ -2033,6 +2351,7 @@ __all__ = [
     "best_linear_predictor",
     "build_heterogeneity_diagnostics",
     "cate_groups",
+    "cate_variance_decomposition",
     "classification_analysis",
     "confirm_fold_modifiers",
     "dr_scores",

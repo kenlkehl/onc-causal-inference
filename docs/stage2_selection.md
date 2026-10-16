@@ -953,11 +953,23 @@ result. `ψ` below is the held-out AIPW score and `τ̂` is `estimated_cate` (th
 ensemble mean under the default estimator policy). The `modifier_confirmation`
 section is described in [Outer-fold confirmation](#outer-fold-confirmation).
 
+**Primary and secondary analyses.** The pre-specified primary heterogeneity
+test is the pooled BLP `beta2` with its one-sided p-value for `beta2 > 0`,
+reported as `primary_heterogeneity_test` in `heterogeneity_diagnostics.json` and
+`causal_estimate.json`. GATES and RATE are secondary analyses; CLAN, the CATE
+variance decomposition, and the modifier confirmation are descriptive. No
+diagnostic is used for selection or estimation. Per-fold results rest on one
+fold's held-out patients (about 200 at n = 1000) and are low-powered. Every
+result also rests on a single random outer split: repeated splitting with
+medians across splits (Chernozhukov, Demirer, Duflo and Fernández-Val) is not
+performed, and would require rerunning the pipeline with other split seeds.
+
 | Section | What it computes | How to read it |
 |---|---|---|
 | `blp` | OLS of `ψ` on `[1, τ̂ − mean(τ̂)]` with HC3 standard errors | `beta1_ate` estimates the ATE among eligible patients. `beta2_heterogeneity` is the key quantity: a positive value with a small `beta2_p_value_one_sided_greater_than_0` is evidence that the CATE ranking captures real heterogeneity; near 0, none is detectable; near 1, the predictions are well scaled (`beta2_p_value_two_sided_equal_1` tests this); between 0 and 1, the predictions are too spread out; above 1, too compressed. |
-| `gates` | Mean `ψ` within quintiles of `τ̂` (G1 lowest predicted effect, G5 highest), formed within each fold, plus a top-minus-bottom difference and a linear trend across groups | An increasing pattern and a positive top-minus-bottom difference mean that the ranking separates patients with larger and smaller effects. Similar group means mean no detectable heterogeneity. |
+| `gates` | Mean `ψ` within quintiles of `τ̂` (G1 lowest predicted effect, G5 highest), formed within each fold, each with its `mean_estimated_cate`; a top-minus-bottom difference; a linear trend across groups; and `calibration`, the HC3 slope of `ψ` on each patient's group mean `τ̂` | An increasing pattern and a positive top-minus-bottom difference mean that the ranking separates patients with larger and smaller effects. Similar group means mean no detectable heterogeneity. A calibration slope near 1 means the group effects match the predicted group means; near 0, the predicted spread is not detectably real. |
 | `clan` | Mean of each retained modifier and confounder (held-out measurements; numeric values or category indicators) in the top versus bottom `τ̂` quintile | Describes which measured characteristics distinguish predicted high- and low-effect patients. Descriptive, not causal, and not adjusted for multiple comparisons. |
+| `cate_variance_decomposition` | Per fold, OLS `R²` of `τ̂` (and of each ensemble component's CATE column) on (a) the prognostic score alone (`logit μ̂0` for binary outcomes, `μ̂0` for continuous outcomes, as in the forest's X and the interaction model's adjustment), (b) the selected modifiers' grouped design alone (the modifier tests' encoding of the held-out measurements), and (c) both; `unique_prognosis` = `R²(c) − R²(b)`, `unique_modifiers` = `R²(c) − R²(a)`, `shared` = `R²(a) + R²(b) − R²(c)`, `unexplained` = `1 − R²(c)` | Shows how much of the predicted CATE spread follows baseline risk rather than the named modifiers: on the risk-difference scale effects vary with baseline risk even under a constant odds ratio, so a wide spread with few modifiers can be mostly prognosis. Descriptive, not causal; nonlinear or interaction structure that a linear projection misses (for example a forest's splits) lands in `unexplained`, and many modifier columns relative to rows inflate `R²(b)`. A fold with a constant `τ̂` is `unavailable`. |
 | `rate` | AUTOC and Qini of the `τ̂` ranking, with stratified bootstrap standard errors (500 replicates) | `TOC(u)` is the ATE among the top fraction `u` minus the overall ATE. AUTOC weights every `u` equally and is sensitive to the top of the ranking; Qini weights by `u` and has more power for diffuse heterogeneity. A positive value whose interval excludes 0 means the ranking is useful for prioritizing patients. |
 | `overlap_weighted_ate` | The [ATO](glossary.md#ato), with weights `1 − e` for treated and `e` for comparator patients; a Hajek (weighted means) and an augmented (adds the outcome models) estimate, with effective sample size | A large gap between the ATO and the AIPW ATE means the ATE depends on patients with extreme propensities, or that effects differ in the region of overlap. |
 | `ipw_weights` | Inverse-propensity weights `1/ê` (treated) and `1/(1 − ê)` (comparator) with `ê` clipped as in AIPW: Kish effective sample size `(Σw)²/Σw²`, its fraction of rows, and the maximum weight | An effective-sample-size fraction well below 1 or a very large maximum weight means the AIPW ATE leans on a few patients: weak overlap and high variance. |
@@ -974,7 +986,9 @@ different model. RATE ranks pooled patients by their within-fold percentile of
 fold only, because training sets overlap across folds. A fold whose `τ̂` is
 constant cannot rank patients: its BLP slope is not identified, and it is left
 out of the pooled GATES, CLAN, and RATE (listed in
-`inputs.folds_with_constant_cate`).
+`inputs.folds_with_constant_cate`). The CATE variance decomposition is computed
+per fold; its pooled shares are row-weighted means of the fold partitions,
+with the fold range.
 
 All standard errors treat the cross-fitted nuisances as fixed. The section
 `inputs.recomputed_psi_max_abs_difference_from_aipw_score` checks that the

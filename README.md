@@ -251,7 +251,8 @@ differences, using only held-out data:
   means well-scaled predictions; near 0 means no detectable heterogeneity; a
   small one-sided p-value supports real heterogeneity.
 - **GATES**: the average effect in each fifth of patients ranked by predicted
-  CATE. An increasing pattern supports the ranking.
+  CATE, next to the group's mean predicted CATE, with a calibration slope of
+  the group effects on those means. An increasing pattern supports the ranking.
 - **RATE (AUTOC, Qini)**: how much better than average the top-ranked patients
   do. Positive values with intervals above 0 indicate useful prioritization.
 - **ATO**: the effect among patients who could plausibly receive either
@@ -261,6 +262,17 @@ differences, using only held-out data:
 - **Balance**: after propensity weighting, each variable's mean should be similar
   in both arms; a weighted standardized mean difference above 0.1 flags a
   variable the propensity model does not balance.
+- **CATE variance decomposition**: how much of the predicted CATE spread a linear
+  projection attributes to baseline risk (the prognostic score), to the selected
+  modifiers, to both, or to neither. Descriptive, not causal.
+
+The pooled BLP `beta2` with its one-sided p-value is the pre-specified primary
+heterogeneity test (`primary_heterogeneity_test` in `causal_estimate.json`);
+GATES and RATE are secondary, and CLAN, the variance decomposition, and the
+modifier confirmation are descriptive. No diagnostic is used for selection.
+Per-fold results use about 200 held-out patients each and are low-powered, and
+all results rest on a single random outer split (repeated splitting would
+require rerunning the pipeline).
 
 Read these with nuisance calibration, overlap, and fold-to-fold variability. See
 [Stage 2 selection](docs/stage2_selection.md#heterogeneity-and-overlap-diagnostics)

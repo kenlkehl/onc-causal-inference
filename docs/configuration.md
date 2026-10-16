@@ -711,7 +711,7 @@ OUTPUT_DIR/
     ├── features_by_outer_fold.jsonl     per-fold variables, roles, and estimation summary
     ├── cross_fitted_predictions.csv     one held-out prediction per patient
     ├── causal_estimate.json             AIPW ATE with 95% CI, overlap, calibration, heterogeneity summary
-    ├── heterogeneity_diagnostics.json   BLP, GATES, CLAN, RATE, overlap-weighted ATE, trimming curve, balance, modifier confirmation
+    ├── heterogeneity_diagnostics.json   BLP (primary test), GATES, CLAN, RATE, overlap, balance, modifier confirmation, CATE variance decomposition
     ├── posthoc_oracle_ite_metrics.json  oracle comparison (records "unavailable" without oracle columns)
     ├── posthoc_predictions_with_oracle_ite.csv  [oracle columns present]
     ├── summary.json
@@ -798,6 +798,18 @@ held-out combined and component p- and q-values, labels), pooled counts of
 selected and confirmed modifiers, and the cross-fold name summary with Stouffer
 combinations. `stage2/causal_estimate.json` repeats a compact summary under
 `heterogeneity_diagnostics.modifier_confirmation`.
+
+The same file contains `cate_variance_decomposition` (`columns`: `estimated_cate`
+and any ensemble component columns; per fold and per column `rows`,
+`modifier_columns`, `cate_variance`, `r2_prognosis`, `r2_modifiers`, `r2_both`,
+`unique_prognosis`, `unique_modifiers`, `shared`, `unexplained`, the modifier
+design columns; `pooled` row-weighted means with each value's fold `range`),
+`gates.*.calibration` (slope, standard error, one-sided p-value for slope > 0,
+two-sided p-value for slope = 1), and `primary_heterogeneity_test` (the pooled BLP
+`beta2`, its standard error, interval, and one-sided p-value, labeled
+pre-specified). `causal_estimate.json` repeats `primary_heterogeneity_test`, the
+pooled decomposition per column, and the pooled GATES calibration and group mean
+predicted CATEs under `heterogeneity_diagnostics`.
 
 ## Checkpoints and resuming
 

@@ -81,8 +81,9 @@ oci/
     │                                 #   or balanced_evidence ranking and budget/estimator choice)
     ├── stage2_nuisance_selection.py, stage2_statistical_selection.py, stage2_interaction_screen.py
     ├── stage2_effect_estimators.py, stage2_dina.py, stage2_final_modeling.py   # Final effect models
-    ├── stage2_diagnostics.py         # Oracle-free BLP, GATES, CLAN, RATE, ATO, trimming, SMDs,
-    │                                 #   outer-fold modifier confirmation (reporting only)
+    ├── stage2_diagnostics.py         # Oracle-free BLP (primary test), GATES, CLAN, RATE, ATO,
+    │                                 #   trimming, SMDs, CATE variance decomposition, outer-fold
+    │                                 #   modifier confirmation (reporting only)
     ├── stage2_extraction_failures.py # Extraction-failure masks and reports
     ├── nuisance_diagnostics.py       # Held-out nuisance diagnostics, overlap policy
     ├── stage2_estimand_ontology*.py, stage2_modifier_concepts.py, stage2_multi_model_adjudication.py,
@@ -153,8 +154,11 @@ estimator ensemble (unweighted mean of `causal_forest`, `linear_interactions`,
 and `dina` for binary outcomes; the interaction model leaves the selected
 modifiers' interactions and main effects unpenalized, guarded by events per
 parameter with a separation fallback) → cross-fitted predictions, AIPW ATE, and
-`heterogeneity_diagnostics.json`, including the reporting-only outer-fold
-confirmation of the selected modifiers. `modifier_selection.rule:
+`heterogeneity_diagnostics.json` (the pooled BLP `beta2` > 0 is the
+pre-specified primary heterogeneity test; GATES and RATE are secondary),
+including the reporting-only outer-fold confirmation of the selected modifiers
+and the CATE variance decomposition (prognosis versus selected modifiers).
+`modifier_selection.rule:
 "balanced_evidence"` instead runs the nested modifier ranking and
 budget/estimator choice; concept review requires it. Details:
 `docs/how_it_works.md` and `docs/stage2_selection.md`.
@@ -174,9 +178,10 @@ Configuration rules:
   `unpenalized_events_per_parameter` (`selection_dict()` omits them).
 - Diagnostic evidence families (`multi_model.diagnostic_families`) and
   matched-batch evidence are opt-in and do not drive selection.
-- Outer-fold confirmation (`modifier_confirmation` in
-  `heterogeneity_diagnostics.json`) is computed from frozen artifacts after
-  every fold finishes; no selection, estimation, or other fold reads it.
+- Outer-fold confirmation (`modifier_confirmation`) and the CATE variance
+  decomposition (`cate_variance_decomposition`) in
+  `heterogeneity_diagnostics.json` are computed from frozen artifacts after
+  every fold finishes; no selection, estimation, or other fold reads them.
 
 ## Scientific invariants
 
