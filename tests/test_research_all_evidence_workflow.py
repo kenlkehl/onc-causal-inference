@@ -18,6 +18,7 @@ from oci.inference.embedding_contrast_discovery import (
 from oci.inference.all_evidence_fusion import HTR_NEURAL, MATCHED_PAIR_UPLIFT
 from oci.inference.plain_handoff_stage2_evidence import SUPPORTED_STAGE2_ARCHITECTURES
 from oci.inference.stage1_architectures import DEFAULT_STAGE1_ARCHITECTURES
+from oci.inference.stage1_checkpointing import row_id_identity
 from oci.inference.research_all_evidence_workflow import (
     STAGE1_COMPONENT_ORDER as COMPONENT_ORDER,
     ResearchAllEvidenceWorkflow,
@@ -519,6 +520,188 @@ def test_rerun_tfidf_invalidates_exact_context_metadata_but_keeps_products(tmp_p
     assert not worker_complete.exists()
     assert not context_metadata.exists()
     assert fitted_product.exists()
+
+
+@pytest.mark.parametrize(
+    "name,removed,kept",
+    [
+        ("embedding_cache", ["complete.json"], ["cache/abc/metadata.json"]),
+        (
+            "text_models",
+            ["complete.json", "outer_001_full/complete.json"],
+            [
+                "outer_001_full/checkpoints/v1/units/bow/fit/" + "0" * 64 + "/complete.json",
+                "outer_001_full/checkpoints/v1/units/assembly/handoff_context/"
+                + "1" * 64
+                + "/complete.json",
+                "outer_001_full/evidence.json",
+                "evidence.jsonl",
+            ],
+        ),
+        (
+            "neural_queries",
+            ["complete.json", "outer_001_inner_002/complete.json"],
+            ["outer_001_inner_002/evidence.json"],
+        ),
+        ("handoff", ["complete.json"], ["evidence.jsonl", "index.json"]),
+        (
+            "stage2",
+            ["complete.json"],
+            [
+                "outer_001/complete.json",
+                "outer_001/selection/complete.json",
+                "outer_001/estimation/complete.json",
+                "outer_001/interpretations/architecture_01/batch_001/complete.json",
+                "outer_001/extraction/fit/serial_chunks/chunk_00001/complete.json",
+                "reselection_archives/reselection_x/artifacts/outer_001/complete.json",
+            ],
+        ),
+    ],
+)
+def test_rerun_removes_only_completion_state_without_identity(
+    tmp_path: Path, name, removed, kept
+):
+    component_dir = tmp_path / name
+    for relative in (*removed, *kept):
+        path = component_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n", encoding="utf-8")
+    workflow = SimpleNamespace(_component_dir=lambda _name: component_dir)
+
+    all_evidence_workflow._invalidate_component_for_rerun(workflow, name)
+
+    assert [relative for relative in removed if (component_dir / relative).exists()] == []
+    assert [relative for relative in kept if not (component_dir / relative).exists()] == []
+
+
+TEXT_MODEL_RERUN_CONTEXTS = 2 * (1 + 2)
+
+
+def _text_model_rerun_fixture(tmp_path: Path, monkeypatch):
+    """Launch a text_models-only run whose contexts fit two checkpointed units.
+
+    Returns the study configuration, its path, the log of computed units, and
+    a function that runs ``main`` on the configuration with extra flags.
+    """
+
+    raw, _config = _inputs(tmp_path, components=("text_models",))
+    raw["run"]["workers"] = 1
+    config_path = tmp_path / "study.json"
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    computed: list[tuple[str, str, int]] = []
+
+    def run_context(*, config, context, handoff_dir, checkpoint_store, **_unused):
+        epochs = int(config.training.epochs)
+        rows = {
+            "fit": row_id_identity(context["train_idx"]),
+            "heldout": row_id_identity(context["heldout_idx"]),
+        }
+        fitted = {}
+        for unit in ("bow/fit", "htr/fit"):
+
+            def compute(unit=unit):
+                computed.append((str(context["scope_id"]), unit, epochs))
+                return {"epochs": epochs}
+
+            fitted[unit] = checkpoint_store.run(
+                unit, compute, parameters={"epochs": epochs}, rows=rows
+            ).value["epochs"]
+        # Written beside the checkpoints, like worker_artifacts/**/predictions.parquet.
+        artifact = Path(handoff_dir) / "worker_artifacts" / "fitted.json"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(json.dumps(fitted), encoding="utf-8")
+        return {
+            "outer_fold": context["outer_fold"],
+            "inner_fold": context.get("inner_fold"),
+            "scope": context["scope"],
+            "fitted": fitted,
+        }
+
+    monkeypatch.setattr(multi_model_stage1, "run_multi_model_forest_handoff_context", run_context)
+    monkeypatch.setattr(all_evidence_workflow, "_configure_logging", lambda *_args: None)
+
+    def launch(*extra: str) -> None:
+        assert all_evidence_workflow.main(["--config", str(config_path), *extra]) == 0
+
+    return raw, config_path, computed, launch
+
+
+def _text_model_rows(output_dir: Path) -> list[dict]:
+    path = output_dir / "components" / "text_models" / "evidence.jsonl"
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_rerun_text_models_reuses_checkpoint_units_whose_identity_matches(
+    tmp_path: Path, monkeypatch
+):
+    _raw, _path, computed, launch = _text_model_rerun_fixture(tmp_path, monkeypatch)
+    output_dir = tmp_path / "output"
+    component_dir = output_dir / "components" / "text_models"
+    launch()
+    assert len(computed) == 2 * TEXT_MODEL_RERUN_CONTEXTS
+    rows = _text_model_rows(output_dir)
+    unit_markers = sorted(component_dir.glob("*/checkpoints/v1/units/**/complete.json"))
+    # bow/fit, htr/fit, and the context's assembly/handoff_context unit.
+    assert len(unit_markers) == 3 * TEXT_MODEL_RERUN_CONTEXTS
+
+    computed.clear()
+    launch("--rerun", "text_models")
+
+    assert computed == []
+    assert sorted(component_dir.glob("*/checkpoints/v1/units/**/complete.json")) == unit_markers
+    assert _text_model_rows(output_dir) == rows
+    progress = json.loads((output_dir / "progress.json").read_text(encoding="utf-8"))
+    assert progress["components"]["text_models"]["status"] == "complete"
+    for context_dir in sorted(path.parent for path in component_dir.glob("*/evidence.json")):
+        assert (context_dir / "complete.json").is_file()
+        units = json.loads(
+            (context_dir / "checkpoints" / "v1" / "checkpoint_progress.json").read_text(
+                encoding="utf-8"
+            )
+        )["units"]
+        assert units["assembly/handoff_context"]["status"] == "reused"
+
+
+def test_rerun_text_models_recomputes_checkpoint_units_whose_identity_changed(
+    tmp_path: Path, monkeypatch
+):
+    raw, config_path, computed, launch = _text_model_rerun_fixture(tmp_path, monkeypatch)
+    output_dir = tmp_path / "output"
+    component_dir = output_dir / "components" / "text_models"
+
+    def set_epochs(epochs: int) -> None:
+        raw["science"]["stage1"]["training"]["epochs"] = epochs
+        config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    launch()
+    computed.clear()
+    set_epochs(4)
+    launch()  # Completion markers record no identity; an ordinary resume skips.
+    assert computed == []
+
+    launch("--rerun", "text_models")
+    assert len(computed) == 2 * TEXT_MODEL_RERUN_CONTEXTS
+    assert {epochs for *_unused, epochs in computed} == {4}
+    assert all(
+        row["fitted"] == {"bow/fit": 4, "htr/fit": 4} for row in _text_model_rows(output_dir)
+    )
+
+    # The earlier settings' units are still valid and are restored, and each
+    # context's evidence and side files are rebuilt from them rather than left
+    # from the settings that ran last.
+    computed.clear()
+    set_epochs(3)
+    launch("--rerun", "text_models")
+    assert computed == []
+    assert all(
+        row["fitted"] == {"bow/fit": 3, "htr/fit": 3} for row in _text_model_rows(output_dir)
+    )
+    artifacts = sorted(component_dir.glob("*/worker_artifacts/fitted.json"))
+    assert len(artifacts) == TEXT_MODEL_RERUN_CONTEXTS
+    assert all(
+        json.loads(path.read_text(encoding="utf-8")) == {"bow/fit": 3, "htr/fit": 3}
+        for path in artifacts
+    )
 
 
 def test_legacy_handoff_references_sources_without_copy_or_architecture_expansion(

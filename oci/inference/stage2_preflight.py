@@ -107,8 +107,12 @@ def preflight_stage2(
         raise RuntimeError(f"existing output directory is missing or not writable: {root}")
     # Constructor checks the saved architecture contract and does not write.
     workflow.ResearchAllEvidenceWorkflow(config)
+    # Only the saved Stage 1 settings are compared. A --stage1-only run saves
+    # stage2: null and takes its Stage 2 settings from this request, so the
+    # saved settings are resolved as the Stage 1 run they describe; the mode
+    # changes none of the compared fields.
     baseline = _object(root / "run_config.json")
-    baseline["run"] = {**baseline.get("run", {}), "mode": "stage2", "components": []}
+    baseline["run"] = {**baseline.get("run", {}), "mode": "stage1", "components": []}
     saved = workflow.compile_config(baseline, config_dir=root)
     for name in (
         "dataset",

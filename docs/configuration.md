@@ -564,7 +564,7 @@ file; `--set` can change any other value.
 | `--stage2-only` | Skip Stage 1 and run or resume Stage 2 from the saved handoff, usually with `--config OUTPUT_DIR/run_config.json` |
 | `--stage2-reselect` | With `--stage2-only`: archive a completed Stage 2 selection and everything after it, then rerun selection from the frozen definitions and outer-training extractions ([Guarded reselection](#guarded-reselection)) |
 | `--preflight-only` | With `--stage2-only`: validate the saved run and the Stage 2 reuse plan without writing files, starting servers, or fitting models; prints a JSON report |
-| `--rerun COMPONENT` | Remove a component's completion markers (not its outputs) so it runs again; repeatable. One of `embedding_cache`, `tfidf`, `text_models`, `neural_queries`, `handoff`, `stage2` |
+| `--rerun COMPONENT` | Remove a component's completion markers (not its outputs or identity-checked checkpoints) so it runs again ([details](#checkpoints-and-resuming)); repeatable. One of `embedding_cache`, `tfidf`, `text_models`, `neural_queries`, `handoff`, `stage2` |
 | `--status` | Print `progress.json` and exit |
 
 **Stage 2 serving** (the two endpoint flags are mutually exclusive)
@@ -988,11 +988,24 @@ interrupted component re-enters at its first incomplete step.
 
 - `--status` prints `progress.json`, which names the current component and
   any error.
-- `--rerun COMPONENT` removes that component's completion markers so it runs
-  again; outputs stay in place. For `text_models`, fitted sub-steps whose
-  inputs are unchanged are reused from each context's `checkpoints/`. For
-  `tfidf`, the per-context markers are also removed, so every context is
-  refit.
+- `--rerun COMPONENT` removes the completion markers that let a component be
+  skipped, so it runs again. Outputs, and checkpoints that verify their own
+  identity, stay in place:
+  - `text_models` and `neural_queries`: the component's and each context's
+    `complete.json` are removed, so every context runs again. A text-model
+    context restores each fitted sub-step from its `checkpoints/` when the
+    sub-step's identity still matches and refits the others. The identity
+    covers the resolved Stage 1 model settings, the dataset file's path, size,
+    and modification time, the context's rows, and the checkpoint version.
+    Neural-query contexts have no finer checkpoints and are refit. To refit
+    every text-model context, also remove the contexts' `checkpoints/`
+    directories.
+  - `tfidf`: every context's markers are also removed, so every context is
+    refit.
+  - `embedding_cache`, `handoff`, and `stage2`: only the component's
+    `complete.json` is removed. The chunk cache is reused while its embedding
+    model, chunking settings, dataset path, and row count still match, and
+    each Stage 2 step is revalidated against its checkpoint, as on any resume.
 - With [`notes`](#notes), `input/analysis_cohort.parquet` is built once and
   verified against its manifest on every start; a changed notes table, cohort
   file, or `notes` setting stops the run.
@@ -1040,13 +1053,20 @@ Stage 2 requires the frozen split file
 different split could place patients that Stage 1 trained on into Stage 2
 held-out sets. A Stage 2-only launch does not rewrite `run_config.json`.
 
+A run made with `--stage1-only` saves `stage2: null`. Supply its Stage 2
+settings, including both model IDs, with `--set` (for example
+`--set stage2.model=MODEL --set stage2.extraction_llm.model=MODEL` beside the
+endpoints above), or launch from a configuration file that holds the run's
+Stage 1 settings and a `stage2` block.
+
 ### Preflight
 
 `--stage2-only --preflight-only` validates a saved run without writing files,
 contacting endpoints, starting servers, or fitting models, and prints a JSON
 report. It checks that:
 
-- the saved Stage 1 settings match the requested ones;
+- the saved Stage 1 settings match the requested ones (the Stage 2 settings
+  come from the request, so a `--stage1-only` run validates the same way);
 - the handoff and every Stage 1 component are complete and their artifacts
   exist;
 - with [`notes`](#notes), the cohort file, the notes table, the `notes`
