@@ -382,6 +382,12 @@ behind the variable. `scripts/ablate_stage1_architectures.py compare --oracle`
 reports the same recovery for each leave-one-architecture-out rerun. See
 [Stage 1 architectures](stage1_architectures.md#attribution-and-ablation).
 
+**Benchmarks.** `scripts/benchmark.py` re-equates a source cohort into one
+cohort per benchmark scenario, size, and seed, writes the workflow
+configurations, and compares the finished runs with these oracle columns under
+the same hash-first rule; see [Benchmarks](benchmarks.md), which also covers
+using the bundled five-confounder cohort as a re-equation source.
+
 **Standalone `oci run`.** The explicit-feature workflows write
 `applied_inference/posthoc_oracle_metrics.json` under the same rules; see
 [Optional extensions](optional_extensions.md#outputs).
