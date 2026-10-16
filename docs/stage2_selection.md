@@ -183,12 +183,12 @@ it.
 ### Testing nuisances
 
 Before any modifier is chosen, the training half of the final
-[nuisance construction](#nuisance-construction) is computed: elastic nets on the
-complete catalog for treatment and for the outcome in each treatment arm,
-fitted in the inner cross-fitting folds with the final estimation's seeds,
-encoders, and standardization, followed by cross-fitted Platt recalibration.
-Each training patient receives `ê`, `μ̂0`, and `μ̂1` from the inner-fold model
-that did not see it. Held-out patients take no part; their measurements do not
+[nuisance construction](#nuisance-construction) is computed: nuisance models on
+the complete catalog for treatment and for the outcome in each treatment arm,
+fitted in the inner cross-fitting folds with the final estimation's learner,
+seeds, encoders, and standardization. Each training patient receives the raw
+`ê`, `μ̂0`, and `μ̂1` of the inner-fold model that did not see it; training
+predictions are not recalibrated. Held-out patients take no part; their measurements do not
 exist yet. The fitted inner-fold models are stored (see
 [Nuisance construction](#nuisance-construction)), and the final estimation
 reuses them to score the held-out patients instead of refitting them. Either
@@ -201,7 +201,7 @@ $$
 $$
 
 When `stage2.min_propensity` or `stage2.max_propensity` is set, the tests use
-only the training patients whose recalibrated `ê` lies within the bounds, as
+only the training patients whose out-of-fold `ê` lies within the bounds, as
 the final estimation does.
 
 ### Grouped design
@@ -747,29 +747,34 @@ supplies the [testing nuisances](#testing-nuisances) of the orthogonal tests.
    written either way, marked `model_source` `reused_stored_model` or
    `fitted`. Under `balanced_evidence` no models are stored and the final
    estimation fits them.
-5. **Recalibration.** The propensity and, for binary outcomes, both arm-specific
-   outcome predictions are Platt-recalibrated: a logistic regression of the label
-   on `[1, logit(prediction)]`. Each inner fold's training predictions use a
-   calibrator fitted on the out-of-fold predictions of the other inner folds;
-   held-out predictions use a calibrator fitted on all training out-of-fold
-   predictions. The `μ0` (`μ1`) calibrator is fitted on comparator (treated)
-   training patients and applied to every patient. A calibrator falls back to
-   the identity map when it has fewer than 20 rows, a single class, constant
-   predictions, separation, or a nonpositive slope. Continuous-outcome
-   predictions are not recalibrated.
+5. **Held-out calibration.** Training out-of-fold predictions are used raw. For
+   the held-out patients, the propensity and, for binary outcomes, both
+   arm-specific outcome predictions of each inner-fold model are
+   Platt-calibrated before averaging: inner-fold model `k`'s calibrator, a
+   logistic regression of the label on `[1, logit(prediction)]`, is fitted on
+   model `k`'s own inner-validation patients (its out-of-fold predictions and
+   their training labels; for `μ0` and `μ1`, only the validation patients in
+   the comparator or treated arm), applied to model `k`'s held-out predictions,
+   and the five calibrated predictions are averaged. Each calibrator therefore
+   matches the model it corrects, and no held-out label is used. A calibrator
+   falls back to the identity map when it has fewer than 20 rows, a single
+   class, constant predictions, separation, or a nonpositive slope.
+   Continuous-outcome predictions are not calibrated; their held-out value is
+   the average of the five models.
 
-The recalibrated predictions are written as `propensity`, `mu0`, and `mu1`; the
-raw predictions are kept as `propensity_uncalibrated`, `mu0_uncalibrated`, and
-`mu1_uncalibrated`. Each fold's `estimation/diagnostics.json` reports
-calibration before and after recalibration (`nuisance_calibration`, including a
-`calibration_slope_summary`), nuisance fit audits, including any elastic-net
-fit that reached its iteration limit (with `model_sources` counts when a model store was
-consulted), and, under `orthogonal_tests`, `nuisance_model_store` (`available`
-or `absent`, with the store fingerprint). The held-out calibrator is learned from
-single-model out-of-fold predictions but applied to an average of five models,
-which is slightly less dispersed; held-out calibration slopes after
-recalibration can therefore sit modestly above 1 (see
-[Limitations](#limitations)).
+The final predictions are written as `propensity`, `mu0`, and `mu1` (training
+rows: raw out-of-fold; held-out rows: the average of the calibrated fold-model
+predictions); the uncalibrated values are kept as `propensity_uncalibrated`,
+`mu0_uncalibrated`, and `mu1_uncalibrated` (equal to the final values for
+training rows; the uncalibrated average for held-out rows). Each fold's
+`estimation/diagnostics.json` reports calibration before and after held-out
+calibration (`nuisance_calibration`, including a `calibration_slope_summary`
+for training and held-out rows), each fold model's calibrator parameters, status,
+and fit rows (`nuisance_calibration.recalibration`), nuisance fit audits,
+including any elastic-net fit that reached its iteration limit (with
+`model_sources` counts when a model store was consulted), and, under
+`orthogonal_tests`, `nuisance_model_store` (`available` or `absent`, with the
+store fingerprint).
 
 ### Nuisance learner
 
@@ -803,8 +808,8 @@ Seeds derive from the inner-fold seed (elastic net, boosting, forest, and the
 internal folds each have a fixed offset), so fits are deterministic. Each fit
 runs in one modeling-pool job with one thread (the forest uses `n_jobs=1`;
 boosting's OpenMP threads follow the job's thread limit), so the learners stay
-within `stage2.modeling_workers`. Platt recalibration (step 5 above) applies
-to the stacked predictions exactly as to the elastic net.
+within `stage2.modeling_workers`. The held-out calibration (step 5 above)
+applies to the stacked predictions exactly as to the elastic net.
 
 Every model's fit audit in `estimation/nuisance_fit_audits/` records the stack
 weights, each learner's internal-CV loss, the stack's internal-CV loss (with
@@ -837,9 +842,9 @@ The same rule applies at every stage:
 | Stage | Training patients judged by | Validation or held-out patients judged by |
 |---|---|---|
 | Evidence families and modifier ranking | Out-of-fold training propensity | Propensity from models fitted on the split's training patients |
-| Orthogonal modifier tests | Recalibrated out-of-fold propensity (testing nuisances) | Not used |
+| Orthogonal modifier tests | Out-of-fold propensity (testing nuisances) | Not used |
 | Modifier count and model selection (`balanced_evidence`) | Out-of-fold training propensity | Propensity from models fitted on the fold's training patients |
-| Final refit and estimation | Recalibrated out-of-fold propensity | Recalibrated inner-fold-ensemble propensity |
+| Final refit and estimation | Out-of-fold propensity | Inner-fold-ensemble propensity, each fold model calibrated on its own validation patients |
 | Outer-fold confirmation | Not used | `effect_eligible` from the final estimation |
 
 Held-out outcomes never determine eligibility, and there is no automatic
@@ -993,7 +998,7 @@ Per outer fold, under `stage2/outer_NNN/`:
 | `final_definitions.json` | Retained variables, roles (with `modifier_evidence` for each modifier under `orthogonal_tests`), definitions, and the final estimator |
 | `estimation/predictions.csv` | Held-out predictions for this fold, including per-estimator CATE columns under the ensemble |
 | `estimation/diagnostics.json` | Fit audits (each ensemble component's), AIPW ATE, nuisance calibration, overlap, and methodology notes |
-| `estimation/nuisance_fit_predictions.csv` | Training out-of-fold nuisances, raw and recalibrated, with eligibility |
+| `estimation/nuisance_fit_predictions.csv` | Training out-of-fold nuisances (raw), with eligibility |
 | `estimation/propensity_overlap.json` | Training and held-out eligibility audit |
 | `estimation/extraction_failure_diagnostics.json` | Extraction-failure rates on training and held-out patients |
 
@@ -1044,11 +1049,12 @@ data, `posthoc_oracle_ite_metrics.json` and
   roles are predictive routing decisions, not demonstrated causal structure.
   OCI provides overlap and balance diagnostics but no sensitivity analysis for
   unmeasured confounding.
-- **Nuisance recalibration.** Held-out nuisances are an average of five models,
-  while their calibrator is learned from single-model predictions. Recalibration
-  improves log loss, but held-out calibration slopes after recalibration can sit
-  modestly above 1 (about 1.04 with five inner folds and about 1.2 with three).
-  Slopes before and after recalibration are in each fold's diagnostics.
+- **Nuisance calibration.** Training out-of-fold nuisances are used without
+  recalibration, so their calibration is that of the learner. Each held-out
+  calibrator is fitted on one fold model's validation patients (about a fifth of
+  the outer-training patients, fewer within an arm), so it is noisier than a
+  pooled calibrator and falls back to the identity map in small arms. Slopes
+  before and after held-out calibration are in each fold's diagnostics.
 - **Inference.** Standard errors for the AIPW ATE and the diagnostics treat the
   cross-fitted nuisances and the eligibility rule as fixed. Only the causal
   forest produces per-patient intervals, and they do not describe the ensemble

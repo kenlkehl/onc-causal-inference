@@ -742,7 +742,7 @@ written and the handoff streams the component evidence directly.
 `stage2/outer_00k/selection/modifier_tests.json` (rule `orthogonal_tests`)
 records `q_threshold`, the resolved `weights` and `weights_source`,
 `max_modifiers`, `propensity_clip`, the propensity bounds,
-`sparse_indicator_min_count`, the testing-nuisance source and recalibration
+`sparse_indicator_min_count`, the testing-nuisance source and calibration
 audit, `summary` counts, `selected_feature_ids`, `discovered_feature_ids`,
 `locked_modifier_ids`, an `interpretation` string per field, and one record per
 candidate in `candidates`:

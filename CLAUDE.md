@@ -54,7 +54,7 @@ oci/
 │   ├── hierarchical_transformer_extractor.py   # HTR model
 │   ├── concept_embedding_cache.py    # Chunk embedding cache (Stage 1)
 │   └── explicit_feature_featurizer.py          # `oci run` featurization
-├── utils/calibration.py              # Platt recalibration of nuisance predictions
+├── utils/calibration.py              # Platt calibration of nuisance predictions
 └── inference/
     │ # Workflow and Stage 1
     ├── research_all_evidence_workflow.py   # Components, config compilation, resume, reselection
@@ -144,9 +144,11 @@ default: training-row final-estimation nuisances, whose inner-fold models are
 stored in `selection/nuisance_models/` for reuse; `r_projection`,
 `aipw_projection`, and `outcome_interaction` tests per candidate; Cauchy
 combination; BH at `modifier_selection.q`) → held-out extraction of the full
-nuisance-candidate catalog → final refit with recalibrated nuisances from the
-configured nuisance learner (super learner by default; the stored inner-fold
-models score the held-out rows when their fingerprint verifies) of the
+nuisance-candidate catalog → final refit with nuisances from the configured
+nuisance learner (super learner by default; raw out-of-fold predictions for
+training rows; for held-out rows, the average of the inner-fold models, each
+Platt-calibrated on its own inner-validation rows; the stored inner-fold models
+score the held-out rows when their fingerprint verifies) of the
 estimator ensemble (unweighted mean of `causal_forest`, `linear_interactions`,
 and `dina` for binary outcomes; the interaction model leaves the selected
 modifiers' interactions and main effects unpenalized, guarded by events per

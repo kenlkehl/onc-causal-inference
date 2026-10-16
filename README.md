@@ -219,8 +219,10 @@ use a separate output directory for a different study. Details are in
 - `propensity`, `mu0`, and `mu1` are the nuisance predictions: the probability of
   treatment and the expected outcome under comparator and under treatment, from
   separate cross-fitted nuisance models, by default super learners that stack an
-  elastic net, gradient boosting, and a random forest (recalibrated for the
-  propensity and, for binary outcomes, for `mu0` and `mu1`). They are not the effect
+  elastic net, gradient boosting, and a random forest. For held-out patients they
+  average the inner-fold models after calibrating each model on its own
+  validation patients (the propensity and, for binary outcomes, `mu0` and
+  `mu1`). They are not the effect
   model's predictions, so `mu1 − mu0` need not equal `estimated_cate`.
 - `aipw_score` is the patient's augmented inverse-probability-weighted score,
   built from the observed outcome and the nuisance predictions.

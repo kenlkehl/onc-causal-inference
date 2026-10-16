@@ -234,6 +234,9 @@ def test_run_fold_analysis_selects_modifiers_by_orthogonal_tests_and_ensembles(
         "fit_row_ids"]
     for column in ("propensity", "mu0", "mu1", "effect_eligible", "inner_fold"):
         np.testing.assert_array_equal(testing[column].to_numpy(), fitted[column].to_numpy())
+    # Both are the raw out-of-fold predictions (training rows are not recalibrated).
+    for column in ("propensity", "mu0", "mu1"):
+        np.testing.assert_array_equal(fitted[column], fitted[f"{column}_uncalibrated"])
     # Final estimation scored the held-out rows with the stored selection-time
     # inner-fold models (2 folds x e, mu0, mu1) instead of refitting them, and
     # their fit audits are identical.

@@ -73,7 +73,7 @@ PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_reconciliation_v7_r
 EXTRACTION_ROUTING_SCHEMA_VERSION = 'stage2_extraction_mode_split_v1'
 REVIEW_CHECKPOINT_SCHEMA_VERSION = 'stage2_aggregate_ontology_supervisor_v2_scalar_contract_20261010'
 REVIEW_CONVERGENCE_SCHEMA_VERSION = "stage2_ontology_supervisor_convergence_v1"
-ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v11_unpenalized_selected_interactions"
+ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v12_own_fold_heldout_calibration"
 STAGE2_ROLE_SELECTION_SCHEMA_VERSION = SELECTION_SCHEMA_VERSION
 PRESELECTION_SNAPSHOT_SCHEMA_VERSION = "stage2_frozen_preselection_snapshot_v1"
 HELDOUT_MEASUREMENT_CACHE_SCHEMA_VERSION = (
@@ -6828,8 +6828,9 @@ SUPER_LEARNER_DESCRIPTION = (
     "or arm is small); non-negative weights summing to one minimize the internal-CV log "
     "loss (binary) or squared error (continuous, normalized NNLS); learners with "
     "positive weight are refitted on all training rows. The fit audits record the "
-    "weights, per-learner and stack CV losses, and each learner's own audit. Platt "
-    "recalibration then applies to the stacked predictions as to any learner."
+    "weights, per-learner and stack CV losses, and each learner's own audit. The "
+    "held-out own-fold Platt calibration applies to the stacked predictions as to any "
+    "learner."
 )
 NUISANCE_MODEL_STORE_SCHEMA_VERSION = "stage2_nuisance_model_store_v1"
 NUISANCE_MODEL_MANIFEST = "manifest.json"
@@ -7172,18 +7173,19 @@ def _cross_fitted_nuisance(
     heldout_extracted: pd.DataFrame | None = None,
     model_store: Mapping[str, Any] | None = None,
     learner: Mapping[str, Any] | None = None,
-) -> tuple[np.ndarray, ...]:
+    heldout_fold_predictions: bool = False,
+) -> tuple[Any, ...]:
     """Inner cross-fitted e/mu0/mu1 for the outer-training rows.
 
     With ``heldout_extracted`` (outer-held-out measurements, no labels), every
     inner-fold model also predicts the held-out rows in the same prediction job,
-    and the held-out nuisances are the unweighted average of the K inner-fold
-    models (the standard cross-fitting ensemble). Six arrays are then returned:
-    training e, mu0, mu1 followed by held-out e, mu0, mu1. Averages are taken on
-    the prediction scale (probabilities for binary targets), before any
-    recalibration. Each fold model predicts its inner-validation rows and the
-    held-out rows in separate calls, so the training values are identical with
-    and without ``heldout_extracted``.
+    and six arrays are returned: training e, mu0, mu1 followed by the unweighted
+    average of the K inner-fold models' held-out e, mu0, mu1 (probability scale
+    for binary targets, uncalibrated). ``heldout_fold_predictions`` appends a
+    seventh element: one record per fold model with its inner-validation
+    positions and its own held-out predictions. Each fold model predicts its
+    inner-validation rows and the held-out rows in separate calls, so the
+    training values are identical with and without ``heldout_extracted``.
     """
     from .stage2_final_modeling import prediction_result
 
@@ -7218,6 +7220,7 @@ def _cross_fitted_nuisance(
             x_t_valid = np.vstack((x_t_valid, t_encoder.transform(heldout_extracted)))
             x_y_valid = np.vstack((x_y_valid, y_encoder.transform(heldout_extracted)))
         valid_positions = [position[row_id] for row_id in valid_ids]
+        fold_number = int(fold.get("inner_fold", fold_index))
         jobs = _nuisance_prediction_futures(
             x_t_train, x_y_train, t_train, y_train, x_t_valid, x_y_valid,
             binary=binary, seed=seed + fold_index,
@@ -7227,14 +7230,22 @@ def _cross_fitted_nuisance(
             model_store=model_store,
             learner=learner,
         )
-        pending.append((valid_positions, jobs))
+        pending.append((fold_number, valid_positions, jobs))
     heldout_rows = 0 if heldout_extracted is None else len(heldout_extracted)
     heldout_sums = [np.zeros(heldout_rows) for _ in range(3)]
-    for valid_positions, jobs in pending:
+    fold_models = []
+    for fold_number, valid_positions, jobs in pending:
+        fold_heldout = []
         for index, (target, job) in enumerate(zip((e, mu0, mu1), jobs)):
             values = prediction_result(job, len(valid_positions) + heldout_rows)
             target[valid_positions] = values[: len(valid_positions)]
             heldout_sums[index] += values[len(valid_positions):]
+            fold_heldout.append(values[len(valid_positions):])
+        fold_models.append({
+            "inner_fold": fold_number,
+            "validation_positions": list(valid_positions),
+            "heldout": tuple(fold_heldout),
+        })
     if np.isnan(e).any() or np.isnan(mu0).any() or np.isnan(mu1).any():
         raise ValueError(
             "inner splits do not provide one nuisance prediction for every outer-fit row"
@@ -7244,6 +7255,8 @@ def _cross_fitted_nuisance(
     if not pending:
         raise ValueError("inner splits fitted no nuisance models for the held-out ensemble")
     heldout_e, heldout_mu0, heldout_mu1 = (values / len(pending) for values in heldout_sums)
+    if heldout_fold_predictions:
+        return e, mu0, mu1, heldout_e, heldout_mu0, heldout_mu1, fold_models
     return e, mu0, mu1, heldout_e, heldout_mu0, heldout_mu1
 
 
@@ -7296,17 +7309,21 @@ def _inner_fold_assignment(
 
 
 NUISANCE_RECALIBRATION_DESCRIPTION = (
-    "Propensity e_hat and, for binary outcomes, arm-specific mu0_hat/mu1_hat were "
-    "Platt-recalibrated (logistic regression of the label on [1, logit(prediction)]). "
-    "Calibrators are fit on training out-of-fold predictions only: each inner fold's "
-    "training predictions use a calibrator fit on the other inner folds; held-out "
-    "predictions, the uncalibrated average of the same K inner-fold models, use a "
-    "calibrator fit on all training out-of-fold predictions. Averaging makes the "
-    "held-out ensemble less over-confident than a single fold model, so held-out "
-    "calibration slopes after recalibration can sit modestly above 1. "
-    "mu0 (mu1) calibrators are fit on control (treated) training rows and applied to "
-    "every row. Continuous-outcome mu_hat is not recalibrated."
+    "Training out-of-fold e_hat, mu0_hat and mu1_hat are the raw predictions of the "
+    "inner-fold model that did not see each row; they are not recalibrated. Held-out "
+    "predictions are calibrated per inner-fold model: model k's Platt calibrator "
+    "(logistic regression of the label on [1, logit(prediction)]) is fit on model k's "
+    "own inner-validation rows (its out-of-fold predictions and those rows' training "
+    "labels; for mu0 and mu1, the validation rows in the matching arm), applied to model "
+    "k's held-out predictions, and the K calibrated predictions are averaged. A "
+    "calibrator with fewer than 20 rows, a single class, constant predictions, "
+    "separation or a nonpositive slope is the identity map. No held-out label is used. "
+    "Continuous-outcome mu_hat is not recalibrated; its held-out value is the average of "
+    "the K fold models."
 )
+# Version of the training/held-out nuisance post-processing; part of the
+# selection identity under orthogonal_tests and of the model-store identity.
+NUISANCE_CONSTRUCTION_VERSION = "raw_training_out_of_fold_own_fold_heldout_platt_v1"
 
 
 def _recalibrated_nuisances(
@@ -7314,52 +7331,69 @@ def _recalibrated_nuisances(
     treatment: np.ndarray,
     outcome: np.ndarray,
     binary: bool,
-    inner_fold_ids: np.ndarray,
     fit: tuple[np.ndarray, np.ndarray, np.ndarray],
     heldout: tuple[np.ndarray, np.ndarray, np.ndarray] | None,
+    heldout_folds: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Cross-fitted Platt recalibration learned from training OOF predictions only.
+    """Raw training OOF nuisances and own-fold Platt-calibrated held-out nuisances.
 
-    Training values never depend on ``heldout``; without it, ``"heldout"`` is None.
+    ``heldout_folds`` (required with ``heldout``) lists each inner-fold model's
+    inner-validation positions and held-out predictions. Calibrators use only
+    training rows and labels; training values never depend on ``heldout``.
     """
 
-    from ..utils.calibration import cross_fitted_platt
+    from ..utils.calibration import PlattRecalibration
 
-    raw_e_fit, raw_mu0_fit, raw_mu1_fit = (np.asarray(v, dtype=float) for v in fit)
-    raw_e_held, raw_mu0_held, raw_mu1_held = (
-        (None, None, None) if heldout is None
-        else (np.asarray(v, dtype=float) for v in heldout)
-    )
-    e_fit, e_held, e_audit = cross_fitted_platt(
-        raw_e_fit, treatment, inner_fold_ids, heldout_prob=raw_e_held
-    )
+    raw_fit = tuple(np.asarray(v, dtype=float) for v in fit)
+    treatment, outcome = np.asarray(treatment, dtype=float), np.asarray(outcome, dtype=float)
     audit: dict[str, Any] = {
-        "schema_version": "stage2_nuisance_recalibration_v1",
-        "method": "cross_fitted_platt",
+        "schema_version": "stage2_nuisance_recalibration_v2_own_fold_heldout",
+        "method": "raw_training_out_of_fold_own_fold_heldout_platt",
         "description": NUISANCE_RECALIBRATION_DESCRIPTION,
-        "propensity": e_audit,
+        "training": "raw_inner_out_of_fold_predictions_not_recalibrated",
     }
+    if heldout is None:
+        return {"fit": raw_fit, "heldout": None, "audit": audit}
+    if not heldout_folds:
+        raise ValueError("held-out calibration requires each fold model's held-out predictions")
+    raw_heldout = tuple(np.asarray(v, dtype=float) for v in heldout)
+    final_heldout = list(raw_heldout)
+    targets = [("propensity", 0, treatment, None)]
     if binary:
-        mu0_fit, mu0_held, mu0_audit = cross_fitted_platt(
-            raw_mu0_fit, outcome, inner_fold_ids, heldout_prob=raw_mu0_held,
-            fit_mask=treatment == 0,
-        )
-        mu1_fit, mu1_held, mu1_audit = cross_fitted_platt(
-            raw_mu1_fit, outcome, inner_fold_ids, heldout_prob=raw_mu1_held,
-            fit_mask=treatment == 1,
-        )
-        audit.update(mu0=mu0_audit, mu1=mu1_audit)
+        targets += [("mu0", 1, outcome, 0), ("mu1", 2, outcome, 1)]
     else:
-        mu0_fit, mu1_fit, mu0_held, mu1_held = raw_mu0_fit, raw_mu1_fit, raw_mu0_held, raw_mu1_held
         audit.update(
             mu0={"method": "none", "reason": "continuous outcome"},
             mu1={"method": "none", "reason": "continuous outcome"},
         )
+    for name, index, label, arm in targets:
+        calibrated, per_fold = [], {}
+        for fold in heldout_folds:
+            rows = np.asarray(fold["validation_positions"], dtype=int)
+            if arm is not None:
+                rows = rows[treatment[rows] == arm]
+            calibrator = PlattRecalibration.fit(raw_fit[index][rows], label[rows])
+            calibrated.append(calibrator.transform(np.asarray(fold["heldout"][index], float)))
+            per_fold[str(fold["inner_fold"])] = {
+                **calibrator.public_dict(),
+                "fit_rows": int(len(rows)),
+                "fit_scope": (
+                    "this fold model's inner-validation rows"
+                    + ("" if arm is None else f" with treatment == {arm}")
+                ),
+            }
+        final_heldout[index] = np.mean(np.vstack(calibrated), axis=0)
+        audit[name] = {
+            "method": "own_fold_platt_then_average",
+            "fold_models": len(heldout_folds),
+            "identity_calibrators": sum(
+                not str(item.get("status")).startswith("fitted") for item in per_fold.values()
+            ),
+            "per_fold": per_fold,
+        }
     return {
-        "fit": (np.asarray(e_fit, float), np.asarray(mu0_fit, float), np.asarray(mu1_fit, float)),
-        "heldout": None if heldout is None else (
-            np.asarray(e_held, float), np.asarray(mu0_held, float), np.asarray(mu1_held, float)
-        ),
+        "fit": raw_fit,
+        "heldout": tuple(np.asarray(v, dtype=float) for v in final_heldout),
         "audit": audit,
     }
 
@@ -7387,23 +7421,24 @@ def _outer_training_nuisances(
     model_store_mode: str | None = None,
     learner: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """All-candidate, inner-cross-fitted, Platt-recalibrated e/mu0/mu1.
+    """All-candidate, inner-cross-fitted e/mu0/mu1 (raw training OOF; own-fold
+    Platt-calibrated held-out values; see ``_recalibrated_nuisances``).
 
     ``learner`` is the nuisance learner (``learner_spec``); None is the elastic
     net.
 
     The final estimation (with ``candidate_heldout``) and the modifier tests
     (training rows only, before held-out measurements exist) share this
-    construction: same candidates, folds, seeds, standardization and
-    recalibration. Training values are identical in both calls.
+    construction: same candidates, folds, seeds and standardization. Training
+    values are the raw out-of-fold predictions and are identical in both calls.
 
     ``model_store_root`` with ``model_store_mode="save"`` (modifier tests)
     persists every inner-fold model under ``<root>/<fingerprint>``; with
     ``"load"`` (final estimation) those verified models score the held-out rows
     instead of being refitted. The fingerprint covers the training inputs, the
     source code and the library versions; any mismatch or load error refits.
-    The Platt recalibration is recomputed from the identical training
-    predictions.
+    The held-out calibrators are recomputed from the stored models' identical
+    training out-of-fold predictions and their own folds' training labels.
     """
 
     fit_ids = [int(value) for value in fit_ids]
@@ -7462,18 +7497,19 @@ def _outer_training_nuisances(
         heldout_extracted=candidate_heldout,
         model_store=store,
         learner=learner,
+        heldout_fold_predictions=candidate_heldout is not None,
     )
     if store is not None and model_store_mode == "save":
         _write_nuisance_model_manifest(Path(store["root"]), identity, store["fingerprint"])
     raw_fit = tuple(raw[:3])
-    raw_heldout = tuple(raw[3:]) if candidate_heldout is not None else None
+    raw_heldout = tuple(raw[3:6]) if candidate_heldout is not None else None
     recalibrated = _recalibrated_nuisances(
         treatment=treatment,
         outcome=outcome,
         binary=binary,
-        inner_fold_ids=inner_fold_ids,
         fit=raw_fit,
         heldout=raw_heldout,
+        heldout_folds=raw[6] if candidate_heldout is not None else None,
     )
     return {
         "treatment": treatment,
@@ -7521,10 +7557,10 @@ def estimate_outer_fold(
     inner-fold nuisance models; verified models are reused to score the
     held-out rows, otherwise they are refitted (identical values either way).
 
-    Training rows get inner-cross-fitted, all-candidate elastic-net nuisances;
-    held-out rows get the average of those same K inner-fold models (the
-    cross-fitting ensemble). Both are Platt-recalibrated with calibrators
-    learned from training out-of-fold predictions only. These same e/mu0/mu1 feed eligibility, the
+    Training rows get the raw inner-cross-fitted, all-candidate nuisances of
+    the configured learner; held-out rows get the average of those same K
+    inner-fold models' predictions, each Platt-calibrated on that model's own
+    inner-validation rows (training labels only). These same e/mu0/mu1 feed eligibility, the
     held-out AIPW scores, the DINA offsets, the interaction model's unpenalized
     adjustment covariates, the forest's prognostic column and the diagnostics.
     Held-out treatment/outcome labels are read only after effect predictions
@@ -7752,8 +7788,10 @@ def estimate_outer_fold(
     overlap = {
         "fit": fit_overlap,
         "heldout": overlap_diagnostics(propensity, min_propensity, max_propensity),
-        "fit_eligibility_source": "inner_out_of_fold_all_candidate_recalibrated_propensity",
-        "heldout_eligibility_source": "inner_fold_ensemble_all_candidate_recalibrated_propensity",
+        "fit_eligibility_source": "inner_out_of_fold_all_candidate_raw_propensity",
+        "heldout_eligibility_source": (
+            "inner_fold_ensemble_all_candidate_own_fold_calibrated_propensity"
+        ),
     }
     _write_json(output_dir / "propensity_overlap.json", overlap)
     if not heldout_keep.any():
@@ -7835,8 +7873,10 @@ def estimate_outer_fold(
                 "prognostic_score": (
                     {
                         "column": "logit_prognostic_mu0",
-                        "training_source": "inner_out_of_fold_all_candidate_recalibrated_mu0",
-                        "heldout_source": "inner_fold_ensemble_all_candidate_recalibrated_mu0",
+                        "training_source": "inner_out_of_fold_all_candidate_raw_mu0",
+                        "heldout_source": (
+                            "inner_fold_ensemble_all_candidate_own_fold_calibrated_mu0"
+                        ),
                         "description": PROGNOSTIC_FOREST_DESCRIPTION,
                     }
                     if prognostic_in_x
@@ -7878,8 +7918,8 @@ def estimate_outer_fold(
             architecture_diagnostics = {
                 "dina_fit_audit": fit_audit,
                 "dina_offsets": (
-                    "training rows: inner out-of-fold all-candidate recalibrated e/mu0/mu1; "
-                    "held-out rows: inner-fold-ensemble all-candidate recalibrated e/mu0/mu1 "
+                    "training rows: raw inner out-of-fold all-candidate e/mu0/mu1; "
+                    "held-out rows: inner-fold ensemble of own-fold calibrated e/mu0/mu1 "
                     "(one construction for fitting and prediction)"
                 ),
                 "cate_confidence_intervals": "not_computed_for_grouped_dina",
@@ -8124,7 +8164,9 @@ def estimate_outer_fold(
                 np.where(t_heldout == 1, mu1, mu0)[heldout_keep],
                 binary=binary,
             ),
-            "predictions_used_downstream": "recalibrated",
+            "predictions_used_downstream": (
+                "raw_training_out_of_fold_and_own_fold_calibrated_heldout"
+            ),
             "before_recalibration": calibration_set(
                 raw_fit_propensity, raw_fit_mu0, raw_fit_mu1, raw_propensity, raw_mu0, raw_mu1
             ),
@@ -8163,9 +8205,10 @@ def estimate_outer_fold(
             )
             + "on the complete nuisance-candidate catalog with fold-local "
             "regularization, fitted in the K inner cross-fitting folds. Training rows get "
-            "the prediction of the fold model that did not see them; held-out rows (whose "
-            "patients were measured on the full catalog) get the average of the same K "
-            "fold models' predictions (probability scale for binary targets). The same "
+            "the raw prediction of the fold model that did not see them; held-out rows "
+            "(whose patients were measured on the full catalog) get the average of the "
+            "same K fold models' predictions, each first Platt-calibrated on that model's "
+            "own inner-validation rows (probability scale for binary targets). The same "
             "e/mu0/mu1 feed eligibility, AIPW, DINA offsets, interaction-model adjustment "
             "covariates, the forest prognostic score and these diagnostics."
         ),
@@ -8265,7 +8308,7 @@ def estimate_outer_fold(
             "heldout_ensemble_models": int(len(set(inner_fold_ids.tolist()))),
             "training_crossfit_candidates": len(nuisance_candidate_definitions),
             "heldout_candidates": len(nuisance_candidate_definitions),
-            "recalibration": "cross_fitted_platt",
+            "recalibration": "own_fold_platt_heldout_only",
             "dina_reuses_external_nuisances": estimator == "dina"
             or (ensemble is not None and "dina" in ensemble["fitted_estimators"]),
         },
@@ -9118,8 +9161,10 @@ def run_fold_analysis(
         # The AIPW projection test clips propensities exactly as the AIPW ATE does.
         # The trees matter only to final estimation, which has its own identity.
         selection_input["modifier_test_propensity_clip"] = float(config.propensity_clip)
-        # The testing nuisances use the final-estimation nuisance learner.
+        # The testing nuisances use the final-estimation nuisance learner and
+        # its training construction (raw out-of-fold predictions).
         selection_input["modifier_test_nuisance_learner"] = _config_nuisance_learner(config)
+        selection_input["modifier_test_nuisance_construction"] = NUISANCE_CONSTRUCTION_VERSION
         selection_input["modifier_tests_source_sha256"] = hashlib.sha256(
             Path(__file__).with_name("stage2_modifier_tests.py").read_bytes()
         ).hexdigest()

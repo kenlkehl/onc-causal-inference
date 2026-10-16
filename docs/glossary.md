@@ -231,9 +231,10 @@ that variable.
 ### Platt recalibration
 
 A two-parameter logistic regression of a binary label on
-`[1, logit(prediction)]`. OCI applies it to its final nuisance predictions,
-learned from out-of-fold training predictions only (see
-[Stage 2 selection](stage2_selection.md#nuisance-construction)).
+`[1, logit(prediction)]`. OCI applies it to the held-out predictions of each
+inner-fold nuisance model, with the calibrator learned from that model's own
+out-of-fold training predictions; training out-of-fold predictions are used
+uncalibrated (see [Stage 2 selection](stage2_selection.md#nuisance-construction)).
 
 ### Super learner
 

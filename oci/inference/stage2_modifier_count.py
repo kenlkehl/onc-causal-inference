@@ -45,15 +45,16 @@ LOGGER = logging.getLogger(__name__)
 SCHEMA_VERSION = "stage2_nested_modifier_count_v8_nuisance_adjusted"
 ORTHOGONAL_SCHEMA_VERSION = "stage2_orthogonal_modifier_selection_v1"
 DEFAULT_PROPENSITY_CLIP = 0.02
-TESTING_NUISANCE_SOURCE = "outer_training_inner_out_of_fold_all_candidate_recalibrated"
+TESTING_NUISANCE_SOURCE = "outer_training_inner_out_of_fold_all_candidate_raw"
 TESTING_NUISANCE_DESCRIPTION = (
     "Testing nuisances are the final-estimation construction restricted to the "
     "outer-training rows: the configured nuisance learner on the complete "
     "nuisance-candidate catalog, "
     "fitted in the inner cross-fitting folds with the final-estimation seeds and "
-    "standardization, then cross-fitted Platt recalibration. Each training row gets "
-    "the prediction of the fold model that did not see it; m_hat = e_hat * mu1_hat + "
-    "(1 - e_hat) * mu0_hat. Final estimation reproduces the same training values."
+    "standardization. Each training row gets the raw prediction of the fold model that "
+    "did not see it (training predictions are not recalibrated); m_hat = e_hat * "
+    "mu1_hat + (1 - e_hat) * mu0_hat. Final estimation reproduces the same training "
+    "values."
 )
 
 
@@ -396,6 +397,7 @@ def _select_by_orthogonal_tests(
         "nuisance_learner": (
             dict(nuisance_learner) if nuisance_learner is not None else {"name": "elastic_net"}
         ),
+        "nuisance_construction": analysis.NUISANCE_CONSTRUCTION_VERSION,
         "fit_row_ids": fit_ids,
         "role_decisions": _fingerprint(role_report),
         "selected_definitions": selected,

@@ -286,8 +286,8 @@ nuisance predictions themselves always use the complete catalog (step 11).
 
 The modifier tests use the training half of the step 11 nuisance construction,
 computed at this point because it needs no held-out measurements: each of the
-800 outer-training patients receives a recalibrated propensity and arm-specific
-outcome predictions from the inner-fold model that did not see that patient.
+800 outer-training patients receives the raw propensity and arm-specific
+outcome predictions of the inner-fold model that did not see that patient.
 The final estimation later reproduces exactly these training values.
 
 Each candidate, with its categorical levels, "not documented" indicator, and
@@ -334,12 +334,12 @@ outer-training patients, nuisance models on the complete catalog are fitted in
 the five inner folds. By default each is a super learner: an elastic net,
 histogram gradient boosting, and a random forest, combined with non-negative
 weights chosen by internal cross-validation (`stage2.nuisance_learner:
-"elastic_net"` uses the elastic net alone). Each training patient gets the
-prediction of the model that
-did not see it, and each held-out patient gets the average of the five models'
-predictions. The propensity and, for binary outcomes, both arm-specific outcome
-predictions are then Platt-recalibrated using calibrators learned from training
-predictions only. Under `orthogonal_tests` the step 9 tests already fitted
+"elastic_net"` uses the elastic net alone). Each training patient gets the raw
+prediction of the model that did not see it. Each held-out patient gets the
+average of the five models' predictions, after each model's propensity and, for
+binary outcomes, arm-specific outcome predictions are Platt-calibrated on that
+model's own inner-validation patients (training labels only). Under
+`orthogonal_tests` the step 9 tests already fitted
 these five models and stored them, so they are reused (after a fingerprint and
 file-hash check) to score the held-out patients instead of being refitted; the
 training predictions equal those used by the tests. These predictions drive
@@ -404,7 +404,7 @@ DINA is replaced by R-loss forms in Stage 1 screens and is removed from Stage 2
 evidence, the estimator ensemble, and the `balanced_evidence` model search; the
 interaction model uses an identity link; the outcome interaction test is a
 partial F test and the three modifier-test components are weighted equally;
-outcome nuisances are not recalibrated; and the forest's X carries no
+held-out outcome nuisances are not calibrated; and the forest's X carries no
 prognostic score.
 
 ## Checkpoints and parallel work

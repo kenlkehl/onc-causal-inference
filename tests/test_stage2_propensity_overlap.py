@@ -115,12 +115,21 @@ def final_fixture(monkeypatch, tmp_path):
     calls = []
 
     def crossfit(**kw):
-        # Training OOF predictions plus the inner-fold ensemble's held-out ones.
+        # Training OOF predictions plus the inner-fold ensemble's held-out ones;
+        # every fold model predicts the same held-out values here.
         calls.append(("crossfit", len(kw["fit_ids"]), len(kw["heldout_extracted"])))
-        return (
+        position = {row: index for index, row in enumerate(kw["fit_ids"])}
+        folds = [
+            {"inner_fold": index,
+             "validation_positions": [position[row] for row in split["heldout_row_ids"]],
+             "heldout": (heldp.copy(), np.full(6, 0.2), np.full(6, 0.8))}
+            for index, split in enumerate(kw["inner_splits"], 1)
+        ]
+        arrays = (
             fitp.copy(), np.full(18, 0.2), np.full(18, 0.8),
             heldp.copy(), np.full(6, 0.2), np.full(6, 0.8),
         )
+        return (*arrays, folds) if kw.get("heldout_fold_predictions") else arrays
 
     monkeypatch.setattr(analysis, "_cross_fitted_nuisance", crossfit)
 
