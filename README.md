@@ -214,6 +214,16 @@ workflow. Without an output directory, results go to
 [Configuration](docs/configuration.md#the-synthetic-launcher-run_syntheticsh) and
 [Serving](docs/serving.md#hardware-presets).
 
+Synthetic notes never mention treatment or outcome, so one corpus serves many
+data-generating processes. `python -m synthetic_data.cli reequation` recomputes
+treatment and outcome over a cohort's true characteristics for a scenario
+(instruments, prognostic-only variables, dual roles, modifier main effects,
+nonlinear terms, unmeasured confounders) without an LLM, copying the text
+unchanged; it refuses cohorts with post-treatment notes. Factors that change the
+text are generator options: correlated covariates, MCAR or MNAR documentation,
+post-treatment dated notes, and near-duplicate proxies. See
+[Synthetic data](docs/synthetic_data.md#re-equation).
+
 ## Resume, inspect, or rerun selection
 
 The output directory is the checkpoint. **Rerunning the same command resumes an
@@ -459,7 +469,7 @@ See [Benchmarks](docs/benchmarks.md).
 | [Configuration](docs/configuration.md) | Configuration keys, command-line flags, launcher, outputs, resume, and reselection |
 | [Serving](docs/serving.md) | LLM endpoints, managed vLLM pools, and hardware presets |
 | [Optional extensions](docs/optional_extensions.md) | Optional Stage 2 steps and the standalone `oci run` workflows |
-| [Synthetic data](docs/synthetic_data.md) | The synthetic cohort generator, bundled cohorts, and oracle columns |
+| [Synthetic data](docs/synthetic_data.md) | The synthetic cohort generator, causal roles, generation-time factors, re-equation, bundled cohorts, and oracle columns |
 | [Benchmarks](docs/benchmarks.md) | The scenario registry, seeds and the confirmatory rule, the benchmark commands, metrics, and caveats |
 | [R-learner weighting](docs/design_notes/r_learner_weighting.md) | Design note on weighted and unweighted effect objectives |
 

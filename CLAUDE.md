@@ -34,7 +34,8 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 | `python scripts/benchmark.py` | `oci/evaluation/benchmark.py`, `oci/evaluation/benchmark_ceiling.py`, `benchmarks/{scenarios,seeds}.json` | `materialize`: one cohort per scenario, size, and seed (re-equation through `synthetic_data.reequation`, or the generator commands for S5/S6); `configs`: one workflow configuration per cell (never launches runs; confirmatory seeds need `--confirmatory` and are logged in `benchmarks/confirmatory_ledger.jsonl`); `aggregate`: finished runs versus oracle truth, with an oracle-covariate ceiling through Stage 2's `estimate_outer_fold` |
 | `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only; for a dated-notes run, `dataset` is its `input/analysis_cohort.parquet`) |
 | `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
-| `python -m synthetic_data.cli` | `synthetic_data/` | Synthetic cohort generator |
+| `python -m synthetic_data.cli` | `synthetic_data/` (`generator.py`, `generation_factors.py`, `dgp_terms.py`) | Synthetic cohort generator: confounder, effect-modifier, instrument, and prognostic roles; generation-time factors (covariate correlation, MCAR/MNAR documentation, post-treatment dated notes, proxies) |
+| `python -m synthetic_data.cli reequation` | `synthetic_data/reequation.py` (`reequation_cohort`) | Recompute treatment and outcome over an existing synthetic cohort's true characteristics for a scenario (no LLM; text copied unchanged; refuses cohorts with post-treatment notes) |
 
 Helper scripts: `scripts/detect_all_evidence_hardware.py` (GPU and worker
 sizing for `run_synthetic.sh`) and `scripts/configure_local_cuda.py` (exposes

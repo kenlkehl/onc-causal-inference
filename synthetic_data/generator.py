@@ -6,7 +6,7 @@ import json
 import math
 import random
 import re
-import unicodedata
+from datetime import timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -24,11 +24,30 @@ from .prompts import (
     SUMMARY_STATISTICS_PROMPT,
     NOTE_EXPANSION_PROMPT,
     DRUG_PERTURBATION_MAP,
+    DOCUMENTATION_TIMELINE_INSTRUCTION,
     format_confounder_list,
     format_patient_characteristics,
     build_event_timeline_prompt,
+    build_note_expansion_prompt,
 )
 from .structured_data import convert_structured_event_to_text
+from .dgp_terms import (
+    ALL_ROLES,
+    CONFOUNDER,
+    EFFECT_MODIFIER,
+    INSTRUMENT,
+    LLM_ROLES,
+    PROGNOSTIC,
+    category_lookup_key,
+    category_probabilities,
+    draw_main_coefficients,
+    nonlinear_value,
+    outcome_nonlinear_terms,
+    role_lists,
+    roles_of,
+    validate_role_combination,
+)
+from . import generation_factors as factors_lib
 
 
 logger = logging.getLogger(__name__)
@@ -57,23 +76,35 @@ _RESERVED_ORACLE_COLUMNS = {
     "true_ite",
 }
 
-# Hyphen/dash look-alikes that LLMs emit interchangeably (U+2010 hyphen,
-# U+2011 non-breaking hyphen, U+2012 figure dash, U+2013 en dash, U+2014 em
-# dash, U+2212 minus). NFKC does not fold these to ASCII "-".
-_DASH_TRANSLATION = str.maketrans({ch: "-" for ch in "\u2010\u2011\u2012\u2013\u2014\u2212"})
+# Spelling-insensitive category matching (see ``dgp_terms.category_lookup_key``).
+_category_lookup_key = category_lookup_key
+
+# Configuration fields added after the first saved generation configs; a saved
+# design or source config without one of them used its default.
+DGP_FACTOR_FIELDS = (
+    "num_instruments",
+    "num_prognostic",
+    "modifier_main_effects",
+    "nonlinearity",
+    "treatment_logit_std",
+    "outcome_logit_std",
+    "modifier_strength",
+    "covariate_correlation",
+    "documentation_rate",
+    "documentation_mechanism",
+    "documentation_mnar_slope",
+    "documented_variables_subset",
+    "post_treatment_notes",
+    "num_proxy_variables",
+    "proxy_correlation",
+)
 
 
-def _category_lookup_key(value: Any) -> str:
-    """Spelling-insensitive key for matching category labels across LLM outputs.
+def dgp_factor_defaults() -> Dict[str, Any]:
+    """Default value of every field in ``DGP_FACTOR_FIELDS``."""
 
-    Feature definitions and summary statistics are produced by separate LLM
-    calls, so the same category can arrive as "First\u2011line" in one and
-    "First-line" in the other. Matching on this key keeps every declared
-    category sampleable while the sampled value keeps the definition's label.
-    """
-
-    text = unicodedata.normalize("NFKC", str(value)).translate(_DASH_TRANSLATION)
-    return re.sub(r"\s+", " ", text).strip().casefold()
+    defaults = SyntheticDataConfig()
+    return {name: getattr(defaults, name) for name in DGP_FACTOR_FIELDS}
 
 
 def generate_synthetic_dataset(
@@ -154,6 +185,7 @@ def generate_synthetic_dataset(
     treatment_eq = design["treatment_equation"]
     outcome_eq = design["outcome_equation"]
     summary_stats = design["summary_statistics"]
+    factors = design.get("factors") or {}
 
     # Step 6: Generate patient data
     logger.info(f"Step 6/7: Generating {config.dataset_size} patients...")
@@ -166,11 +198,16 @@ def generate_synthetic_dataset(
         outcome_eq=outcome_eq,
         num_workers=num_workers,
         show_progress=show_progress,
+        factors=factors,
     )
 
     # Step 6: Assemble dataset
     logger.info("Step 7/7: Assembling dataset...")
-    df = pd.DataFrame(patient_data)
+    note_rows = [row for patient in patient_data for row in patient.get(NOTE_ROWS_KEY, [])]
+    df = pd.DataFrame(
+        [{key: value for key, value in patient.items() if key != NOTE_ROWS_KEY}
+         for patient in patient_data]
+    )
 
     # Compile metadata
     metadata = {
@@ -178,9 +215,14 @@ def generate_synthetic_dataset(
         "features": confounders,
         "confounders": _filter_features_by_role(confounders, "confounder"),
         "effect_modifiers": _filter_features_by_role(confounders, "effect_modifier"),
+        **_extended_role_metadata(confounders),
         "treatment_equation": treatment_eq,
         "outcome_equation": outcome_eq,
         "summary_statistics": summary_stats,
+        "unmeasured_confounders": [],
+        "scenario": None,
+        "documentation": _documentation_metadata(factors.get("documentation"), df),
+        "post_treatment": _post_treatment_metadata(factors.get("post_treatment"), df, note_rows),
         "dataset_statistics": oracle_dataset_statistics(df),
     }
 
@@ -189,6 +231,10 @@ def generate_synthetic_dataset(
     metadata_path = output_dir / "metadata.json"
 
     df.to_parquet(dataset_path, index=False)
+    if factors.get("post_treatment"):
+        notes_path = output_dir / NOTES_FILENAME
+        _notes_frame(note_rows).to_parquet(notes_path, index=False)
+        logger.info(f"Dated notes saved to {notes_path}")
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2, default=str)
 
@@ -196,6 +242,91 @@ def generate_synthetic_dataset(
     logger.info(f"Metadata saved to {metadata_path}")
 
     return df, metadata
+
+
+NOTES_FILENAME = "notes.parquet"
+# Key of a patient record that carries its dated note rows until the notes
+# table is written; it never becomes a dataset column.
+NOTE_ROWS_KEY = "note_rows"
+NOTES_COLUMNS = ["patient_id", "note_date", "note_text", "note_type"]
+
+
+def _extended_role_metadata(features: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Metadata keys for the Python-assigned roles and the proxies."""
+
+    lists = role_lists(features)
+    return {
+        "instruments": lists["instruments"],
+        "prognostic_variables": lists["prognostic_variables"],
+        "proxies": [
+            {"name": feature["name"], "proxy_of": feature["proxy_of"]}
+            for feature in features
+            if feature.get("proxy_of")
+        ],
+    }
+
+
+def _documentation_metadata(
+    design: Optional[Dict[str, Any]], df: pd.DataFrame
+) -> Optional[Dict[str, Any]]:
+    if not design:
+        return None
+    columns = {name: factors_lib.documented_oracle_column(name) for name in design["variables"]}
+    return {
+        **design,
+        "oracle_columns": columns,
+        "achieved_rates": {
+            name: float(df[column].mean()) for name, column in columns.items() if column in df.columns
+        },
+    }
+
+
+def _post_treatment_metadata(
+    block: Optional[Dict[str, Any]], df: pd.DataFrame, note_rows: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    if not block:
+        return None
+    post_rows = [row for row in note_rows if row.get("post_index")]
+    return {
+        "rate": block["rate"],
+        "regimen_mention_prob": block["regimen_mention_prob"],
+        "events": block["events"],
+        "event_rates": {
+            event["oracle_column"]: float(df[event["oracle_column"]].mean())
+            for event in block["events"]
+            if event["oracle_column"] in df.columns
+        },
+        "treatment_arms": {
+            "1": "the first treatment named in the clinical question",
+            "0": "the second treatment named in the clinical question",
+        },
+        "notes_file": NOTES_FILENAME,
+        "notes_columns": list(NOTES_COLUMNS),
+        "note_type": factors_lib.POST_TREATMENT_NOTE_TYPE,
+        "note_day_range": list(factors_lib.POST_TREATMENT_DAY_RANGE),
+        "index_date_column": "index_date",
+        "index_date_rule": "the day after the last pretreatment timeline event",
+        "text_columns": {
+            "pretreatment": "clinical_text",
+            "with_post_treatment": "clinical_text_with_post_treatment",
+        },
+        "patients_with_post_treatment_notes": len({row["patient_id"] for row in post_rows}),
+        "post_treatment_note_count": len(post_rows),
+        "pretreatment_note_count": len(note_rows) - len(post_rows),
+    }
+
+
+def _notes_frame(note_rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    """The dated notes table: every pretreatment document and post-index note."""
+
+    frame = pd.DataFrame(
+        [{column: row[column] for column in NOTES_COLUMNS} for row in note_rows],
+        columns=NOTES_COLUMNS,
+    )
+    frame["patient_id"] = frame["patient_id"].astype("int64")
+    frame["_order"] = np.arange(len(frame))
+    frame = frame.sort_values(["patient_id", "note_date", "_order"], kind="stable")
+    return frame.drop(columns="_order").reset_index(drop=True)
 
 
 def _dgp_design_settings(config: SyntheticDataConfig) -> Dict[str, Any]:
@@ -224,6 +355,9 @@ def _load_dgp_design(path: Path, config: SyntheticDataConfig) -> Optional[Dict[s
     with open(path, "r", encoding="utf-8") as f:
         design = json.load(f)
     saved_settings = design.get("settings", {})
+    if saved_settings:
+        # A design saved before a factor field existed used its default.
+        saved_settings = {**json.loads(json.dumps(dgp_factor_defaults())), **saved_settings}
     current_settings = _dgp_design_settings(config)
     if saved_settings != current_settings:
         changed = sorted(
@@ -258,15 +392,23 @@ def _write_dgp_design(path: Path, config: SyntheticDataConfig, design: Dict[str,
 def _design_dgp(client: LLMClient, config: SyntheticDataConfig) -> Dict[str, Any]:
     """Steps 1-5: LLM-designed features, equations and distributions, then calibration."""
 
-    # Step 1: Generate role-tagged features
+    # Step 1: Generate role-tagged features. Instruments and prognostic
+    # variables are requested as extra confounder-role variables and then
+    # reassigned by Python; the LLM is asked for nothing else.
     logger.info("Step 1/5: Generating role-tagged features...")
+    num_features, num_confounders, num_effect_modifiers = _llm_feature_request(config)
     confounders = _generate_confounders(
         client,
         config.clinical_question,
-        num_features=config.num_features,
-        num_confounders=config.num_confounders,
-        num_effect_modifiers=config.num_effect_modifiers,
+        num_features=num_features,
+        num_confounders=num_confounders,
+        num_effect_modifiers=num_effect_modifiers,
     )
+    confounders = _assign_python_roles(
+        confounders, config.num_instruments, config.num_prognostic, config.seed
+    )
+    if config.num_proxy_variables:
+        confounders = confounders + _generate_proxy_features(client, config, confounders)
     logger.info(f"Generated {len(confounders)} features: {[c['name'] for c in confounders]}")
     
     # Step 2: Generate regression equations
@@ -275,6 +417,9 @@ def _design_dgp(client: LLMClient, config: SyntheticDataConfig) -> Dict[str, Any
         client, config.clinical_question, confounders, config.treatment_effect_prob,
         main_coef_scale=config.main_coefficient_scale,
         interaction_coef_scale=config.interaction_coefficient_scale,
+        modifier_strength=config.modifier_strength,
+        modifier_main_effects=config.modifier_main_effects,
+        nonlinearity=config.nonlinearity,
     )
     logger.info(f"Treatment equation has {len(treatment_eq['coefficients'])} terms")
     logger.info(f"Outcome equation has {len(outcome_eq['coefficients'])} terms")
@@ -286,6 +431,7 @@ def _design_dgp(client: LLMClient, config: SyntheticDataConfig) -> Dict[str, Any
     # Step 4: Rescale coefficients first to achieve target logit std
     # (Order matters: rescaling changes the linear predictor, so intercepts must be calibrated afterward)
     logger.info("Step 4/7: Rescaling coefficients for target variability...")
+    treatment_logit_std, outcome_logit_std = config.logit_stds()
     treatment_eq, outcome_eq = _rescale_for_target_logit_std(
         confounders=confounders,
         summary_stats=summary_stats,
@@ -293,6 +439,10 @@ def _design_dgp(client: LLMClient, config: SyntheticDataConfig) -> Dict[str, Any
         outcome_eq=outcome_eq,
         target_logit_std=config.target_logit_std,
         continuous_distribution=config.continuous_covariate_distribution,
+        treatment_logit_std=treatment_logit_std,
+        outcome_logit_std=outcome_logit_std,
+        covariate_correlation=config.covariate_correlation,
+        proxy_correlation=config.proxy_correlation,
     )
 
     # Step 5: Calibrate intercepts to hit target rates (after rescaling)
@@ -305,14 +455,131 @@ def _design_dgp(client: LLMClient, config: SyntheticDataConfig) -> Dict[str, Any
         target_treatment_rate=config.target_treatment_rate,
         target_control_outcome_rate=config.target_control_outcome_rate,
         continuous_distribution=config.continuous_covariate_distribution,
+        covariate_correlation=config.covariate_correlation,
+        proxy_correlation=config.proxy_correlation,
     )
 
-    return {
+    design = {
         "features": confounders,
         "treatment_equation": treatment_eq,
         "outcome_equation": outcome_eq,
         "summary_statistics": summary_stats,
     }
+    factors = _design_generation_factors(config, confounders, summary_stats)
+    if factors:
+        design["factors"] = factors
+    return design
+
+
+def _llm_feature_request(
+    config: SyntheticDataConfig,
+) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    """Total and role counts to request from the LLM (instruments and prognostic included).
+
+    Instruments and prognostic variables are requested as additional
+    confounder-role variables, which ``_assign_python_roles`` then reassigns.
+    """
+
+    extra = config.num_instruments + config.num_prognostic
+    if not extra:
+        return config.num_features, config.num_confounders, config.num_effect_modifiers
+    num_confounders = config.num_confounders
+    if num_confounders is not None or config.num_effect_modifiers is not None:
+        num_confounders = (num_confounders or 0) + extra
+    num_features = config.num_features + extra if config.num_features is not None else None
+    return num_features, num_confounders, config.num_effect_modifiers
+
+
+def _assign_python_roles(
+    features: List[Dict[str, Any]], num_instruments: int, num_prognostic: int, seed: int
+) -> List[Dict[str, Any]]:
+    """Reassign confounder-only variables as instruments and prognostic variables.
+
+    The variables are drawn with a seeded RNG separate from the global stream;
+    the first ``num_instruments`` drawn become instruments and the rest
+    prognostic variables.
+    """
+
+    extra = num_instruments + num_prognostic
+    if not extra:
+        return features
+    pure = [index for index, feature in enumerate(features) if roles_of(feature) == [CONFOUNDER]]
+    if len(pure) < extra:
+        raise ValueError(
+            f"num_instruments + num_prognostic = {extra} needs that many confounder-only "
+            f"variables, but the design has {len(pure)}; set --num-confounders, or reduce "
+            "the overlap between roles"
+        )
+    chosen = random.Random(f"{seed}:python_roles").sample(pure, extra)
+    output = [dict(feature) for feature in features]
+    for position, index in enumerate(chosen):
+        output[index]["roles"] = [INSTRUMENT if position < num_instruments else PROGNOSTIC]
+    return output
+
+
+def _generate_proxy_features(
+    client: LLMClient, config: SyntheticDataConfig, features: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Ask the design LLM to name a related measurement for each chosen confounder."""
+
+    from .prompts import PROXY_VARIABLE_PROMPT
+
+    sources = factors_lib.choose_proxy_sources(features, config.num_proxy_variables, config.seed)
+    by_name = {feature["name"]: feature for feature in features}
+    prompt = PROXY_VARIABLE_PROMPT.format(
+        clinical_question=config.clinical_question,
+        source_list=format_confounder_list([by_name[name] for name in sources]),
+        all_names=", ".join(feature["name"] for feature in features),
+    )
+    response = client.generate_json(
+        prompt=prompt,
+        system_prompt=CLINICAL_SYSTEM_PROMPT,
+        temperature=0.7,
+    )
+    return factors_lib.validate_proxy_definitions(
+        response, sources, [feature["name"] for feature in features]
+    )
+
+
+def _design_generation_factors(
+    config: SyntheticDataConfig,
+    features: List[Dict[str, Any]],
+    summary_stats: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Documentation probabilities and post-treatment events fixed with the DGP."""
+
+    factors: Dict[str, Any] = {}
+    if config.documentation_enabled():
+        variables = factors_lib.documentation_variables(config.documented_variables_subset, features)
+        sampled = []
+        if config.documentation_mechanism == "mnar":
+            sampled = [
+                _sample_patient_characteristics(
+                    features,
+                    summary_stats,
+                    continuous_distribution=config.continuous_covariate_distribution,
+                    covariate_correlation=config.covariate_correlation,
+                    proxy_correlation=config.proxy_correlation,
+                )
+                for _ in range(10000)
+            ]
+        factors["documentation"] = factors_lib.documentation_design(
+            rate=config.documentation_rate,
+            mechanism=config.documentation_mechanism,
+            slope=config.documentation_mnar_slope,
+            variables=variables,
+            features=features,
+            summary_stats=summary_stats,
+            sampled_characteristics=sampled,
+        )
+    if config.post_treatment_enabled():
+        block = config.post_treatment_notes
+        factors["post_treatment"] = {
+            "rate": block["rate"],
+            "regimen_mention_prob": block["regimen_mention_prob"],
+            "events": factors_lib.resolve_post_treatment_events(block, features, config.seed),
+        }
+    return factors
 
 
 def oracle_dataset_statistics(df: pd.DataFrame) -> Dict[str, Any]:
@@ -461,7 +728,7 @@ def _generate_confounders(
     
     confounders = response.get("features", response.get("confounders", []))
 
-    # Validate structure
+    # Validate structure; the LLM tags only confounder and effect-modifier roles.
     confounders = _validate_feature_roles(confounders)
 
     return _enforce_feature_count_request(
@@ -469,26 +736,33 @@ def _generate_confounders(
     )
 
 
-def _validate_feature_roles(features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Validate feature definitions and normalize causal roles."""
-    valid_roles = {"confounder", "effect_modifier"}
+def _validate_feature_roles(
+    features: List[Dict[str, Any]],
+    *,
+    allowed_roles=LLM_ROLES,
+    allow_empty: bool = False,
+) -> List[Dict[str, Any]]:
+    """Validate feature definitions and normalize causal roles.
+
+    LLM-designed features must carry ``confounder``, ``effect_modifier``, or
+    both. Saved metadata may also hold Python-assigned ``instrument`` and
+    ``prognostic`` roles and role-free variables (``allowed_roles=ALL_ROLES,
+    allow_empty=True``).
+    """
     validated = []
     for feature in features:
         if "name" not in feature or "type" not in feature:
             raise ValueError(f"Invalid feature structure: {feature}")
         if feature["type"] == "categorical" and "categories" not in feature:
             raise ValueError(f"Categorical feature missing categories: {feature}")
-        roles = feature.get("roles")
-        if not roles:
-            raise ValueError(
-                f"Feature '{feature.get('name')}' is missing roles; expected one or both of "
-                "['confounder', 'effect_modifier']"
-            )
-        invalid = set(roles) - valid_roles
+        roles = validate_role_combination(
+            feature.get("name"), feature.get("roles") or [], allow_empty=allow_empty
+        )
+        invalid = set(roles) - set(allowed_roles)
         if invalid:
             raise ValueError(f"Feature '{feature.get('name')}' has invalid roles: {sorted(invalid)}")
         feature = feature.copy()
-        feature["roles"] = list(dict.fromkeys(roles))
+        feature["roles"] = roles
         validated.append(feature)
     return validated
 
@@ -586,9 +860,26 @@ def _generate_equations(
     treatment_coefficient: float,
     main_coef_scale: float = 0.3,
     interaction_coef_scale: float = 0.1,
+    modifier_strength: float = 1.0,
+    modifier_main_effects: bool = False,
+    nonlinearity: str = "none",
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Generate treatment and outcome regression equations with scaled coefficients."""
-    confounder_list = format_confounder_list(confounders)
+    """Generate treatment and outcome regression equations with scaled coefficients.
+
+    The LLM writes main terms for confounder-role variables only. Python adds
+    the treatment-interaction terms (scaled by ``modifier_strength``) and the
+    pairwise confounder interactions as before, then, drawn the same way
+    (``uniform(-1, 1)`` times the main scale), instrument terms in the
+    treatment equation, prognostic terms in the outcome equation, and, with
+    ``modifier_main_effects``, outcome main terms for effect-modifier-only
+    variables. ``nonlinearity`` reshapes continuous outcome main terms and
+    treatment interactions (see ``_compute_logit``).
+    """
+    # Instruments, prognostic variables, and proxies are Python's; the LLM
+    # sees only the variables tagged with its two roles.
+    confounder_list = format_confounder_list(
+        [feature for feature in confounders if set(roles_of(feature)) & LLM_ROLES]
+    )
 
     prompt = REGRESSION_EQUATION_PROMPT.format(
         clinical_question=clinical_question,
@@ -636,7 +927,7 @@ def _generate_equations(
         name = conf["name"]
         if conf["type"] == "continuous":
             # Interaction: treatment * z_scored_confounder
-            coef = np.random.uniform(-1.0, 1.0) * interaction_coef_scale
+            coef = np.random.uniform(-1.0, 1.0) * interaction_coef_scale * modifier_strength
             treatment_interactions.append({
                 "term": name,
                 "coefficient": coef
@@ -645,7 +936,7 @@ def _generate_equations(
             # For categorical, add interaction with each non-reference category
             for cat in conf["categories"][1:]:  # Skip reference category
                 dummy_name = f"{name}_{cat}"
-                coef = np.random.uniform(-1.0, 1.0) * interaction_coef_scale
+                coef = np.random.uniform(-1.0, 1.0) * interaction_coef_scale * modifier_strength
                 treatment_interactions.append({
                     "term": dummy_name,
                     "coefficient": coef
@@ -682,6 +973,26 @@ def _generate_equations(
     treatment_eq["interactions"] = existing_interactions + new_interactions
     logger.info(f"Added {len(new_interactions)} pairwise confounder interactions to treatment equation")
 
+    # Python-drawn main terms for the roles the LLM was not asked about. These
+    # draws come after all earlier ones, so a design without these roles
+    # consumes exactly the same random numbers as before.
+    treatment_eq["coefficients"].update(draw_main_coefficients(
+        _filter_features_by_role(confounders, INSTRUMENT), np.random.uniform, main_coef_scale
+    ))
+    outcome_eq["coefficients"].update(draw_main_coefficients(
+        _filter_features_by_role(confounders, PROGNOSTIC), np.random.uniform, main_coef_scale
+    ))
+    if modifier_main_effects:
+        modifier_only = [
+            feature for feature in confounders if roles_of(feature) == [EFFECT_MODIFIER]
+        ]
+        outcome_eq["coefficients"].update(
+            draw_main_coefficients(modifier_only, np.random.uniform, main_coef_scale)
+        )
+    if nonlinearity != "none":
+        outcome_eq["nonlinearity"] = nonlinearity
+        outcome_eq["nonlinear_terms"] = outcome_nonlinear_terms(confounders, outcome_eq)
+
     return treatment_eq, outcome_eq
 
 
@@ -716,6 +1027,9 @@ def _calibrate_intercepts(
     target_control_outcome_rate: float,
     n_samples: int = 10000,
     continuous_distribution: str = "positive_lognormal",
+    covariate_correlation: float = 0.0,
+    proxy_correlation: float = 0.9,
+    sampled_chars: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Calibrate equation intercepts to achieve target marginal rates.
@@ -731,6 +1045,9 @@ def _calibrate_intercepts(
         target_treatment_rate: Desired proportion receiving treatment=1
         target_control_outcome_rate: Desired outcome rate when treatment=0
         n_samples: Number of Monte Carlo samples for calibration
+        sampled_chars: Monte Carlo draws to use instead of sampling
+            ``n_samples`` from the summary statistics (re-equation passes
+            draws of the source cohort's covariates)
         
     Returns:
         Tuple of (calibrated_treatment_eq, calibrated_outcome_eq)
@@ -738,12 +1055,17 @@ def _calibrate_intercepts(
     from scipy.optimize import brentq
     
     # Sample characteristics for calibration
-    sampled_chars = [
-        _sample_patient_characteristics(
-            confounders, summary_stats, continuous_distribution=continuous_distribution
-        )
-        for _ in range(n_samples)
-    ]
+    if sampled_chars is None:
+        sampled_chars = [
+            _sample_patient_characteristics(
+                confounders,
+                summary_stats,
+                continuous_distribution=continuous_distribution,
+                covariate_correlation=covariate_correlation,
+                proxy_correlation=proxy_correlation,
+            )
+            for _ in range(n_samples)
+        ]
     
     def sigmoid(x):
         return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
@@ -828,19 +1150,34 @@ def _rescale_for_target_logit_std(
     target_logit_std: float = 2.0,
     n_samples: int = 10000,
     continuous_distribution: str = "positive_lognormal",
+    treatment_logit_std: Optional[float] = None,
+    outcome_logit_std: Optional[float] = None,
+    covariate_correlation: float = 0.0,
+    proxy_correlation: float = 0.9,
+    sampled_chars: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Rescale all coefficients (except intercept) to achieve target logit std.
 
     This ensures the final logits have a reasonable range for meaningful probabilities.
+    ``treatment_logit_std`` and ``outcome_logit_std`` override
+    ``target_logit_std`` for one equation each. ``sampled_chars`` replaces the
+    ``n_samples`` draws from the summary statistics (see ``_calibrate_intercepts``).
     """
+    treatment_target = target_logit_std if treatment_logit_std is None else treatment_logit_std
+    outcome_target = target_logit_std if outcome_logit_std is None else outcome_logit_std
     # Sample characteristics
-    sampled_chars = [
-        _sample_patient_characteristics(
-            confounders, summary_stats, continuous_distribution=continuous_distribution
-        )
-        for _ in range(n_samples)
-    ]
+    if sampled_chars is None:
+        sampled_chars = [
+            _sample_patient_characteristics(
+                confounders,
+                summary_stats,
+                continuous_distribution=continuous_distribution,
+                covariate_correlation=covariate_correlation,
+                proxy_correlation=proxy_correlation,
+            )
+            for _ in range(n_samples)
+        ]
 
     def compute_logit_without_intercept(characteristics, equation, treatment=None):
         """Compute logit with intercept temporarily set to 0."""
@@ -897,12 +1234,12 @@ def _rescale_for_target_logit_std(
 
     # Compute scale factors
     if treatment_std > 0:
-        treatment_scale = target_logit_std / treatment_std
+        treatment_scale = treatment_target / treatment_std
         treatment_eq = scale_equation_coefficients(treatment_eq, treatment_scale)
         logger.info(f"Scaled treatment coefficients by {treatment_scale:.3f}")
 
     if outcome_std > 0:
-        outcome_scale = target_logit_std / outcome_std
+        outcome_scale = outcome_target / outcome_std
         outcome_eq = scale_equation_coefficients(outcome_eq, outcome_scale)
         logger.info(f"Scaled outcome coefficients by {outcome_scale:.3f}")
 
@@ -954,8 +1291,23 @@ def _sample_patient_characteristics(
     confounders: List[Dict[str, Any]],
     summary_stats: Dict[str, Any],
     continuous_distribution: str = "positive_lognormal",
+    covariate_correlation: float = 0.0,
+    proxy_correlation: float = 0.9,
 ) -> Dict[str, Any]:
-    """Sample patient characteristics from summary statistics."""
+    """Sample patient characteristics from summary statistics.
+
+    Variables are drawn independently unless ``covariate_correlation`` is
+    positive or a variable is a proxy (``proxy_of``); then the Gaussian copula
+    of ``_sample_copula_characteristics`` is used.
+    """
+    if covariate_correlation or any(conf.get("proxy_of") for conf in confounders):
+        return _sample_copula_characteristics(
+            confounders,
+            summary_stats,
+            continuous_distribution,
+            covariate_correlation,
+            proxy_correlation,
+        )
     characteristics = {}
     
     for conf in confounders:
@@ -969,28 +1321,84 @@ def _sample_patient_characteristics(
                 continuous_distribution,
             )
         else:
-            # Sample from categorical distribution
-            categories = conf["categories"]
-            proportions = stats.get("proportions", {})
-            
-            # Default to uniform if no proportions
-            if not proportions:
-                proportions = {cat: 1.0 / len(categories) for cat in categories}
-            
-            # Match proportions to categories by a spelling-insensitive key
-            # (e.g. "First\u2011line" vs "First-line"); the sampled value keeps
-            # the feature definition's label.
-            by_key = {_category_lookup_key(cat): value for cat, value in proportions.items()}
-            probs = [by_key.get(_category_lookup_key(cat), 0.0) for cat in categories]
-            prob_sum = sum(probs)
-            if prob_sum > 0:
-                probs = [p / prob_sum for p in probs]
-            else:
-                probs = [1.0 / len(categories)] * len(categories)
-            
-            chosen = np.random.choice(categories, p=probs)
+            # Sample from categorical distribution. Proportions are matched to
+            # categories by a spelling-insensitive key (e.g. "First\u2011line"
+            # vs "First-line"); the sampled value keeps the definition's label.
+            probs = category_probabilities(conf, summary_stats)
+            chosen = np.random.choice(conf["categories"], p=probs)
             characteristics[name] = chosen
 
+    return characteristics
+
+
+def _continuous_value_from_latent(mean: float, std: float, distribution: str, z: float) -> float:
+    """The continuous value whose standard-normal latent is ``z`` (same marginals as the draw)."""
+
+    mean = float(mean)
+    std = float(std)
+    if distribution == "positive_lognormal" and mean > 0:
+        sigma2 = math.log1p((std / mean) ** 2)
+        mu = math.log(mean) - sigma2 / 2.0
+        return float(math.exp(mu + math.sqrt(sigma2) * z))
+    return float(mean + std * z)
+
+
+def _sample_copula_characteristics(
+    features: List[Dict[str, Any]],
+    summary_stats: Dict[str, Any],
+    continuous_distribution: str,
+    covariate_correlation: float,
+    proxy_correlation: float,
+) -> Dict[str, Any]:
+    """Gaussian-copula draw of one patient's characteristics.
+
+    Each non-proxy variable has a standard-normal latent ``z``; the latents
+    share one common factor, so every pair has correlation
+    ``covariate_correlation`` (exchangeable). A proxy's latent is
+    ``r * z_source + sqrt(1 - r^2) * e`` with ``r = proxy_correlation``.
+    Continuous marginals are those of the independent draw (normal, or the
+    moment-matched log-normal); a categorical variable takes the level whose
+    cumulative proportion, in category order, first exceeds ``Phi(z)``.
+    Draws from the global RNG: the common factor (when the correlation is
+    positive), one normal per non-proxy variable, then one per proxy.
+    """
+
+    if continuous_distribution not in CONTINUOUS_COVARIATE_DISTRIBUTIONS:
+        raise ValueError(
+            f"continuous covariate distribution must be one of "
+            f"{CONTINUOUS_COVARIATE_DISTRIBUTIONS}, got {continuous_distribution!r}"
+        )
+    rho = float(covariate_correlation)
+    common = float(np.random.normal()) if rho > 0 else 0.0
+    latent: Dict[str, float] = {}
+    for feature in features:
+        if not feature.get("proxy_of"):
+            latent[feature["name"]] = (
+                math.sqrt(rho) * common + math.sqrt(1.0 - rho) * float(np.random.normal())
+            )
+    r = float(proxy_correlation)
+    for feature in features:
+        source = feature.get("proxy_of")
+        if source:
+            if source not in latent:
+                raise ValueError(f"proxy {feature['name']!r} copies unknown variable {source!r}")
+            latent[feature["name"]] = (
+                r * latent[source] + math.sqrt(1.0 - r * r) * float(np.random.normal())
+            )
+    characteristics: Dict[str, Any] = {}
+    for feature in features:
+        name = feature["name"]
+        z = latent[name]
+        stats = summary_stats.get(name, {})
+        if feature["type"] == "continuous":
+            characteristics[name] = _continuous_value_from_latent(
+                stats.get("mean", 0.0), stats.get("std", 1.0), continuous_distribution, z
+            )
+        else:
+            cumulative = np.cumsum(category_probabilities(feature, summary_stats))
+            u = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+            index = min(int(np.searchsorted(cumulative, u, side="right")), len(cumulative) - 1)
+            characteristics[name] = feature["categories"][index]
     return characteristics
 
 
@@ -1204,6 +1612,12 @@ def _compute_logit(
     """
     logit = equation.get("intercept", 0.0)
     coefficients = equation.get("coefficients", {})
+    # Optional nonlinear shape of continuous main terms and treatment
+    # interactions (pairwise interactions stay linear).
+    nonlinearity = equation.get("nonlinearity", "none")
+    nonlinear_terms = (
+        set(equation.get("nonlinear_terms") or []) if nonlinearity != "none" else set()
+    )
     
     # Build z-scored continuous values map
     z_values = {}
@@ -1234,7 +1648,10 @@ def _compute_logit(
     for coef_name, coef_value in coefficients.items():
         # Check if this is a base continuous variable
         if coef_name in z_values:
-            logit += coef_value * z_values[coef_name]
+            z = z_values[coef_name]
+            if coef_name in nonlinear_terms:
+                z = nonlinear_value(z, nonlinearity)
+            logit += coef_value * z
             continue
         
         # Check if this is a categorical dummy (format: varname_category)
@@ -1281,6 +1698,8 @@ def _compute_logit(
             term = interaction.get("term", "")
             coef = interaction.get("coefficient", 0.0)
             value = term_value(term)
+            if value is not None and term in nonlinear_terms and term in z_values:
+                value = nonlinear_value(value, nonlinearity)
             if value is not None:
                 logit += coef * treatment * value
     
@@ -1309,11 +1728,14 @@ def _build_patient_scaffold_record(
     summary_stats: Dict[str, Any],
     treatment_eq: Dict[str, Any],
     outcome_eq: Dict[str, Any],
+    factors: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Sample one patient's covariates, treatment and outcome from the DGP.
 
     This is the single sampler shared by API generation and saved-DGP
     generation; it draws from the global NumPy RNG in a fixed order.
+    Documentation flags and post-treatment events (``factors``) use their own
+    per-patient streams, so they leave those draws unchanged.
     """
     characteristics = _sample_patient_characteristics(
         confounders,
@@ -1321,6 +1743,8 @@ def _build_patient_scaffold_record(
         continuous_distribution=getattr(
             config, "continuous_covariate_distribution", "positive_lognormal"
         ),
+        covariate_correlation=getattr(config, "covariate_correlation", 0.0),
+        proxy_correlation=getattr(config, "proxy_correlation", 0.9),
     )
 
     treatment_logit = _compute_logit(
@@ -1358,7 +1782,22 @@ def _build_patient_scaffold_record(
     outcome_prob_1 = 1.0 / (1.0 + np.exp(-outcome_logit_1))
     outcome_prob = 1.0 / (1.0 + np.exp(-outcome_logit))
 
-    patient_prompt = format_patient_characteristics(characteristics, confounders)
+    factors = factors or {}
+    documentation = factors.get("documentation")
+    documented: Optional[Dict[str, int]] = None
+    shown = characteristics
+    if documentation:
+        documented = factors_lib.draw_documentation(
+            documentation,
+            characteristics,
+            confounders,
+            summary_stats,
+            np.random.default_rng([config.seed, patient_idx, _DOCUMENTATION_STREAM]),
+        )
+        # The note writer receives only the documented values.
+        shown = {name: value for name, value in characteristics.items() if documented[name]}
+
+    patient_prompt = format_patient_characteristics(shown, confounders)
     record = {
         "patient_id": patient_idx,
         "patient_prompt": patient_prompt,
@@ -1394,20 +1833,52 @@ def _build_patient_scaffold_record(
                 "rename the feature"
             )
         record[column] = value
+
+    def add_oracle(column: str, value: Any) -> None:
+        if column in record:
+            raise ValueError(f"oracle column {column!r} collides with a variable's column")
+        record[column] = value
+
+    if documented is not None:
+        for name in characteristics:
+            add_oracle(factors_lib.documented_oracle_column(name), documented[name])
+    post_treatment = factors.get("post_treatment")
+    if post_treatment:
+        events = factors_lib.draw_post_treatment_events(
+            post_treatment["events"],
+            characteristics,
+            treatment,
+            confounders,
+            summary_stats,
+            np.random.default_rng([config.seed, patient_idx, _POST_TREATMENT_STREAM]),
+        )
+        for column, value in events.items():
+            add_oracle(column, value)
     return record
+
+
+# Per-patient random streams of the generation-time factors, keyed by
+# (seed, patient_id, stream).
+_DOCUMENTATION_STREAM = 1
+_POST_TREATMENT_STREAM = 2
 
 
 def _generate_single_patient(
     record: Dict[str, Any],
     client: LLMClient,
     config: SyntheticDataConfig,
+    factors: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Generate the clinical text for one patient's sampled causal scaffold.
 
     Text generation is two-stage: an event timeline, then expansion of each
     narrative event into a note (structured events are templated to text).
+    With post-treatment notes, every document also gets a date, and one or two
+    notes dated after the index date are written (see ``_post_treatment_text``).
     """
     patient_idx = record["patient_id"]
+    factors = factors or {}
+    documentation_control = bool(factors.get("documentation"))
 
     # Reserve tokens for prompt
     history_max_tokens = max(1000, config.llm.max_tokens - 2000)
@@ -1415,10 +1886,14 @@ def _generate_single_patient(
     # ---- Stage 1: Generate event timeline ----
     # Use structured-data-aware prompt if enabled
     structured_config = getattr(config, 'structured_data', None)
-    event_timeline_prompt_template = build_event_timeline_prompt(structured_config)
+    event_timeline_prompt_template = build_event_timeline_prompt(
+        structured_config, documentation_control=documentation_control
+    )
 
     timeline_prompt = event_timeline_prompt_template.format(
-        patient_characteristics=record["patient_prompt"],
+        patient_characteristics=record["patient_prompt"] + (
+            DOCUMENTATION_TIMELINE_INSTRUCTION if documentation_control else ""
+        ),
         clinical_question=config.clinical_question,
         min_events=config.min_events_per_patient,
         max_events=config.max_events_per_patient,
@@ -1453,6 +1928,7 @@ def _generate_single_patient(
 
     # Collect text blocks with their timeline index for interleaving
     text_blocks = []  # list of (timeline_index, text_content)
+    expansion_template = build_note_expansion_prompt(documentation_control=documentation_control)
 
     for event_idx, event in enumerate(events):
         etype = event["event_type"]
@@ -1462,7 +1938,7 @@ def _generate_single_patient(
             masked_timeline = _create_masked_timeline(events, event_idx)
             note_type = _event_type_to_note_type(etype)
 
-            expansion_prompt = NOTE_EXPANSION_PROMPT.format(
+            expansion_prompt = expansion_template.format(
                 note_type=note_type,
                 clinical_question=config.clinical_question,
                 masked_event_timeline=masked_timeline,
@@ -1506,12 +1982,108 @@ def _generate_single_patient(
         logger.warning(f"Patient {patient_idx}: Clinical text contains underscore patterns (likely category codes): {underscore_patterns[:3]}")
 
     # Same column layout as saved-DGP generation.
-    return dict(
+    row = dict(
         record,
         event_timeline=timeline_text,
         clinical_text=clinical_history,
         num_notes=len(text_blocks),
     )
+    if factors.get("post_treatment"):
+        row.update(_post_treatment_text(
+            record, client, config, factors, events, text_blocks, clinical_history,
+            history_max_tokens,
+        ))
+    return row
+
+
+def _post_treatment_text(
+    record: Dict[str, Any],
+    client: LLMClient,
+    config: SyntheticDataConfig,
+    factors: Dict[str, Any],
+    events: List[Dict[str, str]],
+    text_blocks: List[Tuple[int, str]],
+    clinical_history: str,
+    max_tokens: int,
+) -> Dict[str, Any]:
+    """Dates, the index date, post-index notes, and the dated note rows of one patient.
+
+    Every pretreatment document takes its timeline event's date (see
+    ``generation_factors.assign_event_dates``); the index date is the day
+    after the last timeline event. With probability ``rate`` the LLM writes one
+    or two progress notes dated 7-90 days after the index date that describe
+    each event's drawn status and, for some notes, name the regimen.
+    """
+    from .prompts import POST_TREATMENT_NOTE_PROMPT, post_treatment_prompt_parts
+
+    patient_idx = record["patient_id"]
+    block = factors["post_treatment"]
+    event_dates, index_date = factors_lib.assign_event_dates(
+        events, random.Random(f"{config.seed}:{patient_idx}:dates")
+    )
+    note_rows = [
+        {
+            "patient_id": patient_idx,
+            "note_date": event_dates[event_idx].isoformat(),
+            "note_text": text,
+            "note_type": events[event_idx]["event_type"],
+            "post_index": False,
+        }
+        for event_idx, text in text_blocks
+    ]
+    plan = factors_lib.post_treatment_note_plan(
+        block, random.Random(f"{config.seed}:{patient_idx}:post_treatment")
+    )
+    pretreatment_timeline = "\n".join(
+        f"<{event['event_type']}> {event['event_text']}" for event in events
+    )
+    post_texts = []
+    for note_idx, note in enumerate(plan):
+        prompt = POST_TREATMENT_NOTE_PROMPT.format(**post_treatment_prompt_parts(
+            clinical_question=config.clinical_question,
+            treatment=int(record["treatment_indicator"]),
+            days_after_index=note["days_after_index"],
+            mention_regimen=note["mention_regimen"],
+            events=block["events"],
+            event_status={
+                event["name"]: int(record[event["oracle_column"]]) for event in block["events"]
+            },
+            event_timeline=pretreatment_timeline,
+            documentation_control=bool(factors.get("documentation")),
+        ))
+        try:
+            text = client.generate(
+                prompt=prompt,
+                system_prompt=CLINICAL_SYSTEM_PROMPT,
+                temperature=0.5,
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            logger.error(f"Patient {patient_idx}, post-treatment note {note_idx}: Failed: {e}")
+            continue
+        if not text or not str(text).strip():
+            logger.warning(f"Patient {patient_idx}, post-treatment note {note_idx}: empty response")
+            continue
+        rng = random.Random(f"{config.seed}:{patient_idx}:post:{note_idx}")
+        if config.drug_perturbation_prob > 0 and rng.random() < config.drug_perturbation_prob:
+            text = _apply_drug_perturbation(text, rng=rng)
+        note_date = index_date + timedelta(days=note["days_after_index"])
+        post_texts.append(text)
+        note_rows.append({
+            "patient_id": patient_idx,
+            "note_date": note_date.isoformat(),
+            "note_text": text,
+            "note_type": factors_lib.POST_TREATMENT_NOTE_TYPE,
+            "post_index": True,
+        })
+    with_post = config.note_separator.join(
+        ([clinical_history] if clinical_history else []) + post_texts
+    )
+    return {
+        "index_date": index_date.isoformat(),
+        "clinical_text_with_post_treatment": with_post,
+        NOTE_ROWS_KEY: note_rows,
+    }
 
 
 def _generate_all_patients(
@@ -1523,6 +2095,7 @@ def _generate_all_patients(
     outcome_eq: Dict[str, Any],
     num_workers: int = 4,
     show_progress: bool = True,
+    factors: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Generate data for all patients with parallel LLM calls and checkpoint support."""
     output_dir = Path(config.output_dir)
@@ -1537,7 +2110,7 @@ def _generate_all_patients(
     np.random.seed(config.seed)
     scaffolds = [
         _build_patient_scaffold_record(
-            i, config, confounders, summary_stats, treatment_eq, outcome_eq
+            i, config, confounders, summary_stats, treatment_eq, outcome_eq, factors=factors
         )
         for i in range(config.dataset_size)
     ]
@@ -1598,7 +2171,7 @@ def _generate_all_patients(
             iterator = tqdm(iterator, desc="Generating patients", initial=len(completed_patients), total=config.dataset_size)
         
         for i in iterator:
-            data = _generate_single_patient(scaffolds[i], client, config)
+            data = _generate_single_patient(scaffolds[i], client, config, factors)
             patient_data.append(data)
             patients_since_checkpoint += 1
             
@@ -1609,7 +2182,7 @@ def _generate_all_patients(
         # Parallel generation
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = {
-                executor.submit(_generate_single_patient, scaffolds[i], client, config): i
+                executor.submit(_generate_single_patient, scaffolds[i], client, config, factors): i
                 for i in remaining_indices
             }
             
@@ -1646,7 +2219,9 @@ def _load_dgp_metadata(metadata_path: str) -> Tuple[List[Dict[str, Any]], Dict[s
     with open(metadata_path, "r", encoding="utf-8") as f:
         metadata = json.load(f)
 
-    features = _validate_feature_roles(metadata.get("features", []))
+    features = _validate_feature_roles(
+        metadata.get("features", []), allowed_roles=ALL_ROLES, allow_empty=True
+    )
     treatment_eq = json.loads(json.dumps(metadata.get("treatment_equation", {})))
     outcome_eq = json.loads(json.dumps(metadata.get("outcome_equation", {})))
     summary_stats = json.loads(json.dumps(metadata.get("summary_statistics", {})))
