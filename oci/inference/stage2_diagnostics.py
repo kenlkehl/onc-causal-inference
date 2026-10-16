@@ -24,6 +24,11 @@ Diagnostics (all reported per outer fold and pooled):
   and 0.05 (and the configured clip), a secondary sensitivity analysis.
 * Overlap flags (reporting only): counts of held-out patients whose estimated
   propensity lies outside ``stage2.overlap_flag_bounds``.
+* Unmeasured-confounding sensitivity (reporting only;
+  :mod:`oci.inference.stage2_sensitivity`): E-values (VanderWeele and Ding) and
+  omitted-variable-bias bounds with robustness values (Chernozhukov et al.;
+  Cinelli and Hazlett) for the ATE and the ATO, and benchmark-implied ATE
+  bounds from each fold's ``estimation/sensitivity_benchmarks/benchmarks.json``.
 * Balance: IPW-weighted standardized mean differences of every measured
   candidate, with a summary of variables whose ``|SMD| > 0.1``.
 * Modifier confirmation (reporting only): each fold's selected effect
@@ -57,9 +62,13 @@ Pooling rules (also written into the output under ``pooling_rules``):
   not identified, and they are left out of the pooled GATES, CLAN and RATE.
 * Modifier confirmation is computed per fold; the pooled entry counts selected
   and confirmed modifiers. Each fold defines its own variables, so the
-  cross-fold summary matches exact normalized names only, and a Stouffer
-  combination of held-out z-scores is reported for names selected in several
-  folds.
+  cross-fold summary groups them into concepts by lexical name and definition
+  similarity (at most one variable per fold), aggregates each concept's
+  held-out p-values (Meinshausen-Meier-Buhlmann) with Benjamini-Hochberg across
+  concepts, and pools matched effect sizes by fixed effects.
+* The unmeasured-confounding sensitivity is computed per fold and on the
+  stacked held-out rows; benchmark gains are per fold and are applied to the
+  fold's and the pooled ATE.
 * The CATE variance decomposition is computed per fold; pooled shares are
   row-weighted means of the fold partitions, reported with the fold range.
 
@@ -86,9 +95,15 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
+from .stage2_sensitivity import (
+    load_fold_benchmarks,
+    summarize_section as summarize_sensitivity_section,
+    unmeasured_confounding_section,
+)
+
 LOGGER = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "stage2_heterogeneity_diagnostics_v4_overlap_estimands"
+SCHEMA_VERSION = "stage2_heterogeneity_diagnostics_v5_unmeasured_confounding"
 DIAGNOSTICS_FILENAME = "heterogeneity_diagnostics.json"
 TRIMMING_THRESHOLDS = (0.0, 0.01, 0.025, 0.05, 0.1, 0.15)
 SMD_THRESHOLD = 0.1
@@ -268,6 +283,11 @@ POOLING_RULES = {
     "cate_variance_decomposition": DECOMPOSITION_POOLING_RULE,
     "clip_sensitivity": "recomputed on the pooled effect-eligible held-out rows",
     "overlap_flags": "counts per fold and on the pooled held-out rows",
+    "unmeasured_confounding_sensitivity": (
+        "E-values and omitted-variable-bias elements per fold on its held-out rows and "
+        "pooled by stacking every fold's held-out rows; benchmark gains per fold (each "
+        "fold's own variables), applied to that fold's ATE and to the pooled ATE"
+    ),
     "modifier_confirmation": CONFIRMATION_POOLING_RULE,
     "blp": (
         "fixed-effect inverse-variance weighting of fold estimates (disjoint "
@@ -1386,6 +1406,7 @@ class FoldArtifacts:
     balance_training: MeasurementInput | str
     balance_heldout: MeasurementInput | str
     confirmation: ConfirmationInput | str = "modifier confirmation inputs were not loaded"
+    sensitivity_benchmarks: Mapping[str, Any] | str = "sensitivity benchmarks were not loaded"
 
 
 def _guarded(name: str, function: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any):
@@ -2275,12 +2296,15 @@ def build_heterogeneity_diagnostics(
     groups: int = CATE_GROUPS,
     modifier_confirmation_policy: Mapping[str, Any] | None = None,
     overlap_flag_bounds: Sequence[float] = DEFAULT_OVERLAP_FLAG_BOUNDS,
+    outcome_type: str | None = None,
 ) -> dict[str, Any]:
     """Compute every diagnostic from the pooled cross-fitted prediction table.
 
     ``modifier_confirmation_policy`` (``outcome_type``, ``q``, ``weights`` or
     None for the outcome-type defaults, ``min_count``) enables the held-out
     modifier confirmation; without it that section is ``unavailable``.
+    ``outcome_type`` (else the policy's) sets the E-value scale; when neither is
+    given, an outcome with only the values 0 and 1 is treated as binary.
     """
 
     predictions = predictions.drop(
@@ -2457,6 +2481,22 @@ def build_heterogeneity_diagnostics(
         "cate variance decomposition", _decomposition_section, confirmation_rows, artifacts,
         policy=modifier_confirmation_policy,
     )
+    resolved_outcome_type = outcome_type or (modifier_confirmation_policy or {}).get(
+        "outcome_type"
+    )
+    if resolved_outcome_type is None:
+        observed = frame["outcome"].dropna().unique()
+        resolved_outcome_type = (
+            "binary" if len(observed) and set(observed) <= {0.0, 1.0} else "continuous"
+        )
+    diagnostics["unmeasured_confounding_sensitivity"] = _guarded(
+        "unmeasured confounding sensitivity", unmeasured_confounding_section,
+        confirmation_rows, outcome_type=str(resolved_outcome_type),
+        propensity_clip=propensity_clip,
+        benchmarks_by_fold={
+            fold: value.sensitivity_benchmarks for fold, value in artifacts.items()
+        },
+    )
     diagnostics["primary_heterogeneity_test"] = primary_heterogeneity_test(diagnostics)
     return json_safe(diagnostics)
 
@@ -2575,6 +2615,9 @@ def summarize_diagnostics(diagnostics: Mapping[str, Any]) -> dict[str, Any]:
         "modifier_confirmation": _confirmation_summary(diagnostics.get("modifier_confirmation")),
         "cate_variance_decomposition": _decomposition_summary(
             diagnostics.get("cate_variance_decomposition")
+        ),
+        "unmeasured_confounding_sensitivity": summarize_sensitivity_section(
+            diagnostics.get("unmeasured_confounding_sensitivity")
         ),
     }
 
@@ -2756,6 +2799,7 @@ def load_fold_artifacts(fold_dir: Path) -> FoldArtifacts:
     return FoldArtifacts(
         clan=clan, balance_training=training, balance_heldout=heldout,
         confirmation=confirmation,
+        sensitivity_benchmarks=load_fold_benchmarks(fold_dir),
     )
 
 
@@ -2856,6 +2900,7 @@ def write_heterogeneity_diagnostics(
     n_bootstrap: int = DEFAULT_BOOTSTRAP_REPLICATES,
     modifier_confirmation_policy: Mapping[str, Any] | None = None,
     overlap_flag_bounds: Sequence[float] = DEFAULT_OVERLAP_FLAG_BOUNDS,
+    outcome_type: str | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     """Write ``heterogeneity_diagnostics.json`` and return (path, compact summary).
 
@@ -2874,7 +2919,7 @@ def write_heterogeneity_diagnostics(
             except Exception as error:  # a diagnostic must never fail a finished Stage 2 run
                 LOGGER.warning("Stage 2 diagnostics could not read fold %s", fold, exc_info=True)
                 reason = f"fold artifacts unreadable: {type(error).__name__}: {error}"
-                artifacts[fold] = FoldArtifacts(reason, reason, reason, reason)
+                artifacts[fold] = FoldArtifacts(reason, reason, reason, reason, reason)
         diagnostics = build_heterogeneity_diagnostics(
             predictions,
             propensity_clip=propensity_clip,
@@ -2883,6 +2928,7 @@ def write_heterogeneity_diagnostics(
             n_bootstrap=n_bootstrap,
             modifier_confirmation_policy=modifier_confirmation_policy,
             overlap_flag_bounds=overlap_flag_bounds,
+            outcome_type=outcome_type,
         )
     except Exception as error:  # a diagnostic must never fail a finished Stage 2 run
         LOGGER.warning("Stage 2 heterogeneity diagnostics failed", exc_info=True)

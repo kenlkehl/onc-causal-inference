@@ -91,6 +91,7 @@ from ..models.super_learner_nuisance import (
     learner_spec,
     super_learner_config_from_mapping,
 )
+from .stage2_sensitivity import SensitivityConfig, sensitivity_config_from_mapping
 from .vllm_server_pool import (
     ManagedVLLMConfig,
     launch_managed_vllm_servers,
@@ -879,6 +880,9 @@ class PlainHandoffStage2Config:
     # Reporting-only bounds of the outside_overlap flag in
     # cross_fitted_predictions.csv; never used to drop rows or change estimates.
     overlap_flag_bounds: tuple[float, float] = (0.05, 0.95)
+    # Reporting-only unmeasured-confounding sensitivity (E-values, omitted-
+    # variable-bias bounds, benchmark refits); never read by selection or estimation.
+    sensitivity: SensitivityConfig = field(default_factory=SensitivityConfig)
     # Count-based candidate informativeness rule (outer-training rows only):
     # keep a candidate only if at least this many patients have an observed
     # value and, for categorical features, at least two levels (counting "not
@@ -1229,6 +1233,9 @@ class PlainHandoffStage2Config:
             raise ValueError(
                 "stage2.overlap_flag_bounds must be two numbers low < high strictly between 0 and 1"
             )
+        if not isinstance(self.sensitivity, SensitivityConfig):
+            raise ValueError("stage2.sensitivity must be a SensitivityConfig")
+        self.sensitivity.validate()
         if (
             isinstance(self.min_informative_patients, bool)
             or not isinstance(self.min_informative_patients, int)
@@ -1307,6 +1314,7 @@ class PlainHandoffStage2Config:
         values["statistical_selection"] = self.statistical_selection.public_dict()
         values["role_adjudication"] = self.role_adjudication.public_dict()
         values["super_learner"] = self.super_learner.public_dict()
+        values["sensitivity"] = self.sensitivity.public_dict()
         return values
 
     def nuisance_learner_spec(self) -> dict[str, Any]:
@@ -1594,6 +1602,7 @@ def plain_stage2_config_from_mapping(
         # Validated (not coerced) by PlainHandoffStage2Config.validate().
         lead_estimand=raw.get("lead_estimand", "ate"),
         overlap_flag_bounds=_overlap_flag_bounds(raw.get("overlap_flag_bounds", (0.05, 0.95))),
+        sensitivity=sensitivity_config_from_mapping(raw.get("sensitivity")),
         # Validated (not coerced) by PlainHandoffStage2Config.validate().
         min_informative_patients=raw.get("min_informative_patients", 20),
         max_extraction_failure_fraction=raw.get("max_extraction_failure_fraction", 0.10),
@@ -6756,6 +6765,7 @@ class PlainHandoffStage2:
                 propensity_clip=float(self.config.propensity_clip),
                 seed=seed,
                 overlap_flag_bounds=self.config.overlap_flag_bounds,
+                outcome_type=outcome_type,
                 # Reporting only: held-out confirmation of each fold's selected
                 # modifiers, computed after every prediction is frozen.
                 modifier_confirmation_policy={
@@ -6772,6 +6782,12 @@ class PlainHandoffStage2:
             )
             causal_estimate = {
                 "co_primary_estimands": co_primary,
+                # Reporting only: E-values, omitted-variable-bias robustness values
+                # and the strongest benchmark (heterogeneity_diagnostics.json has
+                # the full analysis).
+                "unmeasured_confounding_sensitivity": heterogeneity_summary.get(
+                    "unmeasured_confounding_sensitivity"
+                ),
                 "overlap_flags": overlap_flag_summary(
                     predictions, self.config.overlap_flag_bounds
                 ),

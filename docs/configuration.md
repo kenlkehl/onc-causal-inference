@@ -224,6 +224,7 @@ defaults the input budget per extraction request is
 | `propensity_clip` | 0.02 | Clipping of AIPW denominators to `[c, 1 − c]`; excludes no one. Under the `orthogonal_tests` modifier rule it also clips the AIPW projection test, so it is part of the selection identity |
 | `lead_estimand` | `"ate"` | Which co-primary estimand the study pre-specifies to lead with: `"ate"` (clipped AIPW ATE over eligible patients) or `"ato"` (overlap-weighted ATE). Changes only the order and role labels in `causal_estimate.json`, never the computation; not part of the selection or fold estimation identity (pooled outputs are rewritten whenever Stage 2 runs; on a completed run use `--rerun stage2`) |
 | `overlap_flag_bounds` | `[0.05, 0.95]` | Bounds of the reporting-only `outside_overlap` flag in `cross_fitted_predictions.csv` (two numbers, `0 < low < high < 1`). Never removes patients or changes estimates; trimming is `min_propensity`/`max_propensity` |
+| `sensitivity` | see below | Reporting-only sensitivity to unmeasured confounding |
 | `nuisance_learner` | `"super_learner"` | Learner for the final-estimation nuisances `e`, `μ0`, `μ1` (shared with the modifier tests): `"super_learner"` or `"elastic_net"` ([Nuisance learner](stage2_selection.md#nuisance-learner)). The selection-stage role models and the causal forest's internal nuisances are elastic nets either way. Part of the estimation identity and, under `orthogonal_tests`, of the selection identity |
 | `super_learner` | see below | Super-learner settings, used when `nuisance_learner` is `"super_learner"` |
 | `estimation_trees` | 200 | Trees in the final causal forest and, under `balanced_evidence`, in the forests used for modifier-budget selection (minimum 10). Under `orthogonal_tests` selection does not depend on it, so a change refits only the final estimation |
@@ -251,6 +252,19 @@ Unknown keys are errors. The learner settings are fixed (see
 audit in `estimation/nuisance_fit_audits/` holds its stack weights, per-learner
 and stack internal-CV losses, and the base learners' audits, and
 `estimation/diagnostics.json` summarizes them under `nuisance_learner`.
+
+### `stage2.sensitivity`
+
+| Key | Default | Meaning |
+|---|---|---|
+| `benchmark_groups` | 5 | Discovered variables per outer fold benchmarked by refitting the elastic-net nuisances without each of them ([Benchmarking](stage2_selection.md#benchmarking-against-discovered-variables)); an integer from 0 to 50, where 0 skips the refits. E-values and omitted-variable-bias bounds are always reported |
+
+Unknown keys are errors. The analyses are reporting only: no selection or
+estimation step reads them, and the key is not part of the selection or fold
+estimation identity. The benchmark refits run after a fold's final estimation
+with their own checkpoints, so changing `benchmark_groups` refits only the
+benchmarks the next time Stage 2 runs (on a completed run, use
+`--rerun stage2`).
 
 ### `stage2.statistical_selection`
 
@@ -706,14 +720,14 @@ OUTPUT_DIR/
     │   ├── extraction/                  outer-training and held-out extractions, failure masks and reports
     │   ├── selection/                   consolidation, multi-model evidence, modifier tests or budget search, selected definitions
     │   ├── final_definitions.json       final variables, roles, modifier evidence, and final estimator
-    │   ├── estimation/                  nuisance fits and audits, overlap, predictions.csv, diagnostics.json
+    │   ├── estimation/                  nuisance fits and audits, overlap, predictions.csv, diagnostics.json, sensitivity_benchmarks/
     │   ├── preselection/                [after reselection] frozen selection inputs
     │   ├── recovery_status.json, recovery_events.jsonl
     │   └── complete.json
     ├── features_by_outer_fold.jsonl     per-fold variables, roles, and estimation summary
     ├── cross_fitted_predictions.csv     one held-out prediction per patient
-    ├── causal_estimate.json             AIPW ATE with 95% CI, overlap, calibration, heterogeneity summary
-    ├── heterogeneity_diagnostics.json   BLP (primary test), GATES, CLAN, RATE, overlap, balance, modifier confirmation, CATE variance decomposition
+    ├── causal_estimate.json             co-primary ATE and ATO, sensitivity summary, overlap, calibration, heterogeneity summary
+    ├── heterogeneity_diagnostics.json   BLP (primary test), GATES, CLAN, RATE, overlap, balance, modifier confirmation, CATE variance decomposition, unmeasured-confounding sensitivity
     ├── posthoc_oracle_ite_metrics.json  oracle comparison (records "unavailable" without oracle columns)
     ├── posthoc_predictions_with_oracle_ite.csv  [oracle columns present]
     ├── summary.json
@@ -730,7 +744,7 @@ written and the handoff streams the component evidence directly.
 
 | File | Content |
 |---|---|
-| `stage2/causal_estimate.json` | `co_primary_estimands`: the clipped AIPW ATE and the ATO, per fold and pooled, each with its standard error, 95% CI, target population, method, and role (`lead_estimand` and `order` set which leads), plus `ate_minus_ato`; `overlap_flags` counts; the top-level AIPW `ate`, standard error, and 95% CI; overlap and nuisance calibration summaries; mean estimated CATE; oracle correlations when available |
+| `stage2/causal_estimate.json` | `co_primary_estimands`: the clipped AIPW ATE and the ATO, per fold and pooled, each with its standard error, 95% CI, target population, method, and role (`lead_estimand` and `order` set which leads), plus `ate_minus_ato`; `unmeasured_confounding_sensitivity` (pooled E-values with the risk ratio and its interval, robustness values RV and RVa for the ATE and the ATO, and the strongest benchmark); `overlap_flags` counts; the top-level AIPW `ate`, standard error, and 95% CI; overlap and nuisance calibration summaries; mean estimated CATE; oracle correlations when available |
 | `stage2/cross_fitted_predictions.csv` | One row per patient from its outer held-out fold: `estimated_cate` (a risk difference for binary outcomes), `aipw_score`, `propensity`, `mu0`, `mu1`, `effect_eligible`, `outside_overlap` (reporting only: `propensity` outside `stage2.overlap_flag_bounds`), `outer_fold`, plus per-estimator CATE columns under the ensemble (see [Modifier-selection and ensemble outputs](#modifier-selection-and-ensemble-outputs)) |
 | `stage2/heterogeneity_diagnostics.json` | Whether the CATE predictions track real heterogeneity ([BLP, GATES, CLAN, RATE](glossary.md#blp-gates-clan-and-rate)); see [Stage 2 selection](stage2_selection.md) |
 | `stage2/features_by_outer_fold.jsonl` and `stage2/outer_00k/final_definitions.json` | Which variables were used in each fold, their roles and definitions, and the chosen estimator |
@@ -738,6 +752,7 @@ written and the handoff streams the component evidence directly.
 | `stage2/outer_00k/selection/modifier_count/selection.json` | Modifier selection report: selected modifiers and estimator policy, or the `balanced_evidence` budget and estimator comparison |
 | `stage2/outer_00k/extraction/failure_report_fit.json`, `failure_report_heldout.json` | Extraction failure rates by variable and treatment arm |
 | `stage2/outer_00k/estimation/diagnostics.json`, `propensity_overlap.json`, `nuisance_fit_audits/` | Fold-level ATE, calibration, overlap, and the fitted penalty and iteration count of each nuisance model |
+| `stage2/outer_00k/estimation/sensitivity_benchmarks/benchmarks.json` | Reporting only: the long elastic-net reference, the benchmarked variables with their importance, selected roles, and gains (`cf_y`, `cf_d`, `rho`, short and long `sigma2`, `nu2`, and ATE), the importance and learner descriptions, and `status` (`ok`, `disabled`, `unavailable`, or `error`); fit checkpoints are under `fits/` |
 
 ### Modifier-selection and ensemble outputs
 
@@ -822,6 +837,23 @@ pre-specified). It also contains `clip_sensitivity` (per fold and pooled `points
 with `clip`, `configured`, `rows`, `estimate`, `standard_error`, and
 `confidence_interval_95`) and `overlap_flags` (`bounds` and per-fold and pooled
 `rows`, `outside_overlap`, `fraction`, `below_lower_bound`, `above_upper_bound`).
+`unmeasured_confounding_sensitivity` has `outcome_type`, `interpretation`
+strings, `references`, and three parts. `evalues` gives, for `ate` and `ato`
+(`pooled` and `per_fold`), `risk_ratio`, `risk_ratio_confidence_interval_95`,
+`evalue_point`, `evalue_confidence_limit`, and `scale` (`causal_risk_ratio`
+with the arm means and `log_risk_ratio_standard_error`, or
+`approximate_risk_ratio_from_standardized_mean_difference` with
+`standardized_mean_difference`, its standard error, and `outcome_sd`).
+`omitted_variable_bias` gives, for `ate` and `ato`, `estimate`,
+`standard_error`, `sigma2`, `nu2`, `robustness_value`,
+`robustness_value_confidence`, and `contour` (for each `cf_y`, `cf_d` in the
+`grid`: `max_bias`, `lower`, `upper`, their standard errors,
+`lower_confidence_bound`, `upper_confidence_bound`, and
+`confidence_bounds_exclude_zero`), with `rho`, the critical value, and the Riesz
+representers. `benchmarks` gives `per_fold` the fold's benchmark file contents
+with `fold_ate_bounds` and `pooled_ate_bounds` (at `rho_1` and, when
+identified, `benchmark_rho`) for each variable, and `pooled.rows`, sorted by
+the implied bias at `rho = 1`, each with a plain-language `statement`.
 `causal_estimate.json` repeats `primary_heterogeneity_test`, the
 pooled decomposition per column, and the pooled GATES calibration and group mean
 predicted CATEs under `heterogeneity_diagnostics`.

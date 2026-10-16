@@ -9681,6 +9681,27 @@ def run_fold_analysis(
         nuisance_model_store=selection_dir / "nuisance_models",
         nuisance_learner=_config_nuisance_learner(config),
     )
+    # Reporting only, after this fold's predictions are frozen: benchmark refits
+    # for the unmeasured-confounding sensitivity analysis (training-row fits,
+    # scored on this fold's held-out rows). No selection or estimation reads
+    # them, and a failure is recorded in the benchmark file, not raised.
+    from .stage2_sensitivity import benchmark_fold
+
+    benchmark_fold(
+        config=config,
+        estimation_dir=output_dir / "estimation",
+        dataset=dataset,
+        candidate_definitions=candidate_definitions,
+        candidate_fit=modeling_fit_frame,
+        candidate_heldout=heldout_candidates,
+        selected_definitions=selected,
+        split=split,
+        treatment_column=treatment_column,
+        outcome_column=outcome_column,
+        outcome_type=outcome_type,
+        seed=seed,
+        propensity_clip=float(config.propensity_clip),
+    )
     # Held-out treatment labels are used here only for a descriptive
     # differential-measurement report, after effect predictions are frozen.
     heldout_failure_report = extraction_failures.failure_rate_report(

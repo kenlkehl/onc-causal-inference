@@ -198,8 +198,8 @@ use a separate output directory for a different study. Details are in
 | `stage2/outer_NNN/selection/modifier_count/selection.json` | Summary of the modifier selection and the estimator policy |
 | `stage2/outer_NNN/estimation/diagnostics.json` | Model fit, nuisance calibration, overlap, and fold ATE |
 | `stage2/cross_fitted_predictions.csv` | One held-out prediction per patient |
-| `stage2/causal_estimate.json` | Co-primary ATE and ATO (per fold and pooled), overlap-flag counts, and a diagnostics summary |
-| `stage2/heterogeneity_diagnostics.json` | Heterogeneity, overlap, and balance diagnostics, and the outer-fold confirmation of the selected modifiers |
+| `stage2/causal_estimate.json` | Co-primary ATE and ATO (per fold and pooled), their E-values and robustness values, overlap-flag counts, and a diagnostics summary |
+| `stage2/heterogeneity_diagnostics.json` | Heterogeneity, overlap, and balance diagnostics, the outer-fold confirmation of the selected modifiers, and the sensitivity to unmeasured confounding |
 | `stage2/posthoc_oracle_ite_metrics.json` | Comparison with true effects (synthetic data only) |
 
 **Per-patient columns** in `cross_fitted_predictions.csv`:
@@ -260,6 +260,38 @@ analysis. The ATE is also repeated at the top level as `ate`. It is a separate
 estimate from `mean_estimated_cate`, the mean of the model's predictions: an
 effect model can predict nearly constant effects while the AIPW ATE is clearly
 nonzero, or the reverse.
+
+**Sensitivity to unmeasured confounding** (`unmeasured_confounding_sensitivity`
+in `heterogeneity_diagnostics.json`, summarized next to the co-primary
+estimands in `causal_estimate.json`) asks how strong a confounder missing from
+the extracted variables would have to be to change the conclusion, for both
+the ATE and the ATO, per fold and pooled. It is reporting only.
+
+- **E-value**: the minimum risk-ratio association that an unmeasured
+  confounder would need with both treatment and outcome, beyond the measured
+  variables, to explain the estimate away (VanderWeele and Ding 2017), with the
+  E-value of the confidence limit closest to the null (1 when the interval
+  includes it). For binary outcomes it is computed for the causal risk ratio
+  that corresponds to the reported risk difference; for continuous outcomes it
+  uses an approximate conversion of the standardized mean difference.
+- **Robustness value** (`robustness_value`, and `robustness_value_confidence`
+  for the 95% confidence bound): the share of the outcome's residual variation
+  and of the treatment-weight variation (as partial R²) that confounders would
+  need to explain to reduce the effect to zero, from omitted-variable-bias
+  bounds that assume the most adversarial correlation and are therefore
+  conservative (Chernozhukov, Cinelli, Newey, Sharma and Syrgkanis; Cinelli and
+  Hazlett 2020). A table of bounds over a grid of confounding strengths is
+  included.
+- **Benchmarks**: each fold refits its nuisance models (as elastic nets)
+  without each of its five most important discovered variables
+  (`stage2.sensitivity.benchmark_groups`; 0 disables) and reports where a
+  confounder as strong as that variable would move the ATE bounds. An
+  unmeasured confounder may be weaker or stronger than any measured one.
+
+Measurement error in extracted confounders acts like partial unmeasured
+confounding, which these analyses also cover. Formulas, interpretation, and the
+full references are in
+[Sensitivity to unmeasured confounding](docs/stage2_selection.md#sensitivity-to-unmeasured-confounding).
 
 **Modifier confirmation** (`modifier_confirmation` in
 `heterogeneity_diagnostics.json`, summarized in `causal_estimate.json`)

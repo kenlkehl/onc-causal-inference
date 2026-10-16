@@ -43,8 +43,9 @@ construction, and the diagnostics.
 9. [Propensity eligibility and calibration](#propensity-eligibility-and-calibration)
 10. [DINA](#dina)
 11. [Heterogeneity and overlap diagnostics](#heterogeneity-and-overlap-diagnostics)
-12. [Output files](#output-files)
-13. [Limitations](#limitations)
+12. [Sensitivity to unmeasured confounding](#sensitivity-to-unmeasured-confounding)
+13. [Output files](#output-files)
+14. [Limitations](#limitations)
 
 ## Evidence families and resampling
 
@@ -1050,6 +1051,7 @@ performed, and would require rerunning the pipeline with other split seeds.
 | `ipw_weights` | Inverse-propensity weights `1/ê` (treated) and `1/(1 − ê)` (comparator) with `ê` clipped as in AIPW: Kish effective sample size `(Σw)²/Σw²`, its fraction of rows, and the maximum weight | An effective-sample-size fraction well below 1 or a very large maximum weight means the AIPW ATE leans on a few patients: weak overlap and high variance. |
 | `clip_sensitivity` | The AIPW ATE over the eligible patients recomputed with the propensity clipped at 0.01, 0.02, and 0.05 (and the configured clip, marked `configured`), with standard errors | Clipping changes the weights, not the population. Estimates that move with the clip show dependence on patients with extreme propensities. The configured entry equals the reported ATE. |
 | `overlap_flags` | Counts of held-out patients outside `stage2.overlap_flag_bounds`, per fold and pooled | Reporting only; the same flag as the `outside_overlap` column. |
+| `unmeasured_confounding_sensitivity` | E-values, omitted-variable-bias bounds with robustness values, and benchmark-implied bounds for the ATE and the ATO | See [Sensitivity to unmeasured confounding](#sensitivity-to-unmeasured-confounding). |
 | `trimming_curve` | The AIPW ATE restricted to `α ≤ ê ≤ 1 − α` for `α` in 0, 0.01, 0.025, 0.05, 0.10, 0.15 | Each `α` targets a different population. A flat curve suggests the ATE is not driven by poor-overlap patients; drift signals dependence on extreme propensities. `α = 0` uses all held-out patients, including any outside configured eligibility bounds. |
 | `balance` | [SMDs](glossary.md#smd) of every catalog candidate before and after inverse-propensity weighting, for training patients (per fold, weighted by out-of-fold `ê`) and held-out patients (pooled, weighted by their `ê`); variables with weighted `|SMD| > 0.1` are listed | The **mean of a variable after weighting should be similar in both arms**. A weighted `|SMD|` above 0.1 flags a variable the propensity model does not balance: a likely gap in the propensity model, or a variable that strongly predicts treatment. |
 
@@ -1070,6 +1072,220 @@ with the fold range.
 All standard errors treat the cross-fitted nuisances as fixed. The section
 `inputs.recomputed_psi_max_abs_difference_from_aipw_score` checks that the
 saved AIPW scores match a recomputation from the saved nuisances.
+
+## Sensitivity to unmeasured confounding
+
+The estimates assume that the extracted variables capture every confounder.
+Three reporting-only analyses ask how strong an unmeasured confounder would
+have to be to change the conclusion. They run after every fold's predictions
+are frozen, use only frozen artifacts (the pooled held-out predictions and each
+fold's own refits on its outer-training patients), and are never read by
+selection, estimation, or another fold. The full results are in
+`unmeasured_confounding_sensitivity` in `stage2/heterogeneity_diagnostics.json`;
+`stage2/causal_estimate.json` repeats the pooled E-values, robustness values,
+and strongest benchmark next to the co-primary estimands. E-values and bounds
+are computed for both co-primary estimands, per fold on that fold's held-out
+patients and pooled by stacking every fold's held-out patients; benchmarks cover
+the ATE. A result that cannot be computed is `unavailable` with a reason and
+does not affect the rest of the run.
+
+### E-values
+
+The E-value (VanderWeele and Ding 2017) is the minimum strength of association,
+on the risk-ratio scale, that an unmeasured confounder would need to have with
+both the treatment and the outcome, conditional on the measured covariates, to
+fully explain away the observed association. For a risk ratio `RR ≥ 1`,
+
+```text
+E = RR + sqrt(RR × (RR − 1))
+```
+
+and for `RR < 1` the formula is applied to `1/RR`. The confidence-limit E-value
+(`evalue_confidence_limit`) is the E-value of the confidence limit closest to
+the null; it is 1 when the interval includes 1.
+
+- **Binary outcomes.** The risk ratio is the causal risk ratio
+  `E[Y(1)] / E[Y(0)]` built from the same two arm means whose difference is the
+  reported risk difference, so this is the E-value for the estimated causal risk
+  ratio corresponding to the reported risk difference. For the ATE the arm means
+  are the clipped AIPW means `mean(μ̂1 + T(Y − μ̂1)/ê)` and
+  `mean(μ̂0 + (1 − T)(Y − μ̂0)/(1 − ê))` over the effect-eligible patients; for
+  the ATO they are the augmented overlap-weighted arm means. The 95% interval is
+  the delta-method interval on `log RR` from the arm-mean influence functions,
+  with the cross-fitted nuisances held fixed. If an estimated arm mean is not
+  positive, the risk ratio and its E-values are `unavailable`.
+- **Continuous outcomes.** The estimate is converted to a standardized mean
+  difference `d = estimate / SD(Y)`, where `SD(Y)` is the marginal standard
+  deviation of the observed outcome over the patients that enter the estimate
+  (the effect-eligible held-out patients for the ATE, every held-out patient for
+  the ATO). A residual standard deviation would give a larger `d` and a larger
+  E-value, so the marginal one is the conservative choice. Then `RR ≈ exp(0.91·d)`
+  with interval `exp(0.91·(d ± 1.96·SE(d)))`, `SE(d) = SE / SD(Y)`. This is an
+  approximate conversion that combines Chinn (2000), `ln(OR) ≈ 1.81·d`, with
+  VanderWeele (2017), `RR ≈ sqrt(OR)` for a common outcome, as the EValue R
+  package does for continuous outcomes (`evalues.MD`, `evalues.OLS`):
+  `RR ≈ sqrt(OR) = exp(1.81·d/2) ≈ exp(0.91·d)`. The statement
+  `RR ≈ exp(0.91·d)` is this documentation's statement of that combination, not
+  a verbatim formula from either paper.
+
+### Omitted-variable-bias bounds and robustness values
+
+The omitted-variable-bias framework of Chernozhukov, Cinelli, Newey, Sharma and
+Syrgkanis bounds the bias of a debiased estimate of a linear functional of the
+outcome regression, such as the ATE, by how much omitted confounders would
+explain the outcome and the treatment (through the Riesz representer `α`). OCI
+follows the formulas of the DoubleML sensitivity guide:
+
+```text
+W = (Y, T, X)
+σ² = E[(Y − g(T, X))²],   g(T, X) = T·μ̂1 + (1 − T)·μ̂0
+ν² = E[α²],               estimated by  ν̂² = Eₙ[2·m(W, α̂) − α̂²]
+|θ̃ − θ| ≤ |ρ| · σ · ν · C_Y · C_D,   C_Y² = cf_y,   C_D² = cf_d / (1 − cf_d)
+bounds:  θ ± |ρ|·σ·ν·C_Y·C_D,  with ρ = 1
+```
+
+- `θ̃` is the estimate that adjusts for the measured variables and `θ` the one
+  that would also adjust for the omitted confounders. `m(W, α)` applies the
+  effect functional to `α`: `α(1, X) − α(0, X)` for the ATE, weighted by
+  `h(X)/E[h]` for the ATO.
+- `cf_y` is the share of the outcome's residual variation, given treatment and
+  the measured covariates, that the omitted confounders would explain (a
+  partial R²). `cf_d` is the share of the variation of the Riesz representer
+  that they would explain; for the ATE the representer is the
+  inverse-propensity weight. `ρ` is the correlation between the two omitted
+  parts; `ρ = 1`, the most adversarial value, makes the bounds conservative.
+- **ATE**: `α = T/ê − (1 − T)/(1 − ê)` and `m(W, α) = 1/ê + 1/(1 − ê)`, with `ê`
+  clipped at `stage2.propensity_clip` as in the AIPW scores, over the
+  effect-eligible held-out patients.
+- **ATO**: the overlap weights `h(X) = ê(X)(1 − ê(X))` are treated as a fixed
+  function of the measured covariates, so the target is the `h`-weighted average
+  effect. Its representer is `α = h/E[h] · (T/ê − (1 − T)/(1 − ê)) = (T − ê)/E[h]`,
+  with `m(W, α) = h/E[h]²`, over every held-out patient. This bounds the bias
+  for the measured-covariate equipoise population; it does not describe how an
+  omitted confounder would redefine that population.
+- **Confidence bounds.** The adjusted scores `ψ ∓ ψ_bias`, with
+  `ψ_bias = |ρ|·C_Y·C_D·(σ²·ψ_ν² + ν²·ψ_σ²)/(2σν)` from the centered score
+  elements of `σ²` and `ν²`, give standard errors for each bound (sample variance
+  with `n − 1`, as for the reported standard errors). The lower confidence
+  bound is `θ − bias − 1.96·SE₋` and the upper is `θ + bias + 1.96·SE₊`; at
+  `cf_y = cf_d = 0` they equal the reported 95% confidence interval.
+- **Robustness values.** `robustness_value` (RV) is the common value
+  `x = cf_y = cf_d` at which the bound reaches zero effect, found by bisection
+  (Cinelli and Hazlett introduced the robustness value). Confounders that
+  explain a share `x` of the outcome's residual variation and a share `x` of the
+  representer's variation could explain the estimate away; weaker ones could
+  not. `robustness_value_confidence` (RVa) is the same for the confidence bound;
+  it is 0 when the confidence interval already includes zero.
+- **Bound table.** `contour` lists the bounds and confidence bounds for every
+  pair of `cf_y` and `cf_d` in 0.01, 0.02, 0.05, 0.10, and 0.20 at `ρ = 1`, with
+  `confidence_bounds_exclude_zero`, ready for a contour plot.
+
+### Benchmarking against discovered variables
+
+An unmeasured confounder is easier to judge against the measured ones
+(Cinelli and Hazlett 2020; gain statistics as in the DoubleML guide). In each
+outer fold, OCI ranks that fold's discovered nuisance candidates, refits the
+nuisances without each of the top `stage2.sensitivity.benchmark_groups`
+(default 5; 0 disables the refits), and measures what the omitted variable
+explained:
+
+1. **Long reference.** The propensity model and the two arm outcome models are
+   refitted with every candidate as **elastic nets**, one fit per model on all
+   outer-training patients, scored on the fold's held-out patients without
+   recalibration. The reported estimate may use the super learner; the
+   benchmark uses the elastic net for both the long reference and the short
+   models so that the comparison isolates the omitted variable rather than the
+   learner, and to keep the cost bounded.
+2. **Ranking.** Each variable's importance is the product of the L2 norm of its
+   standardized elastic-net coefficients (all of its encoded columns) in the
+   long reference's propensity model and the combined norm over both arm outcome
+   models; ties are broken by the sum of the two norms, then by name. Variables
+   whose product is zero, that is, that enter only one of the models, are not
+   benchmarked. Each variable's role in the fold's final selection is
+   reported with it.
+3. **Short models.** For each benchmarked variable the same three models are
+   refitted without its columns, and the held-out `σ²_short`, `ν²_short`, and
+   `θ_short` (the ATE over the same effect-eligible held-out patients) are
+   computed as above.
+4. **Gains.** With `R² = 1 − σ²/Var(Y)` from the long reference,
+
+   ```text
+   cf_y = (R² − R²_short) / (1 − R²)
+   cf_d = (1 − R²_α) / R²_α,          R²_α = ν²_short / ν²
+   ρ̂   = (θ_short − θ) / sqrt((σ²_short − σ²)(ν² − ν²_short))
+   ```
+
+   with `cf_y` and `cf_d` limited to `[0, 1]` and `|ρ̂|` to 1. When omitting the
+   variable does not raise `σ²` and lower `ν²`, `ρ̂` is not identified and is
+   reported as null.
+5. **Implied bounds.** Each variable's `(cf_y, cf_d)` is applied to the fold's
+   ATE and to the pooled ATE, at `ρ = 1` and at `ρ̂`, giving statements such as
+   "a confounder as strong as *variable* (fold 2) would move the pooled ATE
+   bound to [a, b] at ρ = 1".
+
+Benchmarking runs `3 + 3k` elastic-net fits per fold for `k` benchmarked
+variables, inside the shared CPU modeling pool (`stage2.modeling_workers`), with
+checkpoints in `outer_NNN/estimation/sensitivity_benchmarks/fits/<id>/` and the
+results in `outer_NNN/estimation/sensitivity_benchmarks/benchmarks.json`; a
+failure is recorded in that file, never raised. The DoubleML guide notes that
+benchmarking is computationally heavy and that `ρ̂` can be unstable when the
+benchmark variables are weak confounders. The ATO is not benchmarked, because
+omitting a variable also changes its overlap weights and therefore its target
+population.
+
+### Reading the sensitivity analyses
+
+- **E-value.** An E-value of 2 means that a confounder associated with both
+  treatment and outcome by risk ratios of 2 each, beyond the measured
+  variables, could explain the estimate away, and a weaker one could not. Values
+  near 1 mean weak confounding could explain the estimate; a
+  confidence-limit E-value of 1 means the interval already includes the null.
+- **Robustness value.** An RV of 0.05 means that confounders explaining 5% of
+  the outcome's residual variation and 5% of the representer's variation could
+  reduce the estimate to zero. RVa answers the same question for statistical
+  significance.
+- **Bounds assume ρ = 1** and are therefore conservative; the benchmark `ρ̂`
+  shows how adversarial a confounder like a measured one actually was.
+- **Benchmarks** describe hypothetical confounders as strong as the discovered
+  variables. An unmeasured confounder may be weaker or stronger than every
+  measured one, so benchmarks can understate or overstate the risk. Each fold
+  discovers its own variables, so benchmarks are listed per fold.
+- **Measurement error.** Discovered confounders are measured by an extraction
+  model. Measurement error in them leaves part of their confounding unadjusted,
+  which acts like partial unmeasured confounding; these analyses cover that
+  residual bias too.
+- None of these analyses addresses positivity violations or post-treatment text
+  (see [Limitations](#limitations)).
+
+### References for the sensitivity analyses
+
+1. **VanderWeele TJ, Ding P.** Sensitivity analysis in observational research:
+   introducing the E-value. *Annals of Internal Medicine.* 2017;167(4):268–274.
+   doi:10.7326/M16-2607. PMID 28693043.
+2. **Ding P, VanderWeele TJ.** Sensitivity analysis without assumptions.
+   *Epidemiology.* 2016;27(3):368–377.
+3. **VanderWeele TJ.** On a square-root transformation of the odds ratio for a
+   common outcome. *Epidemiology.* 2017;28(6):e58–e60.
+   doi:10.1097/EDE.0000000000000733.
+4. **Chinn S.** A simple method for converting an odds ratio to effect size for
+   use in meta-analysis. *Statistics in Medicine.* 2000;19(22):3127–3131.
+   PMID 11113947.
+5. **Mathur MB, Ding P, Riddell CA, VanderWeele TJ.** Website and R package for
+   computing E-values. *Epidemiology.* 2018;29(5):e45–e47 (PMC6066405).
+6. **Chernozhukov V, Cinelli C, Newey W, Sharma A, Syrgkanis V.** Long story
+   short: omitted variable bias in causal machine learning. NBER Working Paper
+   30302 (2022); arXiv:2112.13398; *The Review of Economics and Statistics*
+   (MIT Press), doi:10.1162/REST.a.1705.
+7. **Cinelli C, Hazlett C.** Making sense of sensitivity: extending omitted
+   variable bias. *Journal of the Royal Statistical Society Series B.*
+   2020;82(1):39–67. doi:10.1111/rssb.12348.
+8. **Bach P, Chernozhukov V, Kurz MS, Spindler M.** DoubleML — an
+   object-oriented implementation of double machine learning in Python.
+   *Journal of Machine Learning Research.* 2022;23(53):1–6. Sensitivity user
+   guide: https://docs.doubleml.org/stable/guide/sensitivity.html
+9. **Li F, Morgan KL, Zaslavsky AM.** Balancing covariates via propensity score
+   weighting. *Journal of the American Statistical Association.*
+   2018;113(521):390–400. doi:10.1080/01621459.2016.1260466.
 
 ## Output files
 
@@ -1092,6 +1308,7 @@ Per outer fold, under `stage2/outer_NNN/`:
 | `estimation/nuisance_fit_predictions.csv` | Training out-of-fold nuisances (raw), with eligibility |
 | `estimation/propensity_overlap.json` | Training and held-out eligibility audit |
 | `estimation/extraction_failure_diagnostics.json` | Extraction-failure rates on training and held-out patients |
+| `estimation/sensitivity_benchmarks/benchmarks.json` | Benchmark variables, their importance, and their `cf_y`, `cf_d`, and `ρ̂` gains (reporting only), with fit checkpoints under `fits/` |
 
 Across folds, under `stage2/`: `cross_fitted_predictions.csv`,
 `causal_estimate.json`, `heterogeneity_diagnostics.json`, and, for synthetic
@@ -1138,8 +1355,9 @@ data, `posthoc_oracle_ite_metrics.json` and
   consistency assumptions hold. Characteristics that the notes do not document,
   or that Stage 1 and Stage 2 fail to surface, are not adjusted for. Variable
   roles are predictive routing decisions, not demonstrated causal structure.
-  OCI provides overlap and balance diagnostics but no sensitivity analysis for
-  unmeasured confounding.
+  The [sensitivity analyses](#sensitivity-to-unmeasured-confounding) describe
+  how strong unmeasured confounding would have to be to change the conclusion;
+  they do not adjust for it.
 - **Nuisance calibration.** Training out-of-fold nuisances are used without
   recalibration, so their calibration is that of the learner. Each held-out
   calibrator is fitted on one fold model's validation patients (about a fifth of
@@ -1163,6 +1381,10 @@ data, `posthoc_oracle_ite_metrics.json` and
   [Synthetic data](synthetic_data.md).
 
 ## References
+
+The references for the E-values, omitted-variable-bias bounds, and benchmarks
+are listed with full identifiers in
+[References for the sensitivity analyses](#references-for-the-sensitivity-analyses).
 
 - Benjamini Y, Hochberg Y. Controlling the false discovery rate: a practical
   and powerful approach to multiple testing. *Journal of the Royal Statistical

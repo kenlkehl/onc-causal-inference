@@ -5893,7 +5893,7 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     heterogeneity_text = heterogeneity_path.read_text(encoding="utf-8")
     heterogeneity = json.loads(heterogeneity_text)
     assert heterogeneity["schema_version"] == (
-        "stage2_heterogeneity_diagnostics_v4_overlap_estimands"
+        "stage2_heterogeneity_diagnostics_v5_unmeasured_confounding"
     )
     assert heterogeneity["oracle_columns_consumed"] is False
     assert "true_ite" not in heterogeneity_text
@@ -5903,6 +5903,7 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     assert set(heterogeneity["pooling_rules"]) == {
         "blp", "gates", "clan", "rate", "overlap", "balance", "modifier_confirmation",
         "cate_variance_decomposition", "clip_sensitivity", "overlap_flags",
+        "unmeasured_confounding_sensitivity",
     }
     # Reporting-only held-out confirmation also covers balanced_evidence selections.
     assert heterogeneity["modifier_confirmation"]["status"] == "ok"
@@ -5956,6 +5957,24 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
         persisted_estimate["overlap_flags"]["pooled"]["outside_overlap"])
     assert [p["clip"] for p in heterogeneity["clip_sensitivity"]["pooled"]["points"]] == [
         0.01, 0.02, 0.05]
+    # Reporting-only unmeasured-confounding sensitivity: E-values, OVB bounds, benchmarks.
+    sensitivity = heterogeneity["unmeasured_confounding_sensitivity"]
+    assert sensitivity["status"] == "ok" and sensitivity["outcome_type"] == "binary"
+    assert sensitivity["references"] and sensitivity["interpretation"]["evalue"]
+    for estimand in ("ate", "ato"):
+        assert set(sensitivity["evalues"][estimand]["per_fold"]) == {"1", "2"}
+        assert set(sensitivity["omitted_variable_bias"][estimand]["per_fold"]) == {"1", "2"}
+    ovb_ate = sensitivity["omitted_variable_bias"]["ate"]["pooled"]
+    assert ovb_ate["status"] == "ok" and len(ovb_ate["contour"]) == 25
+    assert ovb_ate["estimate"] == pytest.approx(persisted_estimate["ate"])
+    assert sensitivity["benchmarks"]["status"] in {"ok", "unavailable"}
+    for fold in ("1", "2"):
+        benchmark_file = output / f"outer_00{fold}" / "estimation" / (
+            "sensitivity_benchmarks") / "benchmarks.json"
+        assert json.loads(benchmark_file.read_text(encoding="utf-8"))["status"] == "ok"
+    compact = persisted_estimate["unmeasured_confounding_sensitivity"]
+    assert compact == heterogeneity_summary["unmeasured_confounding_sensitivity"]
+    assert compact["status"] == "ok" and {"ate", "ato", "benchmarks"} <= set(compact)
     selection_path = output / "outer_001" / "selection" / "elastic_net_selection.json"
     assert selection_path.is_file()
     selection = json.loads(selection_path.read_text(encoding="utf-8"))

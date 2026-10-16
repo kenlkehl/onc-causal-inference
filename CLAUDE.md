@@ -84,6 +84,8 @@ oci/
     ├── stage2_diagnostics.py         # Oracle-free BLP (primary test), GATES, CLAN, RATE, ATO,
     │                                 #   trimming, SMDs, CATE variance decomposition, outer-fold
     │                                 #   modifier confirmation (reporting only)
+    ├── stage2_sensitivity.py         # Unmeasured-confounding sensitivity: E-values, OVB bounds,
+    │                                 #   robustness values, per-fold benchmark refits (reporting only)
     ├── stage2_extraction_failures.py # Extraction-failure masks and reports
     ├── nuisance_diagnostics.py       # Held-out nuisance diagnostics, overlap policy
     ├── stage2_estimand_ontology*.py, stage2_modifier_concepts.py, stage2_multi_model_adjudication.py,
@@ -155,7 +157,10 @@ and `dina` for binary outcomes; the interaction model leaves the selected
 modifiers' interactions and main effects unpenalized, guarded by events per
 parameter with a separation fallback) → cross-fitted predictions (with the
 reporting-only `outside_overlap` flag), the co-primary clipped AIPW ATE and
-overlap-weighted ATO (`stage2.lead_estimand` labels which leads), and
+overlap-weighted ATO (`stage2.lead_estimand` labels which leads) with their
+reporting-only sensitivity to unmeasured confounding (E-values, omitted-variable-bias
+bounds and robustness values, and per-fold elastic-net benchmark refits without each
+of the top `stage2.sensitivity.benchmark_groups` discovered variables), and
 `heterogeneity_diagnostics.json` (the pooled BLP `beta2` > 0 is the
 pre-specified primary heterogeneity test; GATES and RATE are secondary),
 including the reporting-only outer-fold confirmation of the selected modifiers
@@ -184,10 +189,14 @@ Configuration rules:
   `unpenalized_events_per_parameter` (`selection_dict()` omits them).
 - Diagnostic evidence families (`multi_model.diagnostic_families`) and
   matched-batch evidence are opt-in and do not drive selection.
-- Outer-fold confirmation (`modifier_confirmation`) and the CATE variance
-  decomposition (`cate_variance_decomposition`) in
+- Outer-fold confirmation (`modifier_confirmation`), the CATE variance
+  decomposition (`cate_variance_decomposition`), and the unmeasured-confounding
+  sensitivity (`unmeasured_confounding_sensitivity`) in
   `heterogeneity_diagnostics.json` are computed from frozen artifacts after
-  every fold finishes; no selection, estimation, or other fold reads them.
+  every fold finishes; no selection, estimation, or other fold reads them. The
+  sensitivity benchmarks are the only part that refits models: per fold, after
+  the final estimation, on outer-training rows only, with their own checkpoints
+  in `estimation/sensitivity_benchmarks/`.
 
 ## Scientific invariants
 

@@ -228,6 +228,41 @@ patients who could plausibly have received either treatment (clinical
 equipoise). OCI reports it as a co-primary estimand next to the clipped AIPW
 ATE; `stage2.lead_estimand` records which one leads.
 
+### E-value
+
+The minimum strength of association, on the risk-ratio scale, that an
+unmeasured confounder would need to have with both the treatment and the
+outcome, conditional on the measured covariates, to fully explain away an
+observed association (VanderWeele and Ding, *Annals of Internal Medicine*
+2017). For a risk ratio `RR ≥ 1` it is `RR + sqrt(RR(RR − 1))` (for `RR < 1`,
+use `1/RR`); the E-value for a confidence interval uses the limit closest to
+the null and is 1 when the interval includes it. OCI reports it for the causal
+risk ratio corresponding to the reported risk difference (binary outcomes) or
+for an approximate risk ratio from the standardized mean difference
+(continuous outcomes); see
+[Sensitivity to unmeasured confounding](stage2_selection.md#sensitivity-to-unmeasured-confounding).
+
+### Omitted-variable-bias bound
+
+A bound on how far an estimate could move if confounders were omitted
+(Chernozhukov, Cinelli, Newey, Sharma and Syrgkanis). It depends on two
+strengths: `cf_y`, the share of the outcome's residual variation that the
+omitted confounders explain (a partial R²), and `cf_d`, the share of the
+variation of the estimand's Riesz representer that they explain (for the ATE,
+the inverse-propensity weight `T/e − (1 − T)/(1 − e)`). The bound is
+`θ ± |ρ|·σ·ν·sqrt(cf_y·cf_d/(1 − cf_d))`, where `σ²` is the outcome model's
+residual variance, `ν²` the representer's second moment, and `ρ` the
+correlation of the two omitted parts; OCI uses `ρ = 1`, which is conservative.
+
+### Robustness value
+
+The common value `x` of `cf_y` and `cf_d` at which an
+[omitted-variable-bias bound](#omitted-variable-bias-bound) reaches zero effect
+(Cinelli and Hazlett, *JRSS B* 2020): confounders that explain a share `x` of
+the outcome's residual variation and of the representer's variation could
+explain the estimate away. The confidence version (RVa) uses the 95% confidence
+bound instead and is 0 when the confidence interval already includes zero.
+
 ### SMD
 
 Standardized mean difference: the treated-minus-comparator difference in a
