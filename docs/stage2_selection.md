@@ -1207,7 +1207,15 @@ bounds:  θ ± |ρ|·σ·ν·C_Y·C_D,  with ρ = 1
   elements of `σ²` and `ν²`, give standard errors for each bound (sample variance
   with `n − 1`, as for the reported standard errors). The lower confidence
   bound is `θ − bias − 1.96·SE₋` and the upper is `θ + bias + 1.96·SE₊`; at
-  `cf_y = cf_d = 0` they equal the reported 95% confidence interval.
+  `cf_y = cf_d = 0` they equal the reported 95% confidence interval. Each
+  adjusted score is its bound's delta-method influence function: `ψ` is the
+  centered AIPW (or ATO) score, and `θ − bias` uses `ψ − ψ_bias`. DoubleML 0.11
+  adds `ψ_bias` to its Jacobian-scaled score, which for this model is `−ψ`, so
+  its lower and upper bound standard errors are exchanged relative to these;
+  the tests check OCI's assignment by simulation, and an optional test
+  (`tests/test_stage2_sensitivity_doubleml.py`, run when DoubleML is installed)
+  checks the estimate, `σ²`, `ν²`, the bounds, RV, and the benchmark gain
+  statistics against DoubleML given the same nuisance predictions.
 - **Robustness values.** `robustness_value` (RV) is the common value
   `x = cf_y = cf_d` at which the bound reaches zero effect, found by bisection
   (Cinelli and Hazlett introduced the robustness value). Confounders that

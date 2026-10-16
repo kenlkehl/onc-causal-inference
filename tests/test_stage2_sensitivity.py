@@ -140,7 +140,11 @@ def _continuous_sample(rng, n=4000):
 
 
 def _doubleml_reference(y, d, m_hat, g0, g1, cf_y, cf_d, rho=1.0):
-    """Independent transcription of the DoubleML IRM (ATE) sensitivity formulas."""
+    """Independent transcription of the DoubleML IRM (ATE) sensitivity formulas.
+
+    The adjusted scores use the delta-method orientation, psi = score - theta
+    (see ``test_bound_standard_errors_follow_the_delta_method``).
+    """
 
     n = len(y)
     psi_b = g1 - g0 + d * (y - g1) / m_hat - (1 - d) * (y - g0) / (1 - m_hat)
@@ -187,6 +191,30 @@ def test_ovb_bounds_match_an_independent_doubleml_transcription(cf_y, cf_d, rho)
         se = np.std(diagnostics.dr_scores(y, t, e, mu0, mu1, clip=1e-6), ddof=1) / math.sqrt(n)
         assert ours["lower_confidence_bound"] == pytest.approx(elements.theta - 1.96 * se)
         assert ours["upper_confidence_bound"] == pytest.approx(elements.theta + 1.96 * se)
+
+
+def test_bound_standard_errors_follow_the_delta_method():
+    # theta - bias has influence function psi - psi_bias, so its standard error
+    # must track the sampling spread of the lower bound; skewed, arm-dependent
+    # noise makes the two adjusted scores differ sharply.
+    rng = np.random.default_rng(1)
+    lower, upper, lower_se, upper_se = [], [], [], []
+    for _ in range(600):
+        x = rng.normal(size=600)
+        e = expit(0.8 * x)
+        t = rng.binomial(1, e).astype(float)
+        mu0, mu1 = 0.5 * x, 1.0 + 0.5 * x
+        y = np.where(t == 1, mu1, mu0) + (rng.exponential(1.0, 600) - 1.0) * (1 + 1.5 * t)
+        bounds = sensitivity.ovb_bounds(
+            sensitivity.ate_elements(y, t, e, mu0, mu1, clip=0.01), 0.5, 0.5)
+        lower.append(bounds["lower"])
+        upper.append(bounds["upper"])
+        lower_se.append(bounds["lower_standard_error"])
+        upper_se.append(bounds["upper_standard_error"])
+    spread_lower, spread_upper = np.std(lower, ddof=1), np.std(upper, ddof=1)
+    assert np.mean(lower_se) == pytest.approx(spread_lower, rel=0.15)
+    assert np.mean(upper_se) == pytest.approx(spread_upper, rel=0.15)
+    assert abs(np.mean(lower_se) - spread_lower) < abs(np.mean(upper_se) - spread_lower)
 
 
 def test_robustness_values_solve_the_bound_equations():

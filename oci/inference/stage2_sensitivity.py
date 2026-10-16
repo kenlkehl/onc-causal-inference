@@ -30,7 +30,10 @@ E_n[2 m(W, alpha) - alpha^2], the bias of the estimate is bounded by
 ``|rho| * sigma * nu * C_Y * C_D`` with ``C_Y^2 = cf_y`` and
 ``C_D^2 = cf_d / (1 - cf_d)``; bounds are ``theta -/+`` that amount, with
 rho = 1 as the conservative choice. Confidence bounds come from the adjusted
-scores ``psi -/+ psi_bias``; the robustness value RV is the common value of cf_y
+scores ``psi -/+ psi_bias``, the delta-method influence functions of the lower
+and upper bounds, with ``psi`` the centered score (DoubleML 0.11 pairs
+``psi_bias`` with its Jacobian-scaled score ``-psi``, which exchanges its two
+bound standard errors); the robustness value RV is the common value of cf_y
 and cf_d at which the bound reaches zero effect, and RVa uses the confidence
 bound instead (Cinelli and Hazlett 2020 introduced the robustness value).
 
