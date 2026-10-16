@@ -194,15 +194,25 @@ CONFIRMATION_INTERPRETATION = (
     "held-out patients took no part in discovery or selection, these tests are "
     "valid conditional on the selection (sample splitting); training p-values are "
     "optimistic because the candidate list was built from the training patients. "
-    "Each fold defines and extracts its own variables, so the cross-fold summary "
-    "matches exact normalized names only; a name selected in several folds may "
-    "still be measured differently in each."
+    "effects gives each modifier's held-out R-learner and AIPW projection "
+    "coefficients (change in the absolute treatment effect, or in the AIPW "
+    "pseudo-outcome, per unit of each design column, per level versus the reference "
+    "for categorical modifiers, and per training SD for continuous ones) with HC3 "
+    "standard errors and 95% intervals; together with the GATES group effects these "
+    "are the honest uncertainty statements, since no per-patient CATE interval "
+    "accounts for variable discovery, extraction and selection. Each fold defines and "
+    "extracts its own variables; across_folds groups them into concepts by name and "
+    "definition similarity, never tests one fold's variable on another fold's "
+    "held-out rows, and aggregates each concept's held-out p-values across folds."
 )
 CONFIRMATION_POOLING_RULE = (
     "per fold; pooled counts of selected and confirmed modifiers; across folds, "
-    "exact normalized-name matches with an unweighted Stouffer combination of the "
-    "held-out combined p-values (one-sided z-scores) for names selected in two or "
-    "more folds"
+    "variables grouped into concepts (at most one per fold) by lexical name and "
+    "definition similarity, with Meinshausen-Meier-Buhlmann aggregation of the "
+    "held-out combined p-values (gamma = 0.5, p = 1 where not selected), "
+    "Benjamini-Hochberg across concepts, and fixed-effect inverse-variance pooling "
+    "of effect sizes (Cochran's Q, I^2, fold range) when every matched fold has the "
+    "same value or category columns"
 )
 
 CATE_COMPONENT_COLUMNS = (
@@ -1177,6 +1187,9 @@ class ConfirmationInput:
     sources: dict[str, str] = field(default_factory=dict)
     excluded_oracle_features: list[str] = field(default_factory=list)
     missing_measurement_columns: list[str] = field(default_factory=list)
+    # Standard deviation of each continuous modifier's observed training values
+    # (the fold's own outer-training measurements; no labels).
+    training_scales: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -1447,14 +1460,33 @@ def confirm_fold_modifiers(
         str(feature.get("feature_id") or feature["name"]): feature.get("modifier_evidence")
         for feature in definitions
     }
+    by_id = {str(feature.get("feature_id") or feature["name"]): feature for feature in definitions}
+    scale = (
+        "risk difference per unit" if policy["outcome_type"] == "binary"
+        else "outcome difference per unit"
+    )
     modifiers = []
     for record in records:
         components = record["components"]
         evidence = training.get(record["feature_id"])
+        definition = by_id.get(record["feature_id"], {})
         modifiers.append({
             "feature_id": record["feature_id"],
             "name": record["name"],
             "normalized_name": normalized_feature_name(record["name"]),
+            "value_type": definition.get("value_type"),
+            "definition_text": _definition_text(definition),
+            "effects": {
+                "scale": scale,
+                "training_sd": confirmation.training_scales.get(record["name"]),
+                **{
+                    name: projection_effects(
+                        components[name], record.get("grouped_columns") or [],
+                        training_sd=confirmation.training_scales.get(record["name"]),
+                    )
+                    for name in ("r_projection", "aipw_projection")
+                },
+            },
             "confirmed": bool(record["selected"]),
             "combined_p_value": record["combined_p_value"],
             "combined_q_value": record["combined_q_value"],
@@ -1491,6 +1523,322 @@ def confirm_fold_modifiers(
     return result
 
 
+# Conservative: a false merge would combine p-values of different concepts, while
+# a missed merge only forgoes aggregation. Lexical overlap separates concepts
+# imperfectly: distinct variables sharing most words (for example brain versus
+# liver metastases) can score about 0.65, and differently worded synonyms can
+# score below 0.6. Complete linkage requires every cross-fold pair to pass.
+CONCEPT_SIMILARITY_THRESHOLD = 0.7
+CONCEPT_SIMILARITY_METHOD = (
+    "mean of the TF-IDF cosine similarities of word 1-2 grams and character 3-5 grams "
+    "(within word boundaries) of the normalized name, description and measurement "
+    "definition, fitted on the selected variables of all folds; identical normalized "
+    "names score 1; groups merge by complete linkage at a conservative threshold, so "
+    "differently worded synonyms can stay separate"
+)
+MMB_GAMMA = 0.5
+
+
+def _definition_text(feature: Mapping[str, Any]) -> str:
+    parts = [feature.get("name"), feature.get("description"), feature.get("measurement_definition")]
+    text = " ".join(str(part) for part in parts if part)
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _column_kind(column: str) -> tuple[str, str | None]:
+    """Kind of a grouped-design column (value, level, fallback, missing, failure) and its level."""
+
+    suffix = column.rsplit(":", 1)[-1]
+    if suffix == "value":
+        return "value", None
+    if suffix == "missing":
+        return "missing_indicator", None
+    if suffix == "extraction_failed":
+        return "extraction_failure_indicator", None
+    for prefix, kind in (("level=", "level"), ("fallback=", "fallback_level")):
+        if suffix.startswith(prefix):
+            return kind, suffix[len(prefix):]
+    return "other", None
+
+
+def projection_effects(
+    component: Mapping[str, Any], grouped_columns: Sequence[str], *, training_sd: float | None
+) -> dict[str, Any]:
+    """Per-column projection coefficients with HC3 standard errors and 95% intervals.
+
+    For ``r_projection`` a coefficient is the change in the absolute treatment
+    effect per unit of the column; for ``aipw_projection`` the change in the
+    AIPW pseudo-outcome. Continuous value columns also get the change per
+    training SD.
+    """
+
+    if component.get("p_value") is None:
+        return unavailable(str(component.get("reason") or "component not evaluable"))
+    indices = [int(i) for i in component.get("tested_column_indices") or []]
+    coefficients = list(component.get("coefficients") or [])
+    errors = list(component.get("standard_errors") or [])
+    if len(indices) != len(coefficients) or len(errors) != len(coefficients):
+        return unavailable("component did not record per-column coefficients")
+    columns = []
+    for index, coefficient, error in zip(indices, coefficients, errors):
+        name = str(grouped_columns[index]) if 0 <= index < len(grouped_columns) else str(index)
+        kind, level = _column_kind(name)
+        coefficient, error = _float(coefficient), _float(error)
+        z = _ratio(coefficient, error) if error else None
+        entry = {
+            "column": name,
+            "kind": kind,
+            "level": level,
+            "coefficient": coefficient,
+            "standard_error": error,
+            "confidence_interval_95": _interval(coefficient, error),
+            "p_value_two_sided": _p_two_sided(z),
+        }
+        if kind == "value" and training_sd and coefficient is not None:
+            entry["per_training_sd"] = {
+                "coefficient": coefficient * training_sd,
+                "standard_error": error * training_sd if error is not None else None,
+                "confidence_interval_95": _interval(
+                    coefficient * training_sd,
+                    error * training_sd if error is not None else None,
+                ),
+            }
+        columns.append(entry)
+    return {"status": "ok", "covariance": "HC3", "columns": columns}
+
+
+def concept_similarities(texts: Sequence[str], names: Sequence[str]) -> np.ndarray:
+    """Deterministic lexical similarity matrix (see CONCEPT_SIMILARITY_METHOD)."""
+
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    texts = [text or name for text, name in zip(texts, names)]
+    if len(texts) < 2:
+        return np.ones((len(texts), len(texts)))
+    matrices = []
+    for analyzer, ngrams in (("word", (1, 2)), ("char_wb", (3, 5))):
+        vectorizer = TfidfVectorizer(analyzer=analyzer, ngram_range=ngrams, sublinear_tf=True)
+        vectors = vectorizer.fit_transform(texts)
+        matrices.append(np.asarray((vectors @ vectors.T).todense(), dtype=float))
+    similarity = np.mean(matrices, axis=0)
+    normalized = [normalized_feature_name(name) for name in names]
+    for i in range(len(texts)):
+        for j in range(len(texts)):
+            if normalized[i] == normalized[j]:
+                similarity[i, j] = 1.0
+    return similarity
+
+
+def match_concepts(
+    entries: Sequence[Mapping[str, Any]], *, threshold: float = CONCEPT_SIMILARITY_THRESHOLD
+) -> list[dict[str, Any]]:
+    """Group selected variables across folds; at most one variable per fold per concept.
+
+    Greedy complete linkage: cross-fold pairs are taken in descending
+    similarity and two groups merge only when every cross pair is at least
+    ``threshold`` and no fold would appear twice. ``entries`` need ``fold``,
+    ``name`` and ``definition_text``.
+    """
+
+    entries = list(entries)
+    if not entries:
+        return []
+    similarity = concept_similarities(
+        [str(e.get("definition_text") or "") for e in entries], [str(e["name"]) for e in entries]
+    )
+    group_of = list(range(len(entries)))
+    members = {i: {i} for i in range(len(entries))}
+    pairs = sorted(
+        ((float(similarity[i, j]), i, j) for i in range(len(entries)) for j in range(i + 1, len(entries))
+         if entries[i]["fold"] != entries[j]["fold"]),
+        key=lambda item: (-item[0], item[1], item[2]),
+    )
+    for score, i, j in pairs:
+        if score < threshold:
+            break
+        a, b = group_of[i], group_of[j]
+        if a == b:
+            continue
+        folds_a = {entries[k]["fold"] for k in members[a]}
+        folds_b = {entries[k]["fold"] for k in members[b]}
+        if folds_a & folds_b:
+            continue
+        if min(similarity[x, y] for x in members[a] for y in members[b]) < threshold:
+            continue
+        members[a] |= members.pop(b)
+        for k in members[a]:
+            group_of[k] = a
+    groups = sorted(
+        (sorted(group, key=lambda k: _fold_key(entries[k]["fold"])) for group in members.values()),
+        key=lambda group: (_fold_key(entries[group[0]]["fold"]), str(entries[group[0]]["name"])),
+    )
+    concepts = []
+    for number, group in enumerate(groups, 1):
+        pairwise = [
+            float(similarity[x, y]) for a, x in enumerate(group) for y in group[a + 1:]
+        ]
+        concepts.append({
+            "concept_id": f"concept_{number:03d}",
+            "member_indices": group,
+            "minimum_similarity": min(pairwise) if pairwise else None,
+            "pairwise_similarities": {
+                f"{entries[x]['fold']}:{entries[y]['fold']}": float(similarity[x, y])
+                for a, x in enumerate(group) for y in group[a + 1:]
+            },
+        })
+    return concepts
+
+
+def mmb_quantile_aggregation(p_values: Sequence[float | None], *, gamma: float = MMB_GAMMA) -> float:
+    """Meinshausen-Meier-Buhlmann fixed-gamma aggregation: min(1, quantile_gamma(p) / gamma).
+
+    Missing p-values count as 1. With gamma = 0.5 this is min(1, 2 * median).
+    """
+
+    values = np.array([1.0 if p is None else float(p) for p in p_values], dtype=float)
+    if not len(values):
+        return 1.0
+    return float(min(1.0, np.quantile(values, gamma) / gamma))
+
+
+def fixed_effect_pool(estimates: Sequence[tuple[float, float]]) -> dict[str, Any]:
+    """Inverse-variance pooled estimate with Cochran's Q, I^2 and the fold range."""
+
+    usable = [(float(b), float(se)) for b, se in estimates
+              if _float(b) is not None and _float(se) is not None and float(se) > 0]
+    if len(usable) < 2:
+        return unavailable("fewer than two folds have an estimate with a positive standard error")
+    b = np.array([value for value, _ in usable])
+    w = np.array([1.0 / se ** 2 for _, se in usable])
+    pooled = float(np.sum(w * b) / np.sum(w))
+    se = float(1.0 / math.sqrt(np.sum(w)))
+    q = float(np.sum(w * (b - pooled) ** 2))
+    df = len(usable) - 1
+    from scipy.stats import chi2
+
+    return {
+        "status": "ok",
+        "estimate": pooled,
+        "standard_error": se,
+        "confidence_interval_95": _interval(pooled, se),
+        "folds": len(usable),
+        "cochran_q": q,
+        "q_degrees_of_freedom": df,
+        "q_p_value": float(chi2.sf(q, df)),
+        "i_squared": float(max(0.0, (q - df) / q)) if q > 0 else 0.0,
+        "fold_range": [float(b.min()), float(b.max())],
+    }
+
+
+def _pooled_concept_effects(members: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Pool matched folds' effects when every member has the same single or level columns."""
+
+    signatures = []
+    for member in members:
+        effects = member.get("effects") or {}
+        columns = (effects.get("r_projection") or {}).get("columns") or []
+        kinds = sorted(
+            (c["kind"], normalized_feature_name(c["level"] or ""))
+            for c in columns if c["kind"] in {"value", "level"}
+        )
+        signatures.append(tuple(kinds))
+    if len(members) < 2:
+        return unavailable("selected in fewer than two folds")
+    if not signatures[0] or len(set(signatures)) != 1:
+        return unavailable(
+            "folds differ in the modifier's columns (value type or category set), so the "
+            "effects are reported per fold only"
+        )
+    pooled: dict[str, Any] = {"status": "ok", "columns": {}}
+    for kind, level in signatures[0]:
+        key = "value_per_training_sd" if kind == "value" else f"level={level}"
+        pooled["columns"][key] = {}
+        for component in ("r_projection", "aipw_projection"):
+            estimates, missing_scale = [], False
+            for member in members:
+                columns = ((member.get("effects") or {}).get(component) or {}).get("columns") or []
+                for column in columns:
+                    if column["kind"] != kind or normalized_feature_name(column["level"] or "") != level:
+                        continue
+                    source = column.get("per_training_sd") if kind == "value" else column
+                    if source:
+                        estimates.append((source.get("coefficient"), source.get("standard_error")))
+                    else:
+                        missing_scale = True
+            pooled["columns"][key][component] = (
+                unavailable("a matched fold has no training SD for this continuous modifier, "
+                            "so per-unit effects with possibly different units are not pooled")
+                if missing_scale else fixed_effect_pool(estimates)
+            )
+    pooled["note"] = (
+        "continuous modifiers are pooled per training SD (each fold's own definition and "
+        "units); categorical levels are pooled by matching normalized level labels"
+    )
+    return pooled
+
+
+def _concept_summary(ok: Mapping[str, Mapping[str, Any]], all_folds: Sequence[str], q: float):
+    entries = [
+        {**modifier, "fold": fold}
+        for fold, result in ok.items()
+        for modifier in result.get("modifiers") or []
+    ]
+    concepts = match_concepts(entries)
+    aggregated = []
+    for concept in concepts:
+        members = [entries[k] for k in concept["member_indices"]]
+        by_fold = {member["fold"]: member for member in members}
+        p_by_fold = {
+            fold: (by_fold[fold]["combined_p_value"] if fold in by_fold else None)
+            for fold in all_folds
+        }
+        aggregated.append({
+            "concept_id": concept["concept_id"],
+            "members": [
+                {key: member.get(key) for key in (
+                    "fold", "feature_id", "name", "normalized_name", "definition_text",
+                    "confirmed", "combined_p_value", "combined_q_value")}
+                for member in members
+            ],
+            "selected_in_folds": [member["fold"] for member in members],
+            "confirmed_in_folds": [member["fold"] for member in members if member["confirmed"]],
+            "folds_selected": len(members),
+            "folds_confirmed": sum(bool(member["confirmed"]) for member in members),
+            "minimum_similarity": concept["minimum_similarity"],
+            "pairwise_similarities": concept["pairwise_similarities"],
+            "heldout_p_values_by_fold": p_by_fold,
+            "aggregated_p_value": mmb_quantile_aggregation(list(p_by_fold.values())),
+            "pooled_effects": _pooled_concept_effects(members),
+        })
+    from .stage2_elastic_net_selection import _benjamini_hochberg
+
+    for item, q_value in zip(
+        aggregated, _benjamini_hochberg([item["aggregated_p_value"] for item in aggregated])
+    ):
+        item["aggregated_q_value"] = q_value
+        item["aggregated_supported"] = q_value is not None and q_value <= q
+    aggregated.sort(key=lambda item: (item["aggregated_p_value"], item["concept_id"]))
+    return {
+        "note": (
+            "Each fold defines its own variables. Variables are grouped into concepts by "
+            "name and definition similarity (at most one variable per fold per concept); a "
+            "concept selected in one fold is never tested on another fold's held-out rows, "
+            "which were that fold's training data. Each fold's confirmation is valid "
+            "conditional on that fold's own selection. The Meinshausen-Meier-Buhlmann "
+            "aggregated p-value is min(1, 2 * median) over all folds, with p = 1 where the "
+            "concept was not selected or not testable; Benjamini-Hochberg then runs across "
+            "concepts. The aggregation treats the folds' tests as tests of one concept, "
+            "which holds only approximately when folds define the variable differently."
+        ),
+        "similarity_method": CONCEPT_SIMILARITY_METHOD,
+        "similarity_threshold": CONCEPT_SIMILARITY_THRESHOLD,
+        "aggregation": "meinshausen_meier_buhlmann_fixed_gamma",
+        "gamma": MMB_GAMMA,
+        "folds": list(all_folds),
+        "concepts": aggregated,
+    }
+
+
 def _confirmation_section(
     predictions: pd.DataFrame,
     artifacts: Mapping[str, FoldArtifacts],
@@ -1498,9 +1846,12 @@ def _confirmation_section(
     policy: Mapping[str, Any] | None,
     propensity_clip: float,
 ) -> dict[str, Any]:
+    from . import stage2_modifier_tests as modifier_tests
+
     header = {
         "interpretation": CONFIRMATION_INTERPRETATION,
         "pooling_rule": CONFIRMATION_POOLING_RULE,
+        "p_value_role": modifier_tests.CONFIRMATION_P_VALUE_ROLE,
     }
     if policy is None:
         return {**header, **unavailable("no modifier confirmation policy was supplied")}
@@ -1509,8 +1860,6 @@ def _confirmation_section(
     except (KeyError, TypeError, ValueError) as error:
         return {**header, **unavailable(f"invalid modifier confirmation policy: {error}")}
     resolved["propensity_clip"] = float(propensity_clip)
-    from . import stage2_modifier_tests as modifier_tests
-
     per_fold: dict[str, Any] = {}
     for fold, rows in predictions.groupby("outer_fold", sort=True):
         fold = str(int(fold))
@@ -1525,38 +1874,6 @@ def _confirmation_section(
         )
     per_fold = dict(sorted(per_fold.items(), key=lambda entry: _fold_key(entry[0])))
     ok = {fold: result for fold, result in per_fold.items() if result.get("status") == "ok"}
-    names: dict[str, dict[str, Any]] = {}
-    for fold, result in ok.items():
-        seen = set()
-        for modifier in result["modifiers"]:
-            key = modifier["normalized_name"]
-            entry = names.setdefault(key, {
-                "normalized_name": key, "selected_in_folds": [], "confirmed_in_folds": [],
-                "heldout_combined_p_values": {}, "duplicate_names_in_folds": [],
-            })
-            if key in seen:
-                # The first matching variable in definition order represents the fold.
-                entry["duplicate_names_in_folds"].append(fold)
-                continue
-            seen.add(key)
-            entry["selected_in_folds"].append(fold)
-            if modifier["confirmed"]:
-                entry["confirmed_in_folds"].append(fold)
-            entry["heldout_combined_p_values"][fold] = modifier["combined_p_value"]
-    summaries = []
-    for entry in names.values():
-        p_values = list(entry["heldout_combined_p_values"].values())
-        summaries.append({
-            **entry,
-            "folds_selected": len(entry["selected_in_folds"]),
-            "folds_confirmed": len(entry["confirmed_in_folds"]),
-            "stouffer": (
-                modifier_tests.stouffer_combination(p_values)
-                if len(entry["selected_in_folds"]) >= 2 else None
-            ),
-        })
-    summaries.sort(key=lambda e: (-e["folds_confirmed"], -e["folds_selected"],
-                                  e["normalized_name"]))
     if not ok:
         return {
             **header, "policy": resolved, "per_fold": per_fold,
@@ -1574,15 +1891,7 @@ def _confirmation_section(
             "total_selected": int(sum(r["selected_modifiers"] for r in ok.values())),
             "total_confirmed": int(sum(r["confirmed_modifiers"] for r in ok.values())),
         },
-        "across_folds": {
-            "note": (
-                "Each fold defines its own variables; names are matched exactly after "
-                "normalization (lower case, non-alphanumeric runs replaced by '_'). "
-                "Stouffer combines the held-out combined p-values of the folds that "
-                "selected the name (z_k = Phi^-1(1 - p_k), Z = sum z_k / sqrt(K))."
-            ),
-            "names": summaries,
-        },
+        "across_folds": _concept_summary(ok, sorted(per_fold, key=_fold_key), resolved["q"]),
     }
 
 
@@ -2078,15 +2387,27 @@ def _decomposition_summary(section: Any) -> dict[str, Any]:
 def _confirmation_summary(section: Any) -> dict[str, Any]:
     section = section if isinstance(section, Mapping) else {}
     pooled = section.get("pooled") or {}
-    names = (section.get("across_folds") or {}).get("names") or []
+    concepts = (section.get("across_folds") or {}).get("concepts") or []
     return {
         **_pick(section, "status", "reason"),
         **_pick(pooled, "total_selected", "total_confirmed", "selected_by_fold",
                 "confirmed_by_fold"),
         "q": (section.get("policy") or {}).get("q"),
-        "names_confirmed_in_multiple_folds": [
-            entry["normalized_name"] for entry in names
-            if isinstance(entry, Mapping) and int(entry.get("folds_confirmed") or 0) >= 2
+        "concepts": [
+            {
+                "concept_id": concept.get("concept_id"),
+                "names": [member.get("name") for member in concept.get("members") or []],
+                "folds_selected": concept.get("folds_selected"),
+                "folds_confirmed": concept.get("folds_confirmed"),
+                "aggregated_p_value": concept.get("aggregated_p_value"),
+                "aggregated_q_value": concept.get("aggregated_q_value"),
+            }
+            for concept in concepts
+            if isinstance(concept, Mapping)
+        ],
+        "concepts_supported_after_aggregation": [
+            concept.get("concept_id") for concept in concepts
+            if isinstance(concept, Mapping) and concept.get("aggregated_supported")
         ],
     }
 
@@ -2222,6 +2543,7 @@ def load_fold_artifacts(fold_dir: Path) -> FoldArtifacts:
         retained, final_path,
         (candidate_heldout, heldout_retained),
         mask=heldout_mask,
+        training_paths=(candidate_fit, fold_dir / "extraction" / "fit" / "extracted.csv"),
     )
     return FoldArtifacts(
         clan=clan, balance_training=training, balance_heldout=heldout,
@@ -2235,8 +2557,46 @@ def _confirmation_input(
     measurement_paths: Sequence[Path],
     *,
     mask: Path,
+    training_paths: Sequence[Path] = (),
 ) -> ConfirmationInput | str:
     """The fold's selected modifiers and the first held-out file that measures them."""
+
+    result = _confirmation_measurements(retained, final_path, measurement_paths, mask=mask)
+    if isinstance(result, ConfirmationInput) and result.definitions:
+        result.training_scales = _training_scales(result.definitions, training_paths)
+    return result
+
+
+def _training_scales(
+    definitions: Sequence[Mapping[str, Any]], paths: Sequence[Path]
+) -> dict[str, float]:
+    """SD of each continuous modifier's observed outer-training values (first file that has it)."""
+
+    scales: dict[str, float] = {}
+    wanted = [str(f["name"]) for f in definitions if _is_continuous(f)]
+    for path in paths:
+        if not wanted or not Path(path).is_file():
+            continue
+        try:
+            frame = pd.read_csv(path, usecols=lambda column: column in wanted)
+        except (OSError, ValueError):
+            continue
+        for name in list(wanted):
+            if name in frame.columns:
+                values = pd.to_numeric(frame[name], errors="coerce").dropna()
+                if len(values) > 1 and float(values.std(ddof=1)) > 0:
+                    scales[name] = float(values.std(ddof=1))
+                wanted.remove(name)
+    return scales
+
+
+def _confirmation_measurements(
+    retained: list[dict[str, Any]] | str,
+    final_path: Path,
+    measurement_paths: Sequence[Path],
+    *,
+    mask: Path,
+) -> ConfirmationInput | str:
 
     if isinstance(retained, str):
         return retained

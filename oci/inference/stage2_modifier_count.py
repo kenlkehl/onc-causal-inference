@@ -563,6 +563,7 @@ def _select_by_orthogonal_tests(
         tests_report = modifier_tests.json_ready({
             "schema_version": modifier_tests.SCHEMA_VERSION,
             "rule": "orthogonal_tests",
+            "p_value_role": modifier_tests.SCREENING_P_VALUE_ROLE,
             "input_fingerprint": fingerprint,
             "outcome_type": outcome_type,
             "q_threshold": chosen.q,

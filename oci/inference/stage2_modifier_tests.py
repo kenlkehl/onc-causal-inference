@@ -123,6 +123,21 @@ INTERPRETATIONS = {
 }
 
 
+SCREENING_P_VALUE_ROLE = (
+    "screening: the training-row p-values choose which candidates become modifiers. "
+    "The candidate list was discovered, defined and extracted with the same "
+    "outer-training outcomes, so these p-values are optimistic and are not inferential; "
+    "the inferential result is the held-out outer-fold confirmation in "
+    "heterogeneity_diagnostics.json (modifier_confirmation)."
+)
+CONFIRMATION_P_VALUE_ROLE = (
+    "inferential: each outer fold's selected modifiers are tested on that fold's held-out "
+    "patients, who took no part in discovery, extraction definitions or selection, so the "
+    "p-values and effect-size intervals are valid conditional on that fold's own "
+    "selection (sample splitting)."
+)
+
+
 def default_weights(outcome_type: str) -> dict[str, float]:
     """Scale-balanced component weights for the outcome type."""
 
@@ -550,6 +565,8 @@ def compact_evidence(record: Mapping[str, Any], *, rule: str) -> dict[str, Any]:
 
 __all__ = [
     "ABSOLUTE_COMPONENTS",
+    "CONFIRMATION_P_VALUE_ROLE",
+    "SCREENING_P_VALUE_ROLE",
     "COMPONENTS",
     "COMPONENT_DESCRIPTIONS",
     "INTERPRETATIONS",

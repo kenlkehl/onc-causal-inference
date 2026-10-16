@@ -13,6 +13,7 @@ from scipy.special import expit
 
 from oci.inference import stage2_diagnostics as diagnostics
 from oci.inference import stage2_modifier_tests as modifier_tests
+from oci.inference.stage2_elastic_net_selection import _benjamini_hochberg
 
 N_PER_FOLD = 1500
 
@@ -180,25 +181,53 @@ def test_confirmation_matches_direct_tests_and_summarizes_across_folds(tmp_path,
         "total_selected": 4,
         "total_confirmed": 2,
     }
-    names = {entry["normalized_name"]: entry for entry in section["across_folds"]["names"]}
-    assert set(names) == {"modifier_score", "noise_level", "smoking_status"}
-    shared = names["modifier_score"]
+    across = section["across_folds"]
+    assert across["aggregation"] == "meinshausen_meier_buhlmann_fixed_gamma"
+    assert across["folds"] == ["1", "2"]
+    concepts = {tuple(m["name"] for m in c["members"]): c for c in across["concepts"]}
+    # Same normalized name in both folds: one concept; the noise variables stay apart.
+    assert set(concepts) == {("Modifier score", "modifier_score"), ("noise level",),
+                             ("Smoking status",)}
+    shared = concepts[("Modifier score", "modifier_score")]
     assert (shared["folds_selected"], shared["folds_confirmed"]) == (2, 2)
     assert shared["selected_in_folds"] == shared["confirmed_in_folds"] == ["1", "2"]
+    assert shared["minimum_similarity"] == 1.0
     p_values = [section["per_fold"][fold]["modifiers"][0]["combined_p_value"]
                 for fold in ("1", "2")]
-    expected_stouffer = modifier_tests.stouffer_combination(p_values)
-    assert shared["stouffer"]["z"] == pytest.approx(expected_stouffer["z"])
-    assert shared["stouffer"]["p_value"] == pytest.approx(expected_stouffer["p_value"])
-    assert names["noise_level"]["stouffer"] is None
-    assert names["noise_level"]["folds_confirmed"] == 0
-    assert section["across_folds"]["names"][0]["normalized_name"] == "modifier_score"
+    assert shared["heldout_p_values_by_fold"] == dict(zip(("1", "2"), p_values))
+    assert shared["aggregated_p_value"] == pytest.approx(
+        diagnostics.mmb_quantile_aggregation(p_values))
+    noise = concepts[("noise level",)]
+    assert noise["heldout_p_values_by_fold"]["2"] is None
+    assert noise["aggregated_p_value"] == pytest.approx(min(
+        1.0, 2 * np.median([noise["heldout_p_values_by_fold"]["1"], 1.0])))
+    q_values = _benjamini_hochberg(
+        [c["aggregated_p_value"] for c in across["concepts"]])
+    assert [c["aggregated_q_value"] for c in across["concepts"]] == pytest.approx(q_values)
+    assert across["concepts"][0]["concept_id"] == shared["concept_id"]
+    assert shared["aggregated_supported"] is True
+    # Effect sizes per fold, and pooled across the two matched folds.
+    for fold in ("1", "2"):
+        effects = section["per_fold"][fold]["modifiers"][0]["effects"]
+        for component in ("r_projection", "aipw_projection"):
+            value = effects[component]["columns"][0]
+            assert value["kind"] == "value" and value["standard_error"] > 0
+            low, high = value["confidence_interval_95"]
+            # The simulated modifier changes the absolute effect by +1.0 per unit
+            # (continuous outcome), or by a positive amount (binary).
+            assert low < value["coefficient"] < high
+            assert value["coefficient"] > 0
+    assert shared["pooled_effects"]["status"] == "ok"
+    assert shared["pooled_effects"]["columns"]["value_per_training_sd"]["r_projection"][
+        "status"] == "unavailable"  # this fixture stores no training measurements
+    assert "p_value_role" in section and section["p_value_role"].startswith("inferential")
     # The compact summary flows into causal_estimate.json.
     compact = summary["modifier_confirmation"]
     assert compact["status"] == "ok"
     assert (compact["total_selected"], compact["total_confirmed"]) == (4, 2)
     assert compact["confirmed_by_fold"] == {"1": 1, "2": 1}
-    assert compact["names_confirmed_in_multiple_folds"] == ["modifier_score"]
+    assert compact["concepts_supported_after_aggregation"] == [shared["concept_id"]]
+    assert compact["concepts"][0]["names"] == ["Modifier score", "modifier_score"]
     assert diagnostics.summarize_diagnostics(json.loads(text))["modifier_confirmation"] == compact
 
 
@@ -271,7 +300,7 @@ def test_missing_inputs_are_unavailable_never_a_failure(tmp_path):
     assert section["pooled"]["folds"] == ["1", "2", "4"]
     assert section["pooled"]["selected_by_fold"]["4"] == 0
     assert summary["modifier_confirmation"]["status"] == "ok"
-    assert "error" not in json.dumps(section)
+    assert '"status": "error"' not in json.dumps(section)
 
 
 def test_without_policy_or_with_invalid_policy_the_section_is_unavailable(tmp_path):
@@ -290,7 +319,7 @@ def test_without_policy_or_with_invalid_policy_the_section_is_unavailable(tmp_pa
         assert reason in section["reason"]
         assert section["interpretation"]
         assert summary["modifier_confirmation"]["status"] == "unavailable"
-        assert summary["modifier_confirmation"]["names_confirmed_in_multiple_folds"] == []
+        assert summary["modifier_confirmation"]["concepts"] == []
 
 
 def test_configured_weights_are_used(tmp_path):

@@ -793,10 +793,19 @@ ensemble component's audit, repeat a compact `selected_modifier_penalty`
 summary.
 
 `stage2/heterogeneity_diagnostics.json` contains `modifier_confirmation`: the
-confirmation policy, per-fold results for each selected modifier (`confirmed`,
-held-out combined and component p- and q-values, labels), pooled counts of
-selected and confirmed modifiers, and the cross-fold name summary with Stouffer
-combinations. `stage2/causal_estimate.json` repeats a compact summary under
+confirmation policy and `p_value_role` (inferential); per-fold results for each
+selected modifier (`confirmed`, held-out combined and component p- and
+q-values, labels, `definition_text`, and `effects`: per-column `r_projection`
+and `aipw_projection` coefficients with `standard_error`,
+`confidence_interval_95` and `p_value_two_sided`, `kind` and `level`, and
+`per_training_sd` for continuous values with the fold's `training_sd`); pooled
+counts of selected and confirmed modifiers; and `across_folds`: the similarity
+method and threshold, MMB `gamma`, and one entry per concept with its
+`members`, `pairwise_similarities`, `selected_in_folds`, `confirmed_in_folds`,
+`heldout_p_values_by_fold`, `aggregated_p_value`, `aggregated_q_value`,
+`aggregated_supported`, and `pooled_effects` (fixed-effect estimate, standard
+error, interval, `cochran_q`, `i_squared`, `fold_range`, or the reason effects
+are per fold only). `modifier_tests.json` records `p_value_role` (screening). `stage2/causal_estimate.json` repeats a compact summary under
 `heterogeneity_diagnostics.modifier_confirmation`.
 
 The same file contains `cate_variance_decomposition` (`columns`: `estimated_cate`

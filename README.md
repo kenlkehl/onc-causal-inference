@@ -215,7 +215,11 @@ use a separate output directory for a different study. Details are in
   interval is in `estimated_cate_causal_forest_lower_95`,
   `estimated_cate_causal_forest_upper_95`, and
   `estimated_cate_causal_forest_standard_error`. When a single causal forest is
-  the final model, the forest fills the three main interval columns.
+  the final model, the forest fills the three main interval columns. No
+  per-patient interval is reported for the ensemble, because no available
+  interval accounts for variable discovery, extraction, and selection; the GATES
+  group effects and the per-modifier held-out effect sizes below are the honest
+  uncertainty statements.
 - `propensity`, `mu0`, and `mu1` are the nuisance predictions: the probability of
   treatment and the expected outcome under comparator and under treatment, from
   separate cross-fitted nuisance models, by default super learners that stack an
@@ -239,10 +243,16 @@ reverse.
 `heterogeneity_diagnostics.json`, summarized in `causal_estimate.json`)
 re-tests each fold's selected modifiers on that fold's held-out patients and
 reports how many were confirmed (held-out q-value at most `q`, 0.10 by
-default), per fold and across folds by variable name. Training p-values are
-somewhat optimistic because the candidates were found in the same patients; the
-held-out tests are not. Confirmation is reporting only and never changes
-selection or estimation.
+default), with each modifier's held-out effect size (the change in absolute
+benefit per unit, per level, or per training SD, with 95% intervals). Across
+folds, variables are grouped into concepts by name and definition similarity;
+each concept's held-out p-values are aggregated across folds
+(Meinshausen–Meier–Bühlmann) with Benjamini–Hochberg across concepts, and
+matched effects are pooled with a heterogeneity statistic. The training-row
+p-values in `modifier_tests.json` are screening values, optimistic because the
+candidates were found in the same patients; the held-out confirmation is the
+inferential result. Confirmation is reporting only and never changes selection
+or estimation.
 
 **Heterogeneity diagnostics** ask whether the CATE predictions capture real
 differences, using only held-out data:

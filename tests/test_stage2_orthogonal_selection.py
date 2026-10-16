@@ -186,6 +186,9 @@ def test_run_fold_analysis_selects_modifiers_by_orthogonal_tests_and_ensembles(
     # modifier_tests.json: schema, per-candidate fields, and the selection.
     tests = json.loads((output / "selection" / "modifier_tests.json").read_text())
     assert tests["schema_version"] == modifier_tests.SCHEMA_VERSION
+    # Training-row p-values are screening values; the held-out confirmation is inferential.
+    assert tests["p_value_role"] == modifier_tests.SCREENING_P_VALUE_ROLE
+    assert tests["p_value_role"].startswith("screening")
     assert (tests["rule"], tests["q_threshold"]) == ("orthogonal_tests", 0.1)
     assert tests["weights"] == modifier_tests.BINARY_WEIGHTS
     assert tests["weights_source"] == "outcome_type_default"

@@ -157,7 +157,11 @@ parameter with a separation fallback) → cross-fitted predictions, AIPW ATE, an
 `heterogeneity_diagnostics.json` (the pooled BLP `beta2` > 0 is the
 pre-specified primary heterogeneity test; GATES and RATE are secondary),
 including the reporting-only outer-fold confirmation of the selected modifiers
-and the CATE variance decomposition (prognosis versus selected modifiers).
+(the inferential result: held-out tests and effect sizes, cross-fold concept
+matching with Meinshausen–Meier–Bühlmann aggregation; training-row modifier-test
+p-values are screening values) and the CATE variance decomposition (prognosis
+versus selected modifiers). No per-patient CATE interval is reported for the
+ensemble.
 `modifier_selection.rule:
 "balanced_evidence"` instead runs the nested modifier ranking and
 budget/estimator choice; concept review requires it. Details:

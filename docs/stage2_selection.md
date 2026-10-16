@@ -341,9 +341,10 @@ whether it is investigator-locked), and every candidate's full test record is in
 - Stage 1 evidence, candidate discovery, and the extraction definitions used
   the same outer-training patients, and candidates reach the catalog partly
   because they appeared related to treatment or outcome. Training p-values are
-  therefore somewhat optimistic. This is why the
-  [outer-fold confirmation](#outer-fold-confirmation) repeats the tests on
-  held-out patients.
+  therefore optimistic **screening** values (`p_value_role` in
+  `modifier_tests.json`), not inferential ones. The inferential result is the
+  [outer-fold confirmation](#outer-fold-confirmation), which repeats the tests
+  on held-out patients.
 - Each test examines one candidate at a time. A candidate correlated with a
   true modifier can be selected in its place, and Benjamini–Hochberg does not
   account for this redundancy.
@@ -381,7 +382,12 @@ outcome).
   error does not describe the average. The forest's own interval is reported in
   `estimated_cate_causal_forest_lower_95`, `estimated_cate_causal_forest_upper_95`,
   and `estimated_cate_causal_forest_standard_error`; it describes the forest
-  alone.
+  alone. No per-patient interval is reported for the ensemble because no
+  available interval accounts for the uncertainty of variable discovery,
+  extraction, and selection. The honest uncertainty statements are the GATES
+  group effects (see [Heterogeneity and overlap diagnostics](#heterogeneity-and-overlap-diagnostics))
+  and the per-modifier held-out effect sizes of the
+  [outer-fold confirmation](#outer-fold-confirmation).
 - **Unestimable components.** A component that is not estimable (for example a
   DINA fit that converges for no penalty) is recorded in
   `ensemble.unavailable_estimators` and left out of the mean; its column stays
@@ -408,15 +414,47 @@ fold reads it.
   configured `q` and weights, on the eligible held-out patients, with
   Benjamini–Hochberg within the fold's selected set. A modifier is confirmed
   when its held-out combined q-value is at most `q`. Because the held-out
-  patients took no part in discovery or selection, these tests are valid
-  conditional on the selection (sample splitting).
+  patients took no part in discovery, extraction definitions, or selection,
+  these tests are valid conditional on that fold's own selection (sample
+  splitting). They are the inferential result (`p_value_role`); the training
+  p-values are screening values.
+- **Effect sizes.** For each selected modifier, `effects` gives the held-out
+  R-learner projection coefficients (the change in the absolute treatment
+  effect, a risk difference for binary outcomes, per unit of each design
+  column) and the AIPW projection coefficients, each with an HC3 standard
+  error, 95% interval, and two-sided p-value. Categorical modifiers have one
+  coefficient per level versus the reference level; continuous modifiers also
+  get the coefficient per standard deviation of the fold's observed
+  outer-training values (`training_sd`). Missingness and extraction-failure
+  columns are reported too. Each modifier is analysed alone, as in the tests.
 - **Pooled.** Counts of selected and confirmed modifiers per fold and in total.
-- **Across folds.** Each fold defines and extracts its own variables, so
-  variables are matched across folds only by exact normalized name (lower case,
-  runs of other characters replaced by `_`), reported as "selected in `k`
-  folds, confirmed in `j`". For a name selected in several folds, the held-out
-  combined p-values are combined by Stouffer's method,
-  `Z = Σ_k Φ⁻¹(1 − p_k) / √K`.
+- **Across folds.** Each fold defines and extracts its own variables, so the
+  selected variables are grouped into **concepts**: identical normalized names
+  always match, and other pairs match when a deterministic lexical similarity
+  (the mean of TF-IDF cosines of word 1–2-grams and character 3–5-grams of the
+  name, description, and measurement definition) is at least 0.7 for every
+  cross-fold pair of the group (complete linkage), with at most one variable
+  per fold per concept, assigned in order of decreasing similarity. The
+  threshold is conservative: a false merge would combine different concepts,
+  while a missed merge only forgoes aggregation, so differently worded synonyms
+  can stay separate (lexical overlap scores, for example, brain versus liver
+  metastases at about 0.65). For each concept, the held-out combined p-values
+  of all outer folds are aggregated by the Meinshausen–Meier–Bühlmann quantile
+  rule with `γ = 0.5`, `Q = min(1, 2 · median_j p_j)`, with `p_j = 1` for folds
+  where the concept was not selected or could not be tested, and
+  Benjamini–Hochberg then runs across concepts (`aggregated_q_value`). Each
+  concept lists its matched variables, definitions, similarity scores, and
+  "selected in `k` folds, confirmed in `j`". A concept selected in one fold is
+  never tested on another fold's held-out patients, because those patients were
+  in that fold's training data. The aggregation treats the folds' tests as
+  tests of one concept, which holds only approximately when folds define the
+  variable differently.
+- **Pooled effect sizes.** For a concept matched in two or more folds whose
+  members have the same columns (a continuous value, or the same category
+  labels), the effects are pooled by fixed-effect inverse-variance weighting,
+  with Cochran's `Q`, `I²`, and the fold range. Continuous modifiers are pooled
+  per training SD, because folds can define units differently; otherwise the
+  effects are reported per fold only, with the reason.
 
 The results are written to `stage2/heterogeneity_diagnostics.json` under
 `modifier_confirmation`, with an `interpretation` string, and summarized in
@@ -1100,6 +1138,8 @@ data, `posthoc_oracle_ite_metrics.json` and
   responses. *Biometrics* 2025;81(4):ujaf162.
 - Hahn PR, Carvalho CM, Puelz D, He J. Regularization and confounding in linear
   regression for treatment effect estimation. *Bayesian Analysis* 2018;13(1):163–182.
+- Higgins JPT, Thompson SG. Quantifying heterogeneity in a meta-analysis.
+  *Statistics in Medicine* 2002;21(11):1539–1558.
 - Li F, Morgan KL, Zaslavsky AM. Balancing covariates via propensity score
   weighting. *Journal of the American Statistical Association* 2018;113(521):390–400.
 - Liu Y, Xie J. Cauchy combination test: a powerful test with analytic p-value
@@ -1108,14 +1148,13 @@ data, `posthoc_oracle_ite_metrics.json` and
 - MacKinnon JG, White H. Some heteroskedasticity-consistent covariance matrix
   estimators with improved finite sample properties. *Journal of Econometrics*
   1985;29(3):305–325.
+- Meinshausen N, Meier L, Bühlmann P. P-values for high-dimensional regression.
+  *Journal of the American Statistical Association* 2009;104(488):1671–1681.
 - Nie X, Wager S. Quasi-oracle estimation of heterogeneous treatment effects.
   *Biometrika* 2021;108(2):299–319.
 - Semenova V, Chernozhukov V. Debiased machine learning of conditional average
   treatment effects and other causal functions. *Econometrics Journal*
   2021;24(2):264–289.
-- Stouffer SA, Suchman EA, DeVinney LC, Star SA, Williams RM. *The American
-  Soldier, Vol. 1: Adjustment During Army Life.* Princeton University Press,
-  1949.
 - van der Laan MJ, Polley EC, Hubbard AE. Super learner. *Statistical
   Applications in Genetics and Molecular Biology* 2007;6(1):Article 25.
 - Yadlowsky S, Fleming S, Shah N, Brunskill E, Wager S. Evaluating treatment
