@@ -33,7 +33,8 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 | `python scripts/ablate_stage1_architectures.py` | `oci/evaluation/ablation.py` | `prepare`: leave-one-architecture-out handoffs and `run_stage2_from_artifacts.py` configs (never launches LLM jobs); `compare`: finished ablations versus the full run |
 | `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only; for a dated-notes run, `dataset` is its `input/analysis_cohort.parquet`) |
 | `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
-| `python -m synthetic_data.cli` | `synthetic_data/` | Synthetic cohort generator |
+| `python -m synthetic_data.cli` | `synthetic_data/` (`generator.py`, `generation_factors.py`, `dgp_terms.py`) | Synthetic cohort generator: confounder, effect-modifier, instrument, and prognostic roles; generation-time factors (covariate correlation, MCAR/MNAR documentation, post-treatment dated notes, proxies) |
+| `python -m synthetic_data.cli reequation` | `synthetic_data/reequation.py` (`reequation_cohort`) | Recompute treatment and outcome over an existing synthetic cohort's true characteristics for a scenario (no LLM; text copied unchanged; refuses cohorts with post-treatment notes) |
 
 Helper scripts: `scripts/detect_all_evidence_hardware.py` (GPU and worker
 sizing for `run_synthetic.sh`) and `scripts/configure_local_cuda.py` (exposes

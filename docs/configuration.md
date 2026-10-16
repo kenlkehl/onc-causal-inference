@@ -125,6 +125,12 @@ If `dataset` already has a column of that name, the run stops instead of
 choosing between them; drop or rename that column, or set `columns.text` to an
 unused name.
 
+**Synthetic dated notes.** The synthetic generator's post-treatment option
+writes `notes.parquet` in the default column format above and an `index_date`
+column in its `dataset.parquet`. That dataset also has `clinical_text`, so set
+`columns.text` to another name; see
+[Synthetic data](synthetic_data.md#post-treatment-dated-notes).
+
 **How the text is built.** Dates are compared by calendar day. Values with a
 time zone are converted to UTC before the day is taken, so a late-evening note
 written west of UTC can fall on the following day; values without a time zone
