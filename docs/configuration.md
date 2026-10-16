@@ -805,10 +805,10 @@ OUTPUT_DIR/
 ├── input/                               [notes] analysis_cohort.parquet, pretreatment_notes_manifest.json, pretreatment_notes_audit.csv
 ├── stage1_architectures/                [explicit selection] manifest.json and one evidence.jsonl per architecture
 ├── components/
-│   ├── embedding_cache/                 chunk embedding cache
-│   ├── tfidf/                           evidence.jsonl, split_provenance.jsonl (fold plan shared by all stages), contexts
-│   ├── text_models/                     evidence.jsonl, one directory per discovery context with checkpoints
-│   └── neural_queries/                  evidence.jsonl, one directory per discovery context
+│   ├── embedding_cache/                 chunk embedding cache, timing.jsonl
+│   ├── tfidf/                           evidence.jsonl, split_provenance.jsonl (fold plan shared by all stages), contexts, timing.jsonl
+│   ├── text_models/                     evidence.jsonl, timing.jsonl, one directory per discovery context with checkpoints
+│   └── neural_queries/                  evidence.jsonl, timing.jsonl, one directory per discovery context
 ├── handoff/                             evidence.jsonl (the handoff), index.json, complete.json
 └── stage2/
     ├── config.json                      Stage 2 settings
@@ -842,10 +842,14 @@ OUTPUT_DIR/
 ```
 
 Without an explicit architecture selection, `stage1_architectures/` is not
-written and the handoff streams the component evidence directly.
-`OUTPUT_DIR/evaluations/stage1/` is written only by `oci-evaluate-stage1`
-([Synthetic data](synthetic_data.md#oracle-safe-evaluation)), and
-`OUTPUT_DIR/evaluation/attribution/` only by `oci-evaluate-attribution`
+written and the handoff streams the component evidence directly. Each
+component's `timing.jsonl` (with one `timing.json` per context directory)
+records reporting-only wall time per architecture; see
+[Cost per architecture](stage1_architectures.md#cost-per-architecture).
+`OUTPUT_DIR/evaluation/stage1/` is written only by `oci-evaluate-stage1`
+([Synthetic data](synthetic_data.md#oracle-safe-evaluation); its files are
+listed in [Stage 1 architectures](stage1_architectures.md#outputs)).
+`OUTPUT_DIR/evaluation/attribution/` is written only by `oci-evaluate-attribution`
 ([Stage 1 architectures](stage1_architectures.md#attribution-of-stage-2-variables)).
 
 ### Files to read first

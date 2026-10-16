@@ -340,6 +340,9 @@ class Stage1CheckpointStore:
             }
         )
         self._tokens: dict[str, str] = {}
+        # Units restored instead of computed in this process, in order. Read by
+        # the reporting-only Stage 1 timer; never part of any identity.
+        self.reused_units: list[str] = []
         self._progress_lock = threading.Lock()
         self._progress_path = self.root / "checkpoint_progress.json"
 
@@ -409,6 +412,7 @@ class Stage1CheckpointStore:
         loaded = self._load(unit, fingerprint, rows=rows, validator=validator)
         if loaded is not None:
             self._tokens[unit] = fingerprint
+            self.reused_units.append(unit)
             self._mark_progress(unit, "reused", fingerprint=fingerprint, seed=seed)
             logger.info("Reused Stage 1 checkpoint unit=%s", unit)
             return Stage1CheckpointResult(loaded, fingerprint, True, seed)

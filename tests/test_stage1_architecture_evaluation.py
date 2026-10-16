@@ -131,6 +131,17 @@ def test_posthoc_evaluation_uses_frozen_architecture_artifacts(tmp_path: Path):
     )
 
     output = Path(result["output_dir"])
+    assert output == run_dir / "evaluation" / "stage1"
+    for name in (
+        "metrics.jsonl",
+        "architectures/bow_nuisance/metrics.jsonl",
+        "comparison.csv",
+        "lexical_recovery_null.csv",
+        "timing.csv",
+        "summary.json",
+        "evaluation_manifest.json",
+    ):
+        assert (output / name).is_file(), name
     metrics = [
         json.loads(line)
         for line in (output / "metrics.jsonl").read_text(encoding="utf-8").splitlines()

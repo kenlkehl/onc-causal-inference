@@ -15,6 +15,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from scipy.stats import norm
 
+from .neural_query_evidence_contract import (
+    NEURAL_QUERY_RANKING_RULE,
+    NEURAL_QUERY_RANKING_VERSION,
+)
+
 
 @dataclass(frozen=True)
 class NeuralCohortWitnessConfig:
@@ -640,6 +645,13 @@ def build_ungated_consensus_query_bank(
     every candidate belongs to one group.  The activation medoid is used as the
     sharp semantic initializer for full-context refitting, while every member
     remains attached as agent-visible provenance.
+
+    Groups are ordered (never filtered) by the median absolute held-out
+    standardized statistic of their members
+    (``validation_audit_standardized_score``, computed on each candidate's
+    inner-validation rows), then by the median absolute training score, then
+    by the medoid candidate ID.  Groups whose members carry no finite held-out
+    statistic follow every group that has one, in the same tie-break order.
     """
 
     from sklearn.cluster import KMeans
@@ -684,6 +696,26 @@ def build_ungated_consensus_query_bank(
             abs(float(candidates[int(index)].get("train_standardized_score", 0.0)))
             for index in member_indices
         ]
+        heldout_z = [
+            abs(value)
+            for value in (
+                _finite_float(
+                    candidates[int(index)].get("validation_audit_standardized_score")
+                )
+                for index in member_indices
+            )
+            if value is not None
+        ]
+        heldout_p = [
+            value
+            for value in (
+                _finite_float(
+                    candidates[int(index)].get("validation_audit_two_sided_p_value")
+                )
+                for index in member_indices
+            )
+            if value is not None
+        ]
         groups.append(
             {
                 "raw_cluster_label": int(label),
@@ -692,14 +724,19 @@ def build_ungated_consensus_query_bank(
                     np.asarray(candidates[medoid_index]["query"], dtype=float)
                 ),
                 "median_abs_train_score": float(np.median(member_scores)),
+                "median_abs_heldout_z": (
+                    float(np.median(heldout_z)) if heldout_z else None
+                ),
+                "median_heldout_p_value": (
+                    float(np.median(heldout_p)) if heldout_p else None
+                ),
+                "heldout_member_count": len(heldout_z),
                 "member_indices": [int(value) for value in member_indices],
             }
         )
-    groups.sort(
-        key=lambda item: (
-            -float(item["median_abs_train_score"]),
-            str(candidates[int(item["medoid_index"])].get("candidate_id", "")),
-        )
+    groups.sort(key=lambda item: _consensus_group_rank_key(item, candidates))
+    groups_without_heldout = sum(
+        group["median_abs_heldout_z"] is None for group in groups
     )
 
     records: List[Dict[str, Any]] = []
@@ -725,6 +762,15 @@ def build_ungated_consensus_query_bank(
                 "member_count": len(member_indices),
                 "member_subfolds": member_subfolds,
                 "subfold_recurrence": len(member_subfolds),
+                "rank": int(index),
+                "ranking_score_source": (
+                    "median_abs_heldout_z"
+                    if group["median_abs_heldout_z"] is not None
+                    else "median_abs_train_score_without_heldout_statistics"
+                ),
+                "median_abs_heldout_z": group["median_abs_heldout_z"],
+                "median_heldout_p_value": group["median_heldout_p_value"],
+                "heldout_member_count": int(group["heldout_member_count"]),
                 "median_abs_train_score": float(group["median_abs_train_score"]),
                 "members": [
                     {
@@ -747,7 +793,38 @@ def build_ungated_consensus_query_bank(
         "all_candidates_assigned": True,
         "statistical_gate_applied": False,
         "consolidation": "forced_kmeans_on_centered_patient_activations_with_medoid",
+        "ranking": {
+            "version": NEURAL_QUERY_RANKING_VERSION,
+            "rule": NEURAL_QUERY_RANKING_RULE,
+            "groups_with_heldout_statistics": int(len(groups) - groups_without_heldout),
+            "groups_without_heldout_statistics": int(groups_without_heldout),
+        },
     }
+
+
+def _finite_float(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _consensus_group_rank_key(
+    group: Dict[str, Any],
+    candidates: Sequence[Dict[str, Any]],
+) -> Tuple[int, float, float, str]:
+    """Sort key: held-out |z| first, training score second, medoid ID last."""
+
+    heldout = group.get("median_abs_heldout_z")
+    return (
+        0 if heldout is not None else 1,
+        -float(heldout) if heldout is not None else 0.0,
+        -float(group["median_abs_train_score"]),
+        str(candidates[int(group["medoid_index"])].get("candidate_id", "")),
+    )
 
 
 def _torch_soft_activations(chunks, mask, queries, *, temperature: float):

@@ -166,12 +166,18 @@ def test_context_and_nested_nuisances_use_budget_with_real_fits(
     monkeypatch.setattr(
         runtime,
         "standardized_direct_target_contrasts",
-        lambda *args, **kwargs: {"standardized_scores": [0.0]},
+        lambda *args, **kwargs: {
+            "standardized_scores": [0.0],
+            "two_sided_p_values": [1.0],
+        },
     )
     monkeypatch.setattr(
         runtime,
         "standardized_cohort_moments",
-        lambda *args, **kwargs: {"standardized_scores": [0.0]},
+        lambda *args, **kwargs: {
+            "standardized_scores": [0.0],
+            "two_sided_p_values": [1.0],
+        },
     )
     monkeypatch.setattr(runtime, "_fit_final_bank", final_bank)
     n = 48

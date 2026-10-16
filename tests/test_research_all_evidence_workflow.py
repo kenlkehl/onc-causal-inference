@@ -669,7 +669,9 @@ def test_handoff_context_uses_stage1_runner_and_exact_heldout_rows(tmp_path, mon
     captured: dict[str, object] = {}
 
     class FakeStage1Runner:
-        def __init__(self, *, dataset, config, output_path, device, num_workers, checkpoint_store):
+        def __init__(
+            self, *, dataset, config, output_path, device, num_workers, checkpoint_store, timer
+        ):
             captured["runner"] = "stage1"
             captured["output_path"] = output_path
             captured["num_workers"] = num_workers

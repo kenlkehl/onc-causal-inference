@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import torch
 from joblib import Parallel, delayed
-from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import brier_score_loss, log_loss, mean_squared_error
 from sklearn.model_selection import KFold
 
@@ -26,20 +25,7 @@ from ..config import (
 )
 from ..utils.calibration import clip_probability
 from .causal_modeling_support import safe_roc_auc as _safe_roc_auc
-from .embedding_contrast_discovery import (
-    EmbeddingContrastEvidenceGenerator,
-    _binary_labels,
-    _binary_mean_difference_direction,
-    _canonicalize_svd_component_signs,
-    _cluster_local_scientific_config,
-    _embedding_cluster_kmeans_parameters,
-    _normalize_rows,
-    _normalize_rows_configured,
-    _normalize_vector,
-    _residualize_embeddings,
-    _residualize_vector_from_basis,
-    _tail_labels,
-)
+from .embedding_contrast_discovery import EmbeddingContrastEvidenceGenerator
 from .discovery_randomness import derive_discovery_seed
 from .htr_evidence_provider import HTREvidenceProvider
 from .htr_trainer import (
@@ -77,7 +63,26 @@ from .multi_model_pair_uplift import (
     fit_bow_pair_uplift_train_test,
     fit_htr_pair_uplift_train_test,
 )
+from .stage1_architecture_artifacts import (
+    EMBEDDING_DIRECTION_SCORE_SOURCES,
+    EMBEDDING_DIRECTION_SCORE_STATISTICS,
+    embedding_direction_score_column,
+)
+from .stage1_architectures import (
+    BOW_NUISANCE,
+    BOW_R_LOSS,
+    EMBEDDING_CLUSTERED,
+    EMBEDDING_WHOLE_COHORT,
+    HTR_NEURAL,
+    MATCHED_PAIR_UPLIFT,
+)
 from .stage1_checkpointing import Stage1CheckpointStore, row_id_identity
+from .stage1_timing import (
+    EMBEDDING_ARCHITECTURES,
+    SHARED_ATTRIBUTION,
+    TEXT_MODEL_ARCHITECTURES,
+    NullTimer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -200,22 +205,6 @@ def _validate_mapping_checkpoint(value: Any, label: str) -> None:
         raise ValueError(f"{label} checkpoint is not a mapping")
 
 
-def _validate_embedding_checkpoint_payload(
-    payload: Mapping[str, Any],
-    train_rows: int,
-    test_rows: int,
-) -> None:
-    for family in ("w_features", "x_features"):
-        features = payload.get(family)
-        if not isinstance(features, list):
-            raise ValueError(f"embedding checkpoint {family} is not a list")
-        for feature in features:
-            if len(np.asarray(feature["train"])) != int(train_rows):
-                raise ValueError("embedding checkpoint fit feature row count changed")
-            if len(np.asarray(feature["test"])) != int(test_rows):
-                raise ValueError("embedding checkpoint held-out feature row count changed")
-
-
 def _validate_prediction_fold_payload(
     payload: Mapping[str, Any],
     heldout_rows: int,
@@ -239,12 +228,13 @@ def run_multi_model_forest_handoff_context(
     device: Any,
     num_workers: int,
     checkpoint_store: Optional[Stage1CheckpointStore] = None,
+    timer: Any = None,
 ) -> Dict[str, Any]:
     """Fit all enabled Stage 1 text architectures in one exact discovery context.
 
     Evidence is fitted only on ``context["train_idx"]``; ``context["heldout_idx"]``
     rows are prediction targets.  The returned row is the context's handoff
-    evidence.
+    evidence.  ``timer`` (reporting only) receives one lap per section.
     """
 
     context_config = copy.deepcopy(config)
@@ -264,6 +254,7 @@ def run_multi_model_forest_handoff_context(
             device=torch.device(device),
             num_workers=max(1, int(num_workers)),
             checkpoint_store=checkpoint_store,
+            timer=timer,
         )
         logger.info(
             "Precomputing handoff context fold_key=%s scope=%s rows=%s device=%s",
@@ -843,6 +834,7 @@ class MultiModelForestStage1Runner:
         device: Optional[Any] = None,
         num_workers: int = 1,
         checkpoint_store: Optional[Stage1CheckpointStore] = None,
+        timer: Any = None,
     ) -> None:
         oracle_columns = [
             column
@@ -867,6 +859,8 @@ class MultiModelForestStage1Runner:
         )
         self.embedding_evidence_generator: Optional[EmbeddingContrastEvidenceGenerator] = None
         self._default_htr_provider: Optional[MultiModelForestStage1HTRProvider] = None
+        # Reporting-only wall-time sections; never part of a checkpoint identity.
+        self.timer = timer if timer is not None else NullTimer()
 
     @staticmethod
     def _checkpoint_rows(
@@ -959,6 +953,11 @@ class MultiModelForestStage1Runner:
             )
             self.output_path.parent.mkdir(parents=True, exist_ok=True)
             predictions.to_parquet(self.output_path, index=False)
+        self.timer.lap(
+            "prediction_artifacts",
+            attribution=SHARED_ATTRIBUTION,
+            consumers=TEXT_MODEL_ARCHITECTURES,
+        )
         result = copy.deepcopy(bundle.handoff_evidence or {})
         metrics = dict(result.get("metrics") or {})
         metrics.update(bundle.metrics)
@@ -1009,7 +1008,8 @@ class MultiModelForestStage1Runner:
             compute,
             train_df=train_df,
             test_df=test_df,
-            parameters={"outer_fold": int(outer_fold), "format_version": 2},
+            # 3: embedding row scores come from the handed-off directions.
+            parameters={"outer_fold": int(outer_fold), "format_version": 3},
             validator=validate,
         )
         return _feature_bundle_from_checkpoint(payload)
@@ -1163,6 +1163,11 @@ class MultiModelForestStage1Runner:
                         },
                     )
                 )
+            self.timer.lap(
+                "bow_nuisance_fits",
+                attribution=SHARED_ATTRIBUTION,
+                consumers=TEXT_MODEL_ARCHITECTURES,
+            )
 
         if self._htr_enabled():
             htr_bundle = self._htr_provider().fit_nuisance_inner_ensemble_predict(
@@ -1229,6 +1234,9 @@ class MultiModelForestStage1Runner:
                     },
                 )
             )
+            # HTR's nuisance heads are its own evidence; they also join the
+            # shared ensemble, which the other architectures do not require.
+            self.timer.lap("htr_nuisance_fits", attribution=HTR_NEURAL)
 
         if not nuisance_train:
             raise ValueError("multi_model_forest Stage 1 requires at least one nuisance source")
@@ -1328,6 +1336,11 @@ class MultiModelForestStage1Runner:
                     "m_hat": (m_train, m_test),
                 },
             )
+        )
+        self.timer.lap(
+            "nuisance_ensemble",
+            attribution=SHARED_ATTRIBUTION,
+            consumers=TEXT_MODEL_ARCHITECTURES,
         )
 
         bow_pair_uplift_results: List[Dict[str, Any]] = []
@@ -1525,6 +1538,9 @@ class MultiModelForestStage1Runner:
                     "matched-pair HTR uplift is enabled, but its producer returned no evidence"
                 )
 
+        if self._matched_pair_uplift_enabled():
+            self.timer.lap("matched_pair_uplift_fits", attribution=MATCHED_PAIR_UPLIFT)
+
         if self._bow_enabled():
             for view_index, view in enumerate(self.nn_config.bow_views):
                 pseudo_unit = f"bow/effect/view_{int(view_index):03d}_pseudo_outcome"
@@ -1607,6 +1623,7 @@ class MultiModelForestStage1Runner:
                         "BoW weighted-R effect",
                     ),
                 )
+                self.timer.lap("bow_effect_fits", attribution=BOW_R_LOSS)
                 prediction_frames.append(
                     _source_prediction_frame(
                         train_df,
@@ -1684,6 +1701,7 @@ class MultiModelForestStage1Runner:
                             "view_index": int(view_index),
                         }
                     )
+                    self.timer.lap("bow_importance_effect_terms", attribution=BOW_R_LOSS)
 
         if self._htr_enabled():
             htr_effect_variants: Dict[str, Any] = {}
@@ -1748,6 +1766,7 @@ class MultiModelForestStage1Runner:
                 htr_evidence["effect"] = next(iter(htr_effect_variants.values()))
             if htr_effect_variants:
                 htr_evidence["effect_variants"] = htr_effect_variants
+            self.timer.lap("htr_effect_fits", attribution=HTR_NEURAL)
 
         importance: Dict[str, Any] = _multi_view_importance(
             bow_view_results,
@@ -1797,54 +1816,26 @@ class MultiModelForestStage1Runner:
                     ),
                 }
 
+        self.timer.lap(
+            "evidence_assembly",
+            attribution=SHARED_ATTRIBUTION,
+            consumers=TEXT_MODEL_ARCHITECTURES,
+        )
         embedding_evidence: Dict[str, Any] = {}
         if self._embedding_contrast_enabled():
-            emb = self._checkpointed_value(
-                "embedding/contrast_bundle",
-                lambda: self._embedding_feature_bundle(
-                    dina_nuisance=dina_train,
-                    train_df=train_df,
-                    test_df=test_df,
+            embedding_evidence, direction_frames = (
+                self._build_primary_embedding_contrast_evidence(
+                    discovery_df=train_df,
+                    heldout_df=test_df,
+                    outer_fold=outer_fold,
                     y=y,
                     t=t,
                     pseudo_target=pseudo_target,
                     t_resid=t_resid,
-                    outer_fold=outer_fold,
-                ),
-                train_df=train_df,
-                test_df=test_df,
-                parameters={
-                    "outer_fold": int(outer_fold),
-                    "objective": "embedding_contrast_feature_bundle",
-                },
-                dependencies=("assembly/nuisance_ensemble",),
-                validator=lambda payload: _validate_embedding_checkpoint_payload(
-                    payload,
-                    len(train_df),
-                    len(test_df),
-                ),
-            )
-            for item in [*emb["w_features"], *emb["x_features"]]:
-                contrast_family = str(item.get("contrast_family") or "whole_cohort")
-                prediction_frames.append(
-                    _source_prediction_frame(
-                        train_df,
-                        test_df,
-                        outer_fold=outer_fold,
-                        source_name=(
-                            f"embedding__{contrast_family}__{item['name']}"
-                        ),
-                        values={"score": (item["train"], item["test"])},
-                    )
+                    importance=importance,
                 )
-            embedding_evidence = self._build_primary_embedding_contrast_evidence(
-                discovery_df=train_df,
-                y=y,
-                t=t,
-                pseudo_target=pseudo_target,
-                t_resid=t_resid,
-                importance=importance,
             )
+            prediction_frames.extend(direction_frames)
 
         handoff_evidence = {
             "metrics": copy.deepcopy(metrics),
@@ -1944,6 +1935,7 @@ class MultiModelForestStage1Runner:
             outcome_model.fit(x_model, np.asarray(y, dtype=int))
             outcome_coef = _model_feature_scores(outcome_model, len(features))
             signed["outcome"] = _model_feature_scores_are_signed(outcome_model)
+        self.timer.lap("bow_importance_nuisance_terms", attribution=BOW_NUISANCE)
 
         if str(self.config.outcome_type).lower() == "binary":
             from .stage1_dina import crossfit_nuisance
@@ -1966,6 +1958,7 @@ class MultiModelForestStage1Runner:
             )
         effect_coef = _model_feature_scores(effect_model, len(features))
         signed["pseudo_target"] = _model_feature_scores_are_signed(effect_model)
+        self.timer.lap("bow_importance_effect_terms", attribution=BOW_R_LOSS)
 
         top_n = int(self.nn_config.top_n_features)
         confounder_score = np.abs(treatment_coef) * np.abs(outcome_coef)
@@ -2025,16 +2018,30 @@ class MultiModelForestStage1Runner:
         self,
         *,
         discovery_df: pd.DataFrame,
+        heldout_df: pd.DataFrame,
+        outer_fold: int,
         y: np.ndarray,
         t: np.ndarray,
         pseudo_target: np.ndarray,
         t_resid: np.ndarray,
         importance: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    ) -> Tuple[Dict[str, Any], List[pd.DataFrame]]:
+        """Return the handed-off embedding evidence and its held-out row scores.
+
+        The row scores project the context's held-out rows on exactly the
+        directions whose aligned chunks enter the handoff.  They exist only for
+        post-hoc evaluation; no fit, ranking, or selection reads them.
+        """
+
         if not self._embedding_contrast_enabled():
-            return {}
+            return {}, []
         generator = self._embedding_generator()
         generator.prepare(self.dataset)
+        self.timer.lap(
+            "embedding_cache_open",
+            attribution=SHARED_ATTRIBUTION,
+            consumers=EMBEDDING_ARCHITECTURES,
+        )
         ordered_fit_rows = tuple(
             discovery_df["_oci_row_id"].astype(int).tolist()
         )
@@ -2056,7 +2063,12 @@ class MultiModelForestStage1Runner:
                 folds=self.nn_config.nuisance_folds,
                 seed=49_001,
             )
-        return generator.build_evidence(
+            self.timer.lap(
+                "embedding_dina_nuisance",
+                attribution=SHARED_ATTRIBUTION,
+                consumers=EMBEDDING_ARCHITECTURES,
+            )
+        evidence, directions = generator.build_evidence_with_directions(
             dina_nuisance=dina_nuisance,
             discovery_df=discovery_df,
             y=y,
@@ -2065,7 +2077,20 @@ class MultiModelForestStage1Runner:
             t_resid=[t_resid],
             pseudo_target_names=["stage1_ensemble_mean_nuisance"],
             importance=importance,
+            timer=self.timer,
         )
+        frames = _handed_off_direction_frames(
+            generator,
+            heldout_df,
+            directions,
+            outer_fold=outer_fold,
+        )
+        self.timer.lap(
+            "embedding_heldout_projection",
+            attribution=SHARED_ATTRIBUTION,
+            consumers=(EMBEDDING_WHOLE_COHORT, EMBEDDING_CLUSTERED),
+        )
+        return evidence, frames
 
     def _fit_bow_binary_train_test(
         self,
@@ -2351,636 +2376,6 @@ class MultiModelForestStage1Runner:
         test_pred = np.nanmean(np.vstack(test_predictions), axis=0)
         return oof, test_pred
 
-    def _embedding_feature_bundle(
-        self,
-        *,
-        train_df: pd.DataFrame,
-        test_df: pd.DataFrame,
-        y: np.ndarray,
-        t: np.ndarray,
-        pseudo_target: np.ndarray,
-        t_resid: np.ndarray,
-        outer_fold: int,
-        dina_nuisance=None,
-    ) -> Dict[str, Any]:
-        generator = self._embedding_generator()
-        generator.prepare(self.dataset)
-        train_positions = generator._positions_for_frame(train_df)
-        test_positions = generator._positions_for_frame(test_df)
-        train_patient = generator._patient_embeddings(train_positions)
-        train_patient = _residualize_embeddings(
-            train_patient,
-            train_df,
-            self.nn_config.embedding_contrast.residualize_columns,
-        )
-        train_patient = _normalize_rows(train_patient)
-        folds = _bounded_fold_count(int(self.nn_config.nuisance_folds), len(train_df))
-        splitter = KFold(n_splits=folds, shuffle=True, random_state=40_000 + int(outer_fold))
-        feature_map: Dict[str, Dict[str, Any]] = {}
-
-        for inner_fold, (fit_pos, heldout_pos) in enumerate(splitter.split(train_df), start=1):
-            fit_pos = np.asarray(fit_pos, dtype=int)
-            heldout_pos = np.asarray(heldout_pos, dtype=int)
-            fold_dina = None
-            if dina_nuisance is not None:
-                from .stage1_dina import crossfit_nuisance
-
-                fold_dina, _ = crossfit_nuisance(
-                    train_df.iloc[fit_pos][self.config.text_column].astype(str).tolist(),
-                    np.asarray(t)[fit_pos],
-                    np.asarray(y)[fit_pos],
-                    folds=self.nn_config.nuisance_folds,
-                    seed=40_000 + 100 * outer_fold + inner_fold,
-                )
-            directions = self._embedding_directions(
-                patient_embeddings=train_patient[fit_pos],
-                fit_row_ids=tuple(
-                    map(
-                        int,
-                        train_df["_oci_row_id"].to_numpy()[fit_pos],
-                    )
-                ),
-                y=np.asarray(y, dtype=float)[fit_pos],
-                t=np.asarray(t, dtype=float)[fit_pos],
-                dina_nuisance=fold_dina,
-                pseudo_target=np.asarray(pseudo_target, dtype=float)[fit_pos],
-                t_resid=np.asarray(t_resid, dtype=float)[fit_pos],
-            )
-            heldout_positions = [int(train_positions[int(pos)]) for pos in heldout_pos]
-            for direction in directions:
-                heldout_mean, heldout_max = self._chunk_similarity_features(
-                    generator,
-                    heldout_positions,
-                    direction["direction"],
-                )
-                test_mean, test_max = self._chunk_similarity_features(
-                    generator,
-                    test_positions,
-                    direction["direction"],
-                )
-                base_name = f"embedding__{direction['name']}"
-                for stat, heldout_values, test_values in [
-                    ("mean_cosine", heldout_mean, test_mean),
-                    ("max_cosine", heldout_max, test_max),
-                ]:
-                    feature_name = f"{base_name}__{stat}"
-                    entry = feature_map.setdefault(
-                        feature_name,
-                        {
-                            "name": feature_name,
-                            "role": direction["role"],
-                            "objective": direction["objective"],
-                            "contrast_family": direction["contrast_family"],
-                            "train": np.full(len(train_df), np.nan, dtype=np.float32),
-                            "test_predictions": [],
-                        },
-                    )
-                    entry["train"][heldout_pos] = heldout_values
-                    entry["test_predictions"].append(np.asarray(test_values, dtype=np.float32))
-
-        w_features = []
-        x_features = []
-        for entry in feature_map.values():
-            train_values = np.asarray(entry["train"], dtype=np.float32)
-            train_values = np.where(np.isfinite(train_values), train_values, 0.0)
-            test_values = (
-                np.nanmean(np.vstack(entry["test_predictions"]), axis=0)
-                if entry["test_predictions"]
-                else np.zeros(len(test_df), dtype=np.float32)
-            )
-            target = w_features if entry["role"] == "W" else x_features
-            target.append(
-                {
-                    "name": entry["name"],
-                    "train": train_values,
-                    "test": np.asarray(test_values, dtype=np.float32),
-                    "objective": entry["objective"],
-                    "contrast_family": entry["contrast_family"],
-                }
-            )
-        return {
-            "w_features": w_features,
-            "x_features": x_features,
-        }
-
-    def _embedding_directions(
-        self,
-        *,
-        patient_embeddings: np.ndarray,
-        fit_row_ids: Sequence[int],
-        y: np.ndarray,
-        t: np.ndarray,
-        pseudo_target: np.ndarray,
-        t_resid: np.ndarray,
-        dina_nuisance=None,
-    ) -> List[Dict[str, Any]]:
-        directions: List[Dict[str, Any]] = []
-        ordered_fit_rows = tuple(map(int, fit_row_ids))
-        if (
-            len(ordered_fit_rows) != len(patient_embeddings)
-            or len(set(ordered_fit_rows)) != len(ordered_fit_rows)
-        ):
-            raise ValueError(
-                "embedding direction fit rows must be exact, ordered, and unique"
-            )
-        finite = np.all(np.isfinite(patient_embeddings), axis=1)
-        treatment_labels, treatment_mask = _binary_labels(t)
-        t_direction, t_counts = _binary_mean_difference_direction(
-            patient_embeddings,
-            treatment_labels,
-            treatment_mask & finite,
-        )
-        outcome_labels, outcome_mask = (
-            _tail_labels(y, float(self.nn_config.embedding_contrast.pseudo_target_quantile))
-            if str(self.config.outcome_type).lower() == "continuous"
-            else _binary_labels(y)
-        )
-        y_direction, y_counts = _binary_mean_difference_direction(
-            patient_embeddings,
-            outcome_labels,
-            outcome_mask & finite,
-        )
-        if t_direction is not None:
-            self._add_embedding_direction(
-                directions,
-                name="global_treatment_contrast",
-                direction=t_direction,
-                role="W",
-                objective="treatment_confounder",
-                contrast_family="global_marginal_treatment",
-            )
-        if y_direction is not None:
-            self._add_embedding_direction(
-                directions,
-                name="global_outcome_contrast",
-                direction=y_direction,
-                role="W",
-                objective="outcome_confounder",
-                contrast_family="global_marginal_outcome",
-            )
-        if t_direction is not None and y_direction is not None:
-            confounder = 0.5 * _normalize_vector(t_direction) + 0.5 * _normalize_vector(y_direction)
-            self._add_embedding_direction(
-                directions,
-                name="global_confounder_average",
-                direction=confounder,
-                role="W",
-                objective="treatment_outcome_confounder_average",
-                contrast_family="global_marginal_confounder_average",
-            )
-
-        if dina_nuisance is not None:
-            from ..models import dina
-
-            dina_score, dina_weights, _ = dina.score(y, t, dina_nuisance["a"], dina_nuisance["nu"])
-            pseudo_target = dina_score
-        pseudo_labels, pseudo_mask = _tail_labels(
-            pseudo_target,
-            float(self.nn_config.embedding_contrast.pseudo_target_quantile),
-        )
-        pseudo_weights = (
-            np.square(np.asarray(t_resid, dtype=float)) if dina_nuisance is None else dina_weights
-        )
-        pseudo_direction, pseudo_counts = _weighted_binary_direction(
-            patient_embeddings,
-            pseudo_labels,
-            pseudo_mask & finite,
-            (
-                pseudo_weights
-                if bool(self.nn_config.embedding_contrast.pseudo_target_weighted)
-                else None
-            ),
-        )
-        if pseudo_direction is not None:
-            self._add_embedding_direction(
-                directions,
-                name=(
-                    "global_dina_fisher_score_contrast"
-                    if dina_nuisance is not None
-                    else "global_r_pseudo_target_contrast"
-                ),
-                direction=pseudo_direction,
-                role="X",
-                objective=(
-                    "bernoulli_dina"
-                    if str(self.config.outcome_type).lower() == "binary"
-                    else "r_pseudo_outcome"
-                ),
-                contrast_family=(
-                    "global_dina_score" if dina_nuisance is not None else "global_r_pseudo_target"
-                ),
-            )
-        orthogonal_score = np.asarray(pseudo_target, dtype=float) * np.square(
-            np.asarray(t_resid, dtype=float)
-        )
-        if dina_nuisance is not None:
-            orthogonal_score = dina_score
-        score_labels, score_mask = _tail_labels(
-            orthogonal_score,
-            float(self.nn_config.embedding_contrast.pseudo_target_quantile),
-        )
-        score_direction, score_counts = _binary_mean_difference_direction(
-            patient_embeddings,
-            score_labels,
-            score_mask & finite,
-        )
-        if score_direction is not None:
-            self._add_embedding_direction(
-                directions,
-                name=(
-                    "global_dina_score_contrast"
-                    if dina_nuisance is not None
-                    else "global_orthogonal_r_score_contrast"
-                ),
-                direction=score_direction,
-                role="X",
-                objective=(
-                    "bernoulli_dina_score" if dina_nuisance is not None else "orthogonal_r_score"
-                ),
-                contrast_family=(
-                    "global_dina_score"
-                    if dina_nuisance is not None
-                    else "global_orthogonal_r_score"
-                ),
-            )
-
-        residual_interaction = self._residualized_interaction_direction(
-            patient_embeddings,
-            y,
-            t,
-            treatment_labels,
-            treatment_mask,
-            outcome_labels,
-            outcome_mask,
-            t_direction,
-            y_direction,
-            finite,
-        )
-        if residual_interaction is not None:
-            self._add_embedding_direction(
-                directions,
-                name="global_residualized_treatment_outcome_interaction",
-                direction=residual_interaction,
-                role="X",
-                objective="residualized_treatment_outcome_interaction",
-                contrast_family="global_residualized_interaction",
-            )
-
-        if bool(self.nn_config.embedding_contrast.include_cluster_contrast_vectors):
-            directions.extend(
-                self._cluster_embedding_directions(
-                    patient_embeddings=patient_embeddings,
-                    y=y,
-                    t=t,
-                    outcome_labels=outcome_labels,
-                    outcome_mask=outcome_mask,
-                    treatment_labels=treatment_labels,
-                    treatment_mask=treatment_mask,
-                    finite=finite,
-                    canonical_group_seed=derive_discovery_seed(
-                        int(self.config.seed),
-                        ordered_fit_rows,
-                    ),
-                )
-            )
-        return directions
-
-    def _add_embedding_direction(
-        self,
-        directions: List[Dict[str, Any]],
-        *,
-        name: str,
-        direction: np.ndarray,
-        role: str,
-        objective: str,
-        contrast_family: str,
-    ) -> None:
-        norm = float(np.linalg.norm(direction))
-        if not np.isfinite(norm) or norm <= 0.0:
-            return
-        direction = _normalize_vector(direction)
-        directions.append(
-            {
-                "name": name,
-                "direction": direction,
-                "role": role,
-                "objective": objective,
-                "contrast_family": contrast_family,
-            }
-        )
-
-    def _cluster_embedding_directions(
-        self,
-        *,
-        patient_embeddings: np.ndarray,
-        y: np.ndarray,
-        t: np.ndarray,
-        outcome_labels: np.ndarray,
-        outcome_mask: np.ndarray,
-        treatment_labels: np.ndarray,
-        treatment_mask: np.ndarray,
-        finite: np.ndarray,
-        canonical_group_seed: int,
-    ) -> List[Dict[str, Any]]:
-        cfg = self.nn_config.embedding_contrast
-        scientific = _cluster_local_scientific_config(cfg)
-        dtype = np.dtype(scientific.computation_dtype)
-        n_usable = int(np.sum(finite))
-        n_clusters = int(scientific.requested_cluster_count)
-        if n_usable < n_clusters * int(scientific.minimum_cluster_size):
-            raise ValueError(
-                "cluster-local Stage 1 feature fit cannot satisfy the exact "
-                "configured cluster count and minimum support"
-            )
-        kmeans_parameters = _embedding_cluster_kmeans_parameters(
-            cfg,
-            n_usable=n_usable,
-            canonical_group_seed=int(canonical_group_seed),
-            n_clusters=n_clusters,
-        )
-        kmeans = MiniBatchKMeans(**kmeans_parameters)
-        labels = np.full(len(patient_embeddings), -1, dtype=int)
-        labels[finite] = kmeans.fit_predict(
-            np.asarray(patient_embeddings[finite], dtype=dtype)
-        )
-        counts = np.bincount(labels[finite], minlength=n_clusters)
-        treatment_items = []
-        interaction_items = []
-        for cluster_id in range(n_clusters):
-            if int(counts[cluster_id]) < int(scientific.minimum_cluster_size):
-                continue
-            cluster_mask = labels == cluster_id
-            local_mask = cluster_mask & treatment_mask & finite
-            pos = local_mask & (treatment_labels == 1)
-            neg = local_mask & (treatment_labels == 0)
-            if int(np.sum(pos)) >= int(scientific.minimum_group_size) and int(
-                np.sum(neg)
-            ) >= int(scientific.minimum_group_size):
-                direction = np.mean(patient_embeddings[pos], axis=0) - np.mean(
-                    patient_embeddings[neg],
-                    axis=0,
-                )
-                if float(np.linalg.norm(direction)) > 0:
-                    treatment_items.append(
-                        {
-                            "cluster_id": int(cluster_id),
-                            "n_cluster": int(counts[cluster_id]),
-                            "direction": direction,
-                        }
-                    )
-            interaction = self._cluster_local_interaction_direction(
-                patient_embeddings,
-                treatment_labels,
-                treatment_mask,
-                outcome_labels,
-                outcome_mask,
-                cluster_mask & finite,
-            )
-            if interaction is not None:
-                interaction_items.append(
-                    {
-                        "cluster_id": int(cluster_id),
-                        "n_cluster": int(counts[cluster_id]),
-                        "direction": interaction,
-                    }
-                )
-        result: List[Dict[str, Any]] = []
-        minimum_local = int(
-            scientific.minimum_distinct_local_clusters_per_family
-        )
-        if (
-            len(treatment_items) < minimum_local
-            or len(interaction_items) < minimum_local
-        ):
-            raise ValueError(
-                "cluster-local Stage 1 feature fit lacks the configured "
-                "independently supported local contrasts"
-            )
-        result.extend(
-            self._svd_cluster_components(
-                items=treatment_items,
-                role="W",
-                objective="cluster_treatment_confounder",
-                contrast_family="cluster_local_treatment_contrast_basis",
-                prefix="cluster_confounder_treatment",
-            )
-        )
-        result.extend(
-            self._svd_cluster_components(
-                items=interaction_items,
-                role="X",
-                objective="cluster_residualized_treatment_outcome_interaction",
-                contrast_family="cluster_local_residualized_interaction_contrast_basis",
-                prefix="cluster_effect_residualized_interaction",
-            )
-        )
-        return result
-
-    def _cluster_local_interaction_direction(
-        self,
-        patient_embeddings: np.ndarray,
-        treatment_labels: np.ndarray,
-        treatment_mask: np.ndarray,
-        outcome_labels: np.ndarray,
-        outcome_mask: np.ndarray,
-        cluster_mask: np.ndarray,
-    ) -> Optional[np.ndarray]:
-        base = cluster_mask & treatment_mask & outcome_mask
-        treated_positive = base & (treatment_labels == 1) & (outcome_labels == 1)
-        treated_negative = base & (treatment_labels == 1) & (outcome_labels == 0)
-        untreated_positive = base & (treatment_labels == 0) & (outcome_labels == 1)
-        untreated_negative = base & (treatment_labels == 0) & (outcome_labels == 0)
-        min_cell = int(
-            _cluster_local_scientific_config(
-                self.nn_config.embedding_contrast
-            ).minimum_cell_size
-        )
-        if (
-            min(
-                int(np.sum(treated_positive)),
-                int(np.sum(treated_negative)),
-                int(np.sum(untreated_positive)),
-                int(np.sum(untreated_negative)),
-            )
-            < min_cell
-        ):
-            return None
-        raw = (
-            np.mean(patient_embeddings[treated_positive], axis=0)
-            - np.mean(patient_embeddings[treated_negative], axis=0)
-            - np.mean(patient_embeddings[untreated_positive], axis=0)
-            + np.mean(patient_embeddings[untreated_negative], axis=0)
-        )
-        t_dir, _ = _binary_mean_difference_direction(
-            patient_embeddings,
-            treatment_labels,
-            cluster_mask & treatment_mask,
-        )
-        y_dir, _ = _binary_mean_difference_direction(
-            patient_embeddings,
-            outcome_labels,
-            cluster_mask & outcome_mask,
-        )
-        if t_dir is None or y_dir is None:
-            return None
-        residual = _residualize_vector_from_basis(raw, [t_dir, y_dir])
-        if float(np.linalg.norm(residual)) <= 0.0:
-            return None
-        return residual
-
-    def _svd_cluster_components(
-        self,
-        *,
-        items: Sequence[Dict[str, Any]],
-        role: str,
-        objective: str,
-        contrast_family: str,
-        prefix: str,
-    ) -> List[Dict[str, Any]]:
-        scientific = _cluster_local_scientific_config(
-            self.nn_config.embedding_contrast
-        )
-        if len(items) < int(
-            scientific.minimum_distinct_local_clusters_per_family
-        ):
-            raise ValueError(
-                f"cluster-local {contrast_family} lacks configured support"
-            )
-        dtype = np.dtype(scientific.computation_dtype)
-        matrix = np.vstack(
-            [
-                _normalize_rows_configured(
-                    np.asarray(item["direction"], dtype=dtype).reshape(1, -1),
-                    normalize=True,
-                    epsilon=float(scientific.normalization_epsilon),
-                    zero_vector_policy=scientific.zero_vector_policy,
-                    dtype=scientific.computation_dtype,
-                )[0]
-                * np.sqrt(float(item["n_cluster"]))
-                for item in items
-            ]
-        ).astype(dtype, copy=False)
-        svd_parameters = {
-            "full_matrices": bool(scientific.svd_full_matrices),
-            "compute_uv": bool(scientific.svd_compute_uv),
-            "hermitian": bool(scientific.svd_hermitian),
-        }
-        _left, singular_values, components = np.linalg.svd(
-            matrix,
-            **svd_parameters,
-        )
-        components = _canonicalize_svd_component_signs(
-            components,
-            policy=scientific.svd_sign_canonicalization_policy,
-        )
-        rank_tolerance = (
-            float(scientific.svd_rank_tolerance_multiplier)
-            * np.finfo(np.dtype(scientific.svd_rank_tolerance_dtype)).eps
-            * max(matrix.shape)
-            * float(singular_values[0])
-        )
-        numerical_rank = int(np.sum(singular_values > rank_tolerance))
-        if numerical_rank < int(
-            scientific.minimum_numerical_rank_per_family
-        ):
-            raise ValueError(
-                f"cluster-local {contrast_family} lacks configured numerical rank"
-            )
-        result = []
-        max_components = min(
-            int(scientific.maximum_components_per_family),
-            numerical_rank,
-        )
-        for idx in range(max_components):
-            sv = float(singular_values[idx])
-            if not np.isfinite(sv) or sv <= 0.0:
-                continue
-            direction = _normalize_rows_configured(
-                np.asarray(components[idx], dtype=dtype).reshape(1, -1),
-                normalize=True,
-                epsilon=float(scientific.normalization_epsilon),
-                zero_vector_policy=scientific.zero_vector_policy,
-                dtype=scientific.computation_dtype,
-            )[0]
-            name = f"{prefix}_pc{idx + 1}"
-            result.append(
-                {
-                    "name": name,
-                    "direction": direction,
-                    "role": role,
-                    "objective": objective,
-                    "contrast_family": contrast_family,
-                }
-            )
-        return result
-
-    def _residualized_interaction_direction(
-        self,
-        patient_embeddings: np.ndarray,
-        y: np.ndarray,
-        t: np.ndarray,
-        treatment_labels: np.ndarray,
-        treatment_mask: np.ndarray,
-        outcome_labels: np.ndarray,
-        outcome_mask: np.ndarray,
-        treatment_direction: Optional[np.ndarray],
-        outcome_direction: Optional[np.ndarray],
-        finite: np.ndarray,
-    ) -> Optional[np.ndarray]:
-        del y, t
-        if treatment_direction is None or outcome_direction is None:
-            return None
-        base = finite & treatment_mask & outcome_mask
-        treated_positive = base & (treatment_labels == 1) & (outcome_labels == 1)
-        treated_negative = base & (treatment_labels == 1) & (outcome_labels == 0)
-        untreated_positive = base & (treatment_labels == 0) & (outcome_labels == 1)
-        untreated_negative = base & (treatment_labels == 0) & (outcome_labels == 0)
-        if (
-            min(
-                int(np.sum(treated_positive)),
-                int(np.sum(treated_negative)),
-                int(np.sum(untreated_positive)),
-                int(np.sum(untreated_negative)),
-            )
-            < 2
-        ):
-            return None
-        raw = (
-            np.mean(patient_embeddings[treated_positive], axis=0)
-            - np.mean(patient_embeddings[treated_negative], axis=0)
-            - np.mean(patient_embeddings[untreated_positive], axis=0)
-            + np.mean(patient_embeddings[untreated_negative], axis=0)
-        )
-        residual = _residualize_vector_from_basis(raw, [treatment_direction, outcome_direction])
-        if float(np.linalg.norm(residual)) <= 0.0:
-            return None
-        return residual
-
-    def _chunk_similarity_features(
-        self,
-        generator: EmbeddingContrastEvidenceGenerator,
-        positions: Sequence[int],
-        direction: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        means = []
-        maxes = []
-        direction = _normalize_vector(np.asarray(direction, dtype=np.float32))
-        for position in positions:
-            chunks = generator._chunk_matrix(int(position))
-            if chunks.size == 0:
-                means.append(0.0)
-                maxes.append(0.0)
-                continue
-            scores = np.asarray(chunks @ direction, dtype=float)
-            finite = scores[np.isfinite(scores)]
-            if len(finite) == 0:
-                means.append(0.0)
-                maxes.append(0.0)
-            else:
-                means.append(float(np.mean(finite)))
-                maxes.append(float(np.max(finite)))
-        return np.asarray(means, dtype=np.float32), np.asarray(maxes, dtype=np.float32)
-
     def _enabled_feature_discovery_methods(self) -> List[str]:
         methods = []
         if self._bow_enabled():
@@ -3097,10 +2492,59 @@ def _source_prediction_frame(
     return pd.concat(rows, ignore_index=True)
 
 
+def _handed_off_direction_frames(
+    generator: EmbeddingContrastEvidenceGenerator,
+    heldout_df: pd.DataFrame,
+    directions: Sequence[Mapping[str, Any]],
+    *,
+    outer_fold: int,
+) -> List[pd.DataFrame]:
+    """Score held-out rows on the exact handed-off embedding directions.
+
+    One wide frame per embedding architecture, one column per direction and
+    statistic (mean and maximum chunk cosine).  Only held-out rows are
+    written: the directions were fitted on this context's training rows, so
+    their training-row projections would be in-sample.
+    """
+
+    row_ids = heldout_df["_oci_row_id"].astype(int).tolist()
+    frames: List[pd.DataFrame] = []
+    for architecture, source_name in EMBEDDING_DIRECTION_SCORE_SOURCES.items():
+        selected = [item for item in directions if item["architecture"] == architecture]
+        if not selected or not row_ids:
+            continue
+        means, maxes = generator.chunk_cosine_summaries(
+            row_ids,
+            [item["direction"] for item in selected],
+        )
+        payload: Dict[str, Any] = {
+            "_oci_row_id": np.asarray(row_ids, dtype=int),
+            "outer_fold": int(outer_fold),
+            "split_role": "test_outer_train_fit",
+            "source_name": source_name,
+        }
+        for index, item in enumerate(selected):
+            for statistic, values in zip(
+                EMBEDDING_DIRECTION_SCORE_STATISTICS,
+                (means, maxes),
+            ):
+                column = embedding_direction_score_column(item["name"], statistic)
+                if column in payload:
+                    raise ValueError(
+                        f"two handed-off embedding directions share column {column!r}"
+                    )
+                payload[column] = np.asarray(values[:, index], dtype=float)
+        frames.append(pd.DataFrame(payload))
+    return frames
+
+
 def _source_prediction_architecture(source_name: Any) -> str:
     """Map a row-score producer onto the public Stage 1 architecture contract."""
 
     source = str(source_name).lower()
+    for architecture, handed_off_source in EMBEDDING_DIRECTION_SCORE_SOURCES.items():
+        if source == handed_off_source:
+            return architecture
     if "matched_pair" in source or "pair_uplift" in source:
         return "matched_pair_uplift"
     if source.startswith("bow__") and "__nuisance" in source:
@@ -3116,37 +2560,6 @@ def _source_prediction_architecture(source_name: Any) -> str:
             return "embedding_clustered"
         return "embedding_whole_cohort"
     return "private_support"
-
-
-def _weighted_binary_direction(
-    embeddings: np.ndarray,
-    labels: np.ndarray,
-    mask: np.ndarray,
-    weights: Optional[np.ndarray],
-) -> Tuple[Optional[np.ndarray], Dict[int, int]]:
-    labels = np.asarray(labels, dtype=int)
-    mask = np.asarray(mask, dtype=bool)
-    pos = mask & (labels == 1)
-    neg = mask & (labels == 0)
-    counts = {1: int(np.sum(pos)), 0: int(np.sum(neg))}
-    if counts[1] < 2 or counts[0] < 2:
-        return None, counts
-    if weights is None:
-        return np.mean(embeddings[pos], axis=0) - np.mean(embeddings[neg], axis=0), counts
-    weights = np.asarray(weights, dtype=float)
-    pos_w = np.maximum(weights[pos], 0.0)
-    neg_w = np.maximum(weights[neg], 0.0)
-    pos_mean = (
-        np.average(embeddings[pos], axis=0, weights=pos_w)
-        if float(np.sum(pos_w)) > 0.0
-        else np.mean(embeddings[pos], axis=0)
-    )
-    neg_mean = (
-        np.average(embeddings[neg], axis=0, weights=neg_w)
-        if float(np.sum(neg_w)) > 0.0
-        else np.mean(embeddings[neg], axis=0)
-    )
-    return pos_mean - neg_mean, counts
 
 
 def _finite_or_none(value: Any) -> Optional[float]:

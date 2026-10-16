@@ -31,6 +31,18 @@ from .tfidf_topic_discovery import (
     stable_hash,
 )
 from .tfidf_topic_score_selection import ORPHAN_NGRAM_SCORE_SCHEMA_VERSION
+from .stage1_timing import (
+    COMPONENT_TIMING_FILE,
+    CONTEXT_TIMING_FILE,
+    SHARED_ATTRIBUTION,
+    TFIDF_ARCHITECTURES,
+    NullTimer,
+    SectionTimer,
+    read_timing_record,
+    unknown_timing_record,
+    write_component_timing,
+    write_timing_record,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -551,6 +563,7 @@ def _fit_tfidf_topic_context_with_orphan_calibration(
     spec: Dict[str, Any],
     config: AppliedInferenceConfig,
     artifact_dir: Path,
+    timer: Any = None,
 ) -> Dict[str, Any]:
     """Fit one context on a nested model partition and select orphan clusters.
 
@@ -584,6 +597,7 @@ def _fit_tfidf_topic_context_with_orphan_calibration(
         artifact_dir=artifact_dir,
         scope_id=f"{spec['scope_id']}__nested_calibration",
         score_orphan_ngrams=True,
+        timer=timer,
     )
     branch = metadata.get("effect_orphan_ngram_branch") or {}
     if branch.get("status") != "completed":
@@ -621,6 +635,11 @@ def _fit_tfidf_topic_context_with_orphan_calibration(
         ignore_index=True,
         sort=False,
     ).to_parquet(nuisance_path, index=False)
+    (timer or NullTimer()).lap(
+        "tfidf_nuisance_stacks",
+        attribution=SHARED_ATTRIBUTION,
+        consumers=TFIDF_ARCHITECTURES,
+    )
 
     registered_heldout_ids = registered_heldout["_oci_row_id"].astype(int).tolist()
     metadata.update(
@@ -709,11 +728,13 @@ def _fit_tfidf_topic_stage1_spec_impl(
         len(spec["heldout_df"]),
     )
     context_dir = contexts_dir / spec["scope_id"]
+    timer = SectionTimer()
     if orphan_enabled:
         metadata = _fit_tfidf_topic_context_with_orphan_calibration(
             spec=spec,
             config=config,
             artifact_dir=context_dir,
+            timer=timer,
         )
     else:
         metadata, _stacks = fit_tfidf_topic_context(
@@ -728,6 +749,7 @@ def _fit_tfidf_topic_stage1_spec_impl(
             config=topic_config,
             artifact_dir=context_dir,
             scope_id=spec["scope_id"],
+            timer=timer,
         )
     metadata.update(
         {
@@ -737,6 +759,12 @@ def _fit_tfidf_topic_stage1_spec_impl(
             "split_semantics_hash": split_semantics_hash,
             "split_schema_version": split_schema_version,
         }
+    )
+    timer.lap("assembly", attribution=SHARED_ATTRIBUTION, consumers=TFIDF_ARCHITECTURES)
+    # Reporting only; written before the context metadata that marks reuse.
+    write_timing_record(
+        context_dir / CONTEXT_TIMING_FILE,
+        timer.record(component="tfidf", context=spec),
     )
     _write_json(metadata_path, metadata)
     logger.info("Stage 1 completed exact context scope_id=%s", spec["scope_id"])
@@ -963,6 +991,21 @@ def run_tfidf_topic_stage1(
             )
             for spec in all_context_specs
         )
+
+    write_component_timing(
+        Path(artifact_dir) / COMPONENT_TIMING_FILE,
+        [
+            read_timing_record(contexts_dir / str(spec["scope_id"]) / CONTEXT_TIMING_FILE)
+            or unknown_timing_record(component="tfidf", context=spec)
+            for spec, _metadata in sorted(
+                completed_contexts,
+                key=lambda item: (
+                    int(item[0]["outer_fold"]),
+                    int(item[0].get("inner_fold") or 0),
+                ),
+            )
+        ],
+    )
 
     full_metadata_by_outer: Dict[int, Dict[str, Any]] = {}
     for spec, metadata in completed_contexts:

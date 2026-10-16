@@ -37,7 +37,11 @@ write under `components/text_models/`, architectures 8 and 9 under
 `components/tfidf/`, and architecture 10 under `components/neural_queries/`. A
 shared chunk-embedding cache (`components/embedding_cache/`) serves
 architectures 5, 6, 7, and 10. Most components also write row-level prediction
-files that the [oracle-safe evaluator](#oracle-safe-evaluation) reads.
+files that the [oracle-safe evaluator](#oracle-safe-evaluation) reads; for
+architectures 5 and 6 these hold each context's held-out patients projected on
+exactly the directions whose excerpts enter the handoff. Every component also
+records the wall time of each context's sections, attributed to the
+architecture they serve (see [Cost per architecture](#cost-per-architecture)).
 
 For binary outcomes, every effect-variation screen below (architectures 2, 4,
 5, 6, 8, 9, and 10) uses the [DINA](glossary.md#dina) objective, built from
@@ -199,6 +203,31 @@ default) are saved as witnesses, together with phrases that distinguish those
 chunks from background text. Queries can learn several distinct detectors for
 the same objective, which a single mean-difference direction cannot.
 
+Each bank is fitted in two steps within a training context:
+
+1. **Candidates.** The context's training rows are split into inner folds
+   (`query_inner_folds`, 5 by default). On each inner fold the bank is fitted
+   on the other folds' rows, and every candidate query is then scored on the
+   rows it did not see: a held-out standardized moment statistic (z) for the
+   bank's objective and its two-sided p-value.
+2. **Consensus and refit.** All candidates of a bank are grouped by k-means on
+   their patient activation patterns into exactly as many groups as the bank
+   has queries. Each group's medoid initializes one query, and the bank is
+   refitted on all of the context's training rows.
+
+Groups are ordered by the median absolute held-out z of their members, then
+by the median absolute training statistic, then by the medoid candidate's ID.
+A group whose members have no held-out statistic follows every group that has
+one, and the number of such groups is recorded. The order only sets the query
+IDs (`<bank>_query_001` ranks first): no query is gated or dropped, so each
+bank keeps its configured number of queries. The held-out rows of this step
+are inner partitions of the context's own training rows; the context's
+held-out rows never enter it. Each query's evidence records its rank, both
+medians, the median held-out p-value, and every member's held-out z, held-out
+p-value, and training statistic (`member_heldout_statistics`);
+`components/neural_queries/<context>/query_records.json` holds the same values
+for every group and member.
+
 ### What agreement and disagreement mean
 
 Agreement across architectures increases confidence that a concept is not an
@@ -265,20 +294,26 @@ uv run oci-evaluate-stage1 \
 | `--architectures` | Comma-separated IDs, or `all` (default) for every architecture present in the run |
 | `--dataset` | The dataset with [oracle columns](glossary.md#oracle-columns); defaults to the path in the run's `run_config.json` |
 | `--metadata` | The generator's `metadata.json`, which names the true confounders and modifiers; defaults to `metadata.json` beside the dataset |
-| `--output-dir` | Defaults to `<run-dir>/evaluations/stage1` |
+| `--output-dir` | Defaults to `<run-dir>/evaluation/stage1` |
+| `--null-draws` | Random-chunk null draws per architecture and context for the lexical recovery metric (default 200; 0 disables the null) |
 
-The evaluator hashes every Stage 1 evidence and score file it will use before it
-opens the oracle-bearing dataset, keeps the loaded copies in memory, and
-records the hashes in `evaluation_manifest.json`. It never changes pipeline
-checkpoints or completion markers. If the run has no per-architecture
+The evaluator hashes every Stage 1 evidence, score, split, and timing file it
+will use before it opens the oracle-bearing dataset, keeps the loaded copies in
+memory, and records the hashes in `evaluation_manifest.json`. It never changes
+pipeline checkpoints or completion markers. If the run has no per-architecture
 sidecars, it builds them from the handoff first.
 
 Metrics are computed on outer held-out rows where row-level scores exist. They
 include:
 
 - **Recovery:** whether evidence text mentions the true features (best lexical
-  token recall), and how strongly row-level scores associate with each true
-  feature's value;
+  token recall, compared with a random-chunk null below), and how strongly
+  row-level scores associate with each true feature's value. For the embedding
+  architectures the row-level scores are the held-out patients' mean and
+  maximum chunk cosine with each handed-off direction (columns
+  `direction__<contrast>__mean_chunk_cosine` and `__max_chunk_cosine`), and
+  `handed_off_direction_score_coverage` reports the share of an outer fold's
+  handed-off directions that have scores;
 - **Nuisance quality:** the treatment-prediction AUC of nuisance scores;
 - **Effect quality:** the best normalized R-loss gain and the association of
   effect scores with the true individual effect;
@@ -286,10 +321,56 @@ include:
   architecture-specific measures such as topic, query, or cluster stability and
   matching or retrieval coverage.
 
-Outputs: `metrics.jsonl` (all metrics), `architectures/<id>/metrics.jsonl`,
-`comparison.csv` (one summary row per architecture and metric), `summary.json`,
-and `evaluation_manifest.json`. See [Synthetic data](synthetic_data.md) for the
-oracle columns and the bundled cohorts.
+### Random-chunk null for lexical recovery
+
+Long excerpts contain many words, so an architecture that emits long text can
+reach a high token recall by chance. For each architecture and discovery
+context (an outer fold's full training set or one of its inner training
+folds), the evaluator draws `--null-draws` sets of random text windows from
+that context's training rows (from `components/tfidf/split_provenance.jsonl`).
+Each set has one window per evidence item of the architecture in that context,
+with the same number of characters; a window starts at a word boundary of a
+training row long enough to hold it (an item longer than every training row
+takes a whole row, counted as `length_unmatched_items`). The same best token
+recall is computed on every set. The draws are seeded from the run seed, the
+architecture, and the context, so a repeated evaluation reproduces them. For
+each true feature and context the evaluator reports the observed value, the
+null mean, the null 95th percentile, and the empirical p-value
+`(1 + #{null ≥ observed}) / (draws + 1)`.
+
+### Cost per architecture
+
+Each Stage 1 context records the wall time of its sections in
+`components/<component>/<context>/timing.json`, and each component collects its
+contexts in `components/<component>/timing.jsonl`
+(`components/embedding_cache/timing.jsonl` holds the one cache build). A
+section that serves one architecture is attributed to it; a section that
+several architectures need, such as the bag-of-words nuisance fits, the
+nuisance ensemble, the TF-IDF nuisance stacks, and the embedding cache, is
+attributed to `shared` and lists its consumers. A context whose sections
+restored checkpoints is marked `partially_restored` with the restored units; a
+context restored whole keeps the record written when it was computed; a
+context restored from a checkpoint written without timing is marked
+`unknown`, and the evaluator reports a completed component without a
+`timing.jsonl` the same way. Timing never enters a checkpoint identity or any
+fitted value.
+
+### Outputs
+
+The evaluator writes to `<run-dir>/evaluation/stage1/` (or `--output-dir`):
+
+| File | Content |
+|---|---|
+| `metrics.jsonl` | Every metric row, including the null comparisons (`oracle_feature_recovery_null`) and per-context wall seconds (`cost`) |
+| `architectures/<id>/metrics.jsonl` | The same rows for one architecture |
+| `comparison.csv` | One summary row per architecture, metric, and target (mean, standard deviation, and count over estimates) |
+| `lexical_recovery_null.csv` | One row per architecture, context, and true feature: observed recall, null mean, null 95th percentile, empirical p-value, draws, evidence items, length-unmatched items, and seed |
+| `timing.csv` | One row per timed section and context: component, context, status, unit, attribution, consumers, and seconds |
+| `summary.json` | Counts, the comparison table, the null settings, and the timing summary (per-architecture and shared seconds, context status counts, and contexts with unknown timing) |
+| `evaluation_manifest.json` | Input paths and hashes, the oracle columns read, and the number of null draws |
+
+See [Synthetic data](synthetic_data.md) for the oracle columns and the bundled
+cohorts.
 
 ## Attribution and ablation
 
