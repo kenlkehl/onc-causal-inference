@@ -411,227 +411,91 @@ def test_dataset_identity_reads_only_path_size_and_mtime(tmp_path):
     }
 
 
-def test_htr_pair_folds_resume_after_interruption_with_equivalent_result(
-    tmp_path,
-    monkeypatch,
+def test_matched_pair_vectorizer_units_resume_and_carry_the_lane_version(
+    tmp_path, monkeypatch
 ):
-    train = pd.DataFrame({"_oci_row_id": np.arange(9)})
-    test = pd.DataFrame({"_oci_row_id": [20, 21]})
-    y = np.asarray([0, 1, 0, 1, 0, 1, 0, 1, 0], dtype=float)
-    t = np.asarray([0, 1, 0, 1, 0, 1, 0, 1, 0], dtype=float)
-    nuisance_train = np.linspace(0.2, 0.8, len(train))
-    nuisance_test = np.asarray([0.35, 0.65])
+    from oci.config import BoWViewConfig
 
-    def fold_payload(**kwargs):
-        heldout_pos = np.asarray(kwargs["heldout_pos"], dtype=int)
-        inner_fold = int(kwargs["inner_fold"])
+    rng = np.random.default_rng(4)
+    n = 160
+    train = pd.DataFrame({"_oci_row_id": np.arange(n)})
+    test = pd.DataFrame({"_oci_row_id": [500, 501]})
+    t = np.tile([0.0, 1.0], n // 2)
+    y = (rng.random(n) < 0.5).astype(float)
+    texts = [f"word{index % 7} term{index % 3}" for index in range(n)]
+    views = [
+        BoWViewConfig(name="uni", ngram_range_min=1, ngram_range_max=1, min_df=1),
+        BoWViewConfig(name="bi", ngram_range_min=1, ngram_range_max=2, min_df=1),
+    ]
+    groups = multi_model_pair_uplift.distinct_vectorizer_groups(views)
+    settings = multi_model_pair_uplift.MatchedPairSettings.from_config(
+        multi_model_forest_stage1.MultiModelForestConfig(
+            bow_views=views, matched_pair_min_discordant_pairs=4
+        ),
+        outcome_type="binary",
+        top_n=5,
+    )
+    calls: list[str] = []
+
+    def fake_view(**kwargs):
+        name = str(kwargs["group"]["name"])
+        calls.append(name)
+        if name == "bi" and interrupt["active"]:
+            raise RuntimeError("simulated matched-pair interruption")
         return {
-            "heldout_pos": heldout_pos,
-            "fold_delta": heldout_pos.astype(float) + inner_fold / 10.0,
-            "fold_prob": np.full(len(heldout_pos), 0.4 + inner_fold / 20.0),
-            "fold_n": np.full(len(heldout_pos), inner_fold, dtype=float),
-            "test_delta": np.full(len(test), inner_fold / 10.0),
-            "test_prob": np.full(len(test), 0.5 + inner_fold / 20.0),
-            "test_n": np.full(len(test), inner_fold, dtype=float),
-            "attention_rows": [{"inner_fold": inner_fold}],
-            "prediction_frame": pd.DataFrame(),
+            "view": {"view_name": f"matched_pair__{name}", "status": "fitted"},
+            "test_tau": np.full(len(test), float(len(name))),
         }
+
+    interrupt = {"active": True}
+    monkeypatch.setattr(multi_model_pair_uplift, "fit_matched_pair_view", fake_view)
 
     def run(store):
-        store.run("assembly/nuisance_ensemble", lambda: {"ready": True})
-        return multi_model_pair_uplift.fit_htr_pair_uplift_train_test(
-            runner=object(),
+        def checkpoint(unit, compute, *, parameters, validator):
+            return store.run(unit, compute, parameters=parameters, validator=validator).value
+
+        return multi_model_pair_uplift.run_matched_pair_lane(
             train_df=train,
             test_df=test,
-            texts_train=[f"train {index}" for index in range(len(train))],
-            texts_test=["test a", "test b"],
+            texts_train=texts,
+            texts_test=["word1", "term2"],
             y_train=y,
             t_train=t,
-            e_train=nuisance_train,
-            m_train=nuisance_train,
-            e_test=nuisance_test,
-            m_test=nuisance_test,
+            propensity=np.full(n, 0.5),
+            prognostic=np.full(n, 0.5),
+            score_sources={},
+            vectorizer_groups=groups,
+            settings=settings,
             outer_fold=1,
-            effect_folds=3,
-            propensity_caliper=0.1,
-            outcome_caliper=0.1,
-            max_controls_per_candidate=2,
-            nearest_fallback_controls=1,
-            max_attention_pairs=4,
-            checkpoint_store=store,
-            checkpoint_dependencies=("assembly/nuisance_ensemble",),
+            seed=11,
+            checkpoint=checkpoint,
         )
 
-    interrupted_store = _store(tmp_path / "interrupted")
-    first_calls: list[int] = []
+    with pytest.raises(RuntimeError, match="simulated matched-pair interruption"):
+        run(_store(tmp_path))
+    assert calls == ["uni", "bi"]
 
-    def interrupting_fold(**kwargs):
-        inner_fold = int(kwargs["inner_fold"])
-        first_calls.append(inner_fold)
-        if inner_fold == 2:
-            raise RuntimeError("simulated pair interruption")
-        return fold_payload(**kwargs)
+    interrupt["active"] = False
+    resumed = run(_store(tmp_path))
+    assert calls == ["uni", "bi", "bi"]
+    assert [view["view_name"] for view in resumed.importance["views"]] == [
+        "matched_pair__uni",
+        "matched_pair__bi",
+    ]
+    reused = run(_store(tmp_path))
+    assert calls == ["uni", "bi", "bi"]
+    assert reused.importance == resumed.importance
 
-    monkeypatch.setattr(
-        multi_model_pair_uplift,
-        "_fit_htr_pair_uplift_fold",
-        interrupting_fold,
-    )
-    with pytest.raises(RuntimeError, match="simulated pair interruption"):
-        run(interrupted_store)
-    assert first_calls == [1, 2]
-
-    resumed_calls: list[int] = []
-
-    def resumed_fold(**kwargs):
-        resumed_calls.append(int(kwargs["inner_fold"]))
-        return fold_payload(**kwargs)
-
-    monkeypatch.setattr(
-        multi_model_pair_uplift,
-        "_fit_htr_pair_uplift_fold",
-        resumed_fold,
-    )
-    resumed = run(_store(tmp_path / "interrupted"))
-    assert resumed_calls == [2, 3]
-
-    clean_calls: list[int] = []
-
-    def clean_fold(**kwargs):
-        clean_calls.append(int(kwargs["inner_fold"]))
-        return fold_payload(**kwargs)
-
-    monkeypatch.setattr(
-        multi_model_pair_uplift,
-        "_fit_htr_pair_uplift_fold",
-        clean_fold,
-    )
-    clean = run(_store(tmp_path / "clean"))
-    assert clean_calls == [1, 2, 3]
-    np.testing.assert_array_equal(resumed.train_delta_logit, clean.train_delta_logit)
-    np.testing.assert_array_equal(resumed.test_delta_logit, clean.test_delta_logit)
-    np.testing.assert_array_equal(resumed.train_pred_prob, clean.train_pred_prob)
-    assert resumed.attention_rows == clean.attention_rows
-    assert resumed.metrics == clean.metrics
-
-
-def test_bow_pair_folds_and_full_importance_resume_independently(tmp_path, monkeypatch):
-    train = pd.DataFrame({"_oci_row_id": np.arange(9)})
-    test = pd.DataFrame({"_oci_row_id": [20, 21]})
-    y = np.asarray([0, 1, 0, 1, 0, 1, 0, 1, 0], dtype=float)
-    t = np.asarray([0, 1, 0, 1, 0, 1, 0, 1, 0], dtype=float)
-    nuisance_train = np.linspace(0.2, 0.8, len(train))
-    nuisance_test = np.asarray([0.35, 0.65])
-
-    def fold_payload(**kwargs):
-        heldout_pos = np.asarray(kwargs["heldout_pos"], dtype=int)
-        inner_fold = int(kwargs["inner_fold"])
-        return {
-            "heldout_pos": heldout_pos,
-            "fold_delta": heldout_pos.astype(float) + inner_fold / 10.0,
-            "fold_prob": np.full(len(heldout_pos), 0.4 + inner_fold / 20.0),
-            "fold_n": np.full(len(heldout_pos), inner_fold, dtype=float),
-            "test_delta": np.full(len(test), inner_fold / 10.0),
-            "test_prob": np.full(len(test), 0.5 + inner_fold / 20.0),
-            "test_n": np.full(len(test), inner_fold, dtype=float),
-            "attention_rows": [],
-            "prediction_frame": pd.DataFrame(),
-        }
-
-    def run(store):
-        store.run("assembly/nuisance_ensemble", lambda: {"ready": True})
-        return multi_model_pair_uplift.fit_bow_pair_uplift_train_test(
-            train_df=train,
-            test_df=test,
-            texts_train=[f"train {index}" for index in range(len(train))],
-            texts_test=["test a", "test b"],
-            y_train=y,
-            t_train=t,
-            e_train=nuisance_train,
-            m_train=nuisance_train,
-            e_test=nuisance_test,
-            m_test=nuisance_test,
-            vectorizer_params={},
-            model_params={},
-            outer_fold=1,
-            view_name="test_view",
-            view_index=0,
-            effect_folds=3,
-            propensity_caliper=0.1,
-            outcome_caliper=0.1,
-            max_controls_per_candidate=2,
-            nearest_fallback_controls=1,
-            l2_alpha=1.0,
-            max_iter=10,
-            top_n=5,
-            checkpoint_store=store,
-            checkpoint_dependencies=("assembly/nuisance_ensemble",),
-            checkpoint_namespace="bow/pair_uplift/view_000",
+    markers = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (tmp_path / "checkpoints" / "v1" / "units" / "bow" / "matched_pair").rglob(
+            "complete.json"
         )
-
-    importance_calls: list[str] = []
-
-    def importance(**_kwargs):
-        importance_calls.append("fit")
-        return {
-            "importance": {"view_name": "test_view", "positive": []},
-            "n_matched_training_pairs": 7,
-        }
-
-    monkeypatch.setattr(
-        multi_model_pair_uplift,
-        "_fit_bow_pair_full_importance",
-        importance,
-    )
-    first_calls: list[int] = []
-
-    def interrupting_fold(**kwargs):
-        inner_fold = int(kwargs["inner_fold"])
-        first_calls.append(inner_fold)
-        if inner_fold == 2:
-            raise RuntimeError("simulated BoW pair interruption")
-        return fold_payload(**kwargs)
-
-    monkeypatch.setattr(
-        multi_model_pair_uplift,
-        "_fit_bow_pair_uplift_fold",
-        interrupting_fold,
-    )
-    with pytest.raises(RuntimeError, match="simulated BoW pair interruption"):
-        run(_store(tmp_path / "interrupted"))
-    assert first_calls == [1, 2]
-    assert importance_calls == []
-
-    resumed_calls: list[int] = []
-
-    def resumed_fold(**kwargs):
-        resumed_calls.append(int(kwargs["inner_fold"]))
-        return fold_payload(**kwargs)
-
-    monkeypatch.setattr(
-        multi_model_pair_uplift,
-        "_fit_bow_pair_uplift_fold",
-        resumed_fold,
-    )
-    resumed = run(_store(tmp_path / "interrupted"))
-    assert resumed_calls == [2, 3]
-    assert importance_calls == ["fit"]
-
-    clean_calls: list[int] = []
-
-    def clean_fold(**kwargs):
-        clean_calls.append(int(kwargs["inner_fold"]))
-        return fold_payload(**kwargs)
-
-    monkeypatch.setattr(
-        multi_model_pair_uplift,
-        "_fit_bow_pair_uplift_fold",
-        clean_fold,
-    )
-    clean = run(_store(tmp_path / "clean"))
-    assert clean_calls == [1, 2, 3]
-    assert importance_calls == ["fit", "fit"]
-    np.testing.assert_array_equal(resumed.train_delta_logit, clean.train_delta_logit)
-    np.testing.assert_array_equal(resumed.test_delta_logit, clean.test_delta_logit)
-    assert resumed.feature_importance == clean.feature_importance
-    assert resumed.metrics == clean.metrics
+    ]
+    assert len(markers) == 2
+    for marker in markers:
+        assert (
+            marker["parameters"]["checkpoint_version"]
+            == multi_model_pair_uplift.MATCHED_PAIR_CHECKPOINT_VERSION
+            == "matched_pair_conditional_logit_checkpoint_v1"
+        )

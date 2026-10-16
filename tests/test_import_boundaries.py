@@ -26,7 +26,7 @@ STAGE1_MODULES = (
 
 # A tiny binary-outcome context that exercises every lazy import on the Stage 1
 # text-model path: BoW nuisance/effect views, sparse DINA nuisances, the HTR
-# trainer (hash sentence encoder), and both matched-pair producers.
+# trainer (hash sentence encoder), and the matched-pair lane.
 _STAGE1_CONTEXT_SCRIPT = textwrap.dedent(
     """
     import json, sys, tempfile
@@ -107,7 +107,11 @@ _STAGE1_CONTEXT_SCRIPT = textwrap.dedent(
             num_workers=1,
         )
     assert {"importance", "htr_evidence"} <= set(row), sorted(row)
-    assert set(row["htr_evidence"]) >= {"nuisance", "effect", "pair_uplift"}
+    assert set(row["htr_evidence"]) >= {"nuisance", "effect"}
+    assert "pair_uplift" not in row["htr_evidence"]
+    assert row["importance"]["matched_pair_uplift"]["schema_version"] == (
+        "matched_pair_conditional_logit_v1"
+    )
     print(json.dumps(sorted(sys.modules)))
     """
 )

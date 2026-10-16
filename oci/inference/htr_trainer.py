@@ -1,4 +1,4 @@
-"""HTR training core for the Stage 1 neural and matched-pair lanes.
+"""HTR training core for the Stage 1 neural lane.
 
 The networks, loaders, and training loops live here so that Stage 1 never
 imports the agentic runners or constructs their LLM agent and extraction

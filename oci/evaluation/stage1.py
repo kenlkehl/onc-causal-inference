@@ -28,6 +28,7 @@ from ..inference.stage1_architectures import (
     EMBEDDING_CLUSTERED,
     EMBEDDING_WHOLE_COHORT,
     HTR_NEURAL,
+    MATCHED_PAIR_EVIDENCE_SCHEMA_VERSION,
     MATCHED_PAIR_UPLIFT,
     NEURAL_QUERY_MOMENTS,
     STAGE1_ARCHITECTURES,
@@ -671,31 +672,18 @@ def _native_evidence_metrics(
             )
         )
     elif architecture == MATCHED_PAIR_UPLIFT:
-        pair_sides = {
-            str(detail.get("pair_side"))
-            for detail in details
-            if detail.get("pair_side") is not None
-        }
-        rows.extend(
-            [
-                factory.row(
-                    metric_family="matching",
-                    metric="matched_pair_evidence_fraction",
-                    value=(
-                        axis_counts["matched_pair"] / occurrence_count
-                        if occurrence_count
-                        else None
-                    ),
-                    n=occurrence_count,
-                    reason="no matched-pair evidence was emitted",
+        rows.append(
+            factory.row(
+                metric_family="matching",
+                metric="matched_pair_evidence_fraction",
+                value=(
+                    axis_counts["matched_pair"] / occurrence_count
+                    if occurrence_count
+                    else None
                 ),
-                factory.row(
-                    metric_family="matching",
-                    metric="represented_pair_side_count",
-                    value=float(len(pair_sides)),
-                    n=occurrence_count,
-                ),
-            ]
+                n=occurrence_count,
+                reason="no matched-pair evidence was emitted",
+            )
         )
     elif architecture == HTR_NEURAL:
         stages = {str(detail.get("stage")) for detail in details if detail.get("stage")}
@@ -1107,26 +1095,157 @@ def _native_score_metrics(
     factory = _MetricFactory(architecture)
     heldout = _outer_heldout(frame)
     if architecture == MATCHED_PAIR_UPLIFT:
-        columns = [column for column in heldout if "matched_control_count" in column]
+        columns = [column for column in heldout if column == "tau_hat_matched_pair"]
         values = (
-            pd.concat(
-                [pd.to_numeric(heldout[column], errors="coerce") for column in columns],
-                ignore_index=True,
-            )
+            pd.to_numeric(heldout[columns[0]], errors="coerce")
             if columns
             else pd.Series(dtype=float)
         )
-        values = values[np.isfinite(values)]
         return [
             factory.row(
-                metric_family="matching",
-                metric="heldout_positive_match_coverage",
-                value=float(np.mean(values > 0)) if len(values) else None,
+                metric_family="uplift",
+                metric="heldout_tau_prediction_coverage",
+                value=float(np.mean(np.isfinite(values))) if len(values) else None,
                 n=len(values),
-                reason="matched-control counts were not persisted",
+                reason="no held-out matched-pair effect predictions were persisted",
             )
         ]
     return []
+
+
+def _text_model_source(
+    run_dir: Path,
+    manifest: Mapping[str, Any],
+) -> Path | None:
+    """The raw text-model evidence file recorded for the architecture sidecars."""
+
+    entry = (manifest.get("source_artifacts") or {}).get("text_models")
+    if not isinstance(entry, Mapping) or not entry.get("path"):
+        return None
+    path = Path(str(entry["path"]))
+    if not path.is_absolute():
+        path = run_dir / path
+    return path if path.is_file() else None
+
+
+def _matched_pair_lane_metrics(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Lane-native matching and fit metrics from the frozen handoff payload.
+
+    Read from each context's ``importance.matched_pair_uplift``; nothing is
+    refitted and no oracle value is consulted.
+    """
+
+    factory = _MetricFactory(MATCHED_PAIR_UPLIFT)
+    output: list[dict[str, Any]] = []
+    for raw in rows:
+        row = raw.get("evidence") if isinstance(raw.get("evidence"), Mapping) else raw
+        importance = row.get("importance") if isinstance(row, Mapping) else None
+        lane = importance.get("matched_pair_uplift") if isinstance(importance, Mapping) else None
+        if not isinstance(lane, Mapping):
+            continue
+        located = {
+            key: row.get(key, raw.get(key)) for key in ("outer_fold", "inner_fold", "scope")
+        }
+        context = {
+            "outer_fold": None if located["outer_fold"] is None else int(located["outer_fold"]),
+            "inner_fold": None if located["inner_fold"] is None else int(located["inner_fold"]),
+            "scope": None if located["scope"] is None else str(located["scope"]),
+        }
+        if lane.get("schema_version") != MATCHED_PAIR_EVIDENCE_SCHEMA_VERSION:
+            output.append(
+                factory.row(
+                    metric_family="matching",
+                    metric="n_matched_pairs",
+                    value=None,
+                    reason="matched-pair payload predates the conditional-logit schema",
+                    **context,
+                )
+            )
+            continue
+        matching = lane.get("matching") if isinstance(lane.get("matching"), Mapping) else {}
+        binary = str(lane.get("outcome_type") or "binary") == "binary"
+        n_pairs = matching.get("n_pairs")
+        matching_metrics = [
+            "n_pairs",
+            "mean_abs_delta_propensity",
+            "max_abs_delta_propensity",
+            "mean_abs_delta_prognostic",
+            "max_abs_delta_prognostic",
+        ]
+        matching_metrics += (
+            [
+                "n_discordant_pairs",
+                "n10_treated_event_only",
+                "n01_control_event_only",
+                "mcnemar_log_odds_ratio",
+            ]
+            if binary
+            else ["mean_adjusted_paired_difference"]
+        )
+        for key in matching_metrics:
+            output.append(
+                factory.row(
+                    metric_family="matching",
+                    metric="n_matched_pairs" if key == "n_pairs" else key,
+                    value=matching.get(key),
+                    n=None if n_pairs is None else int(n_pairs),
+                    reason="not estimable from the matched pairs of this context",
+                    **context,
+                )
+            )
+        views = lane.get("views") if isinstance(lane.get("views"), Sequence) else []
+        gain_key = (
+            "heldout_log_likelihood_gain_per_pair" if binary else "heldout_mse_reduction"
+        )
+        if not views:
+            for metric in (gain_key, "n_nonzero_terms"):
+                output.append(
+                    factory.row(
+                        metric_family="uplift",
+                        metric=metric,
+                        value=None,
+                        reason=str(lane.get("reason") or "no pair model was fitted"),
+                        **context,
+                    )
+                )
+        for view in views:
+            if not isinstance(view, Mapping):
+                continue
+            validation = view.get("validation") if isinstance(view.get("validation"), Mapping) else {}
+            reason = str(view.get("reason") or "the pair model was not fitted")
+            fitted = view.get("status") == "fitted"
+            output.extend(
+                [
+                    factory.row(
+                        metric_family="uplift",
+                        metric=gain_key,
+                        value=validation.get(gain_key) if fitted else None,
+                        score=str(view.get("view_name") or ""),
+                        n=validation.get("n_pairs"),
+                        reason=reason,
+                        **context,
+                    ),
+                    factory.row(
+                        metric_family="uplift",
+                        metric="n_nonzero_terms",
+                        value=view.get("n_nonzero_terms") if fitted else None,
+                        score=str(view.get("view_name") or ""),
+                        n=view.get("n_features"),
+                        reason=reason,
+                        **context,
+                    ),
+                ]
+            )
+    if not output:
+        output.append(
+            factory.row(
+                metric_family="matching",
+                metric="n_matched_pairs",
+                value=None,
+                reason="the text-model evidence has no matched-pair payload",
+            )
+        )
+    return output
 
 
 def _summarize(metrics: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -1211,6 +1330,17 @@ def evaluate_stage1_architectures(
             if relative not in consumed_score_hashes:
                 consumed_score_hashes[relative] = _file_sha256(score_path)
 
+    # The matched-pair lane's native metrics live in the raw text-model
+    # evidence; it is hashed and loaded before any oracle-bearing table too.
+    consumed_source_hashes: dict[str, str] = {}
+    matched_pair_source: tuple[str, list[dict[str, Any]]] | None = None
+    if MATCHED_PAIR_UPLIFT in requested:
+        source_path = _text_model_source(run_dir, architecture_manifest)
+        if source_path is not None:
+            relative = os.path.relpath(source_path, start=run_dir)
+            consumed_source_hashes[relative] = _file_sha256(source_path)
+            matched_pair_source = (relative, _read_jsonl(source_path))
+
     dataset = _resolve_dataset(run_dir, run_config, dataset_path)
     metadata = _resolve_metadata(dataset, metadata_path)
     frame = _load_dataset(dataset)
@@ -1238,6 +1368,24 @@ def evaluate_stage1_architectures(
             source_artifact=os.path.relpath(evidence_path, start=run_dir),
             source_sha256=evidence_hashes[architecture],
         )
+        if architecture == MATCHED_PAIR_UPLIFT:
+            if matched_pair_source is None:
+                metrics.append(
+                    _MetricFactory(architecture).row(
+                        metric_family="matching",
+                        metric="n_matched_pairs",
+                        value=None,
+                        reason="the run records no text-model evidence source",
+                    )
+                )
+            else:
+                metrics.extend(
+                    _annotate_metric_source(
+                        _matched_pair_lane_metrics(matched_pair_source[1]),
+                        source_artifact=matched_pair_source[0],
+                        source_sha256=consumed_source_hashes[matched_pair_source[0]],
+                    )
+                )
         score_frames = score_frames_by_architecture[architecture]
         if not score_frames:
             metrics.append(
@@ -1328,6 +1476,7 @@ def evaluate_stage1_architectures(
         "selected_architectures": list(requested),
         "stage1_evidence_sha256": evidence_hashes,
         "consumed_score_sha256": consumed_score_hashes,
+        "consumed_source_sha256": consumed_source_hashes,
         "oracle_columns": truth_columns,
         "oracle_columns_available_to_stage1": False,
         "stage1_artifacts_frozen_before_oracle_load": True,

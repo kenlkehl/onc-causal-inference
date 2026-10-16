@@ -30,8 +30,7 @@ Other terms are defined in the [glossary](docs/glossary.md).
 1. **Stage 1: find evidence in text.** Up to ten independent text models
    (lexical, neural, embedding, and topic models) point to passages associated
    with treatment, outcome, or variation in the treatment effect. Eight run by
-   default (seven for continuous outcomes). Their evidence is frozen in a
-   handoff.
+   default. Their evidence is frozen in a handoff.
 2. **Stage 2: define and measure variables.** An interpretation LLM reads the
    evidence, names candidate clinical variables, and writes a measurement rule
    for each. An extraction LLM measures every variable from every patient's

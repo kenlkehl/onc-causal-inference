@@ -526,9 +526,6 @@ def _load_stage1_template(config: ResearchStage1Config) -> dict[str, Any]:
         multi_model["htr_evidence_disable_reason"] = (
             "disabled by research workflow option"
         )
-        # Matched-pair HTR is a separate neural HTR path and must follow the
-        # same top-level switch. Its BoW counterpart remains available.
-        multi_model["matched_pair_htr_enabled"] = False
     override_architecture = config.stage1_overrides.get("architecture")
     override_multi_model = (
         override_architecture.get("multi_model_forest")
@@ -562,6 +559,8 @@ def _apply_explicit_architecture_selection(
     * embedding lanes residualize against text-model nuisance predictions, so
       an embedding-only selection runs the BoW nuisance models (HTR only when
       BoW is disabled in the template);
+    * ``matched_pair_uplift`` matches on the BoW nuisance propensities and
+      fits BoW pair features, so it runs the BoW views;
     * ``neural_query_moments`` reads the embedding cache, which the
       ``embedding_cache`` component prepares regardless of whether the
       embedding evidence lanes are enabled.
@@ -582,16 +581,11 @@ def _apply_explicit_architecture_selection(
     matched_selected = MATCHED_PAIR_UPLIFT in selected_set
     bow_available = bool(multi_model.get("bow_discovery_enabled", True))
     htr_available = bool(multi_model.get("htr_evidence_enabled", True))
-    matched_bow_available = bool(multi_model.get("matched_pair_bow_enabled", True))
-    matched_htr_available = bool(multi_model.get("matched_pair_htr_enabled", True))
     bow_needed = bool(
         selected_set.intersection({BOW_NUISANCE, BOW_R_LOSS})
-        or matched_selected and bow_available and matched_bow_available
+        or matched_selected and bow_available
     )
-    htr_needed = bool(
-        HTR_NEURAL in selected_set
-        or matched_selected and htr_available and matched_htr_available
-    )
+    htr_needed = HTR_NEURAL in selected_set
     embedding_needed = bool(
         selected_set.intersection(
             {
@@ -616,12 +610,6 @@ def _apply_explicit_architecture_selection(
     multi_model["bow_discovery_enabled"] = bow_needed
     multi_model["htr_evidence_enabled"] = htr_needed
     multi_model["matched_pair_uplift_enabled"] = matched_selected
-    multi_model["matched_pair_bow_enabled"] = bool(
-        matched_selected and bow_available and matched_bow_available
-    )
-    multi_model["matched_pair_htr_enabled"] = bool(
-        matched_selected and htr_available and matched_htr_available
-    )
     methods: list[str] = []
     if bow_needed:
         methods.append("bow")
@@ -2720,14 +2708,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--htr-model",
-        help="encoder for the HTR Stage 1 lanes (default: prajjwal1/bert-tiny)",
+        help="encoder for the HTR Stage 1 lane (default: prajjwal1/bert-tiny)",
     )
     parser.add_argument(
         "--disable-htr",
         action="store_true",
         help=(
-            "disable all HTR nuisance/effect and matched-pair modeling while "
-            "retaining the other configured evidence families"
+            "disable all HTR nuisance and effect modeling (the htr_neural "
+            "lane) while retaining the other configured evidence families"
         ),
     )
     parser.add_argument(
