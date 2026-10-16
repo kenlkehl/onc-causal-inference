@@ -29,6 +29,8 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 | `python scripts/run_all_evidence.py` | `oci/inference/research_all_evidence_workflow.py` (`build_parser`, `main`) | Run, resume, or relaunch the all-evidence workflow (29 flags; everything else via `--set KEY=VALUE`) |
 | `./run_synthetic.sh COHORT [OUT]` | `run_synthetic.sh`, `scripts/presets/{external,h100x8,rtxpro6000x8}.env` | Run a bundled synthetic cohort with a serving preset |
 | `oci-evaluate-stage1` | `oci/evaluation/stage1.py` | Oracle-safe evaluation of frozen Stage 1 architectures |
+| `oci-evaluate-attribution` | `oci/evaluation/attribution.py` | Credit Stage 2 variables to the Stage 1 architectures that supported them (any-source and sole-source); `--oracle` adds recovery by held-out R² |
+| `python scripts/ablate_stage1_architectures.py` | `oci/evaluation/ablation.py` | `prepare`: leave-one-architecture-out handoffs and `run_stage2_from_artifacts.py` configs (never launches LLM jobs); `compare`: finished ablations versus the full run |
 | `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only; for a dated-notes run, `dataset` is its `input/analysis_cohort.parquet`) |
 | `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
 | `python -m synthetic_data.cli` | `synthetic_data/` | Synthetic cohort generator |
@@ -44,6 +46,8 @@ oci/
 ├── config.py                         # Stage 1 template and `oci run` dataclasses (ExperimentConfig)
 ├── cli.py                            # `oci init`, `oci run`
 ├── evaluation/stage1.py              # oci-evaluate-stage1
+├── evaluation/attribution.py         # oci-evaluate-attribution (Stage 2 lineage, oracle recovery by R²)
+├── evaluation/ablation.py            # scripts/ablate_stage1_architectures.py (prepare, compare)
 ├── extraction/                       # `oci run` extraction: explicit_features, complete_paged,
 │                                     #   contract_lexical_context, llm_routing, cache
 ├── models/
@@ -222,7 +226,9 @@ Configuration rules:
   headers state relative days, so calendar dates never enter prompts through
   them. Only the configured note columns are read from the notes table, and the
   per-patient audit is never read by any modeling or LLM step.
-- Hash frozen Stage 1 artifacts before loading oracle data for evaluation.
+- Hash frozen Stage 1 artifacts before loading oracle data for evaluation; the
+  attribution and ablation reports likewise hash every Stage 2 artifact they
+  read first, and write only under `OUT/evaluation/` or outside the run.
 - Keep outer held-out rows unavailable to inner-fold discovery, review,
   selection, and definition search.
 - LLM prompts never contain dataset paths or names, synthetic-generation
@@ -283,6 +289,11 @@ PRESET=h100x8 ./run_synthetic.sh five_conf_five_mod /path/to/output
 
 # Evaluate frozen Stage 1 outputs against oracle columns
 oci-evaluate-stage1 --run-dir OUT --architectures all
+
+# Credit Stage 2 variables to Stage 1 architectures; leave-one-architecture-out reruns
+oci-evaluate-attribution --run-dir OUT --oracle
+python scripts/ablate_stage1_architectures.py prepare --run-dir OUT --out ABL --stage2-config ENDPOINTS.json
+python scripts/ablate_stage1_architectures.py compare --run-dir OUT --ablation-dir ABL --oracle
 
 # Standalone explicit-feature workflow
 oci run --config example_configs/agentic_explicit_feature_forest_config.json

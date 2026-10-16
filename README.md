@@ -408,13 +408,29 @@ refitting:
 uv run oci-evaluate-stage1 --run-dir /path/to/output --architectures all
 ```
 
+To credit each Stage 2 variable to the Stage 1 architectures whose evidence
+supported it (any-source and sole-source counts per fold), and, for synthetic
+cohorts, to measure which true variables the selected variables recover by
+held-out R², run `oci-evaluate-attribution`. To see what Stage 2 loses without
+an architecture, `scripts/ablate_stage1_architectures.py prepare` writes one
+leave-one-architecture-out handoff and launcher configuration per architecture
+(it starts no LLM requests), and `compare` reads the finished reruns:
+
+```bash
+uv run oci-evaluate-attribution --run-dir /path/to/output --oracle
+python scripts/ablate_stage1_architectures.py prepare --run-dir /path/to/output --out /path/to/ablations
+python scripts/ablate_stage1_architectures.py compare --run-dir /path/to/output --ablation-dir /path/to/ablations
+```
+
+See [Stage 1 architectures](docs/stage1_architectures.md#attribution-and-ablation).
+
 ## Documentation
 
 | Guide | Scope |
 |---|---|
 | [Glossary](docs/glossary.md) | Terms used throughout the documentation |
 | [How OCI works](docs/how_it_works.md) | End-to-end walkthrough of both stages |
-| [Stage 1 architectures](docs/stage1_architectures.md) | The ten evidence architectures, selection rules, and Stage 1 evaluation |
+| [Stage 1 architectures](docs/stage1_architectures.md) | The ten evidence architectures, selection rules, Stage 1 evaluation, and attribution and ablation of Stage 2 results |
 | [Stage 2 selection](docs/stage2_selection.md) | Evidence, ranking, model choice, nuisances, DINA, diagnostics, and limitations |
 | [Configuration](docs/configuration.md) | Configuration keys, command-line flags, launcher, outputs, resume, and reselection |
 | [Serving](docs/serving.md) | LLM endpoints, managed vLLM pools, and hardware presets |

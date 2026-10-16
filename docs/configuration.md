@@ -844,7 +844,9 @@ OUTPUT_DIR/
 Without an explicit architecture selection, `stage1_architectures/` is not
 written and the handoff streams the component evidence directly.
 `OUTPUT_DIR/evaluations/stage1/` is written only by `oci-evaluate-stage1`
-([Synthetic data](synthetic_data.md#oracle-safe-evaluation)).
+([Synthetic data](synthetic_data.md#oracle-safe-evaluation)), and
+`OUTPUT_DIR/evaluation/attribution/` only by `oci-evaluate-attribution`
+([Stage 1 architectures](stage1_architectures.md#attribution-of-stage-2-variables)).
 
 ### Files to read first
 
@@ -1157,3 +1159,8 @@ For `required_architectures`, the launcher's default is the eight default
 architectures. When the source run used a different selection, set
 `stage2.required_architectures` (and, to restrict compilation,
 `stage2.included_architectures`) to match its handoff.
+
+`scripts/ablate_stage1_architectures.py prepare` writes launcher
+configurations of this form, one per Stage 1 architecture, each with the
+run's handoff minus that architecture's evidence; see
+[Leave-one-architecture-out ablation](stage1_architectures.md#leave-one-architecture-out-ablation).

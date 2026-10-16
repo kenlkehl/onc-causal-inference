@@ -72,6 +72,7 @@ local-llm = [
 [project.scripts]
 oci = "oci.cli:main"
 oci-evaluate-stage1 = "oci.evaluation.stage1:main"
+oci-evaluate-attribution = "oci.evaluation.attribution:main"
 
 [project.urls]
 Homepage = "https://github.com/kenlkehl/onc-causal-inference"
