@@ -5,6 +5,16 @@ from typing import Any
 
 
 NEURAL_QUERY_RETRIEVAL_VERSION = "ranked_query_chunks_v1"
+# Consensus query groups are ordered by the median absolute inner-validation
+# z-statistic of their members, then by the median absolute training score,
+# then by the medoid candidate ID. Groups without validation statistics follow.
+NEURAL_QUERY_RANKING_VERSION = "heldout_abs_z_median_v1"
+NEURAL_QUERY_RANKING_RULE = (
+    "median_abs_inner_validation_z_desc, then median_abs_train_score_desc, "
+    "then medoid_candidate_id; groups without validation statistics last"
+)
+# Per-context artifacts (evidence.json, query_records.json, complete.json).
+NEURAL_QUERY_CONTEXT_SCHEMA_VERSION = "neural_query_context_v2_heldout_ranking"
 
 
 def query_term_normalization(config: Any = None) -> dict[str, Any]:

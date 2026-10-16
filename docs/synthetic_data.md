@@ -335,8 +335,9 @@ For datasets without oracle columns the metrics file records that evaluation is
 unavailable.
 
 **Stage 1.** `oci-evaluate-stage1` compares each frozen Stage 1 architecture
-with the oracle columns. It hashes and loads all Stage 1 evidence before it
-reads the dataset, and it never fits or selects a model.
+with the oracle columns. It hashes and loads all Stage 1 evidence, score,
+split, and timing files before it reads the dataset, and it never fits or
+selects a model.
 
 ```bash
 oci-evaluate-stage1 --run-dir OUTPUT_DIR --architectures all
@@ -348,7 +349,8 @@ oci-evaluate-stage1 --run-dir OUTPUT_DIR --architectures all
 | `--dataset PATH` | `dataset` from `run_config.json` | Dataset with oracle columns |
 | `--metadata PATH` | `metadata.json` beside the dataset, if present | DGP metadata, used for variable names |
 | `--architectures LIST` | every architecture in the run | Comma-separated names, or `all` |
-| `--output-dir DIR` | `OUTPUT_DIR/evaluations/stage1` | Where results are written |
+| `--output-dir DIR` | `OUTPUT_DIR/evaluation/stage1` | Where results are written |
+| `--null-draws N` | 200 | Random-chunk null draws per architecture and context for lexical recall; 0 disables the null |
 
 It reads `stage1_architectures/` when present; otherwise it builds that view
 from the handoff and writes it into the run directory. On outer held-out rows
@@ -356,13 +358,19 @@ it reports, for each architecture, how strongly its scores associate with each
 `true_<variable>` (absolute Spearman correlation or one-versus-rest AUC), how
 strongly its effect scores correlate with `true_ite` (or `true_ite_prob` for
 binary outcomes), nuisance discrimination, matching coverage where relevant,
-and a normalized R-loss gain. It also reports lexical recall of each true
-variable's name in the evidence and inner-fold stability. Association metrics
-take the best value over an architecture's score columns and ignore sign. The
-outputs are `metrics.jsonl`, `architectures/<architecture>/metrics.jsonl`,
-`comparison.csv`, `summary.json`, and `evaluation_manifest.json` (input hashes
-and the oracle columns used). Rows are aligned by position, so evaluate with
-the same dataset file the run used. See
+and a normalized R-loss gain. The embedding architectures are scored on the
+directions handed to Stage 2. It also reports lexical recall of each true
+variable's name in the evidence, compared in each discovery context with
+random text windows of the same number and length drawn from that context's
+training rows, inner-fold stability, and the Stage 1 wall time of each
+architecture. Association metrics take the best value over an architecture's
+score columns and ignore sign. The outputs are `metrics.jsonl`,
+`architectures/<architecture>/metrics.jsonl`, `comparison.csv`,
+`lexical_recovery_null.csv`, `timing.csv`, `summary.json`, and
+`evaluation_manifest.json` (input hashes and the oracle columns used); see
+[Stage 1 architectures](stage1_architectures.md#outputs) for their contents.
+Rows are aligned by position, so evaluate with the same dataset file the run
+used. See
 [Stage 1 architectures](stage1_architectures.md) for what each architecture
 produces.
 

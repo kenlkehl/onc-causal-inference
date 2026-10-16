@@ -28,7 +28,7 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 |---|---|---|
 | `python scripts/run_all_evidence.py` | `oci/inference/research_all_evidence_workflow.py` (`build_parser`, `main`) | Run, resume, or relaunch the all-evidence workflow (29 flags; everything else via `--set KEY=VALUE`) |
 | `./run_synthetic.sh COHORT [OUT]` | `run_synthetic.sh`, `scripts/presets/{external,h100x8,rtxpro6000x8}.env` | Run a bundled synthetic cohort with a serving preset |
-| `oci-evaluate-stage1` | `oci/evaluation/stage1.py` | Oracle-safe evaluation of frozen Stage 1 architectures |
+| `oci-evaluate-stage1` | `oci/evaluation/stage1.py` | Oracle-safe evaluation of frozen Stage 1 architectures; writes `OUT/evaluation/stage1/` |
 | `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only) |
 | `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
 | `python -m synthetic_data.cli` | `synthetic_data/` | Synthetic cohort generator |
@@ -43,7 +43,9 @@ the `local-llm` CUDA toolkit inside `.venv` for vLLM).
 oci/
 ├── config.py                         # Stage 1 template and `oci run` dataclasses (ExperimentConfig)
 ├── cli.py                            # `oci init`, `oci run`
-├── evaluation/stage1.py              # oci-evaluate-stage1
+├── evaluation/stage1.py              # oci-evaluate-stage1 (scores the handed-off embedding directions)
+├── evaluation/stage1_lexical_null.py # Random-chunk null for lexical recovery (--null-draws)
+├── evaluation/stage1_timing_report.py  # Per-architecture Stage 1 wall time in the evaluation output
 ├── extraction/                       # `oci run` extraction: explicit_features, complete_paged,
 │                                     #   contract_lexical_context, llm_routing, cache
 ├── models/
@@ -61,6 +63,7 @@ oci/
     ├── stage1_architectures.py       # Canonical registry and selector semantics
     ├── stage1_architecture_artifacts.py    # Per-architecture views for explicit selections
     ├── stage1_checkpointing.py       # Per-context Stage 1 checkpoints
+    ├── stage1_timing.py              # Reporting-only section timer; components/*/timing.jsonl
     ├── multi_model_forest_stage1.py  # BoW, HTR, embedding, matched-pair text models per context
     ├── htr_trainer.py, htr_evidence_provider.py, multi_model_pair_uplift.py, stage1_dina.py
     ├── sparse_text_modeling.py, stage1_modeling_support.py   # Shared Stage 1 modeling primitives
@@ -132,6 +135,16 @@ selection is recorded in `stage1_architectures/manifest.json` and cannot change
 on resume. Private prerequisites (for example BoW nuisance fits for embedding
 architectures) may run, but only selected architectures enter the handoff.
 Keep the omitted-selector path's behavior unchanged.
+
+Neural-query consensus groups are ordered by the median absolute held-out z of
+their members (scored on inner partitions of the context's training rows,
+never its held-out rows), then by the training score; the order sets query IDs
+and never gates queries. For evaluation only, each text-model context writes
+its held-out rows' scores on the exact handed-off embedding directions
+(`EMBEDDING_DIRECTION_SCORE_SOURCES` in `stage1_architecture_artifacts.py`).
+Every Stage 1 component writes reporting-only wall time per architecture
+(`components/*/timing.jsonl`, `stage1_timing.py`); timing never enters a
+checkpoint identity or a fitted value.
 
 ## Stage 2
 

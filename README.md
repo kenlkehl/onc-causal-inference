@@ -353,6 +353,12 @@ refitting:
 uv run oci-evaluate-stage1 --run-dir /path/to/output --architectures all
 ```
 
+It scores the embedding directions handed to Stage 2, compares lexical recall
+of each true variable with a random-chunk null (`--null-draws`, 200 by
+default), reports each architecture's Stage 1 wall time, and writes JSON and
+CSV results to `/path/to/output/evaluation/stage1/`; see
+[Stage 1 architectures](docs/stage1_architectures.md#oracle-safe-evaluation).
+
 ## Documentation
 
 | Guide | Scope |

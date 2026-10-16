@@ -75,6 +75,17 @@ from .stage1_architectures import (
     selected_components,
     unavailable_explicit_architectures,
 )
+from .stage1_timing import (
+    COMPONENT_TIMING_FILE,
+    CONTEXT_TIMING_FILE,
+    EMBEDDING_CACHE_CONSUMERS,
+    SHARED_ATTRIBUTION,
+    SectionTimer,
+    read_timing_record,
+    unknown_timing_record,
+    write_component_timing,
+    write_timing_record,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -772,14 +783,24 @@ def _embedding_cache_component(
 ) -> Mapping[str, Any]:
     from .embedding_contrast_discovery import EmbeddingContrastEvidenceGenerator
 
+    timer = SectionTimer()
     generator = EmbeddingContrastEvidenceGenerator(
         config=context.applied_config,
         output_dir=component_dir,
         precompute_devices=context.config.devices,
     )
     generator.prepare(context.dataset)
+    timer.lap(
+        "embedding_cache",
+        attribution=SHARED_ATTRIBUTION,
+        consumers=EMBEDDING_CACHE_CONSUMERS,
+    )
+    record = timer.record(component="embedding_cache")
+    record["cache_reused"] = bool(getattr(generator, "_chunk_cache_reused", False))
+    write_timing_record(component_dir / CONTEXT_TIMING_FILE, record)
+    write_component_timing(component_dir / COMPONENT_TIMING_FILE, [record])
     return {
-        "artifacts": [str(component_dir / "cache")],
+        "artifacts": [str(component_dir / "cache"), str(component_dir / COMPONENT_TIMING_FILE)],
         "rows": len(context.dataset),
     }
 
@@ -792,7 +813,8 @@ def _text_models_component(
 
     completed: list[dict[str, Any]] = []
     pending: list[dict[str, Any]] = []
-    for spec in _stage1_context_specs(context):
+    specs = _stage1_context_specs(context)
+    for spec in specs:
         context_dir = component_dir / str(spec["scope_id"])
         evidence_path = context_dir / "evidence.json"
         if (context_dir / "complete.json").is_file():
@@ -848,10 +870,32 @@ def _text_models_component(
     )
     evidence_path = component_dir / "evidence.jsonl"
     _write_jsonl(evidence_path, rows)
+    _write_component_context_timing(component_dir, "text_models", specs)
     return {
-        "artifacts": [str(evidence_path)],
+        "artifacts": [str(evidence_path), str(component_dir / COMPONENT_TIMING_FILE)],
         "contexts": len(rows),
     }
+
+
+def _write_component_context_timing(
+    component_dir: Path,
+    component: str,
+    specs: Sequence[Mapping[str, Any]],
+) -> None:
+    """Collect every context's reporting-only timing record in canonical order.
+
+    A context without a readable record (restored from a checkpoint written
+    before timing existed) is listed with status ``unknown``.
+    """
+
+    write_component_timing(
+        component_dir / COMPONENT_TIMING_FILE,
+        [
+            read_timing_record(component_dir / str(spec["scope_id"]) / CONTEXT_TIMING_FILE)
+            or unknown_timing_record(component=component, context=spec)
+            for spec in specs
+        ],
+    )
 
 
 def _run_text_model_context_lane(
@@ -969,9 +1013,12 @@ def _run_one_text_model_context(
         },
         base_seed=int(getattr(applied_config, "seed", 0) or 0),
     )
+    timing_path = context_dir / CONTEXT_TIMING_FILE
     with checkpoint_store.context_lock():
+        timer = SectionTimer(checkpoint_store=checkpoint_store)
+
         def compute_handoff_rows() -> list[dict[str, Any]]:
-            return [
+            rows = [
                 run_multi_model_forest_handoff_context(
                     dataset=dataset,
                     config=applied_config,
@@ -980,8 +1027,16 @@ def _run_one_text_model_context(
                     device=device,
                     num_workers=max(1, int(cpu_workers)),
                     checkpoint_store=checkpoint_store,
+                    timer=timer,
                 )
             ]
+            # Reporting only: written before the context checkpoint publishes,
+            # so a context later restored from that checkpoint keeps it.
+            write_timing_record(
+                timing_path,
+                timer.record(component="text_models", context=spec),
+            )
+            return rows
 
         def validate_handoff_rows(value: Any) -> None:
             if not isinstance(value, list) or len(value) != 1:
@@ -990,7 +1045,7 @@ def _run_one_text_model_context(
                     f"text model context {spec['scope_id']} returned {count} rows"
                 )
 
-        rows = checkpoint_store.run(
+        handoff_result = checkpoint_store.run(
             "assembly/handoff_context",
             compute_handoff_rows,
             parameters={
@@ -998,10 +1053,19 @@ def _run_one_text_model_context(
                 "fold_key": int(spec["fold_key"]),
                 "outer_fold": int(spec["outer_fold"]),
                 "inner_fold": spec.get("inner_fold"),
+                # The context also writes worker_artifacts/**/predictions.parquet;
+                # version 2 scores the handed-off embedding directions.
+                "prediction_artifact_version": 2,
             },
             rows=context_rows,
             validator=validate_handoff_rows,
-        ).value
+        )
+        rows = handoff_result.value
+        if handoff_result.reused and read_timing_record(timing_path) is None:
+            write_timing_record(
+                timing_path,
+                unknown_timing_record(component="text_models", context=spec),
+            )
         nonfinite_paths: list[str] = []
         row = _normalize_evidence_json(
             dict(rows[0]),
@@ -1024,7 +1088,12 @@ def _run_one_text_model_context(
             {
                 "status": "complete",
                 "completed_at": _now(),
-                "artifacts": ["evidence.json", "worker_artifacts/", "checkpoints/v1/"],
+                "artifacts": [
+                    "evidence.json",
+                    "worker_artifacts/",
+                    "checkpoints/v1/",
+                    CONTEXT_TIMING_FILE,
+                ],
                 "checkpoint_schema": "stage1_context_checkpoint_v1",
             },
         )
@@ -1129,15 +1198,28 @@ def _neural_queries_component(
 ) -> Mapping[str, Any]:
     from joblib import Parallel, delayed
 
+    from .neural_query_evidence_contract import NEURAL_QUERY_CONTEXT_SCHEMA_VERSION
+
     completed: list[dict[str, Any]] = []
     pending: list[dict[str, Any]] = []
-    for spec in _stage1_context_specs(context):
+    specs = _stage1_context_specs(context)
+    for spec in specs:
         fold_dir = component_dir / str(spec["scope_id"])
         evidence_path = fold_dir / "evidence.json"
-        if (fold_dir / "complete.json").is_file():
+        complete_path = fold_dir / "complete.json"
+        if complete_path.is_file() and (
+            _read_mapping(complete_path).get("schema_version")
+            == NEURAL_QUERY_CONTEXT_SCHEMA_VERSION
+        ):
             LOGGER.info("skip neural_queries context=%s", spec["scope_id"])
             completed.append(json.loads(evidence_path.read_text(encoding="utf-8")))
         else:
+            if complete_path.is_file():
+                LOGGER.info(
+                    "refit neural_queries context=%s: its artifacts predate %s",
+                    spec["scope_id"],
+                    NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
+                )
             pending.append(spec)
 
     lanes = _context_execution_lanes(
@@ -1184,7 +1266,11 @@ def _neural_queries_component(
         )
     )
     _write_jsonl(aggregate_path, completed)
-    return {"artifacts": [str(aggregate_path)], "contexts": len(completed)}
+    _write_component_context_timing(component_dir, "neural_queries", specs)
+    return {
+        "artifacts": [str(aggregate_path), str(component_dir / COMPONENT_TIMING_FILE)],
+        "contexts": len(completed),
+    }
 
 
 def _run_neural_query_context_lane(
@@ -1245,7 +1331,13 @@ def _run_one_neural_query_context(
     from .neural_cohort_witness import soft_retrieval_activations
     from .neural_query_agentic_forest import build_query_evidence
     from .neural_query_discovery_runtime import fit_context_query_discovery
+    from .neural_query_evidence_contract import (
+        NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
+        NEURAL_QUERY_RANKING_RULE,
+        NEURAL_QUERY_RANKING_VERSION,
+    )
 
+    timer = SectionTimer()
     outer_fold = int(spec["outer_fold"])
     inner_fold = spec.get("inner_fold")
     fit_rows = tuple(int(value) for value in spec["train_idx"])
@@ -1267,6 +1359,11 @@ def _run_one_neural_query_context(
     all_chunk_texts: list[Sequence[str]] = [()] * len(dataset)
     for row_id, chunk_texts in zip(fit_rows, fit_chunk_texts):
         all_chunk_texts[row_id] = chunk_texts
+    timer.lap(
+        "embedding_cache_read",
+        attribution=SHARED_ATTRIBUTION,
+        consumers=(NEURAL_QUERY_MOMENTS,),
+    )
 
     mm_config = applied_config.architecture.multi_model_forest
     discovery = fit_context_query_discovery(
@@ -1284,8 +1381,11 @@ def _run_one_neural_query_context(
         seed=config.seed + 10_000 * int(spec["fold_key"]),
         cpu_workers=cpu_workers,
     )
+    # Includes this architecture's private nuisance stacks and inner folds.
+    timer.lap("neural_query_discovery", attribution=NEURAL_QUERY_MOMENTS)
 
     evidence_rows: list[dict[str, Any]] = []
+    query_ranking: dict[str, Any] = {}
     arrays: dict[str, np.ndarray] = {
         "fit_row_ids": np.asarray(fit_rows, dtype=np.int64)
     }
@@ -1323,6 +1423,9 @@ def _run_one_neural_query_context(
             fit_score_frame[column] = train_activations[:, query_index]
             heldout_score_frame[column] = heldout_activations[:, query_index]
         query_records[bank] = copy.deepcopy(bank_result["records"])
+        query_ranking[bank] = copy.deepcopy(
+            (bank_result.get("consensus") or {}).get("ranking") or {}
+        )
         evidence_rows.extend(
             build_query_evidence(
                 bank=bank,
@@ -1347,26 +1450,48 @@ def _run_one_neural_query_context(
     scores["scope"] = str(spec["scope"])
     scores["architecture"] = NEURAL_QUERY_MOMENTS
     scores.to_parquet(fold_dir / "scores.parquet", index=False)
-    _write_json(fold_dir / "query_records.json", query_records)
+    ranking = {
+        "version": NEURAL_QUERY_RANKING_VERSION,
+        "rule": NEURAL_QUERY_RANKING_RULE,
+        "validation_rows": "inner_partitions_of_the_context_fit_rows",
+        "banks": query_ranking,
+    }
+    _write_json(
+        fold_dir / "query_records.json",
+        {
+            "schema_version": NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
+            "ranking": ranking,
+            "banks": query_records,
+        },
+    )
     evidence = {
+        "schema_version": NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
         "outer_fold": outer_fold,
         "inner_fold": inner_fold,
         "scope": str(spec["scope"]),
         "fit_row_ids": list(fit_rows),
         "heldout_row_ids": list(heldout_rows),
+        "query_ranking": ranking,
         "evidence": evidence_rows,
     }
     _write_json(fold_dir / "evidence.json", evidence)
+    timer.lap("neural_query_evidence", attribution=NEURAL_QUERY_MOMENTS)
+    write_timing_record(
+        fold_dir / CONTEXT_TIMING_FILE,
+        timer.record(component="neural_queries", context=spec),
+    )
     _write_json(
         fold_dir / "complete.json",
         {
             "status": "complete",
+            "schema_version": NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
             "completed_at": _now(),
             "artifacts": [
                 "evidence.json",
                 "query_records.json",
                 "queries.npz",
                 "scores.parquet",
+                CONTEXT_TIMING_FILE,
             ],
         },
     )

@@ -17,7 +17,12 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from .neural_cohort_witness import pad_chunk_embeddings
-from .neural_query_evidence_contract import query_retrieval_policy, query_term_normalization
+from .neural_query_evidence_contract import (
+    NEURAL_QUERY_RANKING_RULE,
+    NEURAL_QUERY_RANKING_VERSION,
+    query_retrieval_policy,
+    query_term_normalization,
+)
 
 
 @dataclass(frozen=True)
@@ -439,6 +444,36 @@ def _contrastive_ngrams(
     return ranked
 
 
+def _query_ranking_payload(record: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return a query's consensus rank, both ranking scores, and held-out p-values."""
+
+    members = [
+        member for member in record.get("members") or [] if isinstance(member, Mapping)
+    ]
+    return {
+        "rank": record.get("rank"),
+        "ranking": {
+            "version": NEURAL_QUERY_RANKING_VERSION,
+            "rule": NEURAL_QUERY_RANKING_RULE,
+            "score_source": record.get("ranking_score_source"),
+        },
+        "median_abs_heldout_z": record.get("median_abs_heldout_z"),
+        "median_abs_train_score": record.get("median_abs_train_score"),
+        "median_heldout_p_value": record.get("median_heldout_p_value"),
+        "heldout_member_count": record.get("heldout_member_count"),
+        "member_heldout_statistics": [
+            {
+                "candidate_id": member.get("candidate_id"),
+                "subfold": member.get("subfold"),
+                "heldout_z": member.get("validation_audit_standardized_score"),
+                "heldout_p_value": member.get("validation_audit_two_sided_p_value"),
+                "train_score": member.get("train_standardized_score"),
+            }
+            for member in members
+        ],
+    }
+
+
 def build_query_evidence(
     *,
     bank: str,
@@ -559,6 +594,7 @@ def build_query_evidence(
                 "member_count": int(record.get("member_count", 0)),
                 "member_subfolds": list(record.get("member_subfolds") or []),
                 "fit_standardized_score": record.get("fit_standardized_score"),
+                **_query_ranking_payload(record),
                 "top_chunks": foreground_items,
                 "term_normalization": query_term_normalization(config),
                 "top_contrastive_ngrams": _contrastive_ngrams(
