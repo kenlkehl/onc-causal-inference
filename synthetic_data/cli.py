@@ -643,7 +643,7 @@ def _add_dgp_factor_arguments(parser: argparse.ArgumentParser) -> None:
     )
     roles.add_argument(
         "--modifier-strength", type=float, default=None,
-        help="Multiplier for the treatment x effect-modifier coefficients (default: 1.0)",
+        help="Multiplier for the treatment x effect-modifier coefficients (default: 2.0)",
     )
 
     factors = parser.add_argument_group("generation-time factors")

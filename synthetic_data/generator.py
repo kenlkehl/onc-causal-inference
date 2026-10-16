@@ -860,7 +860,7 @@ def _generate_equations(
     treatment_coefficient: float,
     main_coef_scale: float = 0.3,
     interaction_coef_scale: float = 0.1,
-    modifier_strength: float = 1.0,
+    modifier_strength: float = 2.0,
     modifier_main_effects: bool = False,
     nonlinearity: str = "none",
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:

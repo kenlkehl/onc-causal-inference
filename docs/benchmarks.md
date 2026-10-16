@@ -73,7 +73,7 @@ features, and features without a role still appear in the text.
 
 Every re-equation DGP pins all of its settings (role counts with random seeded
 assignment, logit standard deviations of 2.0, a treatment effect of 0.2,
-modifier strength 1.0, target rates of 0.5, outcome noise 1.0), so a change in
+modifier strength 2.0, target rates of 0.5, outcome noise 1.0), so a change in
 the generator's defaults cannot change a scenario. The keys follow the
 generator's scenario JSON, described in [Synthetic data](synthetic_data.md).
 `--scenarios` accepts scenario ids or families: `S4` selects S4a and S4b.

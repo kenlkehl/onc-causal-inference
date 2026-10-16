@@ -540,14 +540,14 @@ def test_cli_factor_flags_set_the_config(monkeypatch, tmp_path):
         monkeypatch, tmp_path,
         "--num-instruments", "2", "--num-prognostic", "1", "--modifier-main-effects",
         "--nonlinearity", "threshold", "--treatment-logit-std", "1.5", "--outcome-logit-std", "2.5",
-        "--modifier-strength", "2", "--covariate-correlation", "0.3", "--documentation-rate", "0.7",
+        "--modifier-strength", "3", "--covariate-correlation", "0.3", "--documentation-rate", "0.7",
         "--documentation-mechanism", "mnar", "--documentation-mnar-slope", "0.5",
         "--documented-variables", "age, ecog", "--post-treatment-rate", "0.8",
         "--post-treatment-events", "toxicity", "--num-proxy-variables", "1", "--proxy-correlation", "0.85",
     )
     assert (config.num_instruments, config.num_prognostic, config.modifier_main_effects) == (2, 1, True)
     assert (config.nonlinearity, config.treatment_logit_std, config.outcome_logit_std) == ("threshold", 1.5, 2.5)
-    assert (config.modifier_strength, config.covariate_correlation, config.documentation_rate) == (2.0, 0.3, 0.7)
+    assert (config.modifier_strength, config.covariate_correlation, config.documentation_rate) == (3.0, 0.3, 0.7)
     assert (config.documentation_mechanism, config.documentation_mnar_slope) == ("mnar", 0.5)
     assert config.documented_variables_subset == ["age", "ecog"]
     assert config.post_treatment_notes == {"rate": 0.8, "events": ["toxicity"]}

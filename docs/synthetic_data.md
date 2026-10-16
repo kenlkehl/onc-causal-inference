@@ -188,7 +188,7 @@ python -m synthetic_data.cli \
 | `--modifier-main-effects` | off | Give effect-modifier-only variables an outcome main term |
 | `--nonlinearity` | `none` | `none`, `threshold`, or `quadratic` shape of continuous outcome main terms and treatment interactions |
 | `--treatment-logit-std S`, `--outcome-logit-std S` | `--target-logit-std` | Standard deviation of each linear predictor separately |
-| `--modifier-strength X` | 1.0 | Multiplier for the treatment × effect-modifier coefficients |
+| `--modifier-strength X` | 2.0 | Multiplier for the treatment × effect-modifier coefficients |
 
 **Generation-time factors** (all off by default; see
 [Generation-time factors](#generation-time-factors))
@@ -444,7 +444,7 @@ default, and the outcome type (binary or continuous) comes from the source.
   "treatment_logit_std": 1.5,
   "outcome_logit_std": 2.0,
   "treatment_effect": 0.2,
-  "modifier_strength": 1.0,
+  "modifier_strength": 2.0,
   "unmeasured_confounders": 0,
   "unmeasured_strength": 1.0,
   "target_treatment_rate": 0.5,
@@ -462,7 +462,7 @@ default, and the outcome type (binary or continuous) comes from the source.
 | `nonlinearity` | `none` | `none`, `threshold`, or `quadratic` (see [How a cohort is generated](#how-a-cohort-is-generated)) |
 | `treatment_logit_std`, `outcome_logit_std` | 2.0 | Standard deviations of the linear predictors |
 | `treatment_effect` | 0.2 | Treatment main-effect coefficient |
-| `modifier_strength` | 1.0 | Multiplier for the treatment interaction coefficients |
+| `modifier_strength` | 2.0 | Multiplier for the treatment interaction coefficients |
 | `unmeasured_confounders` | 0 | Number of unmeasured confounders U |
 | `unmeasured_strength` | 1.0 | Size of U's coefficients relative to the measured confounders |
 | `target_treatment_rate`, `target_control_outcome_rate` | 0.5, 0.5 | Calibration targets |

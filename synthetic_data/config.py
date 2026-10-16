@@ -114,7 +114,7 @@ class SyntheticDataConfig:
     treatment_logit_std: Optional[float] = None
     outcome_logit_std: Optional[float] = None
     # Multiplier for the treatment x effect-modifier interaction coefficients.
-    modifier_strength: float = 1.0
+    modifier_strength: float = 2.0
 
     # Generation-time factors (see ``generation_factors``); all off by default.
     # Exchangeable correlation of the latent normals of a Gaussian copula.
