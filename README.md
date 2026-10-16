@@ -429,6 +429,25 @@ python scripts/ablate_stage1_architectures.py compare --run-dir /path/to/output 
 
 See [Stage 1 architectures](docs/stage1_architectures.md#attribution-and-ablation).
 
+To benchmark OCI across synthetic scenarios (instruments and prognostic-only
+variables, dual-role variables, nonlinear effects, an unmeasured confounder,
+MNAR documentation, and post-treatment notes), `scripts/benchmark.py` builds one
+cohort per scenario, sample size, and seed from `benchmarks/scenarios.json`,
+writes one workflow configuration per cohort (it launches no run), and compares
+the finished runs with the oracle columns: ATE and ATO coverage, CATE RMSE
+against a constant-ATE baseline, GATES coverage, an oracle-covariate ceiling
+refitted through Stage 2's own final estimation, role-wise selection, and the
+sensitivity and leak checks. Tune only on development seeds; confirmatory seeds
+need `--confirmatory` and are logged in `benchmarks/confirmatory_ledger.jsonl`:
+
+```bash
+python scripts/benchmark.py materialize --scenarios S0,S1 --source /path/to/source_cohort --out /path/to/bench
+python scripts/benchmark.py configs --base /path/to/config.json --out /path/to/bench
+python scripts/benchmark.py aggregate --out /path/to/bench
+```
+
+See [Benchmarks](docs/benchmarks.md).
+
 ## Documentation
 
 | Guide | Scope |
@@ -441,6 +460,7 @@ See [Stage 1 architectures](docs/stage1_architectures.md#attribution-and-ablatio
 | [Serving](docs/serving.md) | LLM endpoints, managed vLLM pools, and hardware presets |
 | [Optional extensions](docs/optional_extensions.md) | Optional Stage 2 steps and the standalone `oci run` workflows |
 | [Synthetic data](docs/synthetic_data.md) | The synthetic cohort generator, bundled cohorts, and oracle columns |
+| [Benchmarks](docs/benchmarks.md) | The scenario registry, seeds and the confirmatory rule, the benchmark commands, metrics, and caveats |
 | [R-learner weighting](docs/design_notes/r_learner_weighting.md) | Design note on weighted and unweighted effect objectives |
 
 ## Citation

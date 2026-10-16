@@ -1,0 +1,6 @@
+{
+  "schema_version": "oci_benchmark_seeds_v1",
+  "rule": "Tune only on development seeds. Confirmatory seeds require --confirmatory; each confirmatory configs call appends an entry to benchmarks/confirmatory_ledger.jsonl and is refused a second time for the same git commit and scenario unless --force is given.",
+  "development": [101, 102, 103],
+  "confirmatory": [7001, 7002, 7003]
+}

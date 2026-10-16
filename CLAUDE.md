@@ -20,7 +20,7 @@ with a two-stage, science-first workflow:
 User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 `how_it_works.md`, `stage1_architectures.md`, `stage2_selection.md`,
 `configuration.md`, `serving.md`, `optional_extensions.md`,
-`synthetic_data.md`, and `design_notes/`.
+`synthetic_data.md`, `benchmarks.md`, and `design_notes/`.
 
 ## Entry points
 
@@ -31,6 +31,7 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 | `oci-evaluate-stage1` | `oci/evaluation/stage1.py` | Oracle-safe evaluation of frozen Stage 1 architectures; writes `OUT/evaluation/stage1/` |
 | `oci-evaluate-attribution` | `oci/evaluation/attribution.py` | Credit Stage 2 variables to the Stage 1 architectures that supported them (any-source and sole-source); `--oracle` adds recovery by held-out R² |
 | `python scripts/ablate_stage1_architectures.py` | `oci/evaluation/ablation.py` | `prepare`: leave-one-architecture-out handoffs and `run_stage2_from_artifacts.py` configs (never launches LLM jobs); `compare`: finished ablations versus the full run |
+| `python scripts/benchmark.py` | `oci/evaluation/benchmark.py`, `oci/evaluation/benchmark_ceiling.py`, `benchmarks/{scenarios,seeds}.json` | `materialize`: one cohort per scenario, size, and seed (re-equation through `synthetic_data.reequation`, or the generator commands for S5/S6); `configs`: one workflow configuration per cell (never launches runs; confirmatory seeds need `--confirmatory` and are logged in `benchmarks/confirmatory_ledger.jsonl`); `aggregate`: finished runs versus oracle truth, with an oracle-covariate ceiling through Stage 2's `estimate_outer_fold` |
 | `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only; for a dated-notes run, `dataset` is its `input/analysis_cohort.parquet`) |
 | `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
 | `python -m synthetic_data.cli` | `synthetic_data/` | Synthetic cohort generator |
@@ -50,6 +51,9 @@ oci/
 ├── evaluation/stage1_timing_report.py  # Per-architecture Stage 1 wall time in the evaluation output
 ├── evaluation/attribution.py         # oci-evaluate-attribution (Stage 2 lineage, oracle recovery by R²)
 ├── evaluation/ablation.py            # scripts/ablate_stage1_architectures.py (prepare, compare)
+├── evaluation/benchmark.py           # scripts/benchmark.py (registry, seed guard and ledger,
+│                                     #   materialize, configs, aggregate metrics)
+├── evaluation/benchmark_ceiling.py   # Oracle-covariate ceiling via estimate_outer_fold
 ├── extraction/                       # `oci run` extraction: explicit_features, complete_paged,
 │                                     #   contract_lexical_context, llm_routing, cache
 ├── models/
@@ -241,8 +245,12 @@ Configuration rules:
   them. Only the configured note columns are read from the notes table, and the
   per-patient audit is never read by any modeling or LLM step.
 - Hash frozen Stage 1 artifacts before loading oracle data for evaluation; the
-  attribution and ablation reports likewise hash every Stage 2 artifact they
-  read first, and write only under `OUT/evaluation/` or outside the run.
+  attribution and ablation reports and the benchmark aggregate likewise hash
+  every Stage 2 artifact they read first, and write only under
+  `OUT/evaluation/` or outside the run.
+- Tune benchmark settings only on the development seeds of
+  `benchmarks/seeds.json`; confirmatory seeds are used once per commit and
+  scenario (`docs/benchmarks.md`).
 - Keep outer held-out rows unavailable to inner-fold discovery, review,
   selection, and definition search.
 - LLM prompts never contain dataset paths or names, synthetic-generation
@@ -308,6 +316,11 @@ oci-evaluate-stage1 --run-dir OUT --architectures all
 oci-evaluate-attribution --run-dir OUT --oracle
 python scripts/ablate_stage1_architectures.py prepare --run-dir OUT --out ABL --stage2-config ENDPOINTS.json
 python scripts/ablate_stage1_architectures.py compare --run-dir OUT --ablation-dir ABL --oracle
+
+# Benchmark scenarios: cohorts per cell, run configurations (printed, not launched), aggregate
+python scripts/benchmark.py materialize --scenarios S0,S1 --source SOURCE_DIR --out BENCH
+python scripts/benchmark.py configs --base CONFIG.json --out BENCH
+python scripts/benchmark.py aggregate --out BENCH
 
 # Standalone explicit-feature workflow
 oci run --config example_configs/agentic_explicit_feature_forest_config.json
