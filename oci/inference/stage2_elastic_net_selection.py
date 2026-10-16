@@ -33,6 +33,7 @@ from .stage2_statistical_selection import (
 )
 from .stage2_multi_model_config import Stage2MultiModelConfig, multi_model_config_from_mapping
 from .stage2_extraction_failures import failure_flags, has_failure_indicator
+from .stage2_documented_unknown import documented_unknown_mask, without_documented_unknown
 
 
 TEMPORAL_SCOPE = "pre_index_treatment"
@@ -250,6 +251,33 @@ def _append_failure_column(
     )
 
 
+def _append_documented_unknown_column(
+    train_columns: list[np.ndarray],
+    valid_columns: list[np.ndarray],
+    column_feature_ids: list[str],
+    column_names: list[str],
+    *,
+    feature_id: str,
+    name: str,
+    train_unknown: pd.Series,
+    valid_unknown: pd.Series,
+) -> None:
+    """Grouped documented_unknown indicator (dropped when constant in training)."""
+
+    if not bool(train_unknown.any()):
+        return
+    _append_variable_column(
+        train_columns,
+        valid_columns,
+        column_feature_ids,
+        column_names,
+        feature_id=feature_id,
+        name=f"{name}:documented_unknown",
+        train_values=train_unknown.to_numpy(dtype=float),
+        valid_values=valid_unknown.to_numpy(dtype=float),
+    )
+
+
 def _ordered_values(
     train_series: pd.Series,
     valid_series: pd.Series,
@@ -306,6 +334,18 @@ def _encode_design(
         # they get their own indicator in the parent feature's column group.
         train_failed = failure_flags(train, definition).reset_index(drop=True)
         valid_failed = failure_flags(valid, definition).reset_index(drop=True)
+        # documented_unknown gets its own grouped indicator and is neither a
+        # level nor missing. Without training occurrences it is encoded as missing.
+        train_unknown = documented_unknown_mask(train_series)
+        valid_unknown = (
+            documented_unknown_mask(valid_series)
+            if bool(train_unknown.any())
+            else pd.Series(False, index=valid_series.index)
+        )
+        train_series = without_documented_unknown(train_series)
+        valid_series = without_documented_unknown(valid_series)
+        train_excluded = train_failed | train_unknown
+        valid_excluded = valid_failed | valid_unknown
         strategy = _feature_strategy(definition)
         if strategy in {
             "continuous",
@@ -368,17 +408,22 @@ def _encode_design(
                 name=f"{name}:missing",
                 train_values=(
                     (train_numeric.isna() if strategy == "ordinal" else train_series.isna())
-                    & ~train_failed
+                    & ~train_excluded
                 ).to_numpy(),
                 valid_values=(
                     (valid_numeric.isna() if strategy == "ordinal" else valid_series.isna())
-                    & ~valid_failed
+                    & ~valid_excluded
                 ).to_numpy(),
             )
             _append_failure_column(
                 train_columns, valid_columns, column_feature_ids, column_names,
                 definition=definition, feature_id=feature_id, name=name,
                 train_failed=train_failed, valid_failed=valid_failed,
+            )
+            _append_documented_unknown_column(
+                train_columns, valid_columns, column_feature_ids, column_names,
+                feature_id=feature_id, name=name,
+                train_unknown=train_unknown, valid_unknown=valid_unknown,
             )
             continue
 
@@ -423,13 +468,18 @@ def _encode_design(
             column_names,
             feature_id=feature_id,
             name=f"{name}:missing",
-            train_values=(train_missing & ~train_failed).to_numpy(),
-            valid_values=(valid_missing & ~valid_failed).to_numpy(),
+            train_values=(train_missing & ~train_excluded).to_numpy(),
+            valid_values=(valid_missing & ~valid_excluded).to_numpy(),
         )
         _append_failure_column(
             train_columns, valid_columns, column_feature_ids, column_names,
             definition=definition, feature_id=feature_id, name=name,
             train_failed=train_failed, valid_failed=valid_failed,
+        )
+        _append_documented_unknown_column(
+            train_columns, valid_columns, column_feature_ids, column_names,
+            feature_id=feature_id, name=name,
+            train_unknown=train_unknown, valid_unknown=valid_unknown,
         )
     return _EncodedDesign(
         train=(

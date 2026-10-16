@@ -87,6 +87,7 @@ oci/
     ├── stage2_sensitivity.py         # Unmeasured-confounding sensitivity: E-values, OVB bounds,
     │                                 #   robustness values, per-fold benchmark refits (reporting only)
     ├── stage2_extraction_failures.py # Extraction-failure masks and reports
+    ├── stage2_documented_unknown.py  # Reserved documented_unknown state: mapping rules, reports
     ├── nuisance_diagnostics.py       # Held-out nuisance diagnostics, overlap policy
     ├── stage2_estimand_ontology*.py, stage2_modifier_concepts.py, stage2_multi_model_adjudication.py,
     │   stage2_matched_batch.py, stage2_sequential_consolidation.py   # Optional extensions
@@ -137,7 +138,10 @@ Keep the omitted-selector path's behavior unchanged.
 `multi_model` is the only selection mode and the default. Per outer fold:
 evidence cards → interpretation → candidate merging → extraction definitions →
 outer-training extraction with aggregate review and failure-driven definition
-refinement → informativeness and extraction-failure filter
+refinement (each cell is a value, not documented (null), the reserved
+`documented_unknown`, or an extraction failure; every encoder keeps the three
+non-value states as separate grouped indicators) → informativeness and
+extraction-failure filter
 (`min_informative_patients`, `max_extraction_failure_fraction`) → optional
 estimand search and selection consolidation → resampled evidence families and
 predictive nuisance selection (under `orthogonal_tests` only the nuisance

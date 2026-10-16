@@ -54,7 +54,10 @@ def test_split_is_stable_atomic_and_does_not_invent_patient_values():
     assert all(c["supporting_packet_ids"] == ["card_1"] for c in children)
     assert all(c["ontology_parent_feature_id"] == original["feature_id"] for c in children)
     assert all(c["conflict_resolution"]["strategy"] == "latest" for c in children)
-    assert all("not assessed or not mentioned" in c["missing_value_rule"] for c in children)
+    assert all("null when this component is not mentioned" in c["missing_value_rule"]
+               for c in children)
+    assert all("documented_unknown when the record states that it was not assessed"
+               in c["missing_value_rule"] for c in children)
     assert all("explicit negative finding" in c["missing_value_rule"] for c in children)
     assert "brain_sites" not in [c["name"] for c in children]
     values = {c["clinical_label"]: "Present" for c in children}

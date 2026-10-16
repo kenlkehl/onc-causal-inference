@@ -1,12 +1,15 @@
 """Standard Stage 2 system prompts, initially reviewed with Qwen on 2026-09-23.
 
-The exact-duplicate consolidation prompt was tightened on 2026-09-26.
+The exact-duplicate consolidation prompt was tightened on 2026-09-26. The
+definition, extraction, category-mapping, refinement and supervision prompts
+describe the reserved documented_unknown answer
+(:mod:`oci.inference.stage2_documented_unknown`).
 
 Inputs, identity assignment, and validation live in the Python callers.
 The review artifacts preserve the exact example conversations and model replies.
 """
 
-PROMPT_VERSION = "stage2_clinical_prompts_v1_20260923"
+PROMPT_VERSION = "stage2_clinical_prompts_v2_documented_unknown_20261016"
 # Revision of this leaf only: unchanged discovery checkpoints remain reusable.
 ALIAS_MERGE_PROMPT_VERSION = "stage2_exact_duplicate_aliases_v2_20260926"
 
@@ -98,7 +101,7 @@ The variable's name and clinical excerpts illustrating how it is documented. The
 
 How to decide
 
-Define one value per patient. Choose a numerical value when the record supports a measurement, and specify its unit. State allowed labels for categorical values. Use null for missing or unresolved findings. A continuous measurement can contain an exact number or a directly reported threshold string, such as <1.0. Preserve that threshold in both the measurement rule and the missing-value rule.
+Define one value per patient. Choose a numerical value when the record supports a measurement, and specify its unit. State allowed labels for categorical values. Use null for missing or unresolved findings. Every variable also has the reserved answer documented_unknown for a record that explicitly states that the value is unknown, indeterminate, pending, not assessed, or equivocal; do not add categories such as Unknown, Indeterminate, Pending, or Not assessed for these states. State in missing_value_rule when to answer null (the record does not mention the variable) and when to answer documented_unknown. A continuous measurement can contain an exact number or a directly reported threshold string, such as <1.0. Preserve that threshold in both the measurement rule and the missing-value rule.
 
 A categorical answer must be exactly one allowed label. Its labels are possible answers to the same question, not attribute names such as size, location, dose, or frequency. Do not request a list of co-occurring labels while declaring a single categorical value. Multiple simultaneous findings are not conflicting longitudinal observations. If the supplied variable is a composite that cannot yet be measured as one scalar, mark it ambiguous and explain the required decomposition in caveats; do not invent categories or select an arbitrary finding to make it fit.
 
@@ -119,7 +122,7 @@ How to decide
 
 Follow each variable's definition. Use the wording in the patient's text to determine its value. An explicit date belongs to a finding when the sentence or record heading links them. An undated CT sentence therefore keeps an unknown date even when it follows a dated laboratory result.
 
-Use the defined category labels exactly. Write numerical measurements as JSON numbers in the required unit; a definition may also allow a reported threshold string. Use null according to the variable's missing-value rule.
+Use the defined category labels exactly. Write numerical measurements as JSON numbers in the required unit; a definition may also allow a reported threshold string. Use null according to the variable's missing-value rule, and when the record does not mention the variable. Answer documented_unknown, written exactly so, when the record explicitly states that the value is unknown, indeterminate, pending, not assessed, or equivocal and documents no usable value. documented_unknown is not a category: never replace such a statement with one of the variable's categories.
 
 What to return
 
@@ -134,9 +137,9 @@ How to decide
 
 Follow each variable's definition. Use the wording in the patient's text to determine its value. An explicit date belongs to a finding when the sentence or record heading links them. An undated CT sentence therefore keeps an unknown date even when it follows a dated laboratory result.
 
-Use the defined category labels exactly. Write numerical measurements as JSON numbers in the required unit; a definition may also allow a reported threshold string. Use null according to the variable's missing-value rule.
+Use the defined category labels exactly. Write numerical measurements as JSON numbers in the required unit; a definition may also allow a reported threshold string. Use null according to the variable's missing-value rule, and when the record does not mention the variable. Answer documented_unknown, written exactly so, when the record explicitly states that the value is unknown, indeterminate, pending, not assessed, or equivocal and documents no usable value. documented_unknown is not a category: never replace such a statement with one of the variable's categories.
 
-Keep an earlier value when the new text adds nothing that changes it under its definition. A prior null means that no usable value has been found yet. For latest/earliest, a dated observation takes precedence over an undated observation; otherwise compare dates and then text order. The new section comes later in text order. Retain the selected value's date, when known, in its decision note. For maximum/minimum, retain the selected extreme; for any_positive, retain positive evidence; for single_or_null, retain unresolved conflicts.
+Keep an earlier value when the new text adds nothing that changes it under its definition. A prior null means that no usable value has been found yet. A prior documented_unknown means that the record so far only states that the value is unknown: replace it when the new section documents a usable value, and keep a usable earlier value when the new section only states that the value is unknown. For latest/earliest, a dated observation takes precedence over an undated observation; otherwise compare dates and then text order. The new section comes later in text order. Retain the selected value's date, when known, in its decision note. For maximum/minimum, retain the selected extreme; for any_positive, retain positive evidence; for single_or_null, retain unresolved conflicts.
 
 What to return
 
@@ -149,7 +152,7 @@ Clinical variable definitions and one section of a patient's record.
 
 How to decide
 
-Report each distinct value-bearing occurrence once, in the order it appears in the supplied text. Include repeated results on different dates. Use JSON numbers for numerical measurements and strings for category labels or directly reported thresholds. Include a short supporting quotation with each occurrence. Keep its clinical meaning faithful; differences in punctuation, capitalization, or spacing are acceptable. Include a date only when its sentence or heading links it to the finding. Preserve repeated or conflicting observations so Python can count them and choose the most frequent value. A frequency tie is resolved using the latest reported date, then the last occurrence in text order.
+Report each distinct value-bearing occurrence once, in the order it appears in the supplied text. Include repeated results on different dates. Use JSON numbers for numerical measurements and strings for category labels or directly reported thresholds. Report an occurrence that explicitly states that the variable's value is unknown, indeterminate, pending, not assessed, or equivocal using the value documented_unknown; it is not a category, and Python uses it only when no occurrence documents a usable value. Include a short supporting quotation with each occurrence. Keep its clinical meaning faithful; differences in punctuation, capitalization, or spacing are acceptable. Include a date only when its sentence or heading links it to the finding. Preserve repeated or conflicting observations so Python can count them and choose the most frequent value. A frequency tie is resolved using the latest reported date, then the last occurrence in text order.
 
 If the measurement definition calls for null, omit that occurrence from the observations array. Do not create placeholder observations for missing values, unrelated findings, or mentions that lack the requested attribute. An explicitly documented negative category is a supported value and should be included. Report only occurrences present in this section; stop after the last one without cycling through the record again.
 
@@ -164,11 +167,11 @@ The variable's meaning, its allowed categories, and the phrase to interpret.
 
 How to decide
 
-Use an allowed category when the phrase has an unambiguous equivalent meaning. Return null for an unclear or incompatible phrase. Use the category's exact spelling.
+Use an allowed category when the phrase has an unambiguous equivalent meaning. Return documented_unknown when the phrase states that the value is unknown, indeterminate, pending, not assessed, or equivocal. Return null for an unclear or incompatible phrase. Use the category's exact spelling.
 
 What to return
 
-Return one JSON object with only value, containing an allowed category or null.""",
+Return one JSON object with only value, containing an allowed category, documented_unknown, or null.""",
     '09_refine_ontology': """Review the extraction instructions for one clinical variable and decide whether they need clarification.
 
 What you receive
@@ -177,7 +180,7 @@ The current definition and examples of attempted answers that failed its require
 
 How to decide
 
-Choose keep when the failed answers are ordinary synonyms for existing categories and the clinical measurement rule is clear. Revise when the examples reveal an unclear measurement rule, unsuitable type, or missing distinction in the category definitions. A clarification can explain how to interpret equivalent wording. Use null for missing or unresolved findings. An explicit negative must describe this patient's finding to support Absent. Failed outputs are evidence about how the instructions were interpreted; the patient's actual value remains unknown from those outputs alone.
+Choose keep when the failed answers are ordinary synonyms for existing categories and the clinical measurement rule is clear. Revise when the examples reveal an unclear measurement rule, unsuitable type, or missing distinction in the category definitions. A clarification can explain how to interpret equivalent wording. Use null for missing or unresolved findings. documented_unknown is a reserved answer available for every variable when the record explicitly states that the value is unknown, indeterminate, pending, not assessed, or equivocal; it is not a category, so do not add categories such as Unknown or Pending, and a definition need not list one. An explicit negative must describe this patient's finding to support Absent. Failed outputs are evidence about how the instructions were interpreted; the patient's actual value remains unknown from those outputs alone.
 
 What to return
 
@@ -218,9 +221,9 @@ The definition, a summary of current extracted values, and earlier failed answer
 
 How to decide
 
-Choose keep when the failed answers are ordinary synonyms for existing categories and the clinical measurement rule is clear. Revise when the examples reveal an unclear measurement rule, unsuitable type, or missing distinction in the category definitions. A clarification can explain how to interpret equivalent wording. Use null for missing or unresolved findings. An explicit negative must describe this patient's finding to support Absent. Failed outputs are evidence about how the instructions were interpreted; the patient's actual value remains unknown from those outputs alone.
+Choose keep when the failed answers are ordinary synonyms for existing categories and the clinical measurement rule is clear. Revise when the examples reveal an unclear measurement rule, unsuitable type, or missing distinction in the category definitions. A clarification can explain how to interpret equivalent wording. Use null for missing or unresolved findings. documented_unknown is a reserved answer available for every variable when the record explicitly states that the value is unknown, indeterminate, pending, not assessed, or equivocal; it is not a category, so do not add categories such as Unknown or Pending, and a definition need not list one. The summary counts documented_unknown answers separately from missing values. An explicit negative must describe this patient's finding to support Absent. Failed outputs are evidence about how the instructions were interpreted; the patient's actual value remains unknown from those outputs alone.
 
-Missing values, a rare finding, or a common category can occur under a sound definition. Revise when the supplied summaries reveal a specific problem in the instructions.
+Missing values, documented_unknown answers, a rare finding, or a common category can occur under a sound definition. Revise when the supplied summaries reveal a specific problem in the instructions.
 
 What to return
 
@@ -229,7 +232,7 @@ Ambiguous is a valid value type. Its presence alone is not a reason to revise a 
 For keep, return one JSON object with action equal to keep and reason (text). For revise, return action equal to revise, reason, and definition. definition contains exactly description, value_type, categories_or_unit, measurement_definition, and missing_value_rule. value_type is continuous, binary, categorical, ordinal, or ambiguous. categories_or_unit contains a unit for a dimensional continuous value, an empty array for a unitless or ambiguous value, exactly two distinct labels for binary values, or at least two for categorical/ordinal values. Preserve the same clinical measurement. For split, return action equal to split, reason, and components: an array of 2 to 20 complete definitions, each with those same five fields plus name (a distinct, readable clinical component name). Each component must request one scalar answer; replace the composite rather than retaining it alongside its components.""",
     'ontology_scalar_contract': """Check whether proposed clinical extraction definitions can measure the original variable faithfully using one scalar per component.
 
-Reject categories that name attributes (such as size, location, dose, or frequency) instead of possible patient answers. Reject a single categorical field that asks for a list of simultaneous categories or chooses an arbitrary site just to fit one label. Splitting co-occurring findings into separate scalar indicators is valid; inventing components unsupported by the original definition is not. Each component must have a clear unit or actual answer labels and an explicit missing-value rule. Absence of a mention does not establish a negative finding. Preserve the measurement's clinical meaning and temporal rule. Ambiguous is a valid type with an empty category list; never require replacing it just because it is ambiguous.
+Reject categories that name attributes (such as size, location, dose, or frequency) instead of possible patient answers. Reject a single categorical field that asks for a list of simultaneous categories or chooses an arbitrary site just to fit one label. Splitting co-occurring findings into separate scalar indicators is valid; inventing components unsupported by the original definition is not. Each component must have a clear unit or actual answer labels and an explicit missing-value rule. documented_unknown is a reserved answer available to every component when the record states that the value is unknown; a component need not list an Unknown category. Absence of a mention does not establish a negative finding. Preserve the measurement's clinical meaning and temporal rule. Ambiguous is a valid type with an empty category list; never require replacing it just because it is ambiguous.
 
 Return exactly one JSON object with valid (a boolean) and reason (text describing any concrete contradiction).""",
     '13_post_extraction_aliases': """Decide whether the supplied fields record the same clinical measurement and can be combined while retaining every observed value.

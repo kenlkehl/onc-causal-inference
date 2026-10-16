@@ -95,6 +95,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
+from .stage2_documented_unknown import DOCUMENTED_UNKNOWN, is_documented_unknown
 from .stage2_sensitivity import (
     load_fold_benchmarks,
     summarize_section as summarize_sensitivity_section,
@@ -1099,7 +1100,9 @@ def encode_measurements(
     levels; the rest share an ``other`` level). Missing values give a
     ``not_documented`` indicator, except cells flagged in a
     ``<name>__oci_extraction_failed`` companion column, which give a separate
-    ``extraction_failed`` indicator. Oracle-named features are skipped.
+    ``extraction_failed`` indicator. The reserved ``documented_unknown`` value
+    gives its own ``documented_unknown`` indicator and is never a level or
+    counted against ``max_levels``. Oracle-named features are skipped.
     """
 
     columns: dict[str, np.ndarray] = {}
@@ -1137,7 +1140,10 @@ def encode_measurements(
             else pd.Series(False, index=frame.index)
         )
         missing = (text.isna() | text.eq("")) & ~failed
-        observed = ~missing & ~failed
+        unknown = pd.Series(
+            [is_documented_unknown(value) for value in text.tolist()], index=text.index, dtype=bool,
+        )
+        observed = ~missing & ~failed & ~unknown
         if _is_continuous(feature):
             numeric = pd.to_numeric(text.where(observed), errors="coerce")
             if numeric.notna().any():
@@ -1165,6 +1171,14 @@ def encode_measurements(
                     "indicator",
                     OTHER_LEVEL,
                 )
+        if unknown.any():
+            add(
+                f"{name}={DOCUMENTED_UNKNOWN}",
+                unknown.to_numpy(dtype=float),
+                feature,
+                "indicator",
+                DOCUMENTED_UNKNOWN,
+            )
         if missing.any():
             add(
                 f"{name}={NOT_DOCUMENTED_LEVEL}",
@@ -1755,13 +1769,16 @@ def _definition_text(feature: Mapping[str, Any]) -> str:
 
 
 def _column_kind(column: str) -> tuple[str, str | None]:
-    """Kind of a grouped-design column (value, level, fallback, missing, failure) and its level."""
+    """Kind of a grouped-design column (value, level, fallback, missing, documented
+    unknown, failure) and its level."""
 
     suffix = column.rsplit(":", 1)[-1]
     if suffix == "value":
         return "value", None
     if suffix == "missing":
         return "missing_indicator", None
+    if suffix == "documented_unknown":
+        return "documented_unknown_indicator", None
     if suffix == "extraction_failed":
         return "extraction_failure_indicator", None
     for prefix, kind in (("level=", "level"), ("fallback=", "fallback_level")):

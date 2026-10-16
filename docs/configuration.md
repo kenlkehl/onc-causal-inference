@@ -218,7 +218,7 @@ defaults the input budget per extraction request is
 
 | Key | Default | Meaning |
 |---|---|---|
-| `min_informative_patients` | 20 | A candidate is kept only if at least this many outer-training patients have an observed value; categorical candidates also need two levels (counting "not documented") with at least this many patients each, and continuous candidates need non-identical values |
+| `min_informative_patients` | 20 | A candidate is kept only if at least this many outer-training patients have an observed value ([documented unknown](glossary.md#documented-unknown) counts as observed); categorical candidates also need two levels (counting "not documented" and documented unknown) with at least this many patients each, and continuous candidates need non-identical observed states |
 | `max_extraction_failure_fraction` | 0.10 | Candidates whose training [extraction failures](glossary.md#extraction-failure) exceed this fraction of patients are dropped |
 | `min_propensity`, `max_propensity` | null | Inclusive [propensity eligibility bounds](glossary.md#propensity-eligibility-and-clipping) for effect estimation; either may be set alone. Set them here, not under `statistical_selection` |
 | `propensity_clip` | 0.02 | Clipping of AIPW denominators to `[c, 1 − c]`; excludes no one. Under the `orthogonal_tests` modifier rule it also clips the AIPW projection test, so it is part of the selection identity |
@@ -751,6 +751,7 @@ written and the handoff streams the component evidence directly.
 | `stage2/outer_00k/selection/modifier_tests.json` | Every candidate's modifier tests and the selection (`orthogonal_tests`) |
 | `stage2/outer_00k/selection/modifier_count/selection.json` | Modifier selection report: selected modifiers and estimator policy, or the `balanced_evidence` budget and estimator comparison |
 | `stage2/outer_00k/extraction/failure_report_fit.json`, `failure_report_heldout.json` | Extraction failure rates by variable and treatment arm |
+| `stage2/outer_00k/extraction/documented_unknown_report_fit.json`, `documented_unknown_report_heldout.json` | [Documented-unknown](glossary.md#documented-unknown) counts per variable: `documented_unknown_rows`, `documented_unknown_fraction`, and `by_treatment_arm` (rows, count, fraction) with `arm_difference_treated_minus_control`; the held-out file also lists `encoded_as_missing_without_training_occurrences`. The same reports appear under `documented_unknown` in `estimation/extraction_failure_diagnostics.json`, and `candidate_missingness_filter.json` records `documented_unknown_rows` per candidate |
 | `stage2/outer_00k/estimation/diagnostics.json`, `propensity_overlap.json`, `nuisance_fit_audits/` | Fold-level ATE, calibration, overlap, and the fitted penalty and iteration count of each nuisance model |
 | `stage2/outer_00k/estimation/sensitivity_benchmarks/benchmarks.json` | Reporting only: the long elastic-net reference, the benchmarked variables with their importance, selected roles, and gains (`cf_y`, `cf_d`, `rho`, short and long `sigma2`, `nu2`, and ATE), the importance and learner descriptions, and `status` (`ok`, `disabled`, `unavailable`, or `error`); fit checkpoints are under `fits/` |
 

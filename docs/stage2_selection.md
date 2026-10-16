@@ -100,10 +100,46 @@ computed across candidates within each resample. These are ordinary adjusted
 tests with learned adjustment scores, not orthogonal score tests, and their
 p-values carry no post-selection guarantee.
 
-**Grouping.** A candidate's categorical levels, its missingness indicator, and
-its [extraction-failure](glossary.md#extraction-failure) indicator form one
-group. Penalties select or drop the whole group, interaction tests are omnibus
-over the group, and permutations move all its columns together.
+**Grouping.** A candidate's categorical levels, its missingness indicator, its
+[documented-unknown](glossary.md#documented-unknown) indicator, and its
+[extraction-failure](glossary.md#extraction-failure) indicator form one group
+(see [Not documented, documented unknown, and failed cells](#not-documented-documented-unknown-and-failed-cells)).
+Penalties select or drop the whole group, interaction tests are omnibus over the
+group, and permutations move all its columns together.
+
+#### Not documented, documented unknown, and failed cells
+
+Every encoder (the selection designs, the modifier tests' grouped design, the
+final nuisance and effect models, and the diagnostics) keeps three non-value
+states apart:
+
+| State | Stored as | Encoded as |
+|---|---|---|
+| Not documented: the record does not mention the variable | null | The "missing" indicator; a continuous value is imputed at the training median |
+| [Documented unknown](glossary.md#documented-unknown): the record states that the value is unknown, indeterminate, pending, not assessed, or equivocal | The reserved value `documented_unknown`, for every value type | Its own `<variable>:documented_unknown` indicator in the variable's group; a continuous value is imputed at the training median; never a category level, never pooled into a rare-level "other" column, and never the reference level |
+| [Extraction failure](glossary.md#extraction-failure) | null, flagged in `<variable>__oci_extraction_failed` | Its own failure indicator in the variable's group |
+
+The documented-unknown indicator exists when the training rows contain the
+state; a held-out documented unknown for a variable without training
+occurrences is encoded as missing and listed in
+`documented_unknown_report_heldout.json`. In the modifier tests the indicator is
+part of the tested group, as an observed patient state. Unknown-like wording is
+mapped conservatively: only a whole value equal to one of "unknown", "not
+known", "status unknown", "indeterminate", "undetermined", "pending", "result
+pending", "results pending", "not assessed", "not evaluated", "equivocal", or
+"inconclusive" (case, spacing, and punctuation ignored) is treated as the
+reserved state, so a category such as "Unknown primary" is unchanged. A
+declared category with one of these labels is removed from the definition only
+when the remaining categories still form a valid ontology (two for binary,
+at least two otherwise); otherwise it is a genuine answer, such as "Not
+assessed" in an assessed/not-assessed variable. Investigator-specified
+variables (`stage2.explicit_features`) keep every declared category, because
+their definitions are locked; an extracted value matching a declared category
+is that category. An extraction answer of bare
+"unknown" stays a missing-value placeholder, because extraction models often
+write it for an unmentioned variable; the prompts ask for `documented_unknown`
+for an explicit statement. When repeated observations disagree, a documented
+value takes precedence over documented-unknown statements.
 
 **Equivalent measurements.** Candidates that are near-duplicates are grouped by
 complete linkage. Two candidates qualify when they have the same value type
@@ -211,9 +247,11 @@ Each candidate `j` is tested on its grouped design `Z_j`, encoded on the
 eligible training patients: the value centered at its median (continuous
 candidates, with missing values imputed at the median) or one indicator per
 non-reference category (categorical candidates; the reference is the first
-declared category that is observed), plus the "not documented" indicator and,
-for candidates with training extraction failures, the
-[extraction-failure](glossary.md#extraction-failure) indicator. Indicator
+declared category that is observed), plus the "not documented" indicator, the
+[documented-unknown](glossary.md#documented-unknown) indicator when the
+training patients contain that state, and, for candidates with training
+extraction failures, the [extraction-failure](glossary.md#extraction-failure)
+indicator. Indicator
 columns with fewer than `categorical_min_count` patients (default 5) on either
 side are dropped and listed in `dropped_sparse_columns`, because they cannot be
 estimated reliably and give a patient a leverage of one. The remaining columns
@@ -426,8 +464,8 @@ fold reads it.
   error, 95% interval, and two-sided p-value. Categorical modifiers have one
   coefficient per level versus the reference level; continuous modifiers also
   get the coefficient per standard deviation of the fold's observed
-  outer-training values (`training_sd`). Missingness and extraction-failure
-  columns are reported too. Each modifier is analysed alone, as in the tests.
+  outer-training values (`training_sd`). Missingness, documented-unknown, and
+  extraction-failure columns are reported too. Each modifier is analysed alone, as in the tests.
 - **Pooled.** Counts of selected and confirmed modifiers per fold and in total.
 - **Across folds.** Each fold defines and extracts its own variables, so the
   selected variables are grouped into **concepts**: identical normalized names
@@ -707,7 +745,8 @@ the single shared penalty.
 
 - **Guard.** The exemption adds `2c` unpenalized parameters, where `c` is the
   number of encoded design columns of the selected modifiers (values, category
-  contrasts, and missingness and extraction-failure indicators). It is used
+  contrasts, and missingness, documented-unknown, and extraction-failure
+  indicators). It is used
   only when `2c` is at most a limit computed on the effect-eligible training
   patients: `min(events, non-events) / r` for binary outcomes and
   `rows / r` for continuous outcomes, where `r` is
@@ -1294,6 +1333,7 @@ Per outer fold, under `stage2/outer_NNN/`:
 | Path | Contents |
 |---|---|
 | `extraction/candidate_missingness_filter.json` | The informativeness filter's decision for every candidate |
+| `extraction/documented_unknown_report_fit.json`, `documented_unknown_report_heldout.json` | Documented-unknown counts and fractions per candidate, overall and by treatment arm |
 | `selection/statistical_evidence.json` | All evidence cells, family summaries, nuisance supports, and policy (under `orthogonal_tests`, also `skipped_effect_evidence`) |
 | `selection/nuisance_predictions.csv` | Out-of-fold nuisance predictions of the evidence families (outer-training patients only) |
 | `selection/modifier_tests.json` | `orthogonal_tests`: every candidate's component and combined p-values, q-values, selection, and labels |
@@ -1334,9 +1374,9 @@ data, `posthoc_oracle_ite_metrics.json` and
   missing, or inconsistent across patients, and the definitions themselves can
   differ between folds. Error in a confounder leaves residual confounding; error
   in a modifier attenuates estimated heterogeneity. Extraction failures are
-  flagged rather than treated as "not documented", and failure rates by arm are
-  reported, but extraction accuracy is not otherwise validated against a
-  reference standard.
+  flagged rather than treated as "not documented", documented-unknown answers
+  are kept as their own state, and both rates are reported by arm, but
+  extraction accuracy is not otherwise validated against a reference standard.
 - **Nuisance models.** The default super learner can follow thresholds,
   curvature, and interactions that a linear elastic net misses, and the stack
   falls back toward the elastic net when the flexible learners do not improve

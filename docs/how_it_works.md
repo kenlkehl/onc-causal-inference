@@ -207,6 +207,23 @@ as an [extraction failure](glossary.md#extraction-failure), distinct from "not
 documented". The result is one row per outer-training patient and one column
 per candidate.
 
+Every cell is a value or one of three distinct non-value states:
+
+- **Not documented** (null): the record does not mention the variable, or no
+  usable value could be resolved.
+- **[Documented unknown](glossary.md#documented-unknown)** (the reserved value
+  `documented_unknown`, accepted for every value type): the record explicitly
+  states that the value is unknown, indeterminate, pending, not assessed, or
+  equivocal, for example "EGFR status unknown". Definitions do not list
+  categories such as Unknown or Pending; a declared category that is only an
+  unknown-like label is converted to this state. When the record documents a
+  usable value elsewhere, that value is used instead.
+- **Extraction failure**: the response for the cell still failed validation
+  after every repair.
+
+Each state is encoded separately in the models (see
+[Stage 2 selection](stage2_selection.md#not-documented-documented-unknown-and-failed-cells)).
+
 ### 5. Review definitions and harmonize values
 
 Several checks precede any statistical modeling:
@@ -232,9 +249,13 @@ following hold:
 1. At most 10% of patients have an extraction failure for it
    (`stage2.max_extraction_failure_fraction`).
 2. At least 20 patients have an observed value (`stage2.min_informative_patients`).
+   A documented-unknown answer counts as observed: it is recorded patient
+   information, often associated with how care was delivered, and it is
+   encoded as its own indicator.
 3. It is not nearly constant: a categorical, binary, or ordinal variable needs
    at least two levels with at least 20 patients each (counting "not documented"
-   as a level), and a continuous variable needs at least two distinct values.
+   and documented unknown as levels), and a continuous variable needs at least
+   two distinct observed states (documented unknown counts as one).
 
 With the illustrative 800 outer-training patients, a candidate observed in 19
 patients is removed and one observed in 20 is kept. The surviving candidates are
@@ -262,8 +283,8 @@ relation to treatment-effect variation:
 - one-candidate-at-a-time DINA effect models compared with a constant effect;
 - permutation importance in causal forests and in the joint DINA model.
 
-Each candidate's categorical levels and missingness indicators always move
-together as one group. The evidence is repeated over three partitions of the
+Each candidate's categorical levels and its not-documented, documented-unknown,
+and extraction-failure indicators always move together as one group. The evidence is repeated over three partitions of the
 outer-training patients, over row subsamples, and over random subsets of about
 32 candidates, so each candidate is assessed in several covariate contexts.
 Whole-model gains over a constant effect are recorded alongside per-candidate
@@ -290,8 +311,9 @@ computed at this point because it needs no held-out measurements: each of the
 outcome predictions of the inner-fold model that did not see that patient.
 The final estimation later reproduces exactly these training values.
 
-Each candidate, with its categorical levels, "not documented" indicator, and
-extraction-failure indicator tested jointly, receives three p-values:
+Each candidate, with its categorical levels, "not documented" indicator,
+documented-unknown indicator, and extraction-failure indicator tested jointly,
+receives three p-values:
 
 - **R-learner projection** (`r_projection`): does the candidate explain
   variation in the risk-difference effect, weighting patients by how uncertain

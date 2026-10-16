@@ -164,7 +164,7 @@ EXTRACTION_ONTOLOGY_FEEDBACK_SCHEMA_VERSION = (
     "training_failure_ontology_refinement_v1_explicit_feature_invariants"
 )
 OPERATIONALIZATION_SCHEMA_VERSION = (
-    "feature_name_bounded_supporting_text_v7_conflict_resolution"
+    "feature_name_bounded_supporting_text_v8_documented_unknown"
 )
 INTERPRETATION_SCHEMA_VERSION = DISCOVERY_PROMPT_VERSION
 INTERPRETATION_AUDIT_SCHEMA_VERSION = (
@@ -497,6 +497,7 @@ class Stage2ExplicitFeature:
                 value_type=value_type,
                 values=categories,
                 source=f"stage2 explicit feature {name!r}",
+                keep_unknown_like=True,
             )
         measurement_definition = str(self.measurement_definition or "").strip()
         if not measurement_definition:

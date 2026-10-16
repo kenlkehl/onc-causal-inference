@@ -352,9 +352,23 @@ outer held-out patient.
 ### Extraction definition (ontology)
 
 The rule for measuring one candidate variable from text: its meaning, value type,
-units or allowed categories, missing-value rule, and how to resolve repeated or
-conflicting mentions (for example, latest value, maximum, or most frequent
-value). The code and logs call the set of definitions the **ontology**.
+units or allowed categories, missing-value rule (including when to answer null
+and when to answer [documented unknown](#documented-unknown)), and how to resolve
+repeated or conflicting mentions (for example, latest value, maximum, or most
+frequent value). The code and logs call the set of definitions the **ontology**.
+
+### Documented unknown
+
+A patient–variable cell for which the record explicitly states that the value is
+unknown, indeterminate, pending, not assessed, or equivocal, for example "EGFR
+status unknown". It is stored as the reserved value `documented_unknown`, which
+every value type accepts, and is distinct from "not documented" (null: the
+record does not mention the variable) and from an
+[extraction failure](#extraction-failure). Models encode it as its own indicator
+column in the variable's group, and its rates are reported by treatment arm.
+Discovered definitions do not list Unknown-like categories (investigator-specified
+variables keep the categories they declare); see
+[Stage 2 selection](stage2_selection.md#not-documented-documented-unknown-and-failed-cells).
 
 ### Extraction failure
 

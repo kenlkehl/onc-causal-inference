@@ -47,6 +47,13 @@ from ..models.elastic_net_nuisance import (
 from .stage2_elastic_net_selection import TEMPORAL_SCOPE
 from . import stage2_extraction_failures as extraction_failures
 from .stage2_extraction_failures import extraction_failure_column
+from . import stage2_documented_unknown as documented_unknown
+from .stage2_documented_unknown import (
+    DOCUMENTED_UNKNOWN,
+    documented_unknown_mask,
+    is_documented_unknown,
+    is_unknown_like,
+)
 from .stage2_multi_model_selection import select_stage2_features_multi_model
 from .stage2_sequential_consolidation import (
     SELECTION_SCHEMA_VERSION,
@@ -65,39 +72,39 @@ LOGGER = logging.getLogger(__name__)
 # to use separate cores. Small selectors stay in-process to avoid spawn cost.
 STATISTICAL_SELECTION_PROCESS_ISOLATION_MIN_CANDIDATES = 64
 
-EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_extraction_v6_conflict_resolution_independent_small_model_clinical_prompts_20260923'
-EXTRACTION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_feature_batch_extraction_v5_conflict_resolution_independent_small_model_clinical_prompts_20260923'
-PAGE_EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_observations_v6_advisory_quotes'
-PAGE_OBSERVATION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_observation_feature_batch_v2_advisory_quotes'
-PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_reconciliation_v7_reported_occurrences'
+EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_extraction_v7_documented_unknown_20261016'
+EXTRACTION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_feature_batch_extraction_v6_documented_unknown_20261016'
+PAGE_EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_observations_v7_documented_unknown'
+PAGE_OBSERVATION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_observation_feature_batch_v3_documented_unknown'
+PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_reconciliation_v8_documented_unknown'
 EXTRACTION_ROUTING_SCHEMA_VERSION = 'stage2_extraction_mode_split_v1'
-REVIEW_CHECKPOINT_SCHEMA_VERSION = 'stage2_aggregate_ontology_supervisor_v2_scalar_contract_20261010'
+REVIEW_CHECKPOINT_SCHEMA_VERSION = 'stage2_aggregate_ontology_supervisor_v3_documented_unknown_20261016'
 REVIEW_CONVERGENCE_SCHEMA_VERSION = "stage2_ontology_supervisor_convergence_v1"
 ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v12_own_fold_heldout_calibration"
 STAGE2_ROLE_SELECTION_SCHEMA_VERSION = SELECTION_SCHEMA_VERSION
 PRESELECTION_SNAPSHOT_SCHEMA_VERSION = "stage2_frozen_preselection_snapshot_v1"
 HELDOUT_MEASUREMENT_CACHE_SCHEMA_VERSION = (
-    "stage2_frozen_heldout_measurement_cache_v1"
+    "stage2_frozen_heldout_measurement_cache_v2_documented_unknown"
 )
 HELDOUT_MEASUREMENT_REUSE_SCHEMA_VERSION = (
     "stage2_heldout_measurement_reuse_v1"
 )
 STAGE2_RESELECTION_MIGRATION_SCHEMA_VERSION = "stage2_reselection_migration_v1"
 EXTRACTION_ISSUE_SCHEMA_VERSION = "stage2_extraction_issues_v1"
-PENDING_CATEGORY_ONTOLOGY_SCHEMA_VERSION = 'stage2_pending_category_ontology_v1_clinical_prompts_20260923'
-ONTOLOGY_REFINEMENT_CHECKPOINT_SCHEMA_VERSION = 'stage2_training_failure_ontology_refinement_v3_scalar_contract_20261010'
+PENDING_CATEGORY_ONTOLOGY_SCHEMA_VERSION = 'stage2_pending_category_ontology_v2_documented_unknown_20261016'
+ONTOLOGY_REFINEMENT_CHECKPOINT_SCHEMA_VERSION = 'stage2_training_failure_ontology_refinement_v4_documented_unknown_20261016'
 INCREMENTAL_REFINEMENT_EXTRACTION_SCHEMA_VERSION = (
-    "stage2_incremental_refinement_extraction_v1_feature_delta"
+    "stage2_incremental_refinement_extraction_v2_documented_unknown"
 )
-HARMONIZATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mixed_value_harmonization_v1_llm_training_only_clinical_prompts_20260923'
+HARMONIZATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mixed_value_harmonization_v2_documented_unknown_20261016'
 HARMONIZATION_FALLBACK_SCHEMA_VERSION = "stage2_mixed_value_harmonization_fallback_v1"
 DEFAULT_EXTRACTION_FEATURE_BATCH_SIZE = 10
 DEFAULT_EXTRACTION_CHUNK_SIZE_TOKENS = 50_000
 DEFAULT_EXTRACTION_CONTEXT_WINDOW_TOKENS = 131_072
 DEFAULT_EXTRACTION_MAX_TOKENS = 75_000
 DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS = 1_024
-SERIAL_EXTRACTION_CHUNK_CHECKPOINT_SCHEMA_VERSION = 'stage2_serial_patient_feature_chunk_v1_carried_validated_state_clinical_prompts_20260923'
-SERIAL_EXTRACTION_MANIFEST_SCHEMA_VERSION = 'stage2_serial_patient_feature_extraction_v1_lossless_ordered_chunks_clinical_prompts_20260923'
+SERIAL_EXTRACTION_CHUNK_CHECKPOINT_SCHEMA_VERSION = 'stage2_serial_patient_feature_chunk_v2_documented_unknown_20261016'
+SERIAL_EXTRACTION_MANIFEST_SCHEMA_VERSION = 'stage2_serial_patient_feature_extraction_v2_documented_unknown_20261016'
 MAX_SERIAL_FEATURE_STATE_CHARS = 2_048
 
 
@@ -530,11 +537,15 @@ def _validated_closed_category_values(
     value_type: Any,
     values: Sequence[Any],
     source: str,
+    keep_unknown_like: bool = False,
 ) -> list[str]:
     """Normalize and validate one extraction-ready closed ontology.
 
     This is deliberately domain-agnostic.  It validates the shape of the
-    ontology, not which clinical labels should appear in it.
+    ontology, not which clinical labels should appear in it.  With
+    ``keep_unknown_like`` (investigator-configured features, whose definitions
+    are locked) unknown-like categories are kept as declared; the reserved
+    documented_unknown value itself is never a valid category.
     """
 
     normalized_type = str(value_type or "ambiguous").strip().lower()
@@ -544,6 +555,26 @@ def _validated_closed_category_values(
         value_type=normalized_type,
         values=values,
     )
+    if keep_unknown_like:
+        reserved = [category for category in categories if is_documented_unknown(category)]
+        if reserved:
+            raise ValueError(
+                f"{source} categories_or_unit cannot declare the reserved value "
+                f"{DOCUMENTED_UNKNOWN}; it is available to every variable without "
+                "being listed"
+            )
+        unknown_like: list[str] = []
+    else:
+        # "Unknown"-like labels are the reserved documented_unknown state, not
+        # categories, unless removing them would leave an invalid ontology.
+        categories, unknown_like = documented_unknown.split_unknown_like_categories(
+            normalized_type, categories
+        )
+    if unknown_like:
+        LOGGER.info(
+            "%s: unknown-like categories %s are the reserved %s value",
+            source, unknown_like, DOCUMENTED_UNKNOWN,
+        )
     identity_keys = [
         re.sub(r"[\W_]+", " ", category, flags=re.UNICODE).strip().casefold()
         for category in categories
@@ -590,9 +621,31 @@ def _validated_closed_category_values(
 
 
 def _declared_categories(definition: Mapping[str, Any]) -> list[str]:
-    return _normalized_category_values(
-        value_type=definition.get("value_type"),
-        values=definition.get("categories_or_unit") or [],
+    """Declared categories; the reserved documented_unknown value is never one."""
+    return [
+        category
+        for category in _normalized_category_values(
+            value_type=definition.get("value_type"),
+            values=definition.get("categories_or_unit") or [],
+        )
+        if not is_documented_unknown(category)
+    ]
+
+
+def _documented_unknown_answer(value: Any, declared: Sequence[str]) -> bool:
+    """The reserved value, or a whole unknown-like phrase that is not a declared category.
+
+    A bare "unknown" stays a missing-value placeholder (null): extraction models
+    commonly write it for a variable the record does not mention, and they are
+    instructed to answer documented_unknown for an explicit statement.
+    """
+    if is_documented_unknown(value):
+        return True
+    return (
+        isinstance(value, str)
+        and is_unknown_like(value)
+        and not _is_missing_scalar(value)
+        and _canonical_category(value, declared) is None
     )
 
 
@@ -915,7 +968,7 @@ class _ExtractionCategoryError(ValueError):
         super().__init__(
             f"feature {first['feature_name']!r} value "
             f"{first['prior_extracted_value']!r} is invalid; allowed values are "
-            f"{allowed} or null{suffix}"
+            f"{allowed}, {DOCUMENTED_UNKNOWN}, or null{suffix}"
         )
 
 
@@ -1065,6 +1118,9 @@ def _validate_category_ontology(
         if extracted is None:
             corrections[mapping_id] = None
             continue
+        if _documented_unknown_answer(extracted, declared):
+            corrections[mapping_id] = DOCUMENTED_UNKNOWN
+            continue
         if _is_missing_scalar(extracted) and _canonical_category(extracted, declared) is None:
             corrections[mapping_id] = None
             continue
@@ -1073,7 +1129,7 @@ def _validate_category_ontology(
             allowed = json.dumps(declared, ensure_ascii=False, separators=(",", ":"))
             raise ValueError(
                 f"category mapping {mapping_id!r} returned {extracted!r}; "
-                f"allowed values are {allowed} or null"
+                f"allowed values are {allowed}, {DOCUMENTED_UNKNOWN}, or null"
             )
         corrections[mapping_id] = canonical
     if set(corrections) != set(item_by_id):
@@ -1531,7 +1587,8 @@ def _extraction_output_instructions(definitions: Sequence[Mapping[str, Any]]) ->
         "Return exactly one JSON object with the complete variable names shown below as keys. "
         "Copy each key exactly, including all text on both sides of any colon. "
         "Related components are separate variables; do not replace them with a parent name "
-        "or nest them inside another object. Each value is a supported scalar or null. "
+        "or nest them inside another object. Each value is a supported scalar, "
+        "documented_unknown when the record states that the value is unknown, or null. "
         "The nulls in this example are format placeholders, not suggested answers:\n"
         + json.dumps(example, ensure_ascii=False, separators=(",", ":"))
     )
@@ -1569,7 +1626,9 @@ def _serial_output_instructions(definitions: Sequence[Mapping[str, Any]]) -> str
         "Update only the listed clinical variables using the record section and prior values. "
         "Return exactly one JSON object with values and decision_notes, each containing every "
         "requested variable. Copy each complete key exactly, including all text on both sides "
-        "of any colon; keep related components separate. Values are supported scalars or null. Decision notes retain the "
+        "of any colon; keep related components separate. Values are supported scalars, "
+        "documented_unknown when the record states that the value is unknown, or null. "
+        "Decision notes retain the "
         "date or conflict information needed for the next section, as a short string or null. "
         "The nulls in this example are format placeholders, not suggested answers:\n"
         + json.dumps(example, ensure_ascii=False, separators=(",", ":"))
@@ -1601,7 +1660,8 @@ def _page_output_instructions() -> str:
     return (
         "Return exactly one JSON object with an observations array. Each observation has "
         "exactly feature, value, quote, and governing_date_quote. Copy the complete clinical "
-        "variable name into feature. Use a supported scalar value, a short supporting quote, "
+        "variable name into feature. Use a supported scalar value (documented_unknown when the "
+        "text states that the value is unknown), a short supporting quote, "
         "and the linked date quote or null. Include only occurrences that support the requested "
         "attribute under its measurement definition; do not infer it from other measurements. "
         "For example, severity alone does not establish symptom frequency. "
@@ -1822,6 +1882,25 @@ def _validate_extraction(
                         "reason": (
                             "requires one scalar JSON value or null, but the model "
                             f"returned {type(extracted).__name__}"
+                        ),
+                        "prior_extracted_value": extracted,
+                    }
+                )
+                clean_values[name] = extracted
+                continue
+            if _documented_unknown_answer(extracted, declared):
+                # The record states that the value is unknown (every value type).
+                clean_values[name] = DOCUMENTED_UNKNOWN
+                continue
+            if documented_unknown.is_malformed_documented_unknown(extracted):
+                value_issues.append(
+                    {
+                        "row_id": row_id,
+                        "feature_name": name,
+                        "value_type": value_type,
+                        "reason": (
+                            f"must write the reserved value exactly as {DOCUMENTED_UNKNOWN}, "
+                            "with no other text"
                         ),
                         "prior_extracted_value": extracted,
                     }
@@ -2511,6 +2590,24 @@ def _resolve_feature_observations(
     }
     if not ordered:
         return None, decision
+    # A documented value takes precedence over statements that the value is
+    # unknown; documented_unknown is selected only when nothing else is.
+    unknown = [o for o in ordered if is_documented_unknown(o.get("value"))]
+    if unknown:
+        decision["documented_unknown_observations"] = len(unknown)
+        definite = [o for o in ordered if not is_documented_unknown(o.get("value"))]
+        if not definite:
+            selected, basis = _select_temporal_observation(unknown, latest=True)
+            decision.update(
+                {
+                    "selected_observation_id": selected["observation_id"],
+                    "resolution": "documented_unknown_only",
+                    "selection_basis": basis,
+                    "value": DOCUMENTED_UNKNOWN,
+                }
+            )
+            return DOCUMENTED_UNKNOWN, decision
+        ordered = definite
 
     values_by_key: dict[str, list[dict[str, Any]]] = {}
     for observation in ordered:
@@ -4220,17 +4317,22 @@ def feature_summaries(
         nonmissing = series.dropna()
         counts = nonmissing.astype(str).value_counts()
         dominant = float(counts.iloc[0] / len(nonmissing)) if len(nonmissing) else 1.0
+        unknown_rows = int(documented_unknown_mask(nonmissing).sum())
         summary: dict[str, Any] = {
             "feature_id": str(feature["feature_id"]),
             "name": name,
             "rows": len(frame),
             "nonmissing": int(len(nonmissing)),
             "nonmissing_fraction": float(len(nonmissing) / row_count),
+            # Counted in nonmissing: the record states that the value is unknown.
+            "documented_unknown": unknown_rows,
+            "documented_unknown_fraction": float(unknown_rows / row_count),
             "unique_nonmissing": int(nonmissing.nunique()),
             "dominant_value_fraction": dominant,
             "most_common_values": {str(key): int(count) for key, count in counts.head(8).items()},
         }
         if str(feature.get("value_type")) == "continuous":
+            nonmissing = documented_unknown.without_documented_unknown(nonmissing).dropna()
             numeric_values = pd.to_numeric(nonmissing, errors="coerce")
             numeric = numeric_values.dropna()
             categorical = nonmissing.loc[numeric_values.isna()].astype(str)
@@ -4265,7 +4367,8 @@ def _mixed_value_observations(
 
     name = str(feature["name"])
     series = frame[name] if name in frame else pd.Series([None] * len(frame))
-    nonmissing = series.dropna()
+    # documented_unknown is a reserved state, not a phrase to harmonize.
+    nonmissing = documented_unknown.without_documented_unknown(series).dropna()
     numeric_values = pd.to_numeric(nonmissing, errors="coerce")
     numeric = numeric_values.dropna().astype(float)
     categorical = nonmissing.loc[numeric_values.isna()].astype(str)
@@ -4969,6 +5072,9 @@ def _apply_one_harmonization_plan(
         if raw is None or bool(pd.isna(raw)):
             output.append(None)
             continue
+        if is_documented_unknown(raw):
+            output.append(DOCUMENTED_UNKNOWN)
+            continue
         numeric = pd.to_numeric(pd.Series([raw]), errors="coerce").iloc[0]
         if pd.notna(numeric):
             numeric_value = float(numeric)
@@ -5231,8 +5337,12 @@ CANDIDATE_FILTER_DESCRIPTION = (
     "(3) the feature is not nearly constant: categorical/binary/ordinal features "
     "need at least two levels (counting 'not documented' as a level, never counting "
     "failed extractions) each with at least min_informative_patients patients, and "
-    "continuous features need non-identical observed values. Retained features "
-    "with training extraction failures get a grouped failure indicator column."
+    "continuous features need non-identical observed values. A documented_unknown "
+    "value (the record states that the value is unknown, indeterminate, pending, not "
+    "assessed, or equivocal) counts as an observed state and, for categorical features, "
+    "as its own level: it is recorded patient information, encoded as its own "
+    "indicator. Retained features with training extraction failures get a grouped "
+    "failure indicator column."
 )
 
 
@@ -5308,8 +5418,10 @@ def _filter_sparse_training_candidates(
             failed = np.zeros(rows, dtype=bool)
         failed &= series.isna().to_numpy(dtype=bool)
         all_failed[name] = failed.astype(int)
+        # documented_unknown cells are observed (non-null) states.
         observed_mask = series.notna().to_numpy(dtype=bool)
         observed = int(observed_mask.sum())
+        unknown_rows = int(documented_unknown_mask(series).sum())
         failed_rows = int(failed.sum())
         not_documented = rows - observed - failed_rows
         failure_fraction = failed_rows / rows
@@ -5342,6 +5454,7 @@ def _filter_sparse_training_candidates(
             "name": name,
             "modeling_strategy": strategy,
             "observed_rows": observed,
+            "documented_unknown_rows": unknown_rows,
             "not_documented_rows": not_documented,
             "extraction_failed_rows": failed_rows,
             "extraction_failure_fraction": failure_fraction,
@@ -5376,8 +5489,11 @@ def _filter_sparse_training_candidates(
         scope="outer_training",
         treatment=treatment,
     )
+    unknown_report = documented_unknown.documented_unknown_report(
+        frame, definitions, scope="outer_training", treatment=treatment,
+    )
     summary = {
-        "schema_version": "stage2_candidate_informativeness_filter_v2",
+        "schema_version": "stage2_candidate_informativeness_filter_v3_documented_unknown",
         "status": "failed" if definitions and not retained else "complete",
         "scope": "outer_training",
         "rule": "count_based_informativeness_and_extraction_failure",
@@ -5395,6 +5511,7 @@ def _filter_sparse_training_candidates(
         "extraction_failure_mask_available": failure_mask is not None,
         "retained_with_failure_indicator": sorted(failure_columns),
         "training_extraction_failure_report": failure_report,
+        "training_documented_unknown_report": unknown_report,
         "input_matrix_fingerprint": _frame_fingerprint(frame),
         "audit_path": str(audit_path),
     }
@@ -5434,12 +5551,20 @@ class _FeatureEncoder:
     column from its companion ``<name>__oci_extraction_failed`` column;
     failed cells are excluded from the "missing"/"not documented" encoding
     (continuous values are median-imputed, category indicators stay 0).
+
+    A feature whose training rows contain the reserved ``documented_unknown``
+    value gets one more 0/1 column, last in its group; those cells are
+    excluded from the missing indicator, the fallback categories and every
+    category level (continuous values are median-imputed). A held-out
+    ``documented_unknown`` for a feature without training occurrences is
+    encoded as missing.
     """
 
     def __init__(self, definitions: Sequence[Mapping[str, Any]]) -> None:
         self.definitions = list(definitions)
         self.encodings: list[tuple[str, str, Any]] = []
         self.failure_indicators: dict[str, Mapping[str, Any]] = {}
+        self.unknown_indicators: set[str] = set()
 
     def fit(self, frame: pd.DataFrame) -> "_FeatureEncoder":
         self.encodings = []
@@ -5448,10 +5573,14 @@ class _FeatureEncoder:
             for feature in self.definitions
             if extraction_failures.has_failure_indicator(feature)
         }
+        self.unknown_indicators = set()
         for feature in self.definitions:
             name = str(feature["name"])
             modeling_strategy = _feature_modeling_strategy(feature)
-            series = frame[name] if name in frame else pd.Series([None] * len(frame))
+            raw_series = frame[name] if name in frame else pd.Series([None] * len(frame))
+            if bool(documented_unknown_mask(raw_series).any()):
+                self.unknown_indicators.add(name)
+            series = documented_unknown.without_documented_unknown(raw_series)
             if modeling_strategy in {
                 "continuous",
                 "continuous_with_categorical_fallback",
@@ -5497,7 +5626,7 @@ class _FeatureEncoder:
     def transform(self, frame: pd.DataFrame) -> np.ndarray:
         columns: list[np.ndarray] = []
         for name, value_type, parameters in self.encodings:
-            series = frame[name] if name in frame else pd.Series([None] * len(frame))
+            raw_series = frame[name] if name in frame else pd.Series([None] * len(frame))
             tracked = name in self.failure_indicators
             failed = (
                 extraction_failures.failure_flags(frame, self.failure_indicators[name])
@@ -5505,16 +5634,22 @@ class _FeatureEncoder:
                 if tracked and name in frame
                 else np.zeros(len(frame), dtype=bool)
             )
+            unknown_tracked = name in self.unknown_indicators
+            unknown = documented_unknown_mask(raw_series).to_numpy(dtype=bool)
+            # Without training occurrences a documented unknown is encoded as missing.
+            series = documented_unknown.without_documented_unknown(raw_series)
+            # Cells excluded from the missing indicator: failures and tracked unknowns.
+            not_missing = failed | (unknown & unknown_tracked)
             if value_type == "continuous":
                 median, scale = parameters
                 numeric = pd.to_numeric(series, errors="coerce")
-                missing = (numeric.isna().to_numpy(dtype=bool) & ~failed).astype(float)
+                missing = (numeric.isna().to_numpy(dtype=bool) & ~not_missing).astype(float)
                 values = (numeric.fillna(median).to_numpy(dtype=float) - median) / scale
                 columns.extend([values, missing])
             elif value_type == "continuous_with_categorical_fallback":
                 median, scale, categories = parameters
                 numeric = pd.to_numeric(series, errors="coerce")
-                raw_missing = series.isna().to_numpy(dtype=bool) & ~failed
+                raw_missing = series.isna().to_numpy(dtype=bool) & ~not_missing
                 categorical_mask = series.notna() & numeric.isna()
                 normalized = series.where(categorical_mask, "").astype(str)
                 values = (numeric.fillna(median).to_numpy(dtype=float) - median) / scale
@@ -5536,16 +5671,19 @@ class _FeatureEncoder:
                 normalized = series.where(series.notna(), "__missing__").astype(str)
                 for category in parameters:
                     columns.append(
-                        ((normalized == category).to_numpy(dtype=bool) & ~failed).astype(float)
-                    )
-                if value_type == "categorical_with_other":
-                    columns.append(
-                        ((~normalized.isin(parameters)).to_numpy(dtype=bool) & ~failed).astype(
+                        ((normalized == category).to_numpy(dtype=bool) & ~not_missing).astype(
                             float
                         )
                     )
+                if value_type == "categorical_with_other":
+                    columns.append(
+                        ((~normalized.isin(parameters)).to_numpy(dtype=bool) & ~not_missing)
+                        .astype(float)
+                    )
             if tracked:
                 columns.append(failed.astype(float))
+            if unknown_tracked:
+                columns.append(unknown.astype(float))
         if not columns:
             return np.empty((len(frame), 0), dtype=float)
         return np.column_stack(columns).astype(float, copy=False)
@@ -5757,9 +5895,11 @@ def _validate_ontology_refinement(
             )
             if normalized["value_type"] == "binary":
                 missingness_contract = (
-                    "Return null when this component is not assessed or not mentioned. "
-                    "A negative answer requires an explicit negative finding for this "
-                    "component; never infer it from other components being present. "
+                    "Return null when this component is not mentioned, and "
+                    "documented_unknown when the record states that it was not assessed "
+                    "or is unknown. A negative answer requires an explicit negative "
+                    "finding for this component; never infer it from other components "
+                    "being present. "
                 )
                 if not normalized["missing_value_rule"].startswith(missingness_contract):
                     normalized["missing_value_rule"] = missingness_contract + normalized["missing_value_rule"]
@@ -8724,6 +8864,7 @@ def initial_feature_modeling_definitions(definitions):
                 value_type=value_type,
                 values=feature.get("categories_or_unit") or [],
                 source=f"feature {feature.get('name')!r}",
+                keep_unknown_like=feature.get("configured_explicit_feature") is True,
             )
         current.append(_normalized_feature_modeling_definition(feature))
     return current
@@ -9029,6 +9170,11 @@ def run_fold_analysis(
         output_dir / "extraction" / "failure_report_fit.json",
         missingness_report["training_extraction_failure_report"],
     )
+    if missingness_report.get("training_documented_unknown_report") is not None:
+        _write_json(
+            output_dir / "extraction" / "documented_unknown_report_fit.json",
+            missingness_report["training_documented_unknown_report"],
+        )
     preselection_matrix_relative = (
         Path("extraction") / "coverage_filtered_fit"
         / _frame_fingerprint(final_fit_all) / "extracted.csv"
@@ -9725,6 +9871,33 @@ def run_fold_analysis(
         reported_after_effect_predictions_were_frozen=True,
     )
     _write_json(output_dir / "extraction" / "failure_report_heldout.json", heldout_failure_report)
+    # Same reporting rule as the failure report: held-out treatment labels are
+    # read only after the effect predictions are frozen.
+    heldout_unknown_report = documented_unknown.documented_unknown_report(
+        heldout_candidates, candidate_definitions, scope="outer_heldout",
+        treatment=dataset.iloc[heldout_ids][treatment_column].to_numpy(dtype=float),
+    )
+    unknown_tracked = {
+        str(feature["name"])
+        for feature in candidate_definitions
+        if bool(documented_unknown_mask(
+            modeling_fit_frame[str(feature["name"])]
+            if str(feature["name"]) in modeling_fit_frame
+            else pd.Series(dtype=object)
+        ).any())
+    }
+    heldout_unknown_report.update(
+        encoded_as_missing_without_training_occurrences=sorted(
+            record["name"]
+            for record in heldout_unknown_report["per_feature"]
+            if record["documented_unknown_rows"] and record["name"] not in unknown_tracked
+        ),
+        reported_after_effect_predictions_were_frozen=True,
+    )
+    _write_json(
+        output_dir / "extraction" / "documented_unknown_report_heldout.json",
+        heldout_unknown_report,
+    )
     extraction_failure_summary = {
         "description": extraction_failures.TERMINAL_FAILURE_POLICY,
         "training": missingness_report["training_extraction_failure_report"],
@@ -9733,6 +9906,12 @@ def run_fold_analysis(
         "training_mask_path": str(output_dir / "extraction" / "failure_mask_fit.csv"),
         "heldout_mask_path": str(output_dir / "extraction" / "failure_mask_heldout.csv"),
         "features_with_grouped_failure_indicator": sorted(flagged_names),
+        "documented_unknown": {
+            "description": documented_unknown.DOCUMENTED_UNKNOWN_POLICY,
+            "training": missingness_report.get("training_documented_unknown_report"),
+            "heldout": heldout_unknown_report,
+            "features_with_grouped_documented_unknown_indicator": sorted(unknown_tracked),
+        },
     }
     diagnostics["extraction_failures"] = extraction_failure_summary
     _write_json(output_dir / "estimation" / "extraction_failure_diagnostics.json",

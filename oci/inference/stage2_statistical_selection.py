@@ -11,6 +11,7 @@ import pandas as pd
 from scipy import stats
 
 from .stage2_extraction_failures import failure_flags, has_failure_indicator
+from .stage2_documented_unknown import documented_unknown_mask, without_documented_unknown
 
 
 def _feature_strategy(feature: Mapping[str, Any]) -> str:
@@ -79,6 +80,11 @@ def _encode_feature(
     strategy = _feature_strategy(feature)
     # Failed extractions are not "not documented"; they get their own column.
     failed = failure_flags(frame, feature).reset_index(drop=True)
+    # documented_unknown (the record states the value is unknown) is neither a
+    # level nor missing: it gets its own column in the main and interaction groups.
+    unknown = documented_unknown_mask(series)
+    series = without_documented_unknown(series)
+    excluded = failed | unknown
     main_columns: list[np.ndarray] = []
     main_names: list[str] = []
     interaction_columns: list[np.ndarray] = []
@@ -105,7 +111,7 @@ def _encode_feature(
                 main_names.append(f"{name}:fallback={category}")
                 interaction_columns.append(column)
                 interaction_names.append(f"{name}:fallback={category}")
-        missing = (series.isna() & ~failed).to_numpy(dtype=float)
+        missing = (series.isna() & ~excluded).to_numpy(dtype=float)
         main_columns.append(missing)
         main_names.append(f"{name}:missing")
     else:
@@ -130,11 +136,17 @@ def _encode_feature(
             main_names.append(f"{name}:level={category}")
             interaction_columns.append(column)
             interaction_names.append(f"{name}:level={category}")
-        main_columns.append((missing & ~failed).to_numpy(dtype=float))
+        main_columns.append((missing & ~excluded).to_numpy(dtype=float))
         main_names.append(f"{name}:missing")
     if has_failure_indicator(feature):
         main_columns.append(failed.to_numpy(dtype=float))
         main_names.append(f"{name}:extraction_failed")
+    if bool(unknown.any()):
+        column = unknown.to_numpy(dtype=float)
+        main_columns.append(column)
+        main_names.append(f"{name}:documented_unknown")
+        interaction_columns.append(column)
+        interaction_names.append(f"{name}:documented_unknown")
 
     raw_main = (
         np.column_stack(main_columns).astype(float, copy=False)

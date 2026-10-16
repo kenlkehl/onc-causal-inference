@@ -1113,7 +1113,7 @@ def test_extraction_category_error_lists_allowed_literals_and_prompts_forbid_ali
 
     message = str(error.value)
     assert "value 1 is invalid" in message
-    assert '["not documented","documented"] or null' in message
+    assert '["not documented","documented"], documented_unknown, or null' in message
 
     extraction = stage2_analysis._extraction_prompt(definitions=[definition], rows=[{"row_id": 7, "text": "Prior immunotherapy was documented."}])
     page = stage2_analysis._page_extraction_prompt(definitions=[definition], row={"row_id": 7, "text": "Prior immunotherapy was documented."})
@@ -4748,7 +4748,8 @@ def test_operationalization_validates_structured_conflict_resolution():
     [
         ("binary", ["binary"], "exactly two distinct"),
         ("binary", ["enabled or disabled"], "exactly two distinct"),
-        ("binary", ["disabled", "enabled", "unknown"], "exactly two distinct"),
+        # An "unknown" label is the reserved documented_unknown state, not a category.
+        ("binary", ["disabled", "enabled", "partial"], "exactly two distinct"),
         ("categorical", ["only_state"], "at least two distinct"),
         ("ordinal", ["single_level"], "at least two distinct"),
         ("binary", ["Disabled", "disabled"], "distinct after case and spacing"),

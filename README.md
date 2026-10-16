@@ -35,8 +35,11 @@ Other terms are defined in the [glossary](docs/glossary.md).
 2. **Stage 2: define and measure variables.** An interpretation LLM reads the
    evidence, names candidate clinical variables, and writes a measurement rule
    for each. An extraction LLM measures every variable from every patient's
-   record. Definitions are refined, values harmonized, and uninformative
-   candidates removed.
+   record. Each cell is a value, not documented, documented as unknown (the
+   record states that the value is unknown, pending, not assessed, or
+   equivocal), or an extraction failure, and the three non-value states are
+   encoded and reported separately. Definitions are refined, values harmonized,
+   and uninformative candidates removed.
 3. **Stage 2: select and estimate.** Predictive models choose which variables
    to adjust for. Effect modifiers are selected by pre-specified tests: each
    candidate gets an R-learner projection test and an AIPW projection test of
