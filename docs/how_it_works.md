@@ -51,9 +51,21 @@ the [glossary](glossary.md). The statistical details of Stage 2 selection are in
 Each row of the input dataset is one patient (or one treatment decision) with
 four columns: an identifier, the pretreatment clinical text, a binary treatment
 indicator, and the outcome. **All supplied text is assumed to have been written
-before treatment assignment.** OCI does not check dates to remove
-post-treatment text; preparing a pretreatment record is the analyst's
-responsibility.
+before treatment assignment.** The text comes in one of two forms:
+
+- **One text column.** OCI cannot check when the text was written; preparing a
+  pretreatment record is the analyst's responsibility.
+- **[Dated-notes input](glossary.md#dated-notes-input).** A table with one row
+  per note and an [index date](glossary.md#index-date) per patient. OCI keeps
+  only the notes dated before the index day (optionally also those on it, and
+  optionally only within a look-back window), orders them by date, heads each
+  with its distance from the index date in days rather than a calendar date,
+  and counts every dropped note by reason in `input/`
+  ([Configuration](configuration.md#notes)).
+
+Date filtering does not catch plan statements or copied-forward text that names
+the intended treatment in notes dated before the index date, nor a wrong index
+date; see [Pretreatment text](../README.md#pretreatment-text).
 
 The cohort is split into five outer folds, stratified jointly by treatment and
 outcome. Stage 1 and Stage 2 use the same folds. For each outer fold, the

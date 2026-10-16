@@ -311,6 +311,23 @@ of terms that tend to occur together (topics). Used by `tfidf_topics`.
 
 ## Pipeline
 
+### Index date
+
+The date of each patient's treatment decision or treatment start, which
+separates pretreatment from post-treatment documentation. With
+[dated-notes input](#dated-notes-input) it is a column of the cohort file
+(`notes.index_date_column`), and each note is compared with it by calendar day.
+
+### Dated-notes input
+
+The optional `notes` configuration block: a table with one row per note
+(patient identifier, note date, text, and optionally note type) plus an
+[index date](#index-date) per patient. OCI builds each patient's text from the
+notes dated before the index day (by default), with headers that state days
+relative to the index date and never calendar dates, writes the result to
+`OUTPUT_DIR/input/analysis_cohort.parquet`, and counts every dropped note by
+reason. See [Configuration](configuration.md#notes).
+
 ### Stage 1 and Stage 2
 
 **Stage 1** fits text models that point to parts of the clinical record related

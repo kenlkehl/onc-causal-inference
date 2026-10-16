@@ -64,6 +64,7 @@ A configuration file has these top-level blocks:
 |---|---|---|
 | `dataset` | required | Parquet or CSV file with one row per patient |
 | `output_dir` | required | Run directory; it holds all results and is the resume checkpoint |
+| `notes` | omitted | Dated-notes input: build the patient text from a table of dated notes (see [`notes`](#notes)) |
 | `stage1_template` | `example_configs/all_evidence_stage1_model.json` | Stage 1 text-model template (see [Stage 1 template settings](#stage-1-template-settings)) |
 | `neural_query_template` | `example_configs/all_evidence_neural_query_model.json` | Template for the `neural_query_moments` architecture |
 
@@ -72,14 +73,118 @@ A configuration file has these top-level blocks:
 | Key | Default | Meaning |
 |---|---|---|
 | `unit_id` | `patient_id` | Unique, nonmissing patient identifier |
-| `text` | `clinical_text` | Pretreatment clinical text |
+| `text` | `clinical_text` | Pretreatment clinical text. With [`notes`](#notes), the name of the text column that OCI derives; `dataset` must not contain it |
 | `treatment` | `treatment_indicator` | Binary treatment, 0 or 1 |
 | `outcome` | `outcome_indicator` | Outcome, binary or continuous as declared by `science.outcome_type` |
 
-All supplied text is treated as pretreatment; the workflow adds no date-based
-screening. Columns whose names start with `true_`, `oracle_`, or `ground_truth`
-are treated as [oracle columns](glossary.md#oracle-columns) and are never used
-for modeling.
+All supplied text is treated as pretreatment. A single text column is not
+screened by date; to have OCI keep only notes dated before each patient's index
+date, supply dated notes through the [`notes`](#notes) block. Columns whose
+names start with `true_`, `oracle_`, or `ground_truth` are treated as
+[oracle columns](glossary.md#oracle-columns) and are never used for modeling.
+
+### `notes`
+
+Optional. Without it, the patient text is the `columns.text` column of
+`dataset`. With it, OCI builds that column from a long-format notes table,
+keeping only notes dated before each patient's
+[index date](glossary.md#index-date); [Pretreatment text](../README.md#pretreatment-text)
+explains why. `dataset` then holds one row per patient (identifier, index date,
+treatment, outcome, and any other columns) and no text column.
+
+```json
+"notes": {
+  "path": "notes.parquet",
+  "columns": {"unit_id": "patient_id", "date": "note_date", "text": "note_text", "note_type": null},
+  "index_date_column": "index_date",
+  "include_index_date": false,
+  "lookback_days": null,
+  "note_header": "relative_days"
+}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `path` | required | CSV or Parquet notes table with one row per note; a relative path is resolved like `dataset` |
+| `columns.unit_id` | the value of `columns.unit_id` | Patient identifier column of the notes table. Values must equal the cohort's identifiers, including their type |
+| `columns.date` | `note_date` | Note date column: a date, date-time, or date text (ISO 8601, such as `YYYY-MM-DD`, is safest) |
+| `columns.text` | `note_text` | Note text column |
+| `columns.note_type` | null | Optional note type column. When set, each header ends with the note's type, for example `· Progress note` |
+| `index_date_column` | required | Column of `dataset` holding each patient's index date: the treatment decision or treatment start. Every patient needs a parseable date |
+| `include_index_date` | `false` | Also keep notes dated on the index day. By default only notes dated strictly before the index day are kept, because notes written that day often record the treatment decision or the first administration |
+| `lookback_days` | null (all history) | When a positive integer, drop notes dated more than this many days before the index date |
+| `note_header` | `relative_days` | `relative_days` starts each note with a header such as `[Note 3 of 7 · 42 days before index date]`; `none` adds no header |
+
+Unknown keys under `notes` and `notes.columns` are errors, and `--set
+notes.KEY=VALUE` changes any of them. Only the configured note columns are read
+from the notes table, so its other columns, including any oracle columns, never
+reach the analysis.
+
+**The derived text column.** `columns.text` names the column that OCI creates.
+If `dataset` already has a column of that name, the run stops instead of
+choosing between them; drop or rename that column, or set `columns.text` to an
+unused name.
+
+**How the text is built.** Dates are compared by calendar day. Values with a
+time zone are converted to UTC before the day is taken, so a late-evening note
+written west of UTC can fall on the following day; values without a time zone
+are used as given, so supply local dates when the day boundary matters. Each
+note is counted in the first category that applies:
+
+| Category | Meaning |
+|---|---|
+| `unmatched_patient` | The note's identifier is not in `dataset` |
+| `undated` | The note date is missing or unparseable, so the note cannot be verified as pretreatment |
+| `after_index_date` | Dated after the index day |
+| `on_index_date` | Dated on the index day, unless `include_index_date` is true |
+| `before_lookback` | Dated more than `lookback_days` before the index date |
+| `empty_text` | Otherwise eligible, but the text is empty or only whitespace |
+| `retained` | Kept |
+
+Each patient's retained notes are ordered by date (notes on the same day keep
+their order in the notes table), stripped of surrounding whitespace, and joined
+with a blank line between notes, each after its header unless `note_header` is
+`none`. Headers state days relative to the index date and never a calendar
+date, so absolute dates reach the text, and the prompts, only where the note
+bodies contain them. A patient without retained notes gets empty text, which
+the extraction LLM receives as a record that documents nothing; the run logs a
+warning with the number of such patients.
+
+The run stops when a cohort identifier is missing or repeated, an index date is
+missing or unparseable, a configured column is missing, `dataset` already
+contains the derived text column, or no note identifier matches a cohort
+identifier.
+
+**Files.** OCI writes these files at the first Stage 1 start, and every step
+reads `input/analysis_cohort.parquet` in place of `dataset`:
+
+| File | Contents |
+|---|---|
+| `input/analysis_cohort.parquet` | Every column of `dataset` in its row order, plus the derived text column, and nothing else |
+| `input/pretreatment_notes_manifest.json` | Schema `pretreatment_notes_manifest_v1`: the resolved paths and SHA-256 hashes of `dataset` and the notes table, the `notes` settings, the note counts per category, the number of patients without retained notes, the minimum, median, and maximum retained notes and text characters per patient, the SHA-256 of `analysis_cohort.parquet`, and the creation time |
+| `input/pretreatment_notes_audit.csv` | One row per cohort patient: `unit_id`, the patient's note count in each category except `unmatched_patient`, `retained_characters` (the length of the derived text, headers included), `earliest_retained_days_before_index`, and `latest_retained_days_before_index` |
+
+The audit has no treatment or outcome columns. It is for investigators; no
+model or LLM step reads it.
+
+**Resuming.** Every later start, including `--stage2-only`, `--stage2-reselect`,
+and `--preflight-only`, hashes `dataset` and the notes table again and compares
+them, the `notes` settings, `columns.unit_id`, `columns.text`, and the hash of
+`analysis_cohort.parquet` with the manifest. When everything matches, the
+derived file is reused without being rewritten, which keeps Stage 1 checkpoints
+valid because they identify the analysis file by path, size, and modification
+time. Any difference stops the run and names the mismatch; analyze changed
+notes or settings in a different output directory. A directory that holds a
+dated-notes manifest cannot be resumed without its `notes` block, a `notes`
+block cannot be added to a directory that already holds Stage 1 or Stage 2
+output, and Stage 2-only launches never build the derived file. `--status`
+reads only `progress.json`.
+
+`run_config.json` keeps `dataset` (the cohort file) and the resolved `notes`
+block, so `--config OUTPUT_DIR/run_config.json` reproduces both. The resolved
+Stage 1 configuration (`dataset_path`) and the handoff index (`dataset`) name
+`input/analysis_cohort.parquet`. `oci-evaluate-stage1` reads oracle columns
+from `dataset`, whose rows match the analysis cohort one to one.
 
 ### `science`
 
@@ -422,7 +527,7 @@ file; `--set` can change any other value.
 | Flag | Configuration key | Meaning |
 |---|---|---|
 | `--config PATH` | — | JSON or YAML configuration, or a saved `OUTPUT_DIR/run_config.json` |
-| `--dataset PATH` | `dataset` | Input Parquet or CSV dataset |
+| `--dataset PATH` | `dataset` | Input Parquet or CSV dataset (with [`notes`](#notes), the cohort file) |
 | `--output-dir PATH` | `output_dir` | Run directory and resume checkpoint |
 | `--unit-id-column NAME` | `columns.unit_id` | Patient identifier column (default `patient_id`) |
 | `--text-column NAME` | `columns.text` | Clinical text column (default `clinical_text`) |
@@ -697,6 +802,7 @@ OUTPUT_DIR/
 ├── resolved_neural_query_config.json    resolved neural-query template
 ├── progress.json                        run and component status (--status)
 ├── logs/workflow.log                    full log, including Stage 2 request events
+├── input/                               [notes] analysis_cohort.parquet, pretreatment_notes_manifest.json, pretreatment_notes_audit.csv
 ├── stage1_architectures/                [explicit selection] manifest.json and one evidence.jsonl per architecture
 ├── components/
 │   ├── embedding_cache/                 chunk embedding cache
@@ -875,6 +981,9 @@ interrupted component re-enters at its first incomplete step.
   inputs are unchanged are reused from each context's `checkpoints/`. For
   `tfidf`, the per-context markers are also removed, so every context is
   refit.
+- With [`notes`](#notes), `input/analysis_cohort.parquet` is built once and
+  verified against its manifest on every start; a changed notes table, cohort
+  file, or `notes` setting stops the run.
 - Stage 1 completion markers do not detect every changed scientific setting.
   Use a different output directory for a scientifically different run. When a
   Stage 1 text producer changes, rerun `text_models` and `handoff`, and move
@@ -928,6 +1037,10 @@ report. It checks that:
 - the saved Stage 1 settings match the requested ones;
 - the handoff and every Stage 1 component are complete and their artifacts
   exist;
+- with [`notes`](#notes), the cohort file, the notes table, the `notes`
+  settings, and `input/analysis_cohort.parquet` match the dated-notes manifest
+  (the report then names the derived file as `dataset` and the cohort file as
+  `source_dataset`);
 - the dataset's content and row order match Stage 1, and unit IDs are unique;
 - the saved outer and inner splits partition the data exactly and agree with
   the TF-IDF evidence;
@@ -1013,7 +1126,7 @@ workflow output root.
 
 | Key | Meaning |
 |---|---|
-| `dataset`, `handoff_path`, `split_provenance_path` | Inputs from the source run; use the source run's clinical question, columns, inner-fold count, and seed |
+| `dataset`, `handoff_path`, `split_provenance_path` | Inputs from the source run; use the source run's clinical question, columns, inner-fold count, and seed. For a source run with [`notes`](#notes), `dataset` is its `OUTPUT_DIR/input/analysis_cohort.parquet`, not the cohort file |
 | `output_dir` | Stage 2 output directory |
 | `report_dir` | Launcher status files: `status.json`, `preflight.json` (input hashes, git commit, model identity), `result.json`, and a `run.lock` that prevents concurrent launches |
 | `stage2` | A `stage2` block with the same keys as the workflow configuration. The default for `workers` is computed from 8 |

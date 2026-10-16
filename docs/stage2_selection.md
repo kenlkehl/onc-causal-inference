@@ -1386,9 +1386,17 @@ data, `posthoc_oracle_ite_metrics.json` and
   biased roughly in proportion to the product of their errors, whichever
   learner is used.
 - **Pretreatment text.** The analysis assumes that every supplied note was
-  written before treatment assignment. OCI does not verify this. Post-treatment
-  text, such as documentation of early response or toxicity, can act as a
-  mediator or collider and bias both the ATE and the CATEs.
+  written before treatment assignment. Post-treatment text, such as
+  documentation of early response or toxicity, can act as a mediator or
+  collider and bias both the ATE and the CATEs, and text that names the planned
+  treatment undermines overlap. OCI cannot verify the assumption for a single
+  text column. [Dated-notes input](configuration.md#notes) mitigates the risk:
+  notes dated after the index day, and by default those dated on it, never
+  enter the analysis text, and every dropped note is counted. What remains
+  unchecked is text without a trustworthy date (a single text column, or a note
+  date that does not reflect when its content was written), plan statements
+  and copied-forward text that name the intended treatment in notes dated
+  before the index date, and a wrong index date.
 - **Unmeasured confounding.** The estimates are causal only if, given the
   extracted variables, treatment assignment is unconfounded, every eligible
   patient could have received either treatment (positivity), and the usual

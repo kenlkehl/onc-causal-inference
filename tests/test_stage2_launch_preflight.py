@@ -27,8 +27,10 @@ def tree(root):
     }
 
 
-def saved_fixture(tmp_path, managed=False):
+def saved_fixture(tmp_path, managed=False, prepare_raw=None):
     raw, _ = _inputs(tmp_path, components=())
+    if prepare_raw is not None:
+        prepare_raw(raw, tmp_path)
     raw["run"]["mode"] = "stage2"
     raw["stage2"] = {
         "endpoint": "http://primary.test/v1",
@@ -43,7 +45,7 @@ def saved_fixture(tmp_path, managed=False):
     write(root / "run_config.json", config.as_dict())
     applied = workflow._load_stage1_template(config)
     write(root / "resolved_stage1_model_config.json", applied)
-    data = pd.read_parquet(config.dataset)
+    data = workflow._load_analysis_dataset(config, materialize=True)
     identity = tfidf_topic_dataset_fingerprints(
         data, workflow.ExperimentConfig.from_dict({"applied_inference": applied}).applied_inference
     )
@@ -95,7 +97,7 @@ def saved_fixture(tmp_path, managed=False):
     write(
         root / "handoff/index.json",
         {
-            "dataset": str(config.dataset),
+            "dataset": str(config.analysis_dataset),
             "columns": {
                 "unit_id": config.unit_id_column,
                 "text": config.text_column,

@@ -128,6 +128,7 @@ def preflight_stage2(
         "embedding_model",
         "stage1_overrides",
         "neural_query_overrides",
+        "notes",
     ):
         if getattr(saved, name) != getattr(config, name):
             raise RuntimeError(f"saved Stage 1 configuration mismatch: {name}")
@@ -136,7 +137,7 @@ def preflight_stage2(
     if marker.get("status") != "complete":
         raise RuntimeError("Stage 1 handoff is not complete")
     index = _object(handoff / "index.json")
-    if Path(index.get("dataset", "")).resolve() != config.dataset:
+    if Path(index.get("dataset", "")).resolve() != config.analysis_dataset:
         raise RuntimeError("handoff dataset does not match saved configuration")
     columns = {
         "unit_id": config.unit_id_column,
@@ -245,7 +246,7 @@ def preflight_stage2(
         raise RuntimeError("completed Stage 1 embedding cache is missing")
     if cache and (
         cache["semantic_metadata"].get("num_samples") != len(data)
-        or Path(cache["semantic_metadata"]["dataset_path"]).resolve() != config.dataset
+        or Path(cache["semantic_metadata"]["dataset_path"]).resolve() != config.analysis_dataset
     ):
         raise RuntimeError("Stage 1 embedding cache dataset identity mismatch")
     stage2 = root / "stage2"
@@ -303,7 +304,12 @@ def preflight_stage2(
     return {
         "status": "validated",
         "read_only": True,
-        "dataset": str(config.dataset),
+        "dataset": str(config.analysis_dataset),
+        **(
+            {"source_dataset": str(config.dataset), "notes": config.notes.as_dict()}
+            if config.notes is not None
+            else {}
+        ),
         "output_dir": str(root),
         "rows": len(data),
         "columns": columns,

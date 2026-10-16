@@ -57,7 +57,8 @@ Other terms are defined in the [glossary](docs/glossary.md).
 
 Everything runs within outer cross-validation folds, so each patient's
 prediction comes from a pipeline that never saw that patient's outcome. All
-supplied text is assumed to be pretreatment. Variable roles are modeling
+supplied text is assumed to be pretreatment (see
+[Pretreatment text](#pretreatment-text)). Variable roles are modeling
 decisions, not proof of causal structure; causal interpretation still requires
 no unmeasured confounding, adequate overlap, and accurate measurement. See
 [How OCI works](docs/how_it_works.md) for the full walkthrough.
@@ -94,7 +95,7 @@ decision):
 | Column (default name) | Content |
 |---|---|
 | `patient_id` | Unique identifier |
-| `clinical_text` | The patient's pretreatment clinical record |
+| `clinical_text` | The patient's pretreatment clinical record, or built by OCI from dated notes ([Pretreatment text](#pretreatment-text)) |
 | `treatment_indicator` | Treatment, coded 0/1 |
 | `outcome_indicator` | Outcome, binary 0/1 or continuous |
 
@@ -129,6 +130,59 @@ matched-batch evidence); review these before adapting it. Useful options:
 
 All 29 flags and every configuration key are listed in
 [Configuration](docs/configuration.md).
+
+### Pretreatment text
+
+OCI assumes that every word of the patient text was documented before the
+treatment decision. It cannot verify this for a single text column, and text
+written later breaks the analysis in two ways:
+
+- **Post-treatment information biases the estimates.** Response, toxicity, or
+  anything else the treatment caused is a consequence of treatment, not a
+  reason for it. Adjusting for it, or letting it define subgroups, biases the
+  ATE and the CATEs.
+- **Direct treatment proxies break overlap.** An order, a consent, or a plan
+  that names the regimen predicts treatment almost perfectly, so propensities
+  approach 0 or 1 and few patients remain comparable.
+
+In practice:
+
+- Include only notes dated before the index date (the treatment decision or
+  treatment start).
+- Decide deliberately about notes written on the index day. They often record
+  the decision itself or the first administration, so OCI leaves them out by
+  default.
+- Review the retained notes anyway. Notes dated before the index date can still
+  contain plan statements ("will start carboplatin and pemetrexed") or
+  copied-forward text that names the intended treatment, and date filtering
+  does not remove them.
+
+When each note has a date, OCI can apply the date rule itself. Supply a notes
+table with one row per note and a `notes` block; `dataset` then holds one row
+per patient with an index date column and no text column, and `columns.text`
+names the text column that OCI builds:
+
+```json
+"dataset": "cohort.csv",
+"columns": {"unit_id": "patient_id", "text": "clinical_text", "treatment": "treatment_indicator", "outcome": "outcome_indicator"},
+"notes": {
+  "path": "notes.parquet",
+  "columns": {"unit_id": "patient_id", "date": "note_date", "text": "note_text", "note_type": null},
+  "index_date_column": "index_date",
+  "include_index_date": false
+}
+```
+
+OCI keeps each patient's notes dated strictly before the index day, orders
+them by date, starts each with a header such as
+`[Note 3 of 7 · 42 days before index date]` (never a calendar date), and writes
+the cohort with the derived text to `OUTPUT_DIR/input/analysis_cohort.parquet`.
+Next to it, `pretreatment_notes_manifest.json` counts the notes kept and
+dropped, by reason, and `pretreatment_notes_audit.csv` gives the counts per
+patient. Every step of the run reads the derived file. A resumed run reuses it
+unchanged and stops if the notes table, the cohort file, or the `notes` settings
+differ from the ones it was built from. All keys and rules are in
+[Configuration](docs/configuration.md#notes).
 
 ## Run a bundled synthetic cohort
 
@@ -195,6 +249,7 @@ use a separate output directory for a different study. Details are in
 
 | Path in the output directory | Contents |
 |---|---|
+| `input/pretreatment_notes_manifest.json`, `input/pretreatment_notes_audit.csv` | With dated notes: notes kept and dropped by reason, overall and per patient |
 | `handoff/evidence.jsonl` | Frozen Stage 1 evidence passed to Stage 2 |
 | `stage2/outer_NNN/final_definitions.json` | Each outer fold's retained variables, roles, definitions, each modifier's test evidence, and the final estimator |
 | `stage2/outer_NNN/selection/modifier_tests.json` | Every candidate's modifier tests, combined p- and q-values, selection, and labels |

@@ -16,6 +16,11 @@ The module also provides:
   ``run_config.json`` so that a later Stage 2-only run can reuse them;
 * the optional Stage 1 architecture selector, which is recorded in
   ``stage1_architectures/manifest.json`` and cannot change on resume;
+* the optional dated-notes input (``notes``), which builds the analysis text
+  from notes dated before each patient's index date into
+  ``input/analysis_cohort.parquet`` once per output directory
+  (``pretreatment_notes.py``); every step then reads that file instead of
+  ``dataset``;
 * guarded Stage 2 reselection (``--stage2-reselect``).  It archives a completed
   Stage 2 selection and everything downstream of it under
   ``stage2/reselection_archives`` and reruns selection from the frozen feature
@@ -53,6 +58,14 @@ from .plain_handoff_stage2_analysis import (
     _frame_fingerprint,
     frozen_measurement_definition_identity,
     frozen_preselection_review_policy,
+)
+from .pretreatment_notes import (
+    PretreatmentNotesConfig,
+    analysis_cohort_path,
+    check_output_directory as check_notes_output_directory,
+    notes_config_from_mapping,
+    prepare_analysis_cohort,
+    read_table,
 )
 from .stage2_elastic_net_selection import TEMPORAL_SCOPE as STAGE2_INPUT_TEMPORAL_SCOPE
 from .stage2_sequential_consolidation import (
@@ -349,12 +362,30 @@ class ResearchStage1Config:
     stage1_overrides: Mapping[str, Any]
     neural_query_overrides: Mapping[str, Any]
     log_level: str = "INFO"
+    notes: PretreatmentNotesConfig | None = None
+
+    @property
+    def analysis_dataset(self) -> Path:
+        """The cohort file that every workflow step analyzes.
+
+        This is ``dataset`` itself, or with dated notes the derived
+        ``OUTPUT_DIR/input/analysis_cohort.parquet``.
+        """
+
+        if self.notes is None:
+            return self.dataset
+        return analysis_cohort_path(self.output_dir)
 
     def as_dict(self) -> dict[str, Any]:
         values = asdict(self)
         # Keep legacy run_config.json stable when the new selector was omitted.
         if self.stage1_architectures is None:
             values.pop("stage1_architectures", None)
+        # Likewise for runs on one text column; dated notes keep their file form.
+        if self.notes is None:
+            values.pop("notes", None)
+        else:
+            values["notes"] = self.notes.as_dict()
         return values
 
 
@@ -449,10 +480,17 @@ def compile_config(
 
     stage1_template = raw.get("stage1_template", DEFAULT_STAGE1_TEMPLATE)
     neural_template = raw.get("neural_query_template", DEFAULT_NEURAL_QUERY_TEMPLATE)
+    unit_id_column = str(columns.get("unit_id", "patient_id"))
+    # run_config.json stores the notes block in the configuration-file form.
+    notes = notes_config_from_mapping(
+        raw.get("notes"),
+        config_dir=config_dir,
+        default_unit_id_column=unit_id_column,
+    )
     return ResearchStage1Config(
         dataset=Path(_resolve_relative_path(dataset_value, base=config_dir)),
         output_dir=Path(_resolve_relative_path(output_value, base=config_dir)),
-        unit_id_column=str(columns.get("unit_id", "patient_id")),
+        unit_id_column=unit_id_column,
         text_column=str(columns.get("text", "clinical_text")),
         treatment_column=str(columns.get("treatment", "treatment_indicator")),
         outcome_column=str(columns.get("outcome", "outcome_indicator")),
@@ -486,6 +524,7 @@ def compile_config(
         stage1_overrides=copy.deepcopy(dict(science.get("stage1") or {})),
         neural_query_overrides=copy.deepcopy(dict(science.get("neural_queries") or {})),
         log_level=str(run.get("log_level", "INFO")).upper(),
+        notes=notes,
     )
 
 
@@ -500,7 +539,7 @@ def _load_stage1_template(config: ResearchStage1Config) -> dict[str, Any]:
     applied = _deep_merge(applied, config.stage1_overrides)
     applied.update(
         {
-            "dataset_path": str(config.dataset),
+            "dataset_path": str(config.analysis_dataset),
             "text_column": config.text_column,
             "treatment_column": config.treatment_column,
             "outcome_column": config.outcome_column,
@@ -1466,7 +1505,7 @@ def _handoff_component(
         evidence_path.unlink(missing_ok=True)
         raise RuntimeError("handoff has no completed Stage 1 evidence rows")
     index = {
-        "dataset": str(context.config.dataset),
+        "dataset": str(context.config.analysis_dataset),
         "columns": {
             "unit_id": context.config.unit_id_column,
             "text": context.config.text_column,
@@ -1575,6 +1614,44 @@ def _has_completed_pipeline_work(output_dir: Path) -> bool:
     return any(root.is_dir() and next(root.rglob("complete.json"), None) for root in roots)
 
 
+def _load_analysis_dataset(
+    config: ResearchStage1Config,
+    *,
+    materialize: bool = False,
+) -> pd.DataFrame:
+    """Read the cohort that every workflow step analyzes and check its columns.
+
+    Without ``notes`` this reads ``config.dataset``. With ``notes`` it returns
+    the derived ``input/analysis_cohort.parquet``: ``materialize`` (the Stage 1
+    context) builds it when the directory has no dated-notes manifest yet, and
+    every call with a manifest verifies the sources, settings, and derived file
+    against it and reuses the file without rewriting it.
+    """
+
+    if config.notes is None:
+        check_notes_output_directory(config.output_dir, None)
+        dataset = read_table(config.dataset)
+    else:
+        dataset = prepare_analysis_cohort(
+            cohort_path=config.dataset,
+            notes=config.notes,
+            output_dir=config.output_dir,
+            unit_id_column=config.unit_id_column,
+            text_column=config.text_column,
+            materialize=materialize,
+        )
+    required = {
+        config.unit_id_column,
+        config.text_column,
+        config.treatment_column,
+        config.outcome_column,
+    }
+    missing = sorted(required - set(dataset.columns))
+    if missing:
+        raise ValueError(f"dataset is missing configured columns: {missing}")
+    return dataset.reset_index(drop=True)
+
+
 class ResearchAllEvidenceWorkflow:
     """Run and resume the plain-directory all-evidence workflow."""
 
@@ -1584,6 +1661,7 @@ class ResearchAllEvidenceWorkflow:
         *,
         component_runners: Mapping[str, ComponentRunner] | None = None,
     ) -> None:
+        check_notes_output_directory(config.output_dir, config.notes)
         saved_selection = _saved_architecture_selection(config.output_dir)
         if (
             config.stage1_architectures is not None
@@ -1715,21 +1793,7 @@ class ResearchAllEvidenceWorkflow:
 
             neural_config = NeuralQueryAgenticForestConfig(**neural_mapping)
             neural_config.validate()
-        if self.config.dataset.suffix.lower() in {".parquet", ".pq"}:
-            dataset = pd.read_parquet(self.config.dataset)
-        elif self.config.dataset.suffix.lower() == ".csv":
-            dataset = pd.read_csv(self.config.dataset)
-        else:
-            raise ValueError("dataset must be Parquet or CSV")
-        required = {
-            self.config.unit_id_column,
-            self.config.text_column,
-            self.config.treatment_column,
-            self.config.outcome_column,
-        }
-        missing = sorted(required - set(dataset.columns))
-        if missing:
-            raise ValueError(f"dataset is missing configured columns: {missing}")
+        dataset = _load_analysis_dataset(self.config, materialize=True)
         if self.config.stage1_architectures is not None:
             manifest_path = (
                 self.config.output_dir / "stage1_architectures" / "manifest.json"
@@ -1748,7 +1812,7 @@ class ResearchAllEvidenceWorkflow:
                 )
         return Stage1RunContext(
             config=self.config,
-            dataset=dataset.reset_index(drop=True),
+            dataset=dataset,
             applied_config=experiment.applied_inference,
             neural_query_config=neural_config,
             selected_architectures=tuple(selected),
@@ -1777,28 +1841,14 @@ class ResearchAllEvidenceWorkflow:
                 "applied_inference": applied_mapping,
             }
         )
-        if self.config.dataset.suffix.lower() in {".parquet", ".pq"}:
-            dataset = pd.read_parquet(self.config.dataset)
-        elif self.config.dataset.suffix.lower() == ".csv":
-            dataset = pd.read_csv(self.config.dataset)
-        else:
-            raise ValueError("dataset must be Parquet or CSV")
-        required = {
-            self.config.unit_id_column,
-            self.config.text_column,
-            self.config.treatment_column,
-            self.config.outcome_column,
-        }
-        missing = sorted(required - set(dataset.columns))
-        if missing:
-            raise ValueError(f"dataset is missing configured columns: {missing}")
+        dataset = _load_analysis_dataset(self.config)
         selected = self.config.stage1_architectures or legacy_enabled_stage1_architectures(
             experiment.applied_inference,
             outcome_type=self.config.outcome_type,
         )
         return Stage1RunContext(
             config=self.config,
-            dataset=dataset.reset_index(drop=True),
+            dataset=dataset,
             applied_config=experiment.applied_inference,
             neural_query_config=None,
             selected_architectures=tuple(selected),
@@ -1969,23 +2019,7 @@ def _stage2_reselection_policy_fingerprint(config: ResearchStage1Config) -> str:
 
 
 def _load_reselection_dataset(config: ResearchStage1Config) -> pd.DataFrame:
-    suffix = config.dataset.suffix.lower()
-    if suffix in {".parquet", ".pq"}:
-        dataset = pd.read_parquet(config.dataset)
-    elif suffix == ".csv":
-        dataset = pd.read_csv(config.dataset)
-    else:
-        raise ValueError("dataset must be Parquet or CSV")
-    required = {
-        config.unit_id_column,
-        config.text_column,
-        config.treatment_column,
-        config.outcome_column,
-    }
-    missing = sorted(required - set(dataset.columns))
-    if missing:
-        raise ValueError(f"dataset is missing configured columns: {missing}")
-    return dataset.reset_index(drop=True)
+    return _load_analysis_dataset(config)
 
 
 def _heldout_measurement_cache_snapshot(

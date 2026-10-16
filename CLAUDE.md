@@ -29,7 +29,7 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 | `python scripts/run_all_evidence.py` | `oci/inference/research_all_evidence_workflow.py` (`build_parser`, `main`) | Run, resume, or relaunch the all-evidence workflow (29 flags; everything else via `--set KEY=VALUE`) |
 | `./run_synthetic.sh COHORT [OUT]` | `run_synthetic.sh`, `scripts/presets/{external,h100x8,rtxpro6000x8}.env` | Run a bundled synthetic cohort with a serving preset |
 | `oci-evaluate-stage1` | `oci/evaluation/stage1.py` | Oracle-safe evaluation of frozen Stage 1 architectures |
-| `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only) |
+| `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only; for a dated-notes run, `dataset` is its `input/analysis_cohort.parquet`) |
 | `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
 | `python -m synthetic_data.cli` | `synthetic_data/` | Synthetic cohort generator |
 
@@ -58,6 +58,8 @@ oci/
 └── inference/
     │ # Workflow and Stage 1
     ├── research_all_evidence_workflow.py   # Components, config compilation, resume, reselection
+    ├── pretreatment_notes.py         # Optional dated-notes input (`notes`): builds and verifies
+    │                                 #   input/analysis_cohort.parquet, its manifest, and the audit
     ├── stage1_architectures.py       # Canonical registry and selector semantics
     ├── stage1_architecture_artifacts.py    # Per-architecture views for explicit selections
     ├── stage1_checkpointing.py       # Per-context Stage 1 checkpoints
@@ -180,7 +182,15 @@ budget/estimator choice; concept review requires it. Details:
 
 Configuration rules:
 
-- Unknown keys under `stage2` are errors (`_reject_unknown_stage2_keys`).
+- Unknown keys under `stage2` are errors (`_reject_unknown_stage2_keys`), and
+  so are unknown keys under `notes`.
+- With `notes` (dated-notes input), every loader reads
+  `input/analysis_cohort.parquet` (`ResearchStage1Config.analysis_dataset`, via
+  `_load_analysis_dataset`), which the first Stage 1 start builds. Later starts
+  verify the source hashes, the `notes` settings, and the derived file against
+  `input/pretreatment_notes_manifest.json` and reuse it without rewriting it
+  (Stage 1 checkpoints use its path, size, and mtime); any mismatch fails
+  closed. `run_config.json` omits `notes` when it is not configured.
 - Stage 2 requires the frozen split file
   `components/tfidf/split_provenance.jsonl` and never resamples folds.
 - `run_config.json` redacts API keys; Stage 2 checks model identity
@@ -207,6 +217,11 @@ Configuration rules:
 - Never use oracle columns (`true_*`, `oracle_*`, `ground_truth*`) during
   discovery, extraction, fitting, selection, or handoff construction. Join them
   only after predictions are frozen and hashed.
+- In dated-notes mode, notes dated after the index date (and, unless
+  `include_index_date` is set, on it) never enter the analysis text; note
+  headers state relative days, so calendar dates never enter prompts through
+  them. Only the configured note columns are read from the notes table, and the
+  per-patient audit is never read by any modeling or LLM step.
 - Hash frozen Stage 1 artifacts before loading oracle data for evaluation.
 - Keep outer held-out rows unavailable to inner-fold discovery, review,
   selection, and definition search.
