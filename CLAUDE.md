@@ -153,7 +153,9 @@ score the held-out rows when their fingerprint verifies) of the
 estimator ensemble (unweighted mean of `causal_forest`, `linear_interactions`,
 and `dina` for binary outcomes; the interaction model leaves the selected
 modifiers' interactions and main effects unpenalized, guarded by events per
-parameter with a separation fallback) → cross-fitted predictions, AIPW ATE, and
+parameter with a separation fallback) → cross-fitted predictions (with the
+reporting-only `outside_overlap` flag), the co-primary clipped AIPW ATE and
+overlap-weighted ATO (`stage2.lead_estimand` labels which leads), and
 `heterogeneity_diagnostics.json` (the pooled BLP `beta2` > 0 is the
 pre-specified primary heterogeneity test; GATES and RATE are secondary),
 including the reporting-only outer-fold confirmation of the selected modifiers

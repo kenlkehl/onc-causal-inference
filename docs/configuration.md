@@ -222,6 +222,8 @@ defaults the input budget per extraction request is
 | `max_extraction_failure_fraction` | 0.10 | Candidates whose training [extraction failures](glossary.md#extraction-failure) exceed this fraction of patients are dropped |
 | `min_propensity`, `max_propensity` | null | Inclusive [propensity eligibility bounds](glossary.md#propensity-eligibility-and-clipping) for effect estimation; either may be set alone. Set them here, not under `statistical_selection` |
 | `propensity_clip` | 0.02 | Clipping of AIPW denominators to `[c, 1 − c]`; excludes no one. Under the `orthogonal_tests` modifier rule it also clips the AIPW projection test, so it is part of the selection identity |
+| `lead_estimand` | `"ate"` | Which co-primary estimand the study pre-specifies to lead with: `"ate"` (clipped AIPW ATE over eligible patients) or `"ato"` (overlap-weighted ATE). Changes only the order and role labels in `causal_estimate.json`, never the computation; not part of the selection or fold estimation identity (pooled outputs are rewritten whenever Stage 2 runs; on a completed run use `--rerun stage2`) |
+| `overlap_flag_bounds` | `[0.05, 0.95]` | Bounds of the reporting-only `outside_overlap` flag in `cross_fitted_predictions.csv` (two numbers, `0 < low < high < 1`). Never removes patients or changes estimates; trimming is `min_propensity`/`max_propensity` |
 | `nuisance_learner` | `"super_learner"` | Learner for the final-estimation nuisances `e`, `μ0`, `μ1` (shared with the modifier tests): `"super_learner"` or `"elastic_net"` ([Nuisance learner](stage2_selection.md#nuisance-learner)). The selection-stage role models and the causal forest's internal nuisances are elastic nets either way. Part of the estimation identity and, under `orthogonal_tests`, of the selection identity |
 | `super_learner` | see below | Super-learner settings, used when `nuisance_learner` is `"super_learner"` |
 | `estimation_trees` | 200 | Trees in the final causal forest and, under `balanced_evidence`, in the forests used for modifier-budget selection (minimum 10). Under `orthogonal_tests` selection does not depend on it, so a change refits only the final estimation |
@@ -728,8 +730,8 @@ written and the handoff streams the component evidence directly.
 
 | File | Content |
 |---|---|
-| `stage2/causal_estimate.json` | Cross-fitted AIPW ATE, standard error, and 95% CI; overlap and nuisance calibration summaries; mean estimated CATE; oracle correlations when available |
-| `stage2/cross_fitted_predictions.csv` | One row per patient from its outer held-out fold: `estimated_cate` (a risk difference for binary outcomes), `aipw_score`, `propensity`, `mu0`, `mu1`, `effect_eligible`, `outer_fold`, plus per-estimator CATE columns under the ensemble (see [Modifier-selection and ensemble outputs](#modifier-selection-and-ensemble-outputs)) |
+| `stage2/causal_estimate.json` | `co_primary_estimands`: the clipped AIPW ATE and the ATO, per fold and pooled, each with its standard error, 95% CI, target population, method, and role (`lead_estimand` and `order` set which leads), plus `ate_minus_ato`; `overlap_flags` counts; the top-level AIPW `ate`, standard error, and 95% CI; overlap and nuisance calibration summaries; mean estimated CATE; oracle correlations when available |
+| `stage2/cross_fitted_predictions.csv` | One row per patient from its outer held-out fold: `estimated_cate` (a risk difference for binary outcomes), `aipw_score`, `propensity`, `mu0`, `mu1`, `effect_eligible`, `outside_overlap` (reporting only: `propensity` outside `stage2.overlap_flag_bounds`), `outer_fold`, plus per-estimator CATE columns under the ensemble (see [Modifier-selection and ensemble outputs](#modifier-selection-and-ensemble-outputs)) |
 | `stage2/heterogeneity_diagnostics.json` | Whether the CATE predictions track real heterogeneity ([BLP, GATES, CLAN, RATE](glossary.md#blp-gates-clan-and-rate)); see [Stage 2 selection](stage2_selection.md) |
 | `stage2/features_by_outer_fold.jsonl` and `stage2/outer_00k/final_definitions.json` | Which variables were used in each fold, their roles and definitions, and the chosen estimator |
 | `stage2/outer_00k/selection/modifier_tests.json` | Every candidate's modifier tests and the selection (`orthogonal_tests`) |
@@ -816,7 +818,11 @@ design columns; `pooled` row-weighted means with each value's fold `range`),
 `gates.*.calibration` (slope, standard error, one-sided p-value for slope > 0,
 two-sided p-value for slope = 1), and `primary_heterogeneity_test` (the pooled BLP
 `beta2`, its standard error, interval, and one-sided p-value, labeled
-pre-specified). `causal_estimate.json` repeats `primary_heterogeneity_test`, the
+pre-specified). It also contains `clip_sensitivity` (per fold and pooled `points`
+with `clip`, `configured`, `rows`, `estimate`, `standard_error`, and
+`confidence_interval_95`) and `overlap_flags` (`bounds` and per-fold and pooled
+`rows`, `outside_overlap`, `fraction`, `below_lower_bound`, `above_upper_bound`).
+`causal_estimate.json` repeats `primary_heterogeneity_test`, the
 pooled decomposition per column, and the pooled GATES calibration and group mean
 predicted CATEs under `heterogeneity_diagnostics`.
 

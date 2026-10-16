@@ -198,7 +198,7 @@ use a separate output directory for a different study. Details are in
 | `stage2/outer_NNN/selection/modifier_count/selection.json` | Summary of the modifier selection and the estimator policy |
 | `stage2/outer_NNN/estimation/diagnostics.json` | Model fit, nuisance calibration, overlap, and fold ATE |
 | `stage2/cross_fitted_predictions.csv` | One held-out prediction per patient |
-| `stage2/causal_estimate.json` | Pooled ATE with standard error and a diagnostics summary |
+| `stage2/causal_estimate.json` | Co-primary ATE and ATO (per fold and pooled), overlap-flag counts, and a diagnostics summary |
 | `stage2/heterogeneity_diagnostics.json` | Heterogeneity, overlap, and balance diagnostics, and the outer-fold confirmation of the selected modifiers |
 | `stage2/posthoc_oracle_ite_metrics.json` | Comparison with true effects (synthetic data only) |
 
@@ -232,12 +232,34 @@ use a separate output directory for a different study. Details are in
   built from the observed outcome and the nuisance predictions.
 - `effect_eligible` is false for patients outside the propensity bounds, if set;
   those patients have no `estimated_cate` or `aipw_score`.
+- `outside_overlap` is true when the patient's final held-out `propensity` lies
+  outside `stage2.overlap_flag_bounds` (default 0.05 to 0.95). It is a reporting
+  flag only: it never removes patients or changes any estimate.
 
-**The ATE** in `causal_estimate.json` (`ate`) is the mean of `aipw_score`, with
-standard error `sd(aipw_score)/√n`. It is a separate estimate from
-`mean_estimated_cate`, the mean of the model's predictions: an effect model can
-predict nearly constant effects while the AIPW ATE is clearly nonzero, or the
-reverse.
+**Co-primary estimands.** `causal_estimate.json` reports two treatment effects
+side by side under `co_primary_estimands`, per fold and pooled, each with a
+standard error, a 95% interval, and a plain-language description of its target
+population:
+
+- **ATE** (`ate`): the clipped AIPW average treatment effect over all
+  effect-eligible patients, the mean of `aipw_score` with standard error
+  `sd(aipw_score)/√n`.
+- **ATO** (`ato`): the overlap-weighted average treatment effect, which weights
+  each patient by `e(1 − e)` and so targets patients in clinical equipoise, who
+  could plausibly have received either treatment.
+
+Choose the lead estimand before looking at results and record it in
+`stage2.lead_estimand` (`"ate"` by default, or `"ato"`); it changes only the
+order and labels, never the computation. The ATE answers "what if everyone
+eligible were treated"; the ATO answers it for the patients in whom both
+treatments are used and is more stable when propensities are extreme. A large
+gap between them (`ate_minus_ato`) means the effect differs between those
+populations or the ATE leans on patients with extreme propensities; with the
+trimming curve and the clip sensitivity it is a secondary sensitivity
+analysis. The ATE is also repeated at the top level as `ate`. It is a separate
+estimate from `mean_estimated_cate`, the mean of the model's predictions: an
+effect model can predict nearly constant effects while the AIPW ATE is clearly
+nonzero, or the reverse.
 
 **Modifier confirmation** (`modifier_confirmation` in
 `heterogeneity_diagnostics.json`, summarized in `causal_estimate.json`)

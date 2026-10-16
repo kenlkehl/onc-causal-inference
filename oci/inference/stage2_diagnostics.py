@@ -20,6 +20,10 @@ Diagnostics (all reported per outer fold and pooled):
 * Overlap: overlap-weighted ATE (Li, Morgan and Zaslavsky; Hajek and augmented)
   with its effective sample size, inverse-propensity weight summaries (Kish ESS,
   maximum weight) and an AIPW trimming curve (Crump et al.).
+* Clip sensitivity: the AIPW ATE recomputed at propensity clips 0.01, 0.02
+  and 0.05 (and the configured clip), a secondary sensitivity analysis.
+* Overlap flags (reporting only): counts of held-out patients whose estimated
+  propensity lies outside ``stage2.overlap_flag_bounds``.
 * Balance: IPW-weighted standardized mean differences of every measured
   candidate, with a summary of variables whose ``|SMD| > 0.1``.
 * Modifier confirmation (reporting only): each fold's selected effect
@@ -84,7 +88,7 @@ from scipy.stats import norm
 
 LOGGER = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "stage2_heterogeneity_diagnostics_v3_cate_variance_decomposition"
+SCHEMA_VERSION = "stage2_heterogeneity_diagnostics_v4_overlap_estimands"
 DIAGNOSTICS_FILENAME = "heterogeneity_diagnostics.json"
 TRIMMING_THRESHOLDS = (0.0, 0.01, 0.025, 0.05, 0.1, 0.15)
 SMD_THRESHOLD = 0.1
@@ -154,6 +158,19 @@ INTERPRETATIONS = {
         "between the ATO and the AIPW ATE means the ATE depends on patients "
         "with extreme propensities, or that effects differ in the overlap "
         "region. The effective sample size is that of the overlap weights."
+    ),
+    "clip_sensitivity": (
+        "Secondary sensitivity analysis: the AIPW ATE over the effect-eligible rows "
+        "recomputed with the propensity clipped to [c, 1 - c] for several c, using the "
+        "same psi construction; configured marks the clip used for the reported ATE. "
+        "Clipping changes the weights, not the population; estimates that move with c "
+        "show dependence on patients with extreme propensities."
+    ),
+    "overlap_flags": (
+        "Reporting only: held-out patients whose final estimated propensity lies outside "
+        "stage2.overlap_flag_bounds (the outside_overlap column of "
+        "cross_fitted_predictions.csv), per fold and pooled. The flag never removes "
+        "patients or changes estimates."
     ),
     "ipw_weights": (
         "Inverse-propensity weights 1/e (treated) and 1/(1-e) (controls) as "
@@ -249,6 +266,8 @@ DECOMPOSITION_POOLING_RULE = (
 
 POOLING_RULES = {
     "cate_variance_decomposition": DECOMPOSITION_POOLING_RULE,
+    "clip_sensitivity": "recomputed on the pooled effect-eligible held-out rows",
+    "overlap_flags": "counts per fold and on the pooled held-out rows",
     "modifier_confirmation": CONFIRMATION_POOLING_RULE,
     "blp": (
         "fixed-effect inverse-variance weighting of fold estimates (disjoint "
@@ -776,6 +795,175 @@ def overlap_weighted_effects(
             "fraction_of_rows": ess_total / n,
         },
         "standard_error_method": "influence_function_with_cross_fitted_nuisances_fixed",
+    }
+
+
+DEFAULT_OVERLAP_FLAG_BOUNDS = (0.05, 0.95)
+CLIP_SENSITIVITY_CLIPS = (0.01, 0.02, 0.05)
+ESTIMANDS = ("ate", "ato")
+ESTIMAND_DESCRIPTIONS = {
+    "ate": {
+        "label": "Average treatment effect (ATE)",
+        "population": (
+            "all effect-eligible held-out patients, each weighted equally (with "
+            "stage2.min_propensity/max_propensity set, the patients whose estimated "
+            "propensity lies within the bounds)"
+        ),
+        "method": (
+            "cross-fitted AIPW: the mean of the held-out AIPW scores with propensities "
+            "clipped to [c, 1 - c]; standard error sd(psi)/sqrt(n) with the cross-fitted "
+            "nuisances held fixed"
+        ),
+    },
+    "ato": {
+        "label": "Overlap-weighted average treatment effect (ATO)",
+        "population": (
+            "patients in clinical equipoise: every held-out patient weighted by "
+            "e(1 - e), so patients who would almost always or almost never be treated "
+            "contribute little"
+        ),
+        "method": (
+            "augmented overlap-weighted estimator (Li, Morgan and Zaslavsky) with the "
+            "cross-fitted nuisances; influence-function standard error with the nuisances "
+            "held fixed; no clipping or trimming is needed because the weights vanish at "
+            "the extremes"
+        ),
+    },
+}
+
+
+def outside_overlap_flags(propensity: Any, bounds: Sequence[float]) -> np.ndarray:
+    """True where the propensity lies outside ``[low, high]`` (reporting only)."""
+
+    low, high = (float(value) for value in bounds)
+    e = np.asarray(propensity, dtype=float)
+    return np.isfinite(e) & ((e < low) | (e > high))
+
+
+def overlap_flag_summary(
+    predictions: pd.DataFrame, bounds: Sequence[float]
+) -> dict[str, Any]:
+    """Counts of held-out patients outside the overlap-flag bounds, per fold and pooled."""
+
+    def counts(part: pd.DataFrame) -> dict[str, Any]:
+        e = pd.to_numeric(part["propensity"], errors="coerce").to_numpy(dtype=float)
+        flags = outside_overlap_flags(e, bounds)
+        return {
+            "rows": int(len(part)),
+            "outside_overlap": int(flags.sum()),
+            "fraction": float(flags.mean()) if len(part) else None,
+            "below_lower_bound": int(np.sum(e < float(bounds[0]))),
+            "above_upper_bound": int(np.sum(e > float(bounds[1]))),
+        }
+
+    per_fold = {
+        str(int(fold)): counts(part)
+        for fold, part in predictions.groupby("outer_fold", sort=True)
+    } if "outer_fold" in predictions.columns else {}
+    return {
+        "status": "ok",
+        "bounds": [float(bounds[0]), float(bounds[1])],
+        "role": (
+            "reporting only: outside_overlap marks held-out patients whose final estimated "
+            "propensity lies outside the bounds; it never removes patients or changes "
+            "estimates (eligibility trimming is the separate min_propensity/max_propensity)"
+        ),
+        "per_fold": dict(sorted(per_fold.items(), key=lambda item: _fold_key(item[0]))),
+        "pooled": counts(predictions),
+    }
+
+
+def clip_sensitivity(
+    outcome: Any, treatment: Any, propensity: Any, mu0: Any, mu1: Any, *,
+    configured_clip: float, clips: Sequence[float] = CLIP_SENSITIVITY_CLIPS,
+) -> dict[str, Any]:
+    """The AIPW ATE recomputed at several propensity clips (same psi construction)."""
+
+    values = sorted({float(c) for c in clips} | {float(configured_clip)})
+    points = []
+    for clip in values:
+        psi = dr_scores(outcome, treatment, propensity, mu0, mu1, clip=clip)
+        psi = psi[np.isfinite(psi)]
+        summary = _mean_with_se(psi)
+        points.append({
+            "clip": clip,
+            "configured": math.isclose(clip, float(configured_clip)),
+            "rows": summary["rows"],
+            "estimate": summary["estimate"],
+            "standard_error": summary["standard_error"],
+            "confidence_interval_95": summary["confidence_interval_95"],
+        })
+    if not points or points[0]["rows"] == 0:
+        return unavailable("no effect-eligible rows")
+    return {"status": "ok", "points": points}
+
+
+def _aipw_summary(part: pd.DataFrame) -> dict[str, Any]:
+    scores = pd.to_numeric(part["aipw_score"], errors="coerce").to_numpy(dtype=float)
+    return _mean_with_se(scores[np.isfinite(scores)])
+
+
+def co_primary_estimands(
+    predictions: pd.DataFrame, *, propensity_clip: float, lead_estimand: str = "ate",
+) -> dict[str, Any]:
+    """The clipped AIPW ATE and the augmented ATO side by side, per fold and pooled.
+
+    ``lead_estimand`` (pre-specified) changes only the order and labels.
+    """
+
+    if lead_estimand not in ESTIMANDS:
+        raise ValueError("lead_estimand must be ate or ato")
+    order = [lead_estimand, *(name for name in ESTIMANDS if name != lead_estimand)]
+
+    def ato(part: pd.DataFrame) -> dict[str, Any]:
+        values = [pd.to_numeric(part[c], errors="coerce").to_numpy(dtype=float)
+                  for c in ("outcome", "treatment", "propensity", "mu0", "mu1")]
+        result = overlap_weighted_effects(*values)
+        if result.get("status") != "ok":
+            return result
+        return {
+            "status": "ok", "rows": result["rows"], **result["augmented"],
+            "effective_sample_size": result["effective_sample_size"]["total"],
+            "effective_sample_size_fraction": result["effective_sample_size"]["fraction_of_rows"],
+        }
+
+    def ate(part: pd.DataFrame) -> dict[str, Any]:
+        summary = _aipw_summary(part)
+        return {"status": "ok" if summary["rows"] else "unavailable", **summary}
+
+    folds = (
+        {str(int(f)): part for f, part in predictions.groupby("outer_fold", sort=True)}
+        if "outer_fold" in predictions.columns else {}
+    )
+    estimands = {}
+    for name, compute in (("ate", ate), ("ato", ato)):
+        estimands[name] = {
+            **ESTIMAND_DESCRIPTIONS[name],
+            "role": "lead co-primary estimand" if name == lead_estimand else "co-primary estimand",
+            **({"propensity_clip": float(propensity_clip)} if name == "ate" else {}),
+            **compute(predictions),
+            "per_fold": {fold: compute(part) for fold, part in
+                         sorted(folds.items(), key=lambda item: _fold_key(item[0]))},
+        }
+    gap = (
+        estimands["ate"]["estimate"] - estimands["ato"]["estimate"]
+        if estimands["ate"].get("estimate") is not None
+        and estimands["ato"].get("estimate") is not None else None
+    )
+    return {
+        "lead_estimand": lead_estimand,
+        "order": order,
+        "description": (
+            "The ATE and the ATO are co-primary estimands. lead_estimand records which one "
+            "the study pre-specified to lead with; it changes only this order and the role "
+            "labels, never the computation. The ATE targets every effect-eligible patient; "
+            "the ATO targets patients in clinical equipoise. A large gap means the effect "
+            "differs between those populations or the ATE leans on patients with extreme "
+            "propensities; the gap, the trimming curve and the clip sensitivity are "
+            "secondary sensitivity analyses."
+        ),
+        **{name: estimands[name] for name in order},
+        "ate_minus_ato": {"estimate": gap, "role": "secondary sensitivity analysis"},
     }
 
 
@@ -2086,6 +2274,7 @@ def build_heterogeneity_diagnostics(
     n_bootstrap: int = DEFAULT_BOOTSTRAP_REPLICATES,
     groups: int = CATE_GROUPS,
     modifier_confirmation_policy: Mapping[str, Any] | None = None,
+    overlap_flag_bounds: Sequence[float] = DEFAULT_OVERLAP_FLAG_BOUNDS,
 ) -> dict[str, Any]:
     """Compute every diagnostic from the pooled cross-fitted prediction table.
 
@@ -2182,12 +2371,18 @@ def build_heterogeneity_diagnostics(
 
     def overlap_parts(part: pd.DataFrame) -> dict[str, Any]:
         args = (part["outcome"], part["treatment"], part["propensity"], part["mu0"], part["mu1"])
+        eligible_part = part[np.isfinite(part["aipw_score"].to_numpy(dtype=float))]
         return {
             "overlap_weighted_ate": _guarded("ato", overlap_weighted_effects, *args),
             "ipw_weights": _guarded("ipw weights", inverse_propensity_weight_summary,
                                     part["treatment"], part["propensity"], clip=propensity_clip),
             "trimming_curve": _guarded("trimming", aipw_trimming_curve, *args,
                                        clip=propensity_clip),
+            "clip_sensitivity": _guarded(
+                "clip sensitivity", clip_sensitivity,
+                *(eligible_part[c] for c in ("outcome", "treatment", "propensity", "mu0", "mu1")),
+                configured_clip=propensity_clip,
+            ),
         }
 
     overlap_by_fold = {fold: overlap_parts(part) for fold, part in by_fold.items()}
@@ -2235,7 +2430,11 @@ def build_heterogeneity_diagnostics(
             "pooled": rate_pooled,
         },
     }
-    for key in ("overlap_weighted_ate", "ipw_weights", "trimming_curve"):
+    diagnostics["overlap_flags"] = {
+        "interpretation": INTERPRETATIONS["overlap_flags"],
+        **_guarded("overlap flags", overlap_flag_summary, predictions, overlap_flag_bounds),
+    }
+    for key in ("overlap_weighted_ate", "ipw_weights", "trimming_curve", "clip_sensitivity"):
         diagnostics[key] = {
             "interpretation": INTERPRETATIONS[key],
             "per_fold": {fold: values[key] for fold, values in overlap_by_fold.items()},
@@ -2354,6 +2553,15 @@ def summarize_diagnostics(diagnostics: Mapping[str, Any]) -> dict[str, Any]:
             _pick(point, "alpha", "rows", "estimate", "standard_error")
             for point in trimming.get("curve") or []
         ],
+        "clip_sensitivity_pooled": [
+            _pick(point, "clip", "configured", "estimate", "standard_error")
+            for point in pooled("clip_sensitivity").get("points") or []
+        ],
+        "overlap_flags_pooled": {
+            **_pick(diagnostics.get("overlap_flags"), "status", "bounds"),
+            **_pick((diagnostics.get("overlap_flags") or {}).get("pooled"),
+                    "rows", "outside_overlap", "fraction"),
+        },
         "balance_training": {
             **_pick(training, "status", "candidate_scope"),
             **_pick(training_summary, "columns_above_threshold_by_fold",
@@ -2647,6 +2855,7 @@ def write_heterogeneity_diagnostics(
     seed: int,
     n_bootstrap: int = DEFAULT_BOOTSTRAP_REPLICATES,
     modifier_confirmation_policy: Mapping[str, Any] | None = None,
+    overlap_flag_bounds: Sequence[float] = DEFAULT_OVERLAP_FLAG_BOUNDS,
 ) -> tuple[Path, dict[str, Any]]:
     """Write ``heterogeneity_diagnostics.json`` and return (path, compact summary).
 
@@ -2673,6 +2882,7 @@ def write_heterogeneity_diagnostics(
             fold_artifacts=artifacts,
             n_bootstrap=n_bootstrap,
             modifier_confirmation_policy=modifier_confirmation_policy,
+            overlap_flag_bounds=overlap_flag_bounds,
         )
     except Exception as error:  # a diagnostic must never fail a finished Stage 2 run
         LOGGER.warning("Stage 2 heterogeneity diagnostics failed", exc_info=True)
@@ -2712,6 +2922,8 @@ __all__ = [
     "build_heterogeneity_diagnostics",
     "cate_groups",
     "cate_variance_decomposition",
+    "clip_sensitivity",
+    "co_primary_estimands",
     "classification_analysis",
     "confirm_fold_modifiers",
     "dr_scores",
@@ -2721,6 +2933,8 @@ __all__ = [
     "inverse_variance_pool",
     "load_fold_artifacts",
     "normalized_feature_name",
+    "outside_overlap_flags",
+    "overlap_flag_summary",
     "overlap_weighted_effects",
     "pool_blp",
     "rank_weighted_ate_point",

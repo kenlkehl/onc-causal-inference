@@ -5893,7 +5893,7 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     heterogeneity_text = heterogeneity_path.read_text(encoding="utf-8")
     heterogeneity = json.loads(heterogeneity_text)
     assert heterogeneity["schema_version"] == (
-        "stage2_heterogeneity_diagnostics_v3_cate_variance_decomposition"
+        "stage2_heterogeneity_diagnostics_v4_overlap_estimands"
     )
     assert heterogeneity["oracle_columns_consumed"] is False
     assert "true_ite" not in heterogeneity_text
@@ -5902,7 +5902,7 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     assert heterogeneity["inputs"]["recomputed_psi_max_abs_difference_from_aipw_score"] < 1e-9
     assert set(heterogeneity["pooling_rules"]) == {
         "blp", "gates", "clan", "rate", "overlap", "balance", "modifier_confirmation",
-        "cate_variance_decomposition",
+        "cate_variance_decomposition", "clip_sensitivity", "overlap_flags",
     }
     # Reporting-only held-out confirmation also covers balanced_evidence selections.
     assert heterogeneity["modifier_confirmation"]["status"] == "ok"
@@ -5942,6 +5942,20 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     assert {"ate", "standard_error", "mean_estimated_cate", "predictions_path"} <= set(
         persisted_estimate
     )
+    # Co-primary estimands: the clipped AIPW ATE (lead by default) and the ATO.
+    co_primary = persisted_estimate["co_primary_estimands"]
+    assert co_primary["lead_estimand"] == "ate" and co_primary["order"] == ["ate", "ato"]
+    assert co_primary["ate"]["estimate"] == pytest.approx(persisted_estimate["ate"])
+    assert co_primary["ate"]["standard_error"] == pytest.approx(
+        persisted_estimate["standard_error"])
+    assert set(co_primary["ato"]["per_fold"]) == {"1", "2"}
+    assert persisted_estimate["overlap_flags"]["bounds"] == [0.05, 0.95]
+    cross_fitted = pd.read_csv(output / "cross_fitted_predictions.csv")
+    assert cross_fitted["outside_overlap"].dtype == bool
+    assert int(cross_fitted["outside_overlap"].sum()) == (
+        persisted_estimate["overlap_flags"]["pooled"]["outside_overlap"])
+    assert [p["clip"] for p in heterogeneity["clip_sensitivity"]["pooled"]["points"]] == [
+        0.01, 0.02, 0.05]
     selection_path = output / "outer_001" / "selection" / "elastic_net_selection.json"
     assert selection_path.is_file()
     selection = json.loads(selection_path.read_text(encoding="utf-8"))

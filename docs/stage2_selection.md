@@ -896,6 +896,43 @@ The estimand is then labeled `average_treatment_effect_in_propensity_eligible_po
 The eligible population is estimated and differs by fold, and the reported
 standard error treats the eligibility rule as fixed.
 
+### Estimands: clipping, trimming, and overlap weighting
+
+Three different tools address extreme propensities, and they answer different
+questions:
+
+- **Clipping** (`stage2.propensity_clip`, default 0.02) bounds the AIPW
+  denominators to `[c, 1 − c]`. It keeps every patient and the ATE population,
+  trading a little bias for variance. `clip_sensitivity` in the diagnostics
+  recomputes the ATE at clips 0.01, 0.02, and 0.05.
+- **Trimming** (the eligibility bounds above, and the `trimming_curve`
+  diagnostic) removes patients with estimated propensities near 0 or 1. It
+  changes the target population, and that population is data-dependent: it is
+  defined by each fold's fitted propensity model, so it differs between folds
+  and between learners and is hard to describe clinically.
+- **Overlap weighting** (the ATO) weights every patient by `e(1 − e)`. It
+  defines a smooth target population, the patients in clinical equipoise,
+  without a cutoff, and its weights vanish at the extremes so no clipping is
+  needed.
+
+`stage2/causal_estimate.json` reports the clipped AIPW ATE and the augmented ATO
+as **co-primary estimands** (`co_primary_estimands`), per fold and pooled. The ATE
+is the mean of the eligible patients' AIPW scores; the ATO is the augmented
+overlap-weighted estimator of Li, Morgan, and Zaslavsky on every held-out patient
+with the cross-fitted nuisances, with an influence-function standard error that
+treats the nuisances as fixed. `stage2.lead_estimand` (`"ate"` or `"ato"`)
+records which estimand the study pre-specifies to lead with; it changes only
+the order and the role labels, never the computation, and should be set before
+the results are seen. The gap `ate_minus_ato`, the trimming curve, and the clip
+sensitivity are secondary sensitivity analyses.
+
+`cross_fitted_predictions.csv` flags patients whose final held-out propensity
+lies outside `stage2.overlap_flag_bounds` (default `[0.05, 0.95]`) in
+`outside_overlap`, with counts per fold and pooled in `causal_estimate.json` and
+the diagnostics (`overlap_flags`). The flag is reporting only and never removes
+patients or changes estimates; trimming remains the separate, opt-in eligibility
+bounds.
+
 ### Calibration diagnostics
 
 Calibration is reported for treatment and for the factual outcome (the outcome
@@ -1011,6 +1048,8 @@ performed, and would require rerunning the pipeline with other split seeds.
 | `rate` | AUTOC and Qini of the `τ̂` ranking, with stratified bootstrap standard errors (500 replicates) | `TOC(u)` is the ATE among the top fraction `u` minus the overall ATE. AUTOC weights every `u` equally and is sensitive to the top of the ranking; Qini weights by `u` and has more power for diffuse heterogeneity. A positive value whose interval excludes 0 means the ranking is useful for prioritizing patients. |
 | `overlap_weighted_ate` | The [ATO](glossary.md#ato), with weights `1 − e` for treated and `e` for comparator patients; a Hajek (weighted means) and an augmented (adds the outcome models) estimate, with effective sample size | A large gap between the ATO and the AIPW ATE means the ATE depends on patients with extreme propensities, or that effects differ in the region of overlap. |
 | `ipw_weights` | Inverse-propensity weights `1/ê` (treated) and `1/(1 − ê)` (comparator) with `ê` clipped as in AIPW: Kish effective sample size `(Σw)²/Σw²`, its fraction of rows, and the maximum weight | An effective-sample-size fraction well below 1 or a very large maximum weight means the AIPW ATE leans on a few patients: weak overlap and high variance. |
+| `clip_sensitivity` | The AIPW ATE over the eligible patients recomputed with the propensity clipped at 0.01, 0.02, and 0.05 (and the configured clip, marked `configured`), with standard errors | Clipping changes the weights, not the population. Estimates that move with the clip show dependence on patients with extreme propensities. The configured entry equals the reported ATE. |
+| `overlap_flags` | Counts of held-out patients outside `stage2.overlap_flag_bounds`, per fold and pooled | Reporting only; the same flag as the `outside_overlap` column. |
 | `trimming_curve` | The AIPW ATE restricted to `α ≤ ê ≤ 1 − α` for `α` in 0, 0.01, 0.025, 0.05, 0.10, 0.15 | Each `α` targets a different population. A flat curve suggests the ATE is not driven by poor-overlap patients; drift signals dependence on extreme propensities. `α = 0` uses all held-out patients, including any outside configured eligibility bounds. |
 | `balance` | [SMDs](glossary.md#smd) of every catalog candidate before and after inverse-propensity weighting, for training patients (per fold, weighted by out-of-fold `ê`) and held-out patients (pooled, weighted by their `ê`); variables with weighted `|SMD| > 0.1` are listed | The **mean of a variable after weighting should be similar in both arms**. A weighted `|SMD|` above 0.1 flags a variable the propensity model does not balance: a likely gap in the propensity model, or a variable that strongly predicts treatment. |
 

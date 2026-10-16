@@ -873,6 +873,12 @@ class PlainHandoffStage2Config:
     min_propensity: float | None = None
     max_propensity: float | None = None
     propensity_clip: float = 0.02
+    # Which co-primary estimand the study pre-specifies to lead with ("ate" or
+    # "ato"); it changes only labels and order in causal_estimate.json.
+    lead_estimand: str = "ate"
+    # Reporting-only bounds of the outside_overlap flag in
+    # cross_fitted_predictions.csv; never used to drop rows or change estimates.
+    overlap_flag_bounds: tuple[float, float] = (0.05, 0.95)
     # Count-based candidate informativeness rule (outer-training rows only):
     # keep a candidate only if at least this many patients have an observed
     # value and, for categorical features, at least two levels (counting "not
@@ -1210,6 +1216,19 @@ class PlainHandoffStage2Config:
             )
         if not 0.0 < self.propensity_clip < 0.5:
             raise ValueError("stage2.propensity_clip must be between 0 and 0.5")
+        if self.lead_estimand not in {"ate", "ato"}:
+            raise ValueError("stage2.lead_estimand must be ate or ato")
+        bounds = self.overlap_flag_bounds
+        if (
+            not isinstance(bounds, tuple)
+            or len(bounds) != 2
+            or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                   for v in bounds)
+            or not 0.0 < bounds[0] < bounds[1] < 1.0
+        ):
+            raise ValueError(
+                "stage2.overlap_flag_bounds must be two numbers low < high strictly between 0 and 1"
+            )
         if (
             isinstance(self.min_informative_patients, bool)
             or not isinstance(self.min_informative_patients, int)
@@ -1293,6 +1312,12 @@ class PlainHandoffStage2Config:
     def nuisance_learner_spec(self) -> dict[str, Any]:
         """The nuisance learner passed to the final-estimation and modifier-test fits."""
         return learner_spec(self.nuisance_learner, self.super_learner)
+
+
+def _overlap_flag_bounds(value: Any) -> tuple[Any, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError("stage2.overlap_flag_bounds must be a list of two numbers")
+    return tuple(value)
 
 
 def _reject_unknown_stage2_keys(
@@ -1566,6 +1591,9 @@ def plain_stage2_config_from_mapping(
         min_propensity=raw.get("min_propensity"),
         max_propensity=raw.get("max_propensity"),
         propensity_clip=float(raw.get("propensity_clip", 0.02)),
+        # Validated (not coerced) by PlainHandoffStage2Config.validate().
+        lead_estimand=raw.get("lead_estimand", "ate"),
+        overlap_flag_bounds=_overlap_flag_bounds(raw.get("overlap_flag_bounds", (0.05, 0.95))),
         # Validated (not coerced) by PlainHandoffStage2Config.validate().
         min_informative_patients=raw.get("min_informative_patients", 20),
         max_extraction_failure_fraction=raw.get("max_extraction_failure_fraction", 0.10),
@@ -6680,6 +6708,16 @@ class PlainHandoffStage2:
             if len(set(row_ids)) != len(row_ids):
                 raise ValueError("a dataset row appears in more than one outer heldout fold")
             predictions = predictions.sort_values("_oci_row_id").reset_index(drop=True)
+            from .stage2_diagnostics import (
+                co_primary_estimands,
+                outside_overlap_flags,
+                overlap_flag_summary,
+            )
+
+            # Reporting only: never used to drop patients or change estimates.
+            predictions["outside_overlap"] = outside_overlap_flags(
+                predictions["propensity"], self.config.overlap_flag_bounds
+            )
             predictions_path = output_dir / "cross_fitted_predictions.csv"
             temporary = predictions_path.with_name(f".{predictions_path.name}.{os.getpid()}.tmp")
             predictions.to_csv(temporary, index=False)
@@ -6717,6 +6755,7 @@ class PlainHandoffStage2:
                 predictions=predictions,
                 propensity_clip=float(self.config.propensity_clip),
                 seed=seed,
+                overlap_flag_bounds=self.config.overlap_flag_bounds,
                 # Reporting only: held-out confirmation of each fold's selected
                 # modifiers, computed after every prediction is frozen.
                 modifier_confirmation_policy={
@@ -6726,7 +6765,16 @@ class PlainHandoffStage2:
                     "min_count": self.config.statistical_selection.categorical_min_count,
                 },
             )
+            co_primary = co_primary_estimands(
+                predictions,
+                propensity_clip=float(self.config.propensity_clip),
+                lead_estimand=self.config.lead_estimand,
+            )
             causal_estimate = {
+                "co_primary_estimands": co_primary,
+                "overlap_flags": overlap_flag_summary(
+                    predictions, self.config.overlap_flag_bounds
+                ),
                 "estimator": "cross-fitted_aipw_with_fold_trained_nuisance_models",
                 "estimand": (
                     "average_treatment_effect_in_propensity_eligible_population"

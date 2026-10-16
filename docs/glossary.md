@@ -147,7 +147,12 @@ Two separate overlap controls:
   inclusive. Excluded patients are flagged `effect_eligible = false` and the
   estimand becomes the ATE in the propensity-eligible population.
 - **Clipping** (`stage2.propensity_clip`) only bounds the AIPW denominators and
-  excludes no one.
+  excludes no one; the target population is unchanged.
+
+Trimming (eligibility bounds) changes the population to one defined by each
+fold's fitted propensity model, while overlap weighting (the [ATO](#ato))
+defines a smooth population without a cutoff. The `outside_overlap` column only
+flags patients outside `stage2.overlap_flag_bounds` and changes nothing.
 
 ### Prognostic score
 
@@ -219,7 +224,9 @@ heterogeneity. They use only held-out AIPW scores and the frozen predictions.
 
 The average treatment effect in the overlap population (Li, Morgan, and
 Zaslavsky, *JASA* 2018). Patients are weighted by `e(1 − e)`, which emphasizes
-patients who could plausibly have received either treatment.
+patients who could plausibly have received either treatment (clinical
+equipoise). OCI reports it as a co-primary estimand next to the clipped AIPW
+ATE; `stage2.lead_estimand` records which one leads.
 
 ### SMD
 
