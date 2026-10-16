@@ -290,3 +290,173 @@ Outputs: `metrics.jsonl` (all metrics), `architectures/<id>/metrics.jsonl`,
 `comparison.csv` (one summary row per architecture and metric), `summary.json`,
 and `evaluation_manifest.json`. See [Synthetic data](synthetic_data.md) for the
 oracle columns and the bundled cohorts.
+
+## Attribution and ablation
+
+Two post-hoc tools measure what each architecture contributes to Stage 2. Both
+read frozen outputs and change nothing a run reads; the ablation tool only
+prepares inputs for separate Stage 2 runs.
+
+### Attribution of Stage 2 variables
+
+`oci-evaluate-attribution` credits each Stage 2 variable to the architectures
+whose evidence supported it, fold by fold:
+
+```bash
+uv run oci-evaluate-attribution --run-dir /path/to/output
+uv run oci-evaluate-attribution --run-dir /path/to/output --oracle   # synthetic cohorts
+```
+
+It follows the lineage Stage 2 records. Each evidence card lists its
+`source_architectures` (`stage2/evidence_compilation/outer_00k/cards.jsonl`);
+each candidate cites the cards it was proposed from
+(`outer_00k/interpreted_candidates.json`); and each defined variable lists its
+cards and, through `candidate_dispositions`, its candidates
+(`outer_00k/feature_definitions.json`). An architecture supports a variable
+when it produced one of the variable's cards or one of its candidates' cards,
+or when the variable lists it in `supporting_architectures`. Variables created
+later inherit lineage: a variable split by the extraction review, or an
+estimand-search variant, from its parent definition; a consolidated latent from
+all of its measurement dependencies. A variable is **sole-source** when exactly
+one architecture supports it and it is not investigator-specified
+(`stage2.explicit_features`); every supporting architecture gets
+**any-source** credit.
+
+For each fold, in total, and for each architecture, the report gives the
+any-source and sole-source count at each level:
+
+| Level | Items |
+|---|---|
+| `cards` | Evidence cards compiled for the fold |
+| `candidates` | Candidates proposed by interpretation |
+| `variables_defined` | Variables in `feature_definitions.json` |
+| `variables_passing_filter` | Variables kept by the informativeness and extraction-failure filter (`extraction/candidate_missingness_filter.json`, and the estimand-search filter when it ran) |
+| `nuisance_set` | Selected variables with the `confounder` role (`final_definitions.json`) |
+| `selected_modifiers` | Selected variables with the `effect_modifier` role |
+
+Each level also counts its items with several supporting architectures, its
+investigator-specified items, and items without recorded lineage. Every card
+and candidate comes from one architecture, so credit starts to be shared where
+candidates merge into variables.
+
+**Oracle recovery (`--oracle`).** For synthetic cohorts, the report then
+measures which data-generating variables the selected variables capture. It
+first reads and hashes every Stage 2 artifact it uses and closes its reader;
+only then does it load the `true_<variable>` columns named in the generator's
+`metadata.json` (without metadata, every `true_*` column except the outcome-model
+and effect columns such as `true_ite`). On each fold's outer held-out rows, it
+regresses each oracle column on each variable's columns from the frozen
+held-out extraction (`estimation/nuisance_candidate_heldout.csv`, encoded as in
+the Stage 2 diagnostics: a numeric value or one indicator per level, with
+not-documented, documented-unknown, and extraction-failure indicators) by
+ordinary least squares with an intercept. A categorical oracle column is
+one-hot encoded, and its R² is 1 − ΣSSE/ΣSST over its levels. A variable
+recovers an oracle concept when R² ≥ `--recovery-r2`; a variable's name plays
+no part. The report lists, per fold and architecture, the concepts recovered
+by the selected variables it supported, any-source and sole-source, for all
+selected variables, the nuisance set, and the modifiers. The R² is computed on
+the same held-out rows it describes, so it is slightly optimistic for variables
+with many levels.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--run-dir DIR` | required | Workflow output directory, or an ablation directory written by `prepare` |
+| `--oracle` | off | Add oracle recovery |
+| `--recovery-r2 R` | 0.5 | Held-out R² at which a variable recovers an oracle concept |
+| `--dataset PATH` | `input/analysis_cohort.parquet` when present, else `dataset` from `run_config.json` | Dataset with oracle columns (`--oracle`); for an ablation directory, its source run's |
+| `--metadata PATH` | `metadata.json` beside the run's dataset | Generator metadata (`--oracle`) |
+| `--out DIR` | `RUN_DIR/evaluation/attribution` | Output directory; inside the run directory it must be under `evaluation/` |
+
+Outputs: `attribution.json` (all counts, and recovery with `--oracle`),
+`attribution_counts.csv` (one row per fold, level, and architecture),
+`variables.csv` (each variable's cards, candidates, architectures, and levels),
+`attribution_manifest.json` (the SHA-256 of every Stage 2 artifact read, and
+the oracle inputs), and with `--oracle`, `oracle_recovery.csv` (recovered
+concepts per fold, level, and architecture) and `oracle_recovery_r2.csv`
+(every variable–concept R²).
+
+### Leave-one-architecture-out ablation
+
+`scripts/ablate_stage1_architectures.py` measures what Stage 2 loses without
+each architecture by rerunning Stage 2 on the run's handoff minus that
+architecture's evidence. Its `prepare` step writes the inputs and prints the
+commands; it never starts an LLM request. Each ablation is a
+[`run_stage2_from_artifacts.py`](configuration.md#stage-2-in-a-separate-directory-from-preserved-stage-1-artifacts)
+launch with the run's split file, dataset, Stage 2 settings, and seed.
+
+```bash
+python scripts/ablate_stage1_architectures.py prepare \
+  --run-dir /path/to/output --out /path/to/ablations \
+  --stage2-config endpoints.json --include-control
+# run the printed launcher commands, then:
+python scripts/ablate_stage1_architectures.py compare \
+  --run-dir /path/to/output --ablation-dir /path/to/ablations --oracle
+```
+
+`prepare` writes `without_<architecture>/` for each architecture of the run, or
+for those named by `--architectures`. The run's architectures are its explicit
+selection (`stage1_architectures/manifest.json`), else the architectures its
+Stage 2 compiled, else those with evidence in the handoff.
+
+| File | Content |
+|---|---|
+| `handoff/evidence.jsonl` | The run's handoff without the architecture's evidence |
+| `handoff/index.json` | The remaining architectures, and the component evidence files Stage 2 reads to check the split file |
+| `components/tfidf/split_provenance.jsonl` | Copy of the run's split file |
+| `components/embedding_cache` | Link to the run's embedding cache, when the run has one, so evidence cards are grouped as in the run |
+| `stage2_from_artifacts.json` | Launcher configuration; Stage 2 writes to `stage2/` and the launcher's status files go to `stage2_report/` |
+| `ablation.json` | Row counts, the filtering rule, the launch commands, and the SHA-256 of every input |
+
+`ABLATION_DIR/ablations.json` indexes the prepared and skipped ablations.
+
+Filtering works on architecture rows. In a handoff written for an explicit
+selection, each row holds one architecture's evidence, so the ablated
+architecture's rows are dropped and every other line is copied unchanged.
+Without a selection, the handoff streams component rows, and one text-model row
+can hold several architectures' evidence (BoW nuisance and R-loss views,
+matched pairs, embedding contrasts, HTR). `prepare` then first projects the
+handoff into one row per architecture occurrence with the extractor Stage 2
+uses, writes the projection to `ABLATION_DIR/projection/`, and drops the
+ablated architecture's rows, so the other architectures keep their evidence
+from shared rows. The projection compiles to the same evidence cards as the
+original handoff. In each launcher configuration, `stage2.included_architectures`
+lists the remaining architectures and `stage2.required_architectures` those of
+them present in every outer fold. An ablation that would leave an empty handoff
+is skipped with a message.
+
+Stage 2's LLM steps vary from run to run, so an ablation's differences from the
+full run combine the removed evidence with that variation. `--include-control`
+adds `full_control/`, a rerun with every architecture, which measures the
+variation alone.
+
+The Stage 2 settings come from the run's `run_config.json`. `--stage2-config`
+names a JSON file whose `stage2` block is merged over them, and which may also
+set `concurrency_control_path` and `tokenizer_cache_dir`. Use it to point at
+running servers: the launcher does not start managed vLLM pools, and an
+endpoint in the template replaces the run's `vllm` block. API keys stay
+`<redacted>` unless the template sets them; the launcher then reads
+`OCI_STAGE2_API_KEY`, `OCI_STAGE2_EXTRACTION_API_KEY`, and
+`OCI_STAGE2_EXTRACTION_RUNTIME_API_KEY` when it starts. A key in the template
+is copied into every launcher configuration, so prefer the environment
+variables. The dataset is `input/analysis_cohort.parquet` when the run used
+dated notes, else the run's dataset; a CSV dataset is written to
+`ABLATION_DIR/shared/stage2_cohort.parquet` with only the four declared
+columns, because the launcher reads Parquet.
+
+`compare` reads each finished ablation (one whose `stage2/` holds
+`causal_estimate.json` and `heterogeneity_diagnostics.json`) and lists the
+others as pending, with the launcher's last status. Fold by fold, it matches
+the ablation's selected modifiers, and separately its nuisance set, to the full
+run's by concept with the cross-fold matching rule of the
+[outer-fold confirmation](stage2_selection.md#outer-fold-confirmation)
+(TF-IDF similarity of name, description, and measurement definition, threshold
+0.7, at most one variable per side in a concept), and reports the Jaccard
+overlap of the concepts (1 when both sets are empty) and the concepts lost and
+gained. It also reports the ATE and ATO with their 95% CIs, the pooled BLP β2
+with the primary heterogeneity test's p-value, per fold where available, and,
+with `--oracle`, the oracle concepts each side's selected variables recover, as
+in the attribution report. It writes `comparison.json`, `summary.csv` (one row
+per ablation, with the full run as reference), `folds.csv` (one row per
+ablation and fold), and `summary.md` to `ABLATION_DIR/comparison/`, or to
+`--out`. `compare` accepts the same `--oracle`, `--recovery-r2`, `--dataset`,
+and `--metadata` options as `oci-evaluate-attribution`.

@@ -366,6 +366,14 @@ the same dataset file the run used. See
 [Stage 1 architectures](stage1_architectures.md) for what each architecture
 produces.
 
+**Attribution and ablation.** `oci-evaluate-attribution --oracle` hashes the
+frozen Stage 2 artifacts it reads before it loads the oracle columns, then
+measures which `true_<variable>` columns the selected Stage 2 variables
+recover by held-out R² and credits each recovery to the Stage 1 architectures
+behind the variable. `scripts/ablate_stage1_architectures.py compare --oracle`
+reports the same recovery for each leave-one-architecture-out rerun. See
+[Stage 1 architectures](stage1_architectures.md#attribution-and-ablation).
+
 **Standalone `oci run`.** The explicit-feature workflows write
 `applied_inference/posthoc_oracle_metrics.json` under the same rules; see
 [Optional extensions](optional_extensions.md#outputs).
