@@ -223,6 +223,31 @@ def test_context_or_row_identity_change_invalidates_without_scanning_payloads(tm
     assert calls == 2
 
 
+def test_retire_makes_every_checkpoint_of_one_unit_unloadable_and_keeps_payloads(tmp_path):
+    def not_recomputed():
+        pytest.fail("a restorable unit was recomputed")
+
+    under_a = _store(tmp_path, identity="config-a").run("assembly", lambda: np.asarray([1.0]))
+    under_b = _store(tmp_path, identity="config-b").run("assembly", lambda: np.asarray([2.0]))
+    _store(tmp_path, identity="config-a").run("assembly/part", lambda: np.asarray([3.0]))
+    _store(tmp_path, identity="config-a").run("bow/fit", lambda: np.asarray([4.0]))
+    unit_dir = tmp_path / "checkpoints" / "v1" / "units" / "assembly"
+
+    _store(tmp_path, identity="config-b").retire("assembly")
+    _store(tmp_path, identity="config-b").retire("never/computed")
+
+    for result in (under_a, under_b):
+        assert not (unit_dir / result.fingerprint / "complete.json").exists()
+        assert (unit_dir / result.fingerprint / "payload.json").is_file()
+    store = _store(tmp_path, identity="config-a")
+    assert store.run("assembly/part", not_recomputed).reused is True
+    assert store.run("bow/fit", not_recomputed).reused is True
+    recomputed = store.run("assembly", lambda: np.asarray([5.0]))
+    assert recomputed.reused is False
+    assert recomputed.fingerprint == under_a.fingerprint
+    np.testing.assert_array_equal(recomputed.value, [5.0])
+
+
 def test_each_leaf_seed_is_independent_of_resume_order(tmp_path):
     def random_vector():
         return np.concatenate([np.random.random(3), torch.rand(2).numpy()])

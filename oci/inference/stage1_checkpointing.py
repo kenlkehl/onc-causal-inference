@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import random
+import re
 import socket
 import threading
 import uuid
@@ -35,6 +36,8 @@ STAGE1_CHECKPOINT_SCHEMA_VERSION = "stage1_context_checkpoint_v1"
 STAGE1_CHECKPOINT_IMPLEMENTATION_VERSION = 3
 
 T = TypeVar("T")
+# A published unit directory is named by its SHA-256 fingerprint.
+_FINGERPRINT_NAME = re.compile(r"[0-9a-f]{64}")
 
 
 class Stage1CheckpointBusyError(RuntimeError):
@@ -446,6 +449,25 @@ class Stage1CheckpointStore:
         self._tokens[unit] = fingerprint
         self._mark_progress(unit, "completed", fingerprint=fingerprint, seed=seed)
         return Stage1CheckpointResult(value, fingerprint, False, seed)
+
+    def retire(self, unit: str) -> None:
+        """Make every published checkpoint of ``unit`` unloadable.
+
+        Only the completion markers are removed; payloads stay for audit. Call
+        this before recomputing a unit whose computation also rewrites files
+        outside the store, so that no checkpoint computed under other settings
+        can later be restored beside files it did not write.
+        """
+
+        unit_dir = self.root.joinpath("units", *_safe_unit_parts(unit))
+        if not unit_dir.is_dir():
+            return
+        for directory in unit_dir.iterdir():
+            marker = directory / "complete.json"
+            if _FINGERPRINT_NAME.fullmatch(directory.name) and marker.is_file():
+                marker.unlink()
+                _fsync_directory(directory)
+                logger.info("Retired Stage 1 checkpoint unit=%s %s", unit, directory.name)
 
     def token(self, unit: str) -> str:
         try:

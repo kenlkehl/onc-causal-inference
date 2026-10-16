@@ -1043,8 +1043,14 @@ def _run_one_text_model_context(
     timing_path = context_dir / CONTEXT_TIMING_FILE
     with checkpoint_store.context_lock():
         timer = SectionTimer(checkpoint_store=checkpoint_store)
+        handoff_unit = "assembly/handoff_context"
 
         def compute_handoff_rows() -> list[dict[str, Any]]:
+            # This computation rewrites worker_artifacts/ and the timing record
+            # beside the checkpoints. A --rerun keeps the unit checkpoints of
+            # earlier settings, so retire them first: none may later be
+            # restored beside files that it did not write.
+            checkpoint_store.retire(handoff_unit)
             rows = [
                 run_multi_model_forest_handoff_context(
                     dataset=dataset,
@@ -1073,7 +1079,7 @@ def _run_one_text_model_context(
                 )
 
         handoff_result = checkpoint_store.run(
-            "assembly/handoff_context",
+            handoff_unit,
             compute_handoff_rows,
             parameters={
                 "scope": str(spec["scope"]),
@@ -3101,20 +3107,35 @@ def _invalidate_component_for_rerun(
     workflow: ResearchAllEvidenceWorkflow,
     name: str,
 ) -> None:
-    """Invalidate resumable markers, including TF-IDF context-level seals."""
+    """Remove the completion state that lets a component be skipped.
+
+    Outputs stay in place, and so do checkpoints that verify their own
+    identity when loaded, so the rerun reuses exactly those that still match.
+    Every component loses its ``complete.json``. In addition:
+
+    - ``text_models`` and ``neural_queries`` lose each context's
+      ``complete.json``, which records no identity, so every context is
+      entered again. A text-model context then restores each unit under its
+      ``checkpoints/`` whose identity still matches and refits the others; a
+      neural-query context has no finer checkpoints and is refit.
+    - ``tfidf`` loses every context's ``complete.json`` and
+      ``context_metadata.json``, so every context is refit.
+
+    ``embedding_cache`` revalidates its chunk cache and ``stage2`` revalidates
+    each step's checkpoint when the component runs again.
+    """
 
     component_dir = workflow._component_dir(name)
     if not component_dir.is_dir():
         return
-    markers = (
-        [component_dir / "complete.json"]
-        if name == "handoff"
-        else list(component_dir.rglob("complete.json"))
-    )
-    if name == "tfidf":
+    markers = [component_dir / "complete.json"]
+    if name in {"text_models", "neural_queries"}:
+        markers.extend(component_dir.glob("*/complete.json"))
+    elif name == "tfidf":
         # Exact TF-IDF contexts are independently resumable by their metadata,
         # not complete.json.  Removing only the component markers would rerun
         # orchestration while silently reusing every fitted context.
+        markers.extend(component_dir.rglob("complete.json"))
         markers.extend(component_dir.rglob("context_metadata.json"))
     for marker in dict.fromkeys(markers):
         marker.unlink(missing_ok=True)
