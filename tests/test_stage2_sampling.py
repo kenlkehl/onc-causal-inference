@@ -294,3 +294,96 @@ def test_live_flash_next_backing_model_controls_both_roles_and_manifest(monkeypa
         assert "reasoning_effort" not in variant
         assert variant["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
         assert variant["extra_body"]["top_k"] == 20
+
+
+NEMOTRON = "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4"
+
+
+@pytest.mark.parametrize(
+    "model,family",
+    [
+        (NEMOTRON, "nemotron3.5"),
+        ("nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16", "nemotron3.5"),
+        ("nemotron-3.5-super-vl", "nemotron3.5"),
+        # Earlier Nemotron releases use other reasoning switches.
+        ("nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8", "other"),
+        ("nvidia/Llama-3.1-Nemotron-70B-Instruct-HF", "other"),
+        ("nemotron-3.55-test", "other"),
+    ],
+)
+def test_nemotron_3_5_family_detection(model, family):
+    assert stage2._stage2_model_family(model) == family
+
+
+@pytest.mark.parametrize("effort", ["high", "none"])
+def test_nemotron_3_5_profile_follows_the_model_card(effort):
+    policy = stage2._stage2_request_policy(
+        config(NEMOTRON, interpretation_reasoning_effort=effort)
+    )
+    assert {k: policy[k] for k in SAMPLING_FIELDS} == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 0,
+        "min_p": 0.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
+        "repetition_penalty": 1.0,
+    }
+    assert policy["sampling_provenance"]["profile"] == "nemotron3.5"
+
+
+@pytest.mark.parametrize(
+    "effort,template_kwargs",
+    [
+        ("high", {"enable_thinking": True}),
+        ("medium", {"enable_thinking": True, "medium_effort": True}),
+        ("low", {"enable_thinking": True, "medium_effort": True}),
+        ("none", {"enable_thinking": False}),
+    ],
+)
+def test_nemotron_3_5_reasoning_switch_on_wire(monkeypatch, effort, template_kwargs):
+    calls = []
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"ok":true}'),
+                finish_reason="stop",
+            )
+        ]
+    )
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return response
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("openai.OpenAI", Client)
+    messages = [{"role": "system", "content": "S"}, {"role": "user", "content": "Test"}]
+    stage2._openai_completion(
+        messages, config(NEMOTRON, interpretation_reasoning_effort=effort)
+    )
+    assert "reasoning_effort" not in calls[0]
+    assert calls[0]["temperature"] == 1.0 and calls[0]["top_p"] == 0.95
+    assert calls[0]["extra_body"] == {
+        "top_k": 0,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
+        "chat_template_kwargs": template_kwargs,
+    }
+    # No prompt directive: the model card documents only the template switch.
+    assert calls[0]["messages"] == messages
+
+
+def test_nemotron_3_5_managed_vllm_and_oci_run_reasoning_parser():
+    from oci.extraction.explicit_features import infer_vllm_reasoning_parser
+    from oci.inference.vllm_server_pool import _model_family_defaults
+
+    assert _model_family_defaults(NEMOTRON) == ("nemotron_v3", None, None)
+    assert _model_family_defaults("nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8") == ("", None, None)
+    assert infer_vllm_reasoning_parser(NEMOTRON) == "nemotron_v3"

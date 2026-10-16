@@ -108,12 +108,19 @@ with `endpoints`.
 Stage 2 detects the model family from the backing model ID that `/models`
 reports (falling back to the served ID): names containing `qwen3`, `gemma4`, or
 `lfm25` (ignoring punctuation and case) select the Qwen 3, Gemma 4, or LFM 2.5
-family; anything else is treated generically. The family determines:
+family, and names containing `nemotron-3.5` (with `-`, `_`, a space, or nothing
+between the parts, and `.` or `_` in the version) select Nemotron 3.5, for
+example `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4`. Earlier
+Nemotron releases and anything else are treated generically. The family
+determines:
 
 - **Thinking controls.** Recognized families receive the thinking switch through
-  `chat_template_kwargs.enable_thinking` (LFM 2.5 also `enableThinking`) and,
-  when that is rejected, a short instruction added to the prompt. Generic
-  models receive only `reasoning_effort`.
+  `chat_template_kwargs.enable_thinking` (LFM 2.5 also `enableThinking`).
+  Qwen 3, Gemma 4, and LFM 2.5 also get a short instruction added to the
+  prompt in case the switch is rejected. Nemotron 3.5 receives only the
+  chat-template switch its model card documents, with `medium_effort: true`
+  for reasoning effort `low` or `medium`, and never `reasoning_effort`.
+  Generic models receive only `reasoning_effort`.
 - **Reasoning effort.** `stage2.interpretation_reasoning_effort` (default
   `auto`) resolves to `high` (`xhigh` for Qwen 3.8 Flash Next).
   `stage2.extraction_reasoning_effort` (default `none`) turns thinking off for
@@ -250,7 +257,10 @@ plus the named options, `--api-key` when the role's key is not `EMPTY`, and
 `extra_args`. The served model ID equals the configured model string. For model
 names containing `gemma`, OCI adds `--reasoning-parser gemma4
 --language-model-only`; for names containing `qwen`, `--reasoning-parser qwen3
---language-model-only`. Set `reasoning_parser` to `""` and
+--language-model-only`; for Nemotron 3.5 names, `--reasoning-parser
+nemotron_v3`. NVIDIA's model card also serves Nemotron 3.5 with
+`--trust-remote-code`, which OCI does not add itself: pass it in `extra_args`
+(`["--trust-remote-code"]`). Set `reasoning_parser` to `""` and
 `language_model_only` to null to suppress these for a model they do not fit.
 Thinking is selected per request, never as a server default. `extra_args`
 cannot contain flags that OCI sets itself (`--model`, `--host`, `--port`,

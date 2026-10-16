@@ -84,6 +84,8 @@ def infer_vllm_reasoning_parser(model_name: Optional[str]) -> Optional[str]:
     if not model_name:
         return None
     model_key = str(model_name).lower()
+    if re.search(r"nemotron[-_ ]?3[._]5(?![0-9])", model_key):
+        return "nemotron_v3"
     if "qwen" in model_key:
         return "qwen3"
     if "gemma" in model_key:

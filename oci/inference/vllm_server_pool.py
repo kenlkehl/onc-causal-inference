@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -74,6 +75,10 @@ def _model_family_defaults(model: str) -> tuple[str, bool | None, Mapping[str, A
     """Return requested vLLM defaults for recognized reasoning-model families."""
 
     normalized = str(model).strip().lower()
+    if re.search(r"nemotron[-_ ]?3[._]5(?![0-9])", normalized):
+        # NVIDIA's model card serves Nemotron 3.5 with this parser; its
+        # --trust-remote-code is not added here (pass it in extra_args).
+        return "nemotron_v3", None, None
     if "gemma" in normalized:
         # Thinking is selected per request through reasoning_effort. A server
         # default would force extraction and interpretation into one mode.

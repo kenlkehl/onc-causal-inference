@@ -67,7 +67,7 @@ from .stage2_role_adjudication import (
 )
 from .stage2_sampling import (
     SAMPLING_FIELDS, recommended_sampling, default_reasoning,
-    is_qwen_flash_next, sampling_provenance,
+    is_nemotron_3_5, is_qwen_flash_next, sampling_provenance,
 )
 from .stage2_endpoint_pool import ExtractionEndpoint, EndpointPool, endpoints_from_mapping
 from .stage2_discovery_prompt import DISCOVERY_PROMPT_VERSION, DISCOVERY_SYSTEM_PROMPT
@@ -1074,7 +1074,9 @@ class PlainHandoffStage2Config:
             raise ValueError(
                 "stage2.runtime_transport_attempt_budget must be null or a positive integer"
             )
-        if self.runtime_model_family not in {"", "qwen3", "gemma4", "lfm2.5", "other"}:
+        if self.runtime_model_family not in {
+            "", "qwen3", "gemma4", "lfm2.5", "nemotron3.5", "other",
+        }:
             raise ValueError("stage2.runtime_model_family is not recognized")
         if self.runtime_context_window_tokens is not None and (
             isinstance(self.runtime_context_window_tokens, bool)
@@ -1764,6 +1766,8 @@ def _stage2_model_family(model: str) -> str:
         return "gemma4"
     if "lfm25" in compact:
         return "lfm2.5"
+    if is_nemotron_3_5(str(model)):
+        return "nemotron3.5"
     return "other"
 
 
@@ -2375,6 +2379,10 @@ def _wire_reasoning_effort(
 
     effort = str(configured_effort).strip().lower()
     enabled = _reasoning_enabled(effort)
+    if model_family == "nemotron3.5":
+        # Its documented control is the chat-template switch alone
+        # (enable_thinking, with medium_effort for the medium level).
+        return None
     if model_family in {"qwen3", "gemma4", "lfm2.5"} and not enabled:
         # These families have an explicit hard switch in extra_body (and a
         # prompt fallback). Sending reasoning_effort="none" as well breaks
@@ -2416,6 +2424,17 @@ def _openai_request_variants(
         # reminder and semantic validator when negotiating JSON-only serving.
         response_formats.append({"type": "json_object"})
     family_bodies: list[dict[str, Any]] = []
+    if model_family == "nemotron3.5":
+        effort = str(request_policy["reasoning_effort"]).strip().lower()
+        family_bodies.append(
+            {
+                **sampling_extra,
+                "chat_template_kwargs": {
+                    "enable_thinking": enabled,
+                    **({"medium_effort": True} if enabled and effort in {"low", "medium"} else {}),
+                },
+            }
+        )
     if model_family in {"qwen3", "gemma4", "lfm2.5"}:
         if model_family == "lfm2.5":
             family_bodies.append(

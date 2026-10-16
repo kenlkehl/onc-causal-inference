@@ -1,4 +1,5 @@
-"""Publisher sampling recommendations, verified 2026-09-23.
+"""Publisher sampling recommendations (each profile's verification date is in
+:func:`sampling_provenance`).
 
 Profiles are checked in for reproducible/offline runs, rather than scraping a
 mutable model card during inference. Unrecognized models use server defaults.
@@ -26,6 +27,12 @@ def is_qwen_flash_next(model: str) -> bool:
     return bool(re.search(r"qwen[-_ ]?3[._]8[-_ ]flash[-_ ]next", str(model), re.I))
 
 
+def is_nemotron_3_5(model: str) -> bool:
+    """Nemotron 3.5 releases; earlier Nemotron models use other reasoning switches."""
+
+    return bool(re.search(r"nemotron[-_ ]?3[._]5(?![0-9])", str(model), re.I))
+
+
 def default_reasoning(model: str, request_kind: str) -> str:
     if is_qwen_flash_next(model):
         return "xhigh"
@@ -39,6 +46,9 @@ def sampling_provenance(model: str, family: str) -> dict[str, Any]:
     if family == "gemma4":
         return {"profile": "gemma4", "verified_on": "2026-09-23",
                 "source": "https://huggingface.co/google/gemma-4-31B-it#best-practices"}
+    if family == "nemotron3.5":
+        return {"profile": "nemotron3.5", "verified_on": "2026-10-16",
+                "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16"}
     return {"profile": family if family in {"qwen3", "lfm2.5"} else "server_defaults",
             "verified_on": "2026-09-12" if family in {"qwen3", "lfm2.5"} else None}
 
@@ -74,6 +84,11 @@ def recommended_sampling(model: str, family: str, thinking: bool) -> dict[str, A
             if (version == "5" or (modern and not thinking))
             else 0.0,
         )
+    elif family == "nemotron3.5":
+        # https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16
+        # "Text: temperature 1.0, top_p 0.95" with reasoning on or off (the
+        # card's vision setting does not apply: Stage 2 sends text only).
+        defaults.update(top_p=0.95)
     elif family == "lfm2.5":
         # https://huggingface.co/LiquidAI/LFM2.5-2.6B
         # https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct

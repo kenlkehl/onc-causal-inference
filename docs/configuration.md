@@ -730,7 +730,8 @@ Stage 2 looks up a checked-in sampling profile for the model family (using the
 backing model ID when the server advertises one, so an alias still resolves).
 The interpretation and extraction LLMs resolve separately. The Gemma 4 and
 Qwen 3.8 Flash Next profiles follow the publishers' recommendations as
-verified on 2026-09-23; the Qwen 3 and LFM 2.5 profiles on 2026-09-12.
+verified on 2026-09-23, the Qwen 3 and LFM 2.5 profiles on 2026-09-12, and the
+Nemotron 3.5 profile on 2026-10-16.
 
 | Model family | Mode | Temperature | Top-p | Top-k | Presence penalty | Repetition penalty |
 |---|---|---|---|---|---|---|
@@ -742,6 +743,7 @@ verified on 2026-09-23; the Qwen 3 and LFM 2.5 profiles on 2026-09-12.
 | Qwen 3.5, 3.6, and 3.8 | non-thinking | 0.7 | 0.8 | 20 | 1.5 | 1.0 |
 | LFM 2.5 2.6B | either | 0.1 | 1.0 | 50 | 0 | 1.1 |
 | LFM 2.5 1.2B | either | 0.1 | 1.0 | 50 | 0 | 1.05 |
+| Nemotron 3.5 | either | 1.0 | 0.95 | 0 (off) | 0 | 1.0 |
 | Any other model | — | server defaults | | | | |
 
 Sources: [Gemma 4](https://huggingface.co/google/gemma-4-31B-it#best-practices),
@@ -751,7 +753,10 @@ Sources: [Gemma 4](https://huggingface.co/google/gemma-4-31B-it#best-practices),
 [Qwen 3.8](https://huggingface.co/Qwen/Qwen3.8-27B#best-practices),
 [Qwen 3.8 Flash Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next#best-practices),
 [LFM 2.5 2.6B](https://huggingface.co/LiquidAI/LFM2.5-2.6B),
-[LFM 2.5 1.2B](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct).
+[LFM 2.5 1.2B](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct),
+[Nemotron 3.5](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16)
+(its text setting; the card's vision setting, temperature 0.6, does not apply
+because Stage 2 sends text only).
 
 - Recognized profiles also send frequency penalty 0 and min-p 0, so a server's
   `generation_config.json` cannot add a different penalty. Where a publisher
