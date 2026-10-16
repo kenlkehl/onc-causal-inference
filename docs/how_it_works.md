@@ -99,27 +99,28 @@ data are used only for evaluation after all predictions are frozen.
 ## Stage 1: evidence from ten architectures
 
 Stage 1 runs up to ten [architectures](glossary.md#architecture), each a
-different way of finding clinically meaningful text. By default eight run (seven
-for continuous outcomes); the two optional ones are enabled by name. Each
-architecture is fitted within the outer-training data of each fold and writes
-evidence such as ranked phrases, topics, attention spans, or retrieved text
-excerpts. None of this evidence is a variable yet. The architectures fall into
+different way of finding clinically meaningful text. By default eight run; the
+two optional ones are enabled by name. Each architecture is fitted within the
+outer-training data of each fold and writes evidence such as ranked phrases,
+topics, attention spans, or retrieved text excerpts. None of this evidence is a variable yet. The architectures fall into
 four families.
 
-**Sparse lexical models** (`bow_nuisance`, `bow_r_loss`). Regularized
-[bag-of-words](glossary.md#bow-and-tf-idf) models report which words and short
-phrases predict treatment assignment or outcome, and which explain variation in
-the treatment effect after the nuisance predictions are accounted for. They are
-sensitive to explicit chart language such as diagnoses, performance status, and
-laboratory abnormalities.
+**Sparse lexical models** (`bow_nuisance`, `bow_r_loss`, `matched_pair_uplift`).
+Regularized [bag-of-words](glossary.md#bow-and-tf-idf) models report which words
+and short phrases predict treatment assignment or outcome, and which explain
+variation in the treatment effect after the nuisance predictions are accounted
+for. They are sensitive to explicit chart language such as diagnoses,
+performance status, and laboratory abnormalities. The matched-pair architecture
+pairs treated and untreated patients with similar cross-fitted propensity and
+[prognostic score](glossary.md#prognostic-score), and asks which words modify
+the treatment effect within pairs: a conditional logistic regression on the
+pairs with exactly one outcome event (binary outcomes), or a regression of the
+prognosis-adjusted paired outcome difference (continuous outcomes).
 
-**Contextual neural models** (`htr_neural`, `matched_pair_uplift`). A
+**Contextual neural models** (`htr_neural`). A
 [hierarchical transformer](glossary.md#htr) reads long records as ordered chunks
 and learns treatment, outcome, and effect heads; its attention points back to
-influential passages. The matched-pair architecture pairs treated and untreated
-patients with similar predicted propensity and outcome risk, and asks which text
-features explain the difference in their outcomes. It requires a binary
-outcome.
+influential passages.
 
 **Embedding models** (`embedding_whole_cohort`, `embedding_clustered`,
 `neural_query_moments`, and the optional `tfidf_semantic_retrieval_contrasts`).
@@ -433,13 +434,14 @@ effect while the AIPW ATE is nonzero.
 
 ## Continuous outcomes
 
-The same steps run with these differences: `matched_pair_uplift` does not run;
-DINA is replaced by R-loss forms in Stage 1 screens and is removed from Stage 2
-evidence, the estimator ensemble, and the `balanced_evidence` model search; the
-interaction model uses an identity link; the outcome interaction test is a
-partial F test and the three modifier-test components are weighted equally;
-held-out outcome nuisances are not calibrated; and the forest's X carries no
-prognostic score.
+The same steps run with these differences: `matched_pair_uplift` regresses the
+prognosis-adjusted paired outcome difference instead of fitting a conditional
+logistic regression; DINA is replaced by R-loss forms in Stage 1 screens and is
+removed from Stage 2 evidence, the estimator ensemble, and the
+`balanced_evidence` model search; the interaction model uses an identity link;
+the outcome interaction test is a partial F test and the three modifier-test
+components are weighted equally; held-out outcome nuisances are not
+calibrated; and the forest's X carries no prognostic score.
 
 ## Checkpoints and parallel work
 

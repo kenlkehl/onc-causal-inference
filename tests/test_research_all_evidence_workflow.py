@@ -98,8 +98,21 @@ def test_multi_model_forest_defaults_to_the_full_stage1_architecture_set():
     assert config.htr_evidence_enabled is True
     assert config.embedding_contrast.enabled is True
     assert config.matched_pair_uplift_enabled is True
-    assert config.matched_pair_bow_enabled is True
-    assert config.matched_pair_htr_enabled is True
+    assert config.matched_pair_prognostic_caliper is None
+    assert config.matched_pair_l1_ratio == 0.5
+    assert config.matched_pair_cv_folds == 5
+    for retired in (
+        "matched_pair_bow_enabled",
+        "matched_pair_htr_enabled",
+        "matched_pair_htr_attention_pairs_per_fold",
+        "matched_pair_max_controls_per_candidate",
+        "matched_pair_nearest_fallback_controls",
+        "matched_pair_bow_l2_alpha",
+        "matched_pair_outcome_caliper",
+    ):
+        assert not hasattr(config, retired)
+        with pytest.raises(TypeError):
+            MultiModelForestConfig(**{retired: 1})
 
 
 def test_generic_applied_dispatch_rejects_retired_multi_model_orchestration(tmp_path):
@@ -197,7 +210,7 @@ def test_disable_htr_keeps_bow_and_embedding_without_scheduling_htr(
     assert model_config.embedding_contrast.enabled is True
     assert model_config.htr_evidence_enabled is False
     assert model_config.htr_evidence_disable_reason == "disabled by research workflow option"
-    assert model_config.matched_pair_htr_enabled is False
+    assert model_config.matched_pair_uplift_enabled is True
     required = _required_stage2_architectures(context)
     assert HTR_NEURAL not in required
     assert MATCHED_PAIR_UPLIFT in required
@@ -735,6 +748,26 @@ def test_research_config_requires_only_its_enabled_stage2_architectures(
         SUPPORTED_STAGE2_ARCHITECTURES if enable_optional else DEFAULT_STAGE1_ARCHITECTURES
     )
     assert _required_stage2_architectures(context) == expected
+
+
+@pytest.mark.parametrize("selection", [None, "all"])
+def test_continuous_outcomes_run_the_matched_pair_lane(tmp_path, selection):
+    raw, _config = _inputs(tmp_path)
+    raw["science"]["outcome_type"] = "continuous"
+    if selection is not None:
+        raw["science"]["stage1_architectures"] = selection
+    config = compile_config(raw, config_dir=tmp_path)
+    context = ResearchAllEvidenceWorkflow(config)._resolved_context()
+    model = context.applied_config.architecture.multi_model_forest
+
+    assert model.matched_pair_uplift_enabled is True
+    assert model.bow_discovery_enabled is True
+    required = _required_stage2_architectures(context)
+    assert MATCHED_PAIR_UPLIFT in required
+    if selection is None:
+        assert required == DEFAULT_STAGE1_ARCHITECTURES and len(required) == 8
+    else:
+        assert required == SUPPORTED_STAGE2_ARCHITECTURES and len(required) == 10
 
 
 @pytest.mark.parametrize(

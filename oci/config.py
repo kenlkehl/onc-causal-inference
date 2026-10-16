@@ -2250,21 +2250,26 @@ class MultiModelForestConfig:
     outer_parallel_backend: str = "processes"
     # CPU budget for exact TF-IDF contexts.
     cpus_total: Optional[int] = None
-    # Matched-pair uplift evidence. Inner folds fit pair-level models on
-    # observed treated/control matches from the outer-train fold; outer-test
-    # patients are scored as candidate treated patients against similar
-    # untreated outer-train controls. The model output is a delta logit added
-    # to the matched untreated patient's outcome logit.
+    # Matched-pair effect-modification evidence (``matched_pair_uplift``).
+    # Treated and untreated training rows are matched 1:1 within calipers on
+    # the cross-fitted propensity and the cross-fitted untreated-arm outcome
+    # score mu0. Binary outcomes fit an elastic-net conditional logit on the
+    # discordant pairs; continuous outcomes regress the mu0-adjusted paired
+    # difference. Pair features are the mean of the two members' BoW vectors.
     matched_pair_uplift_enabled: bool = True
-    matched_pair_bow_enabled: bool = True
-    matched_pair_htr_enabled: bool = True
+    # Absolute caliper on the propensity.
     matched_pair_propensity_caliper: float = 0.05
-    matched_pair_outcome_caliper: float = 0.05
-    matched_pair_max_controls_per_candidate: int = 3
-    matched_pair_nearest_fallback_controls: int = 1
-    matched_pair_bow_l2_alpha: float = 1.0
-    matched_pair_bow_max_iter: int = 100
-    matched_pair_htr_attention_pairs_per_fold: int = 16
+    # Caliper on mu0: absolute on the probability scale for binary outcomes
+    # (None means 0.05), in standard deviations of mu0 over the training rows
+    # for continuous outcomes (None means 0.2).
+    matched_pair_prognostic_caliper: Optional[float] = None
+    matched_pair_l1_ratio: float = 0.5
+    # Folds over pairs for the penalty choice and the held-out validation.
+    matched_pair_cv_folds: int = 5
+    matched_pair_min_discordant_pairs: int = 30
+    matched_pair_min_pairs: int = 30
+    # Proximal-gradient iterations per penalty value.
+    matched_pair_max_iter: int = 5000
 
     def __post_init__(self):
         if isinstance(self.embedding_contrast, dict):
@@ -2341,37 +2346,28 @@ class MultiModelForestConfig:
         self.cpus_total = None if self.cpus_total is None else int(self.cpus_total)
         if not 0.0 < float(self.matched_pair_propensity_caliper) <= 1.0:
             raise ValueError("multi_model_forest.matched_pair_propensity_caliper must be in (0, 1]")
-        if not 0.0 < float(self.matched_pair_outcome_caliper) <= 1.0:
-            raise ValueError("multi_model_forest.matched_pair_outcome_caliper must be in (0, 1]")
-        if int(self.matched_pair_max_controls_per_candidate) < 1:
-            raise ValueError(
-                "multi_model_forest.matched_pair_max_controls_per_candidate must be >= 1"
-            )
-        if int(self.matched_pair_nearest_fallback_controls) < 0:
-            raise ValueError(
-                "multi_model_forest.matched_pair_nearest_fallback_controls must be >= 0"
-            )
-        if float(self.matched_pair_bow_l2_alpha) < 0.0:
-            raise ValueError("multi_model_forest.matched_pair_bow_l2_alpha must be >= 0")
-        if int(self.matched_pair_bow_max_iter) < 1:
-            raise ValueError("multi_model_forest.matched_pair_bow_max_iter must be >= 1")
-        if int(self.matched_pair_htr_attention_pairs_per_fold) < 0:
-            raise ValueError(
-                "multi_model_forest.matched_pair_htr_attention_pairs_per_fold must be >= 0"
-            )
         self.matched_pair_propensity_caliper = float(self.matched_pair_propensity_caliper)
-        self.matched_pair_outcome_caliper = float(self.matched_pair_outcome_caliper)
-        self.matched_pair_max_controls_per_candidate = int(
-            self.matched_pair_max_controls_per_candidate
-        )
-        self.matched_pair_nearest_fallback_controls = int(
-            self.matched_pair_nearest_fallback_controls
-        )
-        self.matched_pair_bow_l2_alpha = float(self.matched_pair_bow_l2_alpha)
-        self.matched_pair_bow_max_iter = int(self.matched_pair_bow_max_iter)
-        self.matched_pair_htr_attention_pairs_per_fold = int(
-            self.matched_pair_htr_attention_pairs_per_fold
-        )
+        if self.matched_pair_prognostic_caliper is not None:
+            caliper = float(self.matched_pair_prognostic_caliper)
+            if not math.isfinite(caliper) or caliper <= 0.0:
+                raise ValueError(
+                    "multi_model_forest.matched_pair_prognostic_caliper must be positive"
+                )
+            self.matched_pair_prognostic_caliper = caliper
+        ratio = float(self.matched_pair_l1_ratio)
+        if not 0.0 < ratio <= 1.0:
+            raise ValueError("multi_model_forest.matched_pair_l1_ratio must be in (0, 1]")
+        self.matched_pair_l1_ratio = ratio
+        for name, minimum in (
+            ("matched_pair_cv_folds", 2),
+            ("matched_pair_min_discordant_pairs", 1),
+            ("matched_pair_min_pairs", 1),
+            ("matched_pair_max_iter", 1),
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or int(value) != value or int(value) < minimum:
+                raise ValueError(f"multi_model_forest.{name} must be an integer >= {minimum}")
+            setattr(self, name, int(value))
 
     def set_feature_discovery_methods(
         self,
@@ -2716,6 +2712,18 @@ class AppliedInferenceConfig:
             resolve_effect_objective(
                 getattr(avf_config, "effect_objective", "auto"),
                 outcome_type=self.outcome_type,
+            )
+        # A binary outcome's prognostic caliper is on the probability scale.
+        forest_config = getattr(self.architecture, "multi_model_forest", None)
+        caliper = getattr(forest_config, "matched_pair_prognostic_caliper", None)
+        if (
+            caliper is not None
+            and str(self.outcome_type).lower() == "binary"
+            and float(caliper) > 1.0
+        ):
+            raise ValueError(
+                "multi_model_forest.matched_pair_prognostic_caliper must be in (0, 1] "
+                "for a binary outcome (it is on the probability scale)"
             )
 
 

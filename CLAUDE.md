@@ -71,7 +71,9 @@ oci/
     ├── stage1_checkpointing.py       # Per-context Stage 1 checkpoints
     ├── stage1_timing.py              # Reporting-only section timer; components/*/timing.jsonl
     ├── multi_model_forest_stage1.py  # BoW, HTR, embedding, matched-pair text models per context
-    ├── htr_trainer.py, htr_evidence_provider.py, multi_model_pair_uplift.py, stage1_dina.py
+    ├── htr_trainer.py, htr_evidence_provider.py, stage1_dina.py
+    ├── multi_model_pair_uplift.py    # matched_pair_uplift: caliper matching on e and mu0, BoW pair
+    │                                 #   conditional logit (binary) / paired-difference elastic net
     ├── sparse_text_modeling.py, stage1_modeling_support.py   # Shared Stage 1 modeling primitives
     ├── embedding_contrast_discovery.py     # Embedding contrasts (whole-cohort, clustered, retrieval)
     ├── tfidf_topic_stage1.py, tfidf_topic_discovery.py, tfidf_topic_score_selection.py
@@ -134,12 +136,11 @@ The canonical order in `oci/inference/stage1_architectures.py` is:
 When `science.stage1_architectures` (`--architectures`) is omitted, the
 architectures enabled by the Stage 1 template's switches run: eight with the
 bundled template (all except `tfidf_semantic_retrieval_contrasts`
-and `tfidf_orphan_ngrams`), seven for continuous outcomes because
-`matched_pair_uplift` is skipped. `all` selects all ten and is rejected for
-continuous outcomes, where `matched_pair_uplift` is unavailable. An explicit
-selection is recorded in `stage1_architectures/manifest.json` and cannot change
-on resume. Private prerequisites (for example BoW nuisance fits for embedding
-architectures) may run, but only selected architectures enter the handoff.
+and `tfidf_orphan_ngrams`), for binary and continuous outcomes. `all` selects
+all ten. An explicit selection is recorded in
+`stage1_architectures/manifest.json` and cannot change on resume. Private
+prerequisites (for example BoW nuisance fits for embedding architectures) may
+run, but only selected architectures enter the handoff.
 Keep the omitted-selector path's behavior unchanged.
 
 Neural-query consensus groups are ordered by the median absolute held-out z of

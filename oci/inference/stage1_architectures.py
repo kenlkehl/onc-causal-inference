@@ -21,6 +21,12 @@ TFIDF_TOPICS = "tfidf_topics"
 TFIDF_ORPHAN_NGRAMS = "tfidf_orphan_ngrams"
 NEURAL_QUERY_MOMENTS = "neural_query_moments"
 
+# Schema of the ``importance["matched_pair_uplift"]`` payload written by the
+# matched-pair lane and read by the Stage 2 evidence compiler and the Stage 1
+# evaluator. Payloads without it (the earlier treated/control-side lane) are
+# rejected rather than reinterpreted.
+MATCHED_PAIR_EVIDENCE_SCHEMA_VERSION = "matched_pair_conditional_logit_v1"
+
 
 @dataclass(frozen=True)
 class Stage1ArchitectureSpec:
@@ -58,12 +64,15 @@ STAGE1_ARCHITECTURE_SPECS = (
         component="text_models",
         support_services=(
             "split_registry",
+            "bow_views",
             "bow_nuisance_fits",
-            "htr_nuisance_fits",
             "matched_pair_construction",
         ),
         native_metric_families=("matching", "uplift", "oracle_modifier_recovery"),
-        description="Text features that separate propensity-matched treatment pairs.",
+        description=(
+            "Sparse text features that modify the treatment effect within "
+            "propensity- and prognosis-matched treated/untreated pairs."
+        ),
     ),
     Stage1ArchitectureSpec(
         name=HTR_NEURAL,
@@ -193,8 +202,13 @@ def legacy_enabled_stage1_architectures(
     *,
     outcome_type: str,
 ) -> tuple[str, ...]:
-    """Resolve enabled lanes from their implementation settings."""
+    """Resolve enabled lanes from their implementation settings.
 
+    Every lane supports both outcome types, so ``outcome_type`` does not
+    change the result; it stays in the signature for callers that pass it.
+    """
+
+    del outcome_type
     mm_config = applied_config.architecture.multi_model_forest
     enabled: set[str] = set()
     bow_enabled = bool(getattr(mm_config, "bow_discovery_enabled", True))
@@ -204,15 +218,10 @@ def legacy_enabled_stage1_architectures(
     if htr_enabled:
         enabled.add(HTR_NEURAL)
 
-    matched_enabled = (
-        str(outcome_type).lower() != "continuous"
-        and bool(getattr(mm_config, "matched_pair_uplift_enabled", True))
-        and (
-            bow_enabled
-            and bool(getattr(mm_config, "matched_pair_bow_enabled", True))
-            or htr_enabled
-            and bool(getattr(mm_config, "matched_pair_htr_enabled", True))
-        )
+    # The matched-pair lane is a bag-of-words model for both outcome types; it
+    # matches on the BoW nuisance propensity and fits BoW pair features.
+    matched_enabled = bow_enabled and bool(
+        getattr(mm_config, "matched_pair_uplift_enabled", True)
     )
     if matched_enabled:
         enabled.add(MATCHED_PAIR_UPLIFT)
@@ -293,6 +302,7 @@ __all__ = [
     "EMBEDDING_CLUSTERED",
     "EMBEDDING_WHOLE_COHORT",
     "HTR_NEURAL",
+    "MATCHED_PAIR_EVIDENCE_SCHEMA_VERSION",
     "MATCHED_PAIR_UPLIFT",
     "NEURAL_QUERY_MOMENTS",
     "STAGE1_ARCHITECTURES",

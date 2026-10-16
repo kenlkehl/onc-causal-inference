@@ -23,7 +23,7 @@ report.
 |---|---|---|---|---|
 | 1 | `bow_nuisance` | on | Words and phrases that predict treatment or outcome | Ranked terms with scores, per text view |
 | 2 | `bow_r_loss` | on | Words and phrases that explain treatment-effect variation after nuisance adjustment | Ranked terms with scores |
-| 3 | `matched_pair_uplift` | on (binary outcomes only) | Text that separates outcomes within matched treated/untreated pairs | Ranked terms and attended text chunks |
+| 3 | `matched_pair_uplift` | on | Words and phrases that modify the treatment effect within matched treated/untreated pairs | Signed ranked terms, per text view |
 | 4 | `htr_neural` | on | Context-dependent passages used by neural treatment, outcome, and effect heads | Attended text chunks per head |
 | 5 | `embedding_whole_cohort` | on | Semantic directions separating patient groups across the cohort | Text chunks at both ends of each direction |
 | 6 | `embedding_clustered` | on | The same directions computed within clusters of similar patients | Text chunks at both ends of each cluster-based direction |
@@ -49,7 +49,8 @@ cross-fitted propensity and arm-specific outcome predictions; effects are
 reported on the log-odds-ratio scale inside the model and converted to risk
 differences for prediction. For continuous outcomes the same screens use the
 residualized relation `Y − m(X) ≈ τ(X)·(T − e(X))` that underlies the
-[R-loss](glossary.md#r-loss).
+[R-loss](glossary.md#r-loss). Architecture 3 instead compares the members of
+matched treated/untreated pairs.
 
 ### 1. Sparse treatment and outcome associations (`bow_nuisance`)
 
@@ -72,18 +73,93 @@ ordinary outcome prediction, but they do not show that the named characteristic
 modifies the treatment effect. The [R-learner weighting note](design_notes/r_learner_weighting.md)
 discusses the weighted and unweighted forms.
 
-### 3. Matched-pair uplift (`matched_pair_uplift`)
+### 3. Matched-pair effect modification (`matched_pair_uplift`)
 
-Treated patients are matched one-to-one to untreated patients whose
-cross-fitted propensity and outcome probability both lie within a caliper (0.05
-by default), using a maximum bipartite matching. A bag-of-words model and an
-[HTR](glossary.md#htr) model then predict each treated patient's outcome with the
-matched control's predicted risk as an offset, so the text features explain the
-difference within pairs. The architecture asks what differs in the records of
-otherwise similar patients who received different treatments. Matching balances
-only what the nuisance models capture, so the result is evidence for a candidate
-characteristic, not an individual treatment effect. It runs only for binary
-outcomes.
+Within each training context, treated patients are matched one-to-one, without
+replacement, to untreated patients. A pair is allowed only when both
+cross-fitted scores lie within a caliper: the propensity `ê` (absolute
+caliper `matched_pair_propensity_caliper`, 0.05 by default) and the
+[prognostic score](glossary.md#prognostic-score) `μ̂0`, the predicted outcome
+without treatment (`matched_pair_prognostic_caliper`: absolute on the
+probability scale for binary outcomes, 0.05 by default; in standard deviations
+of `μ̂0` over the training patients for continuous outcomes, 0.2 by default).
+Using a prognostic score alongside the propensity follows Hansen (2008). The
+matching is a maximum bipartite matching (Hopcroft–Karp) in which
+each treated patient tries its closest eligible controls first; a treated
+patient with no control inside both calipers stays unmatched. Each treated
+patient's candidate list keeps at most its 256 closest eligible controls,
+which matters only in large cohorts.
+
+Both scores are out of fold for every training patient:
+
+- `ê` is the mean of the bag-of-words nuisance propensities (architecture 1),
+  each predicted by a model fitted on the other nuisance folds. The HTR
+  propensity is not used, because its calibration step is fitted on
+  predictions from models that saw the patient.
+- For binary outcomes, `μ̂0` is the untreated-arm probability from the
+  context's cross-fitted DINA nuisance models (a ridge logistic regression on
+  untreated patients, fitted on the other folds). For continuous outcomes it is
+  a cross-fitted elastic-net linear regression on the untreated patients of the
+  other folds, using the first bag-of-words view's vocabulary.
+
+A pair is described by the average of its two members' bag-of-words vectors:
+one block of features per pair, with no treated or control side. One model is
+fitted per distinct vocabulary among the configured bag-of-words views, so
+views that differ only in their learner share a fit.
+
+**Binary outcomes: conditional logistic regression on discordant pairs.**
+Only pairs in which exactly one member had the event inform a matched-pair
+comparison; pairs in which both or neither had it are discarded (Breslow and
+Day 1980, chapters 5 and 7). With `D = 1` when the treated member had the
+event, the model is
+
+```text
+logit P(D = 1 | discordant pair) = [logit μ̂0(x_t) − logit μ̂0(x_c)] + α + β·x̄_pair
+```
+
+The bracketed term is a fixed offset that absorbs prognostic imbalance left
+inside the pair. The intercept `α` is the average conditional log odds ratio of
+treatment (features are centered, so it applies at the average pair), and each
+coefficient is effect modification on the log-odds-ratio scale.
+
+**Continuous outcomes: adjusted paired differences.** Every matched pair is
+kept, and the target is
+`Δ = (Y_t − Y_c) − (μ̂0(x_t) − μ̂0(x_c))`, regressed on the pair features. The
+intercept is the average effect and the coefficients are additive effect
+modification.
+
+Both fits are elastic nets (`matched_pair_l1_ratio`, 0.5 by default) on
+standardized pair features with an unpenalized intercept. The penalty is chosen
+from a 30-value path by `matched_pair_cv_folds`-fold cross-validation over
+pairs (5 by default), minimizing the held-out conditional negative
+log-likelihood (binary) or squared error (continuous). The vocabulary and the
+column scaling are fitted on the analysis pairs' records without outcome
+information. The evidence is the `top_n_features` terms with the largest
+absolute standardized coefficients, kept with their sign: a positive term
+means a higher conditional odds of the outcome (binary) or a larger outcome
+(continuous) for a treated patient than for a similar untreated patient. Stage
+2 attaches supporting sentences to these terms the same way it does for the
+other bag-of-words architectures.
+
+**Validation.** A nested cross-fit over the same pair folds, in which each
+fold's penalty is chosen by an inner cross-validation on the other folds'
+pairs, reports the held-out log-likelihood gain (binary) or squared-error
+reduction (continuous) of the fitted model over the intercept-only,
+constant-effect model with the same offset. It is reported in the evidence and
+in the evaluator's metrics and never filters evidence. For the outer held-out
+patients the architecture also writes a prediction
+`τ̂(x) = intercept + coefficients · x` from each patient's own features; nothing
+is fitted on those patients.
+
+**Power.** Only discordant pairs inform the binary fit, roughly `2p(1 − p)` of
+the matched pairs when the outcome rate is `p`, and patients without a match
+within the calipers contribute nothing. When a context has fewer than
+`matched_pair_min_discordant_pairs` discordant pairs (binary) or
+`matched_pair_min_pairs` matched pairs (continuous), both 30 by default, the
+architecture emits no evidence for that context and records the reason.
+Matching balances only what the nuisance models capture, so a term is evidence
+for a candidate effect modifier, not an estimate of an individual treatment
+effect.
 
 ### 4. Hierarchical transformer (`htr_neural`)
 
@@ -95,8 +171,7 @@ nuisance predictions fitted and frozen inside the effect-training fold. Its
 attention identifies the chunks the model relied on. Unlike a bag-of-words
 model, it can distinguish some uses of the same vocabulary and combine
 information spread across a long history. Attention describes what the model
-used, not a causal explanation. `--disable-htr` turns off this architecture and
-the HTR half of `matched_pair_uplift`.
+used, not a causal explanation. `--disable-htr` turns off this architecture.
 
 ### 5. Whole-cohort embedding contrasts (`embedding_whole_cohort`)
 
@@ -245,8 +320,8 @@ The selector is `science.stage1_architectures` in the configuration file, or
 
 | Selector | Architectures that run and enter the handoff |
 |---|---|
-| Omitted | The architectures enabled in the Stage 1 template `example_configs/all_evidence_stage1_model.json`. With the bundled template these are the eight marked "on" above, or seven for continuous outcomes because `matched_pair_uplift` requires a binary outcome. |
-| `all` | All ten. Because `matched_pair_uplift` requires a binary outcome, `all` is rejected for a continuous outcome; list the other nine instead. |
+| Omitted | The architectures enabled in the Stage 1 template `example_configs/all_evidence_stage1_model.json`. With the bundled template these are the eight marked "on" above, for binary and continuous outcomes. |
+| `all` | All ten |
 | Comma-separated list, for example `bow_nuisance,tfidf_topics` | Exactly those, in canonical order |
 
 Rules that apply to an explicit selection:
@@ -260,7 +335,9 @@ Rules that apply to an explicit selection:
   models. For example, the embedding architectures need nuisance predictions
   from a text model, so selecting only embedding architectures still fits the
   bag-of-words nuisance models (or the HTR models when bag-of-words is disabled
-  in the template), and `neural_query_moments` needs the embedding cache.
+  in the template), `matched_pair_uplift` needs the bag-of-words views and
+  their nuisance propensities, and `neural_query_moments` needs the embedding
+  cache.
   Prerequisites run as private support; only the selected architectures'
   evidence enters the handoff and Stage 2.
 - **Availability checks.** Naming either optional architecture enables it. A
@@ -319,7 +396,14 @@ include:
   effect scores with the true individual effect;
 - **Stability:** overlap of evidence across inner folds, plus
   architecture-specific measures such as topic, query, or cluster stability and
-  matching or retrieval coverage.
+  retrieval coverage;
+- **Matched pairs** (`matched_pair_uplift`, read from the frozen text-model
+  evidence, which is hashed with the other inputs): the numbers of matched and
+  discordant pairs, the counts of pairs in which only the treated member
+  (`n10`) or only the control (`n01`) had the event, the McNemar log odds ratio
+  `log(n10/n01)` (binary) or the mean adjusted paired difference (continuous),
+  the mean and maximum within-pair `|Δê|` and `|Δμ̂0|`, the held-out gain over
+  the constant-effect model, and the number of nonzero terms, per context.
 
 ### Random-chunk null for lexical recovery
 
@@ -541,3 +625,11 @@ per ablation, with the full run as reference), `folds.csv` (one row per
 ablation and fold), and `summary.md` to `ABLATION_DIR/comparison/`, or to
 `--out`. `compare` accepts the same `--oracle`, `--recovery-r2`, `--dataset`,
 and `--metadata` options as `oci-evaluate-attribution`.
+
+## References
+
+- Breslow NE, Day NE. *Statistical Methods in Cancer Research, Volume I: The
+  Analysis of Case-Control Studies.* IARC Scientific Publications No. 32. Lyon:
+  International Agency for Research on Cancer; 1980.
+- Hansen BB. The prognostic analogue of the propensity score. *Biometrika*
+  2008;95(2):481–488.

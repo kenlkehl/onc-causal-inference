@@ -248,17 +248,19 @@ def _all_architecture_raw_rows() -> list[dict]:
                         }
                     ],
                     "matched_pair_uplift": {
+                        "schema_version": "matched_pair_conditional_logit_v1",
                         "views": [
                             {
-                                "view_name": "pair_word_linear",
-                                "uplift_delta_logit_positive": [
-                                    {"feature": "treated::pair response wording", "score": 1.7}
+                                "view_name": "matched_pair__word_linear",
+                                "score_polarity": {"effect_modification": "signed"},
+                                "effect_modification_positive": [
+                                    {"feature": "pair response wording", "score": 1.7, "rank": 1}
                                 ],
-                                "ridge_delta_probability_negative": [
-                                    {"feature": "control::pair control wording", "score": -0.8}
+                                "effect_modification_negative": [
+                                    {"feature": "pair attenuation wording", "score": -0.8, "rank": 2}
                                 ],
                             }
-                        ]
+                        ],
                     },
                 },
                 "embedding_contrast_evidence": {
@@ -323,11 +325,6 @@ def _all_architecture_raw_rows() -> list[dict]:
                                 {"row_id": 5, "chunk_text": "HTR squared R loss witness"}
                             ]
                         },
-                    },
-                    "pair_uplift": {
-                        "attention": [
-                            {"row_id": 6, "chunk_text": "HTR matched pair witness"}
-                        ]
                     },
                 },
             },
@@ -440,9 +437,12 @@ def test_compiler_preserves_enabled_architectures_as_independent_interpretation_
     assert pair_cards
     assert all("matched_pair" in card["evidence_axes"] for card in pair_cards)
     rendered_pairs = json.dumps(pair_cards)
-    assert "treated::" not in rendered_pairs
-    assert "control::" not in rendered_pairs
-    assert "HTR matched pair witness" in rendered_pairs
+    assert "pair response wording" in rendered_pairs
+    assert "pair attenuation wording" in rendered_pairs
+    assert "pair_side" not in rendered_pairs
+    assert {"positive", "negative"} <= {
+        polarity for card in pair_cards for polarity in card["polarities"]
+    }
 
     htr_rendered = json.dumps(
         [

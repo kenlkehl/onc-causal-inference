@@ -159,7 +159,9 @@ flags patients outside `stage2.overlap_flag_bounds` and changes nothing.
 The predicted outcome under the comparator, `μ̂0(X)`. OCI uses it, on the logit
 scale for binary outcomes, as an unpenalized adjustment covariate in the
 penalized interaction model and as an extra column of the forest's X for binary
-outcomes.
+outcomes. In Stage 1, the `matched_pair_uplift` architecture matches treated and
+untreated patients on a cross-fitted prognostic score as well as the propensity,
+and adjusts each pair's comparison by the members' difference in it.
 
 ## Statistics and models
 
@@ -293,8 +295,8 @@ interactions while keeping the elastic net available when it fits best (see
 
 Hierarchical transformer. A long record is split into overlapping word chunks,
 each chunk is encoded by a small pretrained text encoder, and a document-level
-transformer combines the chunk encodings. Used by the `htr_neural` and
-`matched_pair_uplift` Stage 1 architectures.
+transformer combines the chunk encodings. Used by the `htr_neural` Stage 1
+architecture.
 
 ### BoW and TF-IDF
 

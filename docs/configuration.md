@@ -195,8 +195,8 @@ from `dataset`, whose rows match the analysis cohort one to one.
 | `outer_folds` | 5 | Outer cross-fitting folds ([outer and inner folds](glossary.md#outer-and-inner-folds)) |
 | `inner_folds` | 5 | Inner folds within each outer-training set |
 | `seed` | 42 | Seed for fold splits and models |
-| `stage1_architectures` | omitted | Comma-separated string or list of Stage 1 architectures, or `all` (all ten; rejected for continuous outcomes, where `matched_pair_uplift` is unavailable). Omitted runs the architectures enabled by the Stage 1 template: eight with the bundled template (seven for continuous outcomes, which skip `matched_pair_uplift`). See [Stage 1 architectures](stage1_architectures.md) |
-| `htr_enabled` | `true` | `false` disables all HTR modeling, including matched-pair HTR (same as `--disable-htr`) |
+| `stage1_architectures` | omitted | Comma-separated string or list of Stage 1 architectures, or `all` (all ten). Omitted runs the architectures enabled by the Stage 1 template: eight with the bundled template, for binary and continuous outcomes. See [Stage 1 architectures](stage1_architectures.md) |
+| `htr_enabled` | `true` | `false` disables all HTR modeling and with it the `htr_neural` architecture (same as `--disable-htr`) |
 | `stage1` | `{}` | Overrides merged into the Stage 1 template |
 | `neural_queries` | `{}` | Overrides merged into the neural-query template |
 
@@ -510,6 +510,12 @@ Commonly changed keys, relative to `science.stage1.architecture`:
 | `multi_model_forest.tfidf_topic.orphan_ngram_enabled` | `false` | Add `tfidf_orphan_ngrams` to the default selection |
 | `multi_model_forest.embedding_contrast.include_cluster_contrast_vectors` | `true` | Produce `embedding_clustered` |
 | `multi_model_forest.bow_discovery_enabled`, `htr_evidence_enabled`, `matched_pair_uplift_enabled` | `true` | Enable the BoW, HTR, and matched-pair architectures |
+| `multi_model_forest.matched_pair_propensity_caliper` | 0.05 | `matched_pair_uplift`: absolute caliper on the cross-fitted propensity |
+| `multi_model_forest.matched_pair_prognostic_caliper` | `null` | `matched_pair_uplift`: caliper on the cross-fitted prognostic score `μ̂0`; `null` means 0.05 on the probability scale for binary outcomes and 0.2 standard deviations of `μ̂0` over the training patients for continuous outcomes. A binary value must be in (0, 1] |
+| `multi_model_forest.matched_pair_l1_ratio` | 0.5 | `matched_pair_uplift`: elastic-net mixing of the pair model and of the continuous-outcome `μ̂0` model (1 is the lasso) |
+| `multi_model_forest.matched_pair_cv_folds` | 5 | `matched_pair_uplift`: folds over pairs for the penalty choice and the nested held-out validation |
+| `multi_model_forest.matched_pair_min_discordant_pairs`, `matched_pair_min_pairs` | 30, 30 | `matched_pair_uplift`: minimum discordant pairs (binary) or matched pairs (continuous), never below 4 (the nested cross-fit needs two pairs per fold); below it a context emits no matched-pair evidence and records why |
+| `multi_model_forest.matched_pair_max_iter` | 5000 | `matched_pair_uplift`: solver iterations per penalty value |
 
 Chunk-based models stop with a capacity error rather than truncating a long
 record; raise the relevant `max_chunks` value when that happens. The workflow
@@ -545,7 +551,7 @@ file; `--set` can change any other value.
 |---|---|---|
 | `--devices LIST` | `run.devices` | Comma-separated Stage 1 devices, such as `cuda:0,cuda:1` (default `cpu`) |
 | `--workers N` | `run.workers` | Stage 1 CPU budget; also the default Stage 2 request concurrency (default 1) |
-| `--architectures LIST` | `science.stage1_architectures` | Comma-separated Stage 1 architectures, or `all` for all ten (binary outcomes only). Frozen on resume |
+| `--architectures LIST` | `science.stage1_architectures` | Comma-separated Stage 1 architectures, or `all` for all ten. Frozen on resume |
 | `--htr-model ID` | `models.htr` | HTR chunk encoder |
 | `--disable-htr` | `science.htr_enabled=false` | Disable all HTR modeling, keeping the other evidence families |
 | `--embedding-model ID` | `models.embeddings` | Embedding model for the embedding and neural-query architectures |
