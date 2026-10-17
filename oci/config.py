@@ -849,7 +849,7 @@ class EmbeddingContrastDiscoveryConfig:
     model_name: str = "Qwen/Qwen3-Embedding-8B"
     cache_dir: Optional[str] = None
     device: Optional[str] = None
-    batch_size: int = 16
+    batch_size: int = 128
     max_seq_length: Optional[int] = 1024
     chunk_size_words: int = 256
     chunk_overlap_words: int = 64
