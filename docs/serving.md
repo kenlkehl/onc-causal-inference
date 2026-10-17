@@ -392,9 +392,11 @@ The `dgx_station_gb300` preset expects the station's optional RTX PRO display
 GPU at PCI position 0 and the GB300 at position 1, the numbering `nvidia-smi`
 shows. CUDA's default order (fastest first) can number them differently, so
 the preset exports `CUDA_DEVICE_ORDER=PCI_BUS_ID` and sets `PHYSICAL_GPUS=1`.
-It also sets `MIN_FREE_GPU_GB=150`, which no display GPU can satisfy, so
-selecting the wrong GPU stops the launch at detection. On a station without a
-display GPU, set `PHYSICAL_GPUS=0`. Check the launcher's `GPU memory:` line for
+It also sets `MIN_TOTAL_GPU_GB=150`, which no display GPU (at most 96 GB) can
+satisfy, so selecting the wrong GPU stops the launch at detection; the check
+uses total rather than free memory because a vLLM server on the GB300 leaves
+Stage 1 less than that free. On a station without a display GPU, set
+`PHYSICAL_GPUS=0`. Check the launcher's `GPU memory:` line for
 the GB300. The Grace CPU is Arm (aarch64): the lockfile's torch and vLLM have
 aarch64 wheels, but this preset has not yet been run on a station.
 
@@ -424,6 +426,7 @@ summary) and requires PyTorch to see at least one CUDA GPU:
 | `--workers` | `auto` | Stage 1 workers; `auto` is the smaller of the CPU count and the larger of outer × (inner + 1) and the GPUs' capacity at 8 GiB per worker |
 | `--stage2-workers` | 32 | Stage 2 request concurrency; `auto` caps 32 at the CPU count |
 | `--min-free-vram-gib` | 20 (`run_synthetic.sh` passes `MIN_FREE_GPU_GB`, default 0) | Free memory a GPU needs to be eligible |
+| `--min-total-vram-gib` | 0 (`run_synthetic.sh` passes `MIN_TOTAL_GPU_GB`, default 0) | Total memory a GPU needs to be eligible, which identifies a GPU model |
 | `--stage1-vram-gib-per-worker` | 8 | GPU memory assumed per concurrent Stage 1 context |
 
 ## Troubleshooting

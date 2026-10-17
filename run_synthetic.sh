@@ -56,6 +56,7 @@
 #   GPU_COUNT, PHYSICAL_GPUS     Stage 1 GPUs: how many eligible GPUs to select,
 #                                or explicit host indices (CUDA_VISIBLE_DEVICES)
 #   MIN_FREE_GPU_GB              free memory a GPU needs to be eligible (0)
+#   MIN_TOTAL_GPU_GB             total memory a GPU needs to be eligible (0)
 #   STAGE1_WORKERS               Stage 1 CPU workers (auto)
 #   STAGE1_ARCHITECTURES         comma-separated Stage 1 architectures, or all
 #                                (default: the template's eight default lanes)
@@ -305,6 +306,7 @@ detect_args=(
     --gpu-count "${GPU_COUNT:-auto}"
     --workers "${STAGE1_WORKERS:-auto}"
     --min-free-vram-gib "${MIN_FREE_GPU_GB:-0}"
+    --min-total-vram-gib "${MIN_TOTAL_GPU_GB:-0}"
 )
 if [[ -n "${STAGE2_WORKERS:-}" ]]; then
     detect_args+=(--stage2-workers "$STAGE2_WORKERS")

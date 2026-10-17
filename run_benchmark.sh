@@ -17,7 +17,10 @@
 #   The benchmark directory.  Rerun the same command to resume every step.
 # OPTION
 #   For example --scenarios S0 --sizes 1000 --seeds 101, --plan (print the
-#   plan and stop), or --through materialize.  See ./run_benchmark.sh --help.
+#   plan and stop), --through materialize, or --llm-url URL[,URL...] to use
+#   running vLLM servers for every LLM role instead of the preset's managed
+#   ones (the preset then supplies only its GPU selection, CPU workers, and
+#   timeouts).  See ./run_benchmark.sh --help.
 #
 # Environment variables
 #   The runs honor every variable of run_synthetic.sh (STAGE2_MODEL, ...).

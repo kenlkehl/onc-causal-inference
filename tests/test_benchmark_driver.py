@@ -276,3 +276,89 @@ def test_plan_only_writes_nothing(tmp_path):
     assert driver.main(["dgx_station_gb300", str(bench), "--plan"]) == 0
     assert not bench.exists()
     assert driver.main(["rtxpro6000x8", str(bench), "--seeds", "7001", "--plan"]) == 2
+
+
+def _models(model="nvidia/Gemma-4-26B-A4B-NVFP4", window=262_144, count=1):
+    return lambda url: {"data": [{"id": model, "max_model_len": window}] * count}
+
+
+def test_llm_servers_are_probed_for_one_model_and_their_window():
+    servers = driver.probe_llm_servers("http://a:8000/v1/, http://b:8000/v1",
+                                       concurrency=32, fetch=_models(window=100_000))
+    assert servers.urls == ("http://a:8000/v1", "http://b:8000/v1")
+    assert servers.model == "nvidia/Gemma-4-26B-A4B-NVFP4"
+    assert servers.context_window == 100_000
+    assert servers.interpretation_workers == 8
+    assert servers.extraction_endpoints() == [
+        {"endpoint": "http://a:8000/v1", "max_concurrency": 24},
+        {"endpoint": "http://b:8000/v1", "max_concurrency": 32},
+    ]
+    models = {"http://a/v1": "m1", "http://b/v1": "m2"}
+    with pytest.raises(DriverError, match="serve one model"):
+        driver.probe_llm_servers("http://a/v1,http://b/v1", concurrency=32,
+                                 fetch=lambda url: {"data": [{"id": models[url]}]})
+    with pytest.raises(DriverError, match="exactly one model"):
+        driver.probe_llm_servers("http://a/v1", concurrency=32, fetch=_models(count=2))
+    with pytest.raises(DriverError, match="at least 2"):
+        driver.probe_llm_servers("http://a/v1", concurrency=1, fetch=_models())
+
+    def unreachable(url):
+        raise OSError("connection refused")
+
+    with pytest.raises(DriverError, match="cannot read http://a/v1/models"):
+        driver.probe_llm_servers("http://a/v1", concurrency=32, fetch=unreachable)
+
+
+def test_llm_url_runs_use_the_external_preset_and_the_machine_hardware():
+    machine = driver.preset_environment("dgx_station_gb300", _environ())
+    servers = driver.LLMServers(("http://gb300:8000/v1",), "served-model", 100_000, 32)
+    env = driver.external_run_environment(_environ(STAGE2_REQUEST_TIMEOUT="9000"), machine, servers)
+
+    assert env["PRESET"] == "external"
+    assert env["STAGE2_ENDPOINT"] == "http://gb300:8000/v1"
+    assert env["STAGE2_MODEL"] == env["STAGE2_EXTRACTION_MODEL"] == "served-model"
+    assert json.loads(env["STAGE2_EXTRACTION_ENDPOINTS"]) == [
+        {"endpoint": "http://gb300:8000/v1", "max_concurrency": 24},
+    ]
+    assert env["STAGE2_WORKERS"] == "8"
+    assert env["STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS"] == "100000"
+    assert (env["PHYSICAL_GPUS"], env["CUDA_DEVICE_ORDER"], env["MIN_TOTAL_GPU_GB"]) == (
+        "1", "PCI_BUS_ID", "150",
+    )
+    assert env["STAGE2_MODELING_WORKERS"] == "64"
+    assert env["STAGE2_REQUEST_TIMEOUT"] == "9000"  # explicit values win
+    assert not any(name.startswith(("STAGE2_VLLM_", "STAGE2_EXTRACTION_VLLM_")) for name in env)
+    with pytest.raises(DriverError, match="unset STAGE2_MODEL"):
+        driver.external_run_environment(_environ(STAGE2_MODEL="x"), machine, servers)
+
+
+def test_llm_url_generator_uses_the_servers_and_fits_their_window(tmp_path):
+    servers = driver.LLMServers(("http://a/v1", "http://b/v1"), "served-model", 40_000, 16)
+    env = driver.generator_environment({}, servers)
+    assert env["GENERATOR_ENDPOINT"] == "http://a/v1,http://b/v1"
+    assert env["GENERATOR_MODEL"] == "served-model" and env["GENERATOR_WORKERS"] == "32"
+    assert driver.generator_max_tokens(servers, env) == 40_000 - 16_384
+    assert driver.generator_max_tokens(
+        driver.LLMServers(("http://a/v1",), "m", 262_144, 32),
+        {"GENERATOR_ENDPOINT": "http://a/v1"},
+    ) == 50_000
+    # A separate generator server keeps its own settings.
+    other = driver.generator_environment({"GENERATOR_ENDPOINT": "http://gen/v1"}, servers)
+    assert other["GENERATOR_ENDPOINT"] == "http://gen/v1" and "GENERATOR_MODEL" not in other
+    assert driver.generator_max_tokens(servers, other) is None
+
+    job = GenerationJob(name="S5", output_dir=tmp_path / "S5", settings={}, patients=10)
+    command = driver.generator_command(job, bench=tmp_path, endpoints=list(servers.urls),
+                                       model=servers.model, workers=32, max_tokens=23_616)
+    settings = json.loads(Path(command[command.index("--config") + 1]).read_text())
+    assert settings["llm"]["max_tokens"] == 23_616
+
+
+def test_llm_url_plan_reports_the_servers(tmp_path, capsys):
+    args = _args("dgx_station_gb300", tmp_path / "bench", "--scenarios", "S0", "--sizes", "1000",
+                 "--seeds", "101", "--llm-url", "http://gb300:8000/v1", "--plan")
+    assert driver.run(args, environ=_environ(), fetch=_models()) == 0
+    out = capsys.readouterr().out
+    assert ("Stage 2:      nvidia/Gemma-4-26B-A4B-NVFP4 at http://gb300:8000/v1 "
+            "(262144-token window; 8 interpretation and 24 extraction requests at a time)") in out
+    assert not (tmp_path / "bench").exists()

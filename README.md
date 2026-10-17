@@ -469,6 +469,7 @@ turn, and aggregates. Rerun the same command to resume:
 ```bash
 ./run_benchmark.sh rtxpro6000x8 /path/to/bench --scenarios S0 --sizes 1000 --seeds 101
 ./run_benchmark.sh dgx_station_gb300 /path/to/bench --plan   # what would run, and what is done
+./run_benchmark.sh dgx_station_gb300 /path/to/bench --llm-url http://localhost:8000/v1  # a running vLLM server
 ```
 
 See [Benchmarks](docs/benchmarks.md).

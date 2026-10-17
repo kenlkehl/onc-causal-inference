@@ -89,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="minimum free memory for a GPU to be eligible",
     )
     parser.add_argument(
+        "--min-total-vram-gib",
+        type=float,
+        default=0.0,
+        help="minimum total memory for a GPU to be eligible (identifies a GPU model)",
+    )
+    parser.add_argument(
         "--stage1-vram-gib-per-worker",
         type=float,
         default=8.0,
@@ -101,8 +107,8 @@ def main() -> int:
     args = build_parser().parse_args()
     if args.outer_folds < 1 or args.inner_folds < 1:
         raise SystemExit("fold counts must be positive")
-    if args.min_free_vram_gib < 0:
-        raise SystemExit("--min-free-vram-gib must be nonnegative")
+    if args.min_free_vram_gib < 0 or args.min_total_vram_gib < 0:
+        raise SystemExit("--min-free-vram-gib and --min-total-vram-gib must be nonnegative")
     if args.stage1_vram_gib_per_worker <= 0:
         raise SystemExit("VRAM-per-worker estimates must be positive")
 
@@ -111,13 +117,18 @@ def main() -> int:
     visible = _visible_gpus()
     if not visible:
         raise SystemExit("no CUDA GPUs are visible to PyTorch")
-    eligible = [gpu for gpu in visible if gpu.free_gib >= args.min_free_vram_gib]
+    eligible = [
+        gpu for gpu in visible
+        if gpu.free_gib >= args.min_free_vram_gib and gpu.total_gib >= args.min_total_vram_gib
+    ]
     if not eligible:
         details = "; ".join(
-            f"cuda:{gpu.index} {gpu.free_gib:.1f}/{gpu.total_gib:.1f} GiB free" for gpu in visible
+            f"cuda:{gpu.index} {gpu.name} {gpu.free_gib:.1f}/{gpu.total_gib:.1f} GiB free"
+            for gpu in visible
         )
         raise SystemExit(
-            f"no visible GPU has the required {args.min_free_vram_gib:.1f} GiB free; {details}"
+            f"no visible GPU has the required {args.min_free_vram_gib:.1f} GiB free and "
+            f"{args.min_total_vram_gib:.1f} GiB total; {details}"
         )
 
     if args.gpu_count == "auto":
@@ -127,7 +138,8 @@ def main() -> int:
         if requested > len(eligible):
             raise SystemExit(
                 f"GPU_COUNT={requested} requested, but only {len(eligible)} visible GPU(s) "
-                f"have at least {args.min_free_vram_gib:.1f} GiB free"
+                f"have at least {args.min_free_vram_gib:.1f} GiB free and "
+                f"{args.min_total_vram_gib:.1f} GiB total"
             )
         selected = sorted(eligible, key=lambda gpu: (-gpu.free_gib, gpu.index))[:requested]
         selected.sort(key=lambda gpu: gpu.index)

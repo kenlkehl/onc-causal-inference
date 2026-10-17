@@ -20,8 +20,11 @@ order, and resumes from where it stopped when rerun:
 
 ``MACHINE`` names a preset in ``scripts/presets/``. The driver reads the preset
 (and the environment, whose values win) for the generator's GPUs and for its
-report; the runs read it themselves. Oracle columns are read only by the
-harness's aggregate step, as when it is run by hand.
+report; the runs read it themselves. With ``--llm-url``, running vLLM servers
+replace the preset's managed ones for both Stage 2 roles and the generator,
+and the preset contributes only its hardware settings (GPU selection, CPU
+workers, and timeouts). Oracle columns are read only by the harness's
+aggregate step, as when it is run by hand.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ import os
 import shlex
 import subprocess
 import sys
+import urllib.request
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -84,6 +88,22 @@ GENERATOR_VLLM_DEFAULTS = {
         ["--gpu-memory-utilization", "0.90", "--max-model-len", "131072"]
     ),
 }
+
+# Preset settings kept when --llm-url replaces the preset's servers: Stage 1's
+# GPU selection and CPU budget, final-modeling CPU workers, and timeouts.
+HARDWARE_VARIABLES = (
+    "PHYSICAL_GPUS", "GPU_COUNT", "MIN_FREE_GPU_GB", "MIN_TOTAL_GPU_GB", "CUDA_DEVICE_ORDER",
+    "STAGE1_WORKERS", "STAGE2_MODELING_WORKERS", "STAGE2_REQUEST_TIMEOUT",
+    "STAGE2_REQUEST_ATTEMPT_TIMEOUT",
+)
+# Serving variables that --llm-url sets; an explicit value would contradict it.
+LLM_URL_CONFLICTS = (
+    "STAGE2_ENDPOINT", "STAGE2_MODEL", "STAGE2_EXTRACTION_ENDPOINT", "STAGE2_EXTRACTION_ENDPOINTS",
+    "STAGE2_EXTRACTION_MODEL",
+)
+CONTEXT_MARGIN_TOKENS = 4096
+# Room for the generator's prompts when a server's window caps its output.
+GENERATOR_PROMPT_RESERVE_TOKENS = 16_384
 
 Runner = Callable[[Sequence[str], Path, Mapping[str, str]], int]
 
@@ -152,6 +172,133 @@ def run_logged(command: Sequence[str], log_path: Path, env: Mapping[str, str]) -
             # The child received the same interrupt and stops its own servers.
             process.wait()
             raise
+
+
+# ---------------------------------------------------------------------------
+# running vLLM servers (--llm-url)
+
+
+@dataclass(frozen=True)
+class LLMServers:
+    """Running OpenAI-compatible servers that serve one model for every LLM role."""
+
+    urls: tuple[str, ...]
+    model: str
+    context_window: int | None
+    concurrency: int
+
+    @property
+    def interpretation_workers(self) -> int:
+        return max(1, self.concurrency // 4)
+
+    def extraction_endpoints(self) -> list[dict[str, Any]]:
+        """Per-server extraction limits; the first server also takes interpretation."""
+
+        return [
+            {"endpoint": url,
+             "max_concurrency": self.concurrency - (self.interpretation_workers if index == 0 else 0)}
+            for index, url in enumerate(self.urls)
+        ]
+
+
+def _fetch_models(url: str) -> Any:
+    with urllib.request.urlopen(f"{url.rstrip('/')}/models", timeout=15) as response:  # noqa: S310
+        return json.loads(response.read().decode("utf-8"))
+
+
+def probe_llm_servers(
+    urls: str | Sequence[str],
+    *,
+    concurrency: int,
+    fetch: Callable[[str], Any] = _fetch_models,
+) -> LLMServers:
+    """Read each server's model and context window from its ``/models`` list."""
+
+    if isinstance(urls, str):
+        urls = [part.strip().rstrip("/") for part in urls.split(",") if part.strip()]
+    if not urls:
+        raise DriverError("--llm-url needs at least one URL")
+    if int(concurrency) < 2:
+        raise DriverError("--llm-concurrency must be at least 2 (interpretation and extraction)")
+    models: dict[str, str] = {}
+    windows: list[int] = []
+    for url in urls:
+        try:
+            payload = fetch(url)
+        except Exception as error:  # noqa: BLE001 - any failure means the server is unusable
+            raise DriverError(f"cannot read {url}/models: {error}") from error
+        data = payload.get("data") if isinstance(payload, Mapping) else None
+        if not isinstance(data, list) or len(data) != 1:
+            raise DriverError(
+                f"{url} serves {len(data) if isinstance(data, list) else 'no'} models; "
+                "--llm-url needs servers that each serve exactly one model"
+            )
+        models[url] = str(data[0].get("id") or "")
+        window = data[0].get("max_model_len")
+        if isinstance(window, int) and not isinstance(window, bool) and window > 0:
+            windows.append(window)
+    if len(set(models.values())) != 1 or not next(iter(models.values())):
+        raise DriverError(f"the --llm-url servers must serve one model; they serve {models}")
+    return LLMServers(
+        urls=tuple(urls),
+        model=next(iter(models.values())),
+        context_window=min(windows) if windows else None,
+        concurrency=int(concurrency),
+    )
+
+
+def external_run_environment(
+    environ: Mapping[str, str],
+    machine_env: Mapping[str, str],
+    servers: LLMServers,
+) -> dict[str, str]:
+    """The runs' environment: the external preset on these servers, the machine's hardware."""
+
+    conflicts = sorted(
+        name for name in environ
+        if name in LLM_URL_CONFLICTS or name.startswith(("STAGE2_VLLM_", "STAGE2_EXTRACTION_VLLM_"))
+    )
+    if conflicts:
+        raise DriverError(f"--llm-url sets the Stage 2 servers; unset {', '.join(conflicts)}")
+    derived = {
+        "STAGE2_WORKERS": str(servers.interpretation_workers),
+        **({"STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS": str(servers.context_window),
+            "STAGE2_EXTRACTION_CONTEXT_MARGIN_TOKENS": str(CONTEXT_MARGIN_TOKENS)}
+           if servers.context_window else {}),
+        **{name: machine_env[name] for name in HARDWARE_VARIABLES if machine_env.get(name)},
+    }
+    return {
+        **derived,
+        # Explicit settings (workers, windows, timeouts) win over derived ones.
+        **environ,
+        "PRESET": "external",
+        "STAGE2_ENDPOINT": servers.urls[0],
+        "STAGE2_MODEL": servers.model,
+        "STAGE2_EXTRACTION_ENDPOINTS": json.dumps(servers.extraction_endpoints()),
+        "STAGE2_EXTRACTION_MODEL": servers.model,
+    }
+
+
+def generator_environment(machine_env: Mapping[str, str], servers: LLMServers) -> dict[str, str]:
+    """The generator uses the servers too unless GENERATOR_ENDPOINT names others."""
+
+    env = dict(machine_env)
+    if not env.get("GENERATOR_ENDPOINT"):
+        env["GENERATOR_ENDPOINT"] = ",".join(servers.urls)
+        env.setdefault("GENERATOR_MODEL", servers.model)
+        env.setdefault("GENERATOR_WORKERS", str(servers.concurrency * len(servers.urls)))
+    return env
+
+
+def generator_max_tokens(servers: LLMServers | None, env: Mapping[str, str]) -> int | None:
+    """The generator's output ceiling, capped to fit the servers' window."""
+
+    if servers is None or servers.context_window is None:
+        return None
+    if env.get("GENERATOR_ENDPOINT") != ",".join(servers.urls):
+        return None
+    return max(4096, min(GENERATOR_MAX_TOKENS,
+                         servers.context_window - GENERATOR_PROMPT_RESERVE_TOKENS))
 
 
 # ---------------------------------------------------------------------------
@@ -299,15 +446,25 @@ def build_plan(
     )
 
 
-def describe(plan: Plan, env: Mapping[str, str]) -> str:
+def describe(plan: Plan, env: Mapping[str, str], servers: LLMServers | None = None) -> str:
     managed = not _external_generator(plan.machine, env)
-    primary = env.get("STAGE2_MODEL") or "(not set)"
-    extraction = env.get("STAGE2_EXTRACTION_MODEL") or "(not set)"
     lines = [
         f"Machine:      {plan.machine} (scripts/presets/{plan.machine}.env)",
         f"Benchmark:    {plan.bench}",
-        f"Stage 2:      {primary} (interpretation), {extraction} (extraction)",
     ]
+    if servers is not None:
+        window = (f"{servers.context_window}-token window" if servers.context_window
+                  else "window not reported")
+        lines.append(
+            f"Stage 2:      {servers.model} at {', '.join(servers.urls)} ({window}; "
+            f"{servers.interpretation_workers} interpretation and "
+            f"{sum(e['max_concurrency'] for e in servers.extraction_endpoints())} extraction "
+            "requests at a time), in place of the preset's servers"
+        )
+    else:
+        primary = env.get("STAGE2_MODEL") or "(not set)"
+        extraction = env.get("STAGE2_EXTRACTION_MODEL") or "(not set)"
+        lines.append(f"Stage 2:      {primary} (interpretation), {extraction} (extraction)")
     if plan.jobs:
         where = ("a managed vLLM pool on "
                  + (env.get("GENERATOR_VLLM_GPUS") or "the detected GPUs")
@@ -355,6 +512,7 @@ def detect_devices(env: Mapping[str, str]) -> str:
         sys.executable, str(DETECT_HARDWARE), "--outer-folds", "5", "--inner-folds", "5",
         "--gpu-count", env.get("GPU_COUNT") or "auto",
         "--min-free-vram-gib", env.get("MIN_FREE_GPU_GB") or "0",
+        "--min-total-vram-gib", env.get("MIN_TOTAL_GPU_GB") or "0",
     ]
     completed = subprocess.run(command, env=dict(env), capture_output=True, text=True)
     if completed.returncode != 0:
@@ -439,6 +597,7 @@ def generator_command(
     model: str,
     workers: int,
     api_key: str = "",
+    max_tokens: int | None = None,
 ) -> list[str]:
     """Write the job's generator configuration (routed to the endpoints) and return its command."""
 
@@ -446,6 +605,8 @@ def generator_command(
     llm = dict(settings.get("llm") or {})
     llm.update(model_name=model, api_base_url=endpoints[0], api_key="")
     llm.setdefault("max_tokens", GENERATOR_MAX_TOKENS)
+    if max_tokens is not None:
+        llm["max_tokens"] = min(int(llm["max_tokens"]), int(max_tokens))
     if len(endpoints) > 1:
         llm["api_base_urls"] = list(endpoints)
     else:
@@ -471,6 +632,7 @@ def run_generation(
     *,
     runner: Runner = run_logged,
     endpoints_context: Callable[..., Any] = generation_endpoints,
+    max_tokens: int | None = None,
 ) -> None:
     pending = [job for job in plan.jobs if not job.complete()]
     if not pending:
@@ -485,7 +647,7 @@ def run_generation(
                   f"({workers} workers) -> {job.output_dir}\n   log: {log}")
             command = generator_command(
                 job, bench=plan.bench, endpoints=endpoints, model=model, workers=workers,
-                api_key=env.get("GENERATOR_API_KEY", ""),
+                api_key=env.get("GENERATOR_API_KEY", ""), max_tokens=max_tokens,
             )
             code = runner(command, log, env)
             if code != 0 or not job.complete():
@@ -562,7 +724,7 @@ def run_cells(
         log = plan.bench / "driver" / "logs" / f"run_{cell.id.replace('/', '_')}_{variant}.log"
         print(f"\n== run {index}/{len(runs)} {cell.id} {variant} ({detail})\n"
               f"   output: {run_dir}\n   log: {log}")
-        env = {**environ, "PRESET": plan.machine, "OCI_PYTHON": sys.executable}
+        env = {"PRESET": plan.machine, **environ, "OCI_PYTHON": sys.executable}
         code = runner(["bash", str(LAUNCHER), str(config)], log, env)
         status, detail = run_status(run_dir)
         result = "complete" if status == "complete" else "failed"
@@ -603,6 +765,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-size", type=int,
                         help="expand the source to this many patients even if the selected cells "
                         "need fewer, so later selections can use the same source")
+    parser.add_argument("--llm-url",
+                        help="comma-separated URLs of running vLLM (OpenAI-compatible) servers that "
+                        "serve one model; they replace the preset's managed servers for both Stage 2 "
+                        "roles and the generator, and the preset keeps only its hardware settings")
+    parser.add_argument("--llm-concurrency", type=int, default=32,
+                        help="requests at a time per --llm-url server, shared by interpretation "
+                        "(a quarter on the first server) and extraction (default: 32)")
     parser.add_argument("--base", type=Path, default=DEFAULT_BASE,
                         help="base workflow configuration (default: benchmarks/base_config.json)")
     parser.add_argument("--through", choices=STEPS, default="aggregate",
@@ -622,15 +791,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace, *, environ: Mapping[str, str] | None = None,
-        runner: Runner = run_logged, endpoints_context: Callable[..., Any] = generation_endpoints) -> int:
+        runner: Runner = run_logged, endpoints_context: Callable[..., Any] = generation_endpoints,
+        fetch: Callable[[str], Any] = _fetch_models) -> int:
     environ = dict(os.environ if environ is None else environ)
     env = preset_environment(args.machine, environ)
+    servers = (probe_llm_servers(args.llm_url, concurrency=args.llm_concurrency, fetch=fetch)
+               if args.llm_url else None)
+    if servers is not None:
+        run_env = external_run_environment(environ, env, servers)
+        env = generator_environment(env, servers)
+    else:
+        run_env = {**environ, "PRESET": args.machine}
     plan = build_plan(
         machine=args.machine, bench=args.out, scenarios=args.scenarios, sizes=args.sizes,
         seeds=args.seeds, confirmatory=args.confirmatory, source=args.source,
         source_size=args.source_size, registry_path=args.registry, seeds_path=args.seeds_file,
     )
-    print(describe(plan, env))
+    print(describe(plan, env, servers))
     if args.plan:
         return 0
     base = Path(args.base).expanduser().resolve()
@@ -642,15 +819,21 @@ def run(args: argparse.Namespace, *, environ: Mapping[str, str] | None = None,
         handle.write(json.dumps({
             "schema_version": DRIVER_SCHEMA_VERSION, "time": _now(), "machine": args.machine,
             "argv": [str(part) for part in sys.argv[1:]], "git": git_state(),
-            "stage2_model": env.get("STAGE2_MODEL"),
-            "stage2_extraction_model": env.get("STAGE2_EXTRACTION_MODEL"),
+            "stage2_model": run_env.get("STAGE2_MODEL") or env.get("STAGE2_MODEL"),
+            "stage2_extraction_model": (run_env.get("STAGE2_EXTRACTION_MODEL")
+                                        or env.get("STAGE2_EXTRACTION_MODEL")),
             "generator_model": _generator_model(env) if plan.jobs else None,
+            "llm_servers": None if servers is None else {
+                "urls": list(servers.urls), "model": servers.model,
+                "context_window": servers.context_window, "concurrency": servers.concurrency,
+            },
         }, sort_keys=True) + "\n")
     selection = {"sizes": args.sizes, "seeds": args.seeds, "registry_path": args.registry,
                  "seeds_path": args.seeds_file}
     last = STEPS.index(args.through)
     results: list[dict[str, Any]] = []
-    run_generation(plan, env, runner=runner, endpoints_context=endpoints_context)
+    run_generation(plan, env, runner=runner, endpoints_context=endpoints_context,
+                   max_tokens=generator_max_tokens(servers, env))
     if last >= STEPS.index("materialize"):
         print("\n== materialize")
         run_materialize(plan, confirmatory=args.confirmatory, **selection)
@@ -659,7 +842,7 @@ def run(args: argparse.Namespace, *, environ: Mapping[str, str] | None = None,
         run_configs(plan, base=base, confirmatory=args.confirmatory, force=args.force,
                     ledger_path=args.ledger, **selection)
     if last >= STEPS.index("runs"):
-        results = run_cells(plan, environ, runner=runner, stop_on_failure=args.stop_on_failure)
+        results = run_cells(plan, run_env, runner=runner, stop_on_failure=args.stop_on_failure)
     if last >= STEPS.index("aggregate"):
         print("\n== aggregate")
         aggregate(out=plan.bench, scenarios=",".join(s.id for s in plan.scenarios),

@@ -411,7 +411,8 @@ def test_dgx_station_preset_selects_the_gb300_and_one_shared_server(tmp_path):
         FAKE_PYTHON_ENVIRONMENT_LOG=str(environment_log),
     )
     detect = invocations[-2]
-    assert detect[detect.index("--min-free-vram-gib") + 1] == "150"
+    assert detect[detect.index("--min-free-vram-gib") + 1] == "0"
+    assert detect[detect.index("--min-total-vram-gib") + 1] == "150"
     environments = [json.loads(line) for line in environment_log.read_text().splitlines()]
     assert environments[-1] == {"CUDA_VISIBLE_DEVICES": "1", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"}
     config = _compile(_workflow_args(invocations))
@@ -435,10 +436,46 @@ def test_dgx_station_preset_keeps_explicit_gpu_choices(tmp_path):
     environment_log = tmp_path / "environment.jsonl"
     _completed, invocations = _launch(
         tmp_path, "five_conf_five_mod", PRESET="dgx_station_gb300",
-        PHYSICAL_GPUS="0", CUDA_DEVICE_ORDER="FASTEST_FIRST", MIN_FREE_GPU_GB="20",
+        PHYSICAL_GPUS="0", CUDA_DEVICE_ORDER="FASTEST_FIRST", MIN_TOTAL_GPU_GB="20",
         FAKE_PYTHON_ENVIRONMENT_LOG=str(environment_log),
     )
     detect = invocations[-2]
-    assert detect[detect.index("--min-free-vram-gib") + 1] == "20"
+    assert detect[detect.index("--min-total-vram-gib") + 1] == "20"
     last = json.loads(environment_log.read_text().splitlines()[-1])
     assert last == {"CUDA_VISIBLE_DEVICES": "0", "CUDA_DEVICE_ORDER": "FASTEST_FIRST"}
+
+
+def test_benchmark_driver_llm_url_environment_reaches_the_launcher(tmp_path):
+    from oci.evaluation import benchmark_driver as driver
+
+    environ = {key: value for key, value in os.environ.items()
+               if not key.startswith(("STAGE1_", "STAGE2_", "OCI_", "CUDA_"))
+               and key not in {"PRESET", "GPU_COUNT", "PHYSICAL_GPUS", "MIN_TOTAL_GPU_GB"}}
+    servers = driver.LLMServers(("http://gb300:8000/v1",), "served-model", 100_000, 32)
+    env = driver.external_run_environment(
+        environ, driver.preset_environment("dgx_station_gb300", environ), servers
+    )
+    variables = {key: value for key, value in env.items() if key not in environ}
+    environment_log = tmp_path / "environment.jsonl"
+    _completed, invocations = _launch(
+        tmp_path, str(_bundled_cell_config(tmp_path)),
+        FAKE_PYTHON_ENVIRONMENT_LOG=str(environment_log), **variables,
+    )
+    detect = invocations[-2]
+    assert detect[detect.index("--min-total-vram-gib") + 1] == "150"
+    last = json.loads(environment_log.read_text().splitlines()[-1])
+    assert last == {"CUDA_VISIBLE_DEVICES": "1", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"}
+    config = _compile(_workflow_args(invocations))
+
+    stage2 = config.stage2
+    extraction = stage2.extraction_llm
+    assert stage2.vllm is None and extraction.vllm is None
+    assert stage2.endpoint == "http://gb300:8000/v1" and stage2.model == "served-model"
+    assert stage2.workers == 8
+    assert [server.public_dict() for server in extraction.endpoints] == [
+        {"endpoint": "http://gb300:8000/v1", "max_concurrency": 24},
+    ]
+    assert extraction.model == "served-model"
+    assert stage2.extraction_context_window_tokens == 100_000
+    assert stage2.modeling_workers == 64
+    assert stage2.request_attempt_timeout == 1800

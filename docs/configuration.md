@@ -635,7 +635,7 @@ Presets apply to every launch except Stage 2-only relaunches
 | `external` (default) | Prestarted OpenAI-compatible servers: interpretation at `http://127.0.0.1:8010/v1`, extraction at `http://127.0.0.1:8020/v1` | Model IDs only |
 | `h100x8` | Managed vLLM on eight 80 GB H100 GPUs; the two models alternate across all GPUs | 32 workers per role, 1800 s attempt timeout, 6000 s request timeout, 128,000-token extraction window with a 4,096-token margin |
 | `rtxpro6000x8` | Managed vLLM on eight 96 GB RTX PRO 6000 GPUs; one model serves both roles from one pool | As `h100x8`, plus `STAGE2_MODELING_WORKERS=128` and a 262,144-token extraction window |
-| `dgx_station_gb300` | Managed vLLM on a DGX Station's GB300 GPU; one model serves both roles from one server | `CUDA_DEVICE_ORDER=PCI_BUS_ID`, `PHYSICAL_GPUS=1`, `MIN_FREE_GPU_GB=150`, 32 workers per role, `STAGE2_MODELING_WORKERS=64`, the `h100x8` timeouts, and a 262,144-token extraction window |
+| `dgx_station_gb300` | Managed vLLM on a DGX Station's GB300 GPU; one model serves both roles from one server | `CUDA_DEVICE_ORDER=PCI_BUS_ID`, `PHYSICAL_GPUS=1`, `MIN_TOTAL_GPU_GB=150`, 32 workers per role, `STAGE2_MODELING_WORKERS=64`, the `h100x8` timeouts, and a 262,144-token extraction window |
 
 Except in Stage 2-only relaunches, the `one_conf_one_mod` cohort also defaults to
 `STAGE2_WORKERS=4`, `STAGE2_EXTRACTION_WORKERS=4`,
@@ -657,6 +657,7 @@ other `STAGE2_*` variable; pass other Stage 2 settings as
 | `GPU_COUNT` | Number of eligible Stage 1 GPUs to select (default: all eligible) |
 | `PHYSICAL_GPUS` | Explicit host GPU indices; exported as `CUDA_VISIBLE_DEVICES` |
 | `MIN_FREE_GPU_GB` | Free memory a GPU needs to be eligible (default 0) |
+| `MIN_TOTAL_GPU_GB` | Total memory a GPU needs to be eligible (default 0) |
 | `STAGE1_WORKERS` | Stage 1 CPU workers (default: sized from CPUs, folds, and GPU memory) |
 | `STAGE1_ARCHITECTURES` | Comma-separated Stage 1 architectures, or `all` (default: the template's eight) |
 | `DISABLE_HTR=1` | Skip all HTR modeling |
