@@ -80,6 +80,13 @@ DEFAULT_GENERATOR_WORKERS_PER_SERVER = 32
 # The generator command line's output ceiling; its configuration files
 # otherwise fall back to LLMConfig's smaller 12,000.
 GENERATOR_MAX_TOKENS = 50_000
+# Seconds per generator request. LLMConfig's 300 fails requests that wait in
+# a busy server's queue; this matches Stage 2's attempt timeout. The timeout
+# only routes requests, so an interrupted generation still resumes.
+GENERATOR_REQUEST_TIMEOUT = 1800.0
+# The generator shares one OpenAI client per server, whose connection pool
+# holds 1,000 connections; more patient threads would wait for a connection.
+GENERATOR_MAX_WORKERS_PER_SERVER = 1000
 GENERATOR_VLLM_DEFAULTS = {
     "GENERATOR_VLLM_GPUS_PER_SERVER": "1",
     "GENERATOR_VLLM_BASE_PORT": "8210",
@@ -286,7 +293,9 @@ def generator_environment(machine_env: Mapping[str, str], servers: LLMServers) -
     if not env.get("GENERATOR_ENDPOINT"):
         env["GENERATOR_ENDPOINT"] = ",".join(servers.urls)
         env.setdefault("GENERATOR_MODEL", servers.model)
-        env.setdefault("GENERATOR_WORKERS", str(servers.concurrency * len(servers.urls)))
+        env.setdefault("GENERATOR_WORKERS", str(
+            min(servers.concurrency, GENERATOR_MAX_WORKERS_PER_SERVER) * len(servers.urls)
+        ))
     return env
 
 
@@ -605,6 +614,7 @@ def generator_command(
     llm = dict(settings.get("llm") or {})
     llm.update(model_name=model, api_base_url=endpoints[0], api_key="")
     llm.setdefault("max_tokens", GENERATOR_MAX_TOKENS)
+    llm["timeout"] = max(float(llm.get("timeout") or 0.0), GENERATOR_REQUEST_TIMEOUT)
     if max_tokens is not None:
         llm["max_tokens"] = min(int(llm["max_tokens"]), int(max_tokens))
     if len(endpoints) > 1:

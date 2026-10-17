@@ -166,6 +166,13 @@ for name in STAGE2_VLLM_SERVERS STAGE2_EXTRACTION_VLLM_SERVERS; do
     fi
 done
 
+# Each concurrent LLM request holds a socket; raise the soft open-file limit to
+# the hard limit so thousands of requests do not exhaust a default of 1024.
+hard_files="$(ulimit -Hn)"
+if [[ "$hard_files" == unlimited ]]; then
+    hard_files=1048576
+fi
+ulimit -Sn "$hard_files" 2>/dev/null || true
 export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"

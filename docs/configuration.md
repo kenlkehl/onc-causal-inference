@@ -612,7 +612,9 @@ synthetic cohorts ([Synthetic data](synthetic_data.md#bundled-cohorts)):
 | `WORKFLOW_OPTION` | Passed to the workflow after the launcher's own options, so a later `--set` wins, for example `--set stage2.consolidation_max_rounds=12` |
 
 The launcher synchronizes `.venv` from the lockfile with `uv` (adding the
-`local-llm` extra when a managed vLLM pool is configured), detects GPUs, sets
+`local-llm` extra when a managed vLLM pool is configured), raises the soft
+open-file limit to the hard limit (each concurrent request holds a socket),
+detects GPUs, sets
 `OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS`, `MKL_NUM_THREADS`, and
 `NUMEXPR_NUM_THREADS` to 1 unless they are already set, and starts the
 workflow. GPU detection needs at least one CUDA GPU visible to PyTorch. It

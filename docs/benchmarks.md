@@ -287,7 +287,17 @@ reads the model ID and `max_model_len` from each server's `/models` list
 | Interpretation | The first server, with a quarter of `--llm-concurrency` (default 32) requests at a time |
 | Extraction | Every server, with `--llm-concurrency` requests at a time each, less the interpretation share on the first |
 | Extraction window | The smallest `max_model_len`, with a 4,096-token margin (the interpretation role reads the window from the server itself) |
-| Generator | The same servers and model, `--llm-concurrency` patients per server, and an output ceiling of at most 50,000 tokens that leaves 16,384 tokens of the window for the prompt; `GENERATOR_ENDPOINT` names other servers instead |
+| Generator | The same servers and model, `--llm-concurrency` patients per server (at most 1,000, the connection pool of the generator's client for each server), and an output ceiling of at most 50,000 tokens that leaves 16,384 tokens of the window for the prompt; `GENERATOR_ENDPOINT` names other servers instead |
+
+Set `--llm-concurrency` to the number of requests a server can run at once,
+which its KV cache limits, rather than to its `--max-num-seqs`: vLLM queues
+requests beyond what fits, and a queued request spends its time limit waiting
+(Stage 2 allows 1,800 seconds per attempt). Raise it while vLLM's log shows
+few waiting requests and rising throughput. Every generator request (with or
+without `--llm-url`) allows 1,800 seconds instead of the generator's default
+300, for the same reason; this changes only routing, so an interrupted
+generation still resumes. Both launchers raise the soft open-file limit to the
+hard limit, because every concurrent request holds a socket.
 
 Explicit `STAGE2_WORKERS`, `STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS`, and
 timeout variables still win; `STAGE2_ENDPOINT`, `STAGE2_MODEL`, the extraction

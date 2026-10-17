@@ -122,6 +122,8 @@ def test_generator_command_routes_requests_to_every_replica(tmp_path):
     assert settings["llm"]["api_base_urls"] == ["http://a/v1", "http://b/v1"]
     assert settings["llm"]["model_name"] == "openai/gpt-oss-120b"
     assert settings["llm"]["max_tokens"] == 50_000 and settings["llm"]["api_key"] == ""
+    # The source's 300-second timeout would fail requests queued on a busy server.
+    assert settings["llm"]["timeout"] == 1800.0
 
     corpus = GenerationJob(name="S5", output_dir=tmp_path / "S5", settings={"seed": 42},
                            patients=5000)
@@ -342,6 +344,9 @@ def test_llm_url_generator_uses_the_servers_and_fits_their_window(tmp_path):
         driver.LLMServers(("http://a/v1",), "m", 262_144, 32),
         {"GENERATOR_ENDPOINT": "http://a/v1"},
     ) == 50_000
+    # One OpenAI client per server holds at most 1,000 connections.
+    many = driver.LLMServers(("http://a/v1",), "served-model", 262_144, 2048)
+    assert driver.generator_environment({}, many)["GENERATOR_WORKERS"] == "1000"
     # A separate generator server keeps its own settings.
     other = driver.generator_environment({"GENERATOR_ENDPOINT": "http://gen/v1"}, servers)
     assert other["GENERATOR_ENDPOINT"] == "http://gen/v1" and "GENERATOR_MODEL" not in other

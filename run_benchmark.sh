@@ -34,7 +34,8 @@
 #                                it before the first run (the external preset
 #                                uses http://127.0.0.1:8000/v1)
 #   GENERATOR_API_KEY            key for GENERATOR_ENDPOINT
-#   GENERATOR_WORKERS            concurrent patients (32 per server)
+#   GENERATOR_WORKERS            concurrent patients (32 per server; with
+#                                --llm-url, --llm-concurrency per server, at most 1000)
 #   GENERATOR_VLLM_GPUS          logical GPUs for the pool (the detected GPUs)
 #   GENERATOR_VLLM_GPUS_PER_SERVER (1), GENERATOR_VLLM_BASE_PORT (8210),
 #   GENERATOR_VLLM_INTERNAL_PORT_BASE (40000),
@@ -55,6 +56,13 @@ case "${1:-}" in
         fi ;;
 esac
 
+# Each concurrent LLM request holds a socket; raise the soft open-file limit to
+# the hard limit so thousands of requests do not exhaust a default of 1024.
+hard_files="$(ulimit -Hn)"
+if [[ "$hard_files" == unlimited ]]; then
+    hard_files=1048576
+fi
+ulimit -Sn "$hard_files" 2>/dev/null || true
 export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"

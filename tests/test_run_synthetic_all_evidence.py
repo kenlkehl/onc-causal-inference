@@ -33,6 +33,10 @@ if os.environ.get("FAKE_PYTHON_ENVIRONMENT_LOG"):
     with open(os.environ["FAKE_PYTHON_ENVIRONMENT_LOG"], "a") as log:
         names = ("CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER")
         log.write(json.dumps({{name: os.environ.get(name) for name in names}}) + "\\n")
+if os.environ.get("FAKE_PYTHON_LIMITS_LOG"):
+    import resource
+    with open(os.environ["FAKE_PYTHON_LIMITS_LOG"], "a") as log:
+        log.write(json.dumps(resource.getrlimit(resource.RLIMIT_NOFILE)) + "\\n")
 if sys.argv[1].endswith("detect_all_evidence_hardware.py"):
     args = sys.argv[1:]
     workers = args[args.index("--stage2-workers") + 1] if "--stage2-workers" in args else "32"
@@ -479,3 +483,25 @@ def test_benchmark_driver_llm_url_environment_reaches_the_launcher(tmp_path):
     assert stage2.extraction_context_window_tokens == 100_000
     assert stage2.modeling_workers == 64
     assert stage2.request_attempt_timeout == 1800
+
+
+def test_launcher_raises_the_open_file_limit_for_many_concurrent_requests(tmp_path):
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    limits_log = tmp_path / "limits.jsonl"
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.startswith(("STAGE1_", "STAGE2_", "OCI_"))}
+    fake_python = tmp_path / "python"
+    fake_python.write_text(FAKE_PYTHON, encoding="utf-8")
+    fake_python.chmod(0o755)
+    environment.update(OCI_PYTHON=str(fake_python), FAKE_PYTHON_LIMITS_LOG=str(limits_log),
+                       FAKE_PYTHON_INVOCATION_LOG=str(tmp_path / "invocations.jsonl"))
+    lowered = min(soft, 512)
+    subprocess.run(
+        ["bash", "-c", f'ulimit -Sn {lowered} && exec bash "$0" "$@"', str(LAUNCHER), "one_conf_one_mod"],
+        cwd=REPO_ROOT, env=environment, check=True, capture_output=True, text=True,
+    )
+    limits = [json.loads(line) for line in limits_log.read_text().splitlines()]
+    expected = hard if hard != resource.RLIM_INFINITY else 1048576
+    assert limits and all(limit[0] == min(expected, hard) for limit in limits)
