@@ -367,3 +367,37 @@ def test_llm_url_plan_reports_the_servers(tmp_path, capsys):
     assert ("Stage 2:      nvidia/Gemma-4-26B-A4B-NVFP4 at http://gb300:8000/v1 "
             "(262144-token window; 8 interpretation and 24 extraction requests at a time)") in out
     assert not (tmp_path / "bench").exists()
+
+
+@pytest.mark.parametrize(
+    "arguments,installs_vllm",
+    [
+        (["dgx_station_gb300", "BENCH", "--llm-url", "http://x:8000/v1"], False),
+        (["dgx_station_gb300", "BENCH", "--plan", "--llm-url=http://x:8000/v1"], False),
+        (["external", "BENCH"], False),
+        (["dgx_station_gb300", "BENCH"], True),
+    ],
+)
+def test_run_benchmark_installs_vllm_only_when_oci_starts_servers(tmp_path, arguments, installs_vllm):
+    import shutil
+    import subprocess
+
+    # A copy of the launcher without an environment, so nothing can start.
+    root = tmp_path / "checkout"
+    (root / "scripts").mkdir(parents=True)
+    shutil.copy(driver.REPOSITORY_ROOT / "run_benchmark.sh", root / "run_benchmark.sh")
+    shutil.copytree(driver.PRESET_DIR, root / "scripts" / "presets")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "uv.log"
+    (bin_dir / "uv").write_text(f'#!/bin/sh\necho "$@" >> {log}\n', encoding="utf-8")
+    (bin_dir / "uv").chmod(0o755)
+    environment = {key: value for key, value in os.environ.items() if key != "OCI_PYTHON"}
+    environment["PATH"] = f"{bin_dir}{os.pathsep}{environment['PATH']}"
+    completed = subprocess.run(["bash", str(root / "run_benchmark.sh"), *arguments],
+                               env=environment, capture_output=True, text=True)
+
+    assert completed.returncode != 0  # the copy has no .venv to run
+    assert log.read_text().splitlines() == (
+        ["sync --frozen --extra local-llm"] if installs_vllm else ["sync --frozen"]
+    )

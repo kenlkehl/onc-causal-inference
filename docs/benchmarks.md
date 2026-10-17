@@ -269,7 +269,9 @@ the `external` preset (`http://127.0.0.1:8000/v1`).
 
 The runs honor every `run_synthetic.sh` variable (`STAGE2_MODEL`,
 `STAGE2_ENDPOINT`, `STAGE2_WORKERS`, ...), and `OCI_PYTHON` selects the
-interpreter instead of synchronizing `.venv`.
+interpreter instead of synchronizing `.venv`. The synchronization installs vLLM
+(the `local-llm` extra) only when OCI starts its own servers, that is, for a
+managed preset without `--llm-url`.
 
 **Running vLLM servers (`--llm-url`).** `--llm-url URL[,URL...]` names running
 OpenAI-compatible servers (for example `http://localhost:8000/v1`) that serve

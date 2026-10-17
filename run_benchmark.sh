@@ -41,6 +41,9 @@
 #   GENERATOR_VLLM_INTERNAL_PORT_BASE (40000),
 #   GENERATOR_VLLM_EXTRA_ARGS_JSON (["--gpu-memory-utilization","0.90","--max-model-len","131072"])
 #   OCI_PYTHON                   use this interpreter instead of uv-syncing .venv
+#                                (the sync adds the local-llm extra, vLLM, only
+#                                when OCI starts vLLM servers: not for the
+#                                external machine or with --llm-url)
 
 set -euo pipefail
 
@@ -78,8 +81,19 @@ else
         echo "uv is required but was not found on PATH: https://docs.astral.sh/uv/" >&2
         exit 1
     fi
-    echo "Synchronizing ${repo_root}/.venv from the lockfile..."
+    # vLLM is needed only when OCI starts its own servers: a managed machine
+    # preset without --llm-url.
+    managed_servers=1
     if [[ "${1:-}" == external ]]; then
+        managed_servers=0
+    fi
+    for argument in "$@"; do
+        case "$argument" in
+            --llm-url|--llm-url=*) managed_servers=0 ;;
+        esac
+    done
+    echo "Synchronizing ${repo_root}/.venv from the lockfile..."
+    if (( ! managed_servers )); then
         uv sync --frozen
     else
         uv sync --frozen --extra local-llm
