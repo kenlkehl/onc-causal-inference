@@ -223,6 +223,7 @@ change it.
 |---|---|---|
 | `devices` | `["cpu"]` | Stage 1 devices, as a list or comma-separated string such as `cuda:0,cuda:1` |
 | `workers` | 1 | Stage 1 CPU budget; also the default for `stage2.workers` (capped at 4) |
+| `contexts_per_gpu` | 1 | Maximum concurrent text-model/HTR and neural-query discovery contexts per GPU, each in a separate process. Extra lanes are capped by `workers`, and the CPU budget is divided across lanes. Safe to change on resume |
 | `components` | all five Stage 1 components | Subset of `embedding_cache`, `tfidf`, `text_models`, `neural_queries`, `handoff`. With an architecture selection, components the selection does not need are skipped |
 | `mode` | `full` when Stage 2 is configured, otherwise `stage1` | `full`, `stage1`, or `stage2` (the flags `--stage1-only` and `--stage2-only` set this) |
 | `log_level` | `INFO` | Logging level for `logs/workflow.log` |
@@ -557,6 +558,7 @@ file; `--set` can change any other value.
 |---|---|---|
 | `--devices LIST` | `run.devices` | Comma-separated Stage 1 devices, such as `cuda:0,cuda:1` (default `cpu`) |
 | `--workers N` | `run.workers` | Stage 1 CPU budget; also the default Stage 2 request concurrency (default 1) |
+| `--contexts-per-gpu N` | `run.contexts_per_gpu` | Concurrent discovery contexts per GPU (default 1); separate processes preserve independent training state and seeds |
 | `--architectures LIST` | `science.stage1_architectures` | Comma-separated Stage 1 architectures, or `all` for all ten. Frozen on resume |
 | `--htr-model ID` | `models.htr` | HTR chunk encoder |
 | `--disable-htr` | `science.htr_enabled=false` | Disable all HTR modeling, keeping the other evidence families |
@@ -661,6 +663,7 @@ other `STAGE2_*` variable; pass other Stage 2 settings as
 | `MIN_FREE_GPU_GB` | Free memory a GPU needs to be eligible (default 0) |
 | `MIN_TOTAL_GPU_GB` | Total memory a GPU needs to be eligible (default 0) |
 | `STAGE1_WORKERS` | Stage 1 CPU workers (default: sized from CPUs, folds, and GPU memory) |
+| `STAGE1_CONTEXTS_PER_GPU` | Concurrent text-model/HTR and neural-query contexts per GPU (default: workflow configuration, or 1; `dgx_station_gb300` sets 4). Preserved with benchmark `--llm-url`; explicit environment values override the preset |
 | `STAGE1_ARCHITECTURES` | Comma-separated Stage 1 architectures, or `all` (default: the template's eight) |
 | `DISABLE_HTR=1` | Skip all HTR modeling |
 | `STAGE2_ENDPOINT` | Interpretation LLM URL; set it empty to run Stage 1 only |

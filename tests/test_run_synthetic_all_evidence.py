@@ -420,6 +420,7 @@ def test_dgx_station_preset_selects_the_gb300_and_one_shared_server(tmp_path):
     environments = [json.loads(line) for line in environment_log.read_text().splitlines()]
     assert environments[-1] == {"CUDA_VISIBLE_DEVICES": "1", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"}
     config = _compile(_workflow_args(invocations))
+    assert config.contexts_per_gpu == 4
 
     stage2 = config.stage2
     extraction = stage2.extraction_llm
@@ -441,12 +442,14 @@ def test_dgx_station_preset_keeps_explicit_gpu_choices(tmp_path):
     _completed, invocations = _launch(
         tmp_path, "five_conf_five_mod", PRESET="dgx_station_gb300",
         PHYSICAL_GPUS="0", CUDA_DEVICE_ORDER="FASTEST_FIRST", MIN_TOTAL_GPU_GB="20",
+        STAGE1_CONTEXTS_PER_GPU="2",
         FAKE_PYTHON_ENVIRONMENT_LOG=str(environment_log),
     )
     detect = invocations[-2]
     assert detect[detect.index("--min-total-vram-gib") + 1] == "20"
     last = json.loads(environment_log.read_text().splitlines()[-1])
     assert last == {"CUDA_VISIBLE_DEVICES": "0", "CUDA_DEVICE_ORDER": "FASTEST_FIRST"}
+    assert _compile(_workflow_args(invocations)).contexts_per_gpu == 2
 
 
 def test_benchmark_driver_llm_url_environment_reaches_the_launcher(tmp_path):
@@ -470,6 +473,7 @@ def test_benchmark_driver_llm_url_environment_reaches_the_launcher(tmp_path):
     last = json.loads(environment_log.read_text().splitlines()[-1])
     assert last == {"CUDA_VISIBLE_DEVICES": "1", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"}
     config = _compile(_workflow_args(invocations))
+    assert config.contexts_per_gpu == 4
 
     stage2 = config.stage2
     extraction = stage2.extraction_llm

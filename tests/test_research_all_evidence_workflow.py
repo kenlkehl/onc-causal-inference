@@ -853,6 +853,159 @@ def test_gpu_context_lanes_use_every_gpu_without_device_overlap():
     assert _lane_cpu_worker_budgets(len(lanes), workers=10) == [4, 3, 3]
 
 
+@pytest.mark.parametrize(
+    "devices,workers,limit,expected",
+    [
+        (("cuda:0",), 30, 4, ["cuda:0"] * 4),
+        (("cuda:0", "cuda:1"), 30, 3, ["cuda:0", "cuda:1"] * 3),
+        (("cuda:0", "cuda:1"), 3, 4, ["cuda:0", "cuda:1", "cuda:0"]),
+        (("cuda:0", "cuda:1"), 1, 4, ["cuda:0", "cuda:1"]),
+        (("cuda:0", "cuda:0"), 30, 2, ["cuda:0"] * 2),
+        (("cpu",), 3, 8, ["cpu"] * 3),
+    ],
+)
+def test_context_concurrency_respects_gpu_and_cpu_limits(devices, workers, limit, expected):
+    pending = [{"scope_id": f"context_{i}", "train_idx": range(i + 1)} for i in range(11)]
+    lanes = _context_execution_lanes(
+        pending, devices=devices, workers=workers, contexts_per_gpu=limit,
+    )
+    assert [device for device, _ in lanes] == expected
+    scheduled = [spec["scope_id"] for _, specs in lanes for spec in specs]
+    assert sorted(scheduled) == sorted(spec["scope_id"] for spec in pending)
+    assert all(specs for _, specs in lanes)
+    assert sum(_lane_cpu_worker_budgets(len(lanes), workers)) == max(workers, len(lanes))
+    # The last few unfinished contexts must not spawn idle processes.
+    assert len(_context_execution_lanes(
+        pending[:1], devices=devices, workers=workers, contexts_per_gpu=limit,
+    )) == 1
+
+
+def test_contexts_per_gpu_round_trips_and_keeps_scientific_configuration(tmp_path):
+    raw, serial = _inputs(tmp_path, components=("text_models",))
+    assert serial.contexts_per_gpu == 1
+    raw["run"]["contexts_per_gpu"] = 4
+    parallel = compile_config(raw, config_dir=tmp_path)
+    assert parallel.contexts_per_gpu == 4
+    restored = compile_config(parallel.as_dict(), config_dir=tmp_path)
+    assert restored.contexts_per_gpu == 4
+    assert all_evidence_workflow._load_stage1_template(serial) == (
+        all_evidence_workflow._load_stage1_template(parallel)
+    )
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(raw))
+    args = build_parser().parse_args(["--config", str(path), "--contexts-per-gpu", "2"])
+    override, base = _raw_config_from_args(args)
+    assert compile_config(override, config_dir=base).contexts_per_gpu == 2
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5, "4", None])
+def test_invalid_contexts_per_gpu_fails_before_training(tmp_path, value):
+    raw, _ = _inputs(tmp_path)
+    raw["run"]["contexts_per_gpu"] = value
+    with pytest.raises(ValueError, match="contexts_per_gpu must be a positive integer"):
+        compile_config(raw, config_dir=tmp_path)
+
+
+def test_text_model_checkpoint_units_survive_context_concurrency_change(tmp_path, monkeypatch):
+    _raw, _path, computed, launch = _text_model_rerun_fixture(tmp_path, monkeypatch)
+    launch()
+    previous = _text_model_rows(tmp_path / "output")
+    computed.clear()
+    launch("--contexts-per-gpu", "4", "--rerun", "text_models")
+    assert computed == []
+    assert _text_model_rows(tmp_path / "output") == previous
+
+
+def test_same_gpu_contexts_use_isolated_processes_and_resume(tmp_path, monkeypatch):
+    """Exercise the real process scheduler and checkpoints without a CUDA device."""
+    import os
+    import joblib
+
+    _raw, config = _inputs(tmp_path, components=("text_models",))
+    config = replace(config, devices=("cuda:0",), workers=30, contexts_per_gpu=4)
+    context = ResearchAllEvidenceWorkflow(config)._resolved_context()
+    original_lane = all_evidence_workflow._run_text_model_context_lane
+    starts = tmp_path / "worker_starts"
+    starts.mkdir()
+
+    def cpu_test_lane(**kwargs):
+        import os
+        import time
+        import random
+        import numpy as np
+        import torch
+        from oci.inference import multi_model_forest_stage1 as stage1
+
+        assert kwargs["device"] == "cuda:0"
+        (starts / str(os.getpid())).write_text(str(kwargs["cpu_workers"]))
+        # All four process lanes must have started before any is allowed to
+        # finish. This catches thread/sequential fallbacks without using a GPU.
+        deadline = time.monotonic() + 30
+        while len(list(starts.iterdir())) < 4:
+            if time.monotonic() >= deadline:
+                raise AssertionError("four independent context processes did not start")
+            time.sleep(0.02)
+
+        def cheap_training(*, context, checkpoint_store, handoff_dir, **unused):
+            def fit():
+                (Path(handoff_dir) / "training_calls").touch()
+                return [random.random(), float(np.random.random()), float(torch.rand(()))]
+
+            result = checkpoint_store.run(
+                "htr/nuisance/fold_001", fit, deterministic_seed=True,
+            ).value
+            return {
+                "outer_fold": context["outer_fold"],
+                "inner_fold": context["inner_fold"],
+                "scope": context["scope"],
+                "draws": result,
+            }
+
+        previous_runner = stage1.run_multi_model_forest_handoff_context
+        stage1.run_multi_model_forest_handoff_context = cheap_training
+        try:
+            kwargs["device"] = "cpu"
+            return original_lane(**kwargs)
+        finally:
+            stage1.run_multi_model_forest_handoff_context = previous_runner
+
+    monkeypatch.setattr(all_evidence_workflow, "_run_text_model_context_lane", cpu_test_lane)
+    parallel_calls = []
+    real_parallel = joblib.Parallel
+
+    def record_parallel(**kwargs):
+        parallel_calls.append(kwargs)
+        return real_parallel(**kwargs)
+
+    monkeypatch.setattr(joblib, "Parallel", record_parallel)
+    component_dir = context.component_dir("text_models")
+    first = all_evidence_workflow._text_models_component(context, component_dir)
+    assert first["contexts"] == 6
+    assert parallel_calls[0]["n_jobs"] == 4
+    assert parallel_calls[0]["backend"] == "loky"
+    assert len(list(starts.iterdir())) == 4
+    assert str(os.getpid()) not in {path.name for path in starts.iterdir()}
+    assert sorted(int(path.read_text()) for path in starts.iterdir()) == [7, 7, 8, 8]
+    previous = _text_model_rows(config.output_dir)
+    assert len({tuple(row["draws"]) for row in previous}) == 6
+
+    # Resume a mixture of completed and interrupted contexts with a different
+    # lane count. The interrupted ones retain their checkpointed training.
+    for scope in ("outer_001_full", "outer_001_inner_001"):
+        (component_dir / scope / "complete.json").unlink()
+        for marker in (component_dir / scope).glob(
+            "checkpoints/v1/units/assembly/handoff_context/*/complete.json"
+        ):
+            marker.unlink()
+    for marker in component_dir.glob("*/training_calls"):
+        marker.unlink()
+    resumed = replace(context, config=replace(config, contexts_per_gpu=1))
+    all_evidence_workflow._text_models_component(resumed, component_dir)
+    assert parallel_calls[-1]["n_jobs"] == 1
+    assert not list(component_dir.glob("*/training_calls"))
+    assert _text_model_rows(config.output_dir) == previous
+
+
 def test_cpu_worker_budget_is_divided_without_being_duplicated():
     assert _lane_cpu_worker_budgets(3, workers=10) == [4, 3, 3]
     assert sum(_lane_cpu_worker_budgets(7, workers=23)) == 23

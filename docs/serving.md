@@ -397,7 +397,14 @@ satisfy, so selecting the wrong GPU stops the launch at detection; the check
 uses total rather than free memory because a vLLM server on the GB300 leaves
 Stage 1 less than that free. On a station without a display GPU, set
 `PHYSICAL_GPUS=0`. Check the launcher's `GPU memory:` line for
-the GB300. The Grace CPU is Arm (aarch64): the lockfile's torch and vLLM have
+the GB300. Stage 1 defaults to four concurrent text-model/HTR and neural-query
+contexts on that GPU, each in a separate process sharing the CPU budget.
+Set `STAGE1_CONTEXTS_PER_GPU=2` (or another positive integer) to change that
+limit, including when using benchmark `--llm-url`. More processes use more GPU
+memory; this is a concurrency limit, not automatic memory sizing. Restart the
+workflow to apply it; completed contexts and checkpointed training folds remain
+reusable. Individual HTR folds stay serial within each process.
+The Grace CPU is Arm (aarch64): the lockfile's torch and vLLM have
 aarch64 wheels, but this preset has not yet been run on a station.
 
 A typical managed launch on an eight-GPU machine:

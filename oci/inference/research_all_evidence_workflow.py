@@ -374,6 +374,9 @@ class ResearchStage1Config:
     neural_query_overrides: Mapping[str, Any]
     log_level: str = "INFO"
     notes: PretreatmentNotesConfig | None = None
+    # Runtime scheduling only; never enters the applied scientific config or
+    # the per-context checkpoint identity.
+    contexts_per_gpu: int = 1
 
     @property
     def analysis_dataset(self) -> Path:
@@ -438,7 +441,7 @@ def compile_config(
         and raw.get("stage1_architectures") is not None
     ):
         science["stage1_architectures"] = raw["stage1_architectures"]
-    for key in ("devices", "workers", "components", "mode", "log_level"):
+    for key in ("devices", "workers", "contexts_per_gpu", "components", "mode", "log_level"):
         if key not in run and raw.get(key) is not None:
             run[key] = raw[key]
     if "htr" not in models and raw.get("htr_model") is not None:
@@ -460,6 +463,13 @@ def compile_config(
         raw_devices = [part.strip() for part in raw_devices.split(",") if part.strip()]
     if not raw_devices:
         raise ValueError("run.devices must contain at least one device")
+    contexts_per_gpu = run.get("contexts_per_gpu", 1)
+    if (
+        isinstance(contexts_per_gpu, bool)
+        or not isinstance(contexts_per_gpu, int)
+        or contexts_per_gpu < 1
+    ):
+        raise ValueError("run.contexts_per_gpu must be a positive integer")
     raw_components = run.get("components", list(STAGE1_COMPONENT_ORDER))
     if isinstance(raw_components, str):
         raw_components = [part.strip() for part in raw_components.split(",") if part.strip()]
@@ -517,6 +527,7 @@ def compile_config(
         seed=int(science.get("seed", 42)),
         devices=tuple(str(value) for value in raw_devices),
         workers=max(1, int(run.get("workers", 1))),
+        contexts_per_gpu=contexts_per_gpu,
         components=selected_components,
         stage1_architectures=architecture_selection,
         mode=mode,
@@ -731,14 +742,23 @@ def _context_execution_lanes(
     *,
     devices: Sequence[str],
     workers: int,
+    contexts_per_gpu: int = 1,
 ) -> list[tuple[str, list[Mapping[str, Any]]]]:
     """Assign whole discovery contexts to fixed device lanes.
 
-    A CUDA lane owns one GPU for the duration of its job.  This avoids two
-    process-pool workers landing on the same GPU when contexts take different
-    amounts of time.  CPU-only runs use ``workers`` identical CPU lanes.
+    Each CUDA lane owns a separate process pinned to one GPU. A GPU may host
+    up to ``contexts_per_gpu`` lanes, with each lane running its contexts
+    serially so Torch random state and model state stay process-local. The CPU
+    budget caps extra lanes, while retaining at least one lane per GPU when
+    there is enough work. CPU-only runs use ``workers`` identical CPU lanes.
     """
 
+    if (
+        isinstance(contexts_per_gpu, bool)
+        or not isinstance(contexts_per_gpu, int)
+        or contexts_per_gpu < 1
+    ):
+        raise ValueError("contexts_per_gpu must be a positive integer")
     if not pending:
         return []
     normalized = tuple(dict.fromkeys(str(device).strip() for device in devices))
@@ -747,7 +767,11 @@ def _context_execution_lanes(
     cuda_devices = tuple(device for device in normalized if device.startswith("cuda:"))
     execution_devices = cuda_devices or normalized
     if cuda_devices:
-        parallelism = min(len(cuda_devices), len(pending))
+        parallelism = min(
+            len(cuda_devices) * contexts_per_gpu,
+            max(len(cuda_devices), int(workers)),
+            len(pending),
+        )
     else:
         parallelism = min(max(1, int(workers)), len(pending))
 
@@ -854,6 +878,7 @@ def _text_models_component(
         pending,
         devices=context.config.devices,
         workers=context.config.workers,
+        contexts_per_gpu=context.config.contexts_per_gpu,
     )
     lane_cpu_workers = _lane_cpu_worker_budgets(len(lanes), context.config.workers)
     if pending:
@@ -875,6 +900,14 @@ def _text_models_component(
             backend="loky" if len(lanes) > 1 else "sequential",
             batch_size=1,
             pre_dispatch="all",
+            **(
+                {
+                    "initializer": _configure_logging,
+                    "initargs": (context.config.output_dir, context.config.log_level),
+                }
+                if len(lanes) > 1
+                else {}
+            ),
         )(
             delayed(_run_text_model_context_lane)(
                 dataset=context.dataset,
@@ -1259,6 +1292,7 @@ def _neural_queries_component(
         pending,
         devices=context.config.devices,
         workers=context.config.workers,
+        contexts_per_gpu=context.config.contexts_per_gpu,
     )
     lane_cpu_workers = _lane_cpu_worker_budgets(len(lanes), context.config.workers)
     if pending:
@@ -1276,6 +1310,14 @@ def _neural_queries_component(
             backend="loky" if len(lanes) > 1 else "sequential",
             batch_size=1,
             pre_dispatch="all",
+            **(
+                {
+                    "initializer": _configure_logging,
+                    "initargs": (context.config.output_dir, context.config.log_level),
+                }
+                if len(lanes) > 1
+                else {}
+            ),
         )(
             delayed(_run_neural_query_context_lane)(
                 dataset=context.dataset,
@@ -2861,6 +2903,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--contexts-per-gpu",
+        type=int,
+        help=(
+            "maximum concurrent Stage 1 text-model and neural-query discovery "
+            "contexts per GPU, in separate processes (default: 1); runtime-only, "
+            "safe to change on resume"
+        ),
+    )
+    parser.add_argument(
         "--architectures",
         help=(
             "comma-separated Stage 1 architecture names, or 'all' for all ten. "
@@ -3035,7 +3086,7 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
     if args.architectures is not None:
         science["stage1_architectures"] = args.architectures
     run = raw.setdefault("run", {})
-    for key in ("devices", "workers"):
+    for key in ("devices", "workers", "contexts_per_gpu"):
         value = getattr(args, key)
         if value is not None:
             run[key] = value

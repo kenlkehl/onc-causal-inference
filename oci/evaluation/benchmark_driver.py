@@ -100,7 +100,7 @@ GENERATOR_VLLM_DEFAULTS = {
 # GPU selection and CPU budget, final-modeling CPU workers, and timeouts.
 HARDWARE_VARIABLES = (
     "PHYSICAL_GPUS", "GPU_COUNT", "MIN_FREE_GPU_GB", "MIN_TOTAL_GPU_GB", "CUDA_DEVICE_ORDER",
-    "STAGE1_WORKERS", "STAGE2_MODELING_WORKERS", "STAGE2_REQUEST_TIMEOUT",
+    "STAGE1_WORKERS", "STAGE1_CONTEXTS_PER_GPU", "STAGE2_MODELING_WORKERS", "STAGE2_REQUEST_TIMEOUT",
     "STAGE2_REQUEST_ATTEMPT_TIMEOUT",
 )
 # Serving variables that --llm-url sets; an explicit value would contradict it.

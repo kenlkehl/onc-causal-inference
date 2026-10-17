@@ -58,6 +58,8 @@
 #   MIN_FREE_GPU_GB              free memory a GPU needs to be eligible (0)
 #   MIN_TOTAL_GPU_GB             total memory a GPU needs to be eligible (0)
 #   STAGE1_WORKERS               Stage 1 CPU workers (auto)
+#   STAGE1_CONTEXTS_PER_GPU      concurrent training contexts per GPU (1;
+#                                dgx_station_gb300: 4), safe to change on resume
 #   STAGE1_ARCHITECTURES         comma-separated Stage 1 architectures, or all
 #                                (default: the template's eight default lanes)
 #   DISABLE_HTR=1                skip all HTR modeling
@@ -359,6 +361,9 @@ else
         --set science.stage1.architecture.htr_max_chunks=512
     )
 fi
+if [[ -n "${STAGE1_CONTEXTS_PER_GPU:-}" ]]; then
+    args+=(--contexts-per-gpu "$STAGE1_CONTEXTS_PER_GPU")
+fi
 if [[ -n "${STAGE1_ARCHITECTURES:-}" ]]; then
     args+=(--architectures "$STAGE1_ARCHITECTURES")
 fi
@@ -421,6 +426,7 @@ echo "GPU memory:     ${gpu_summary}"
 echo "CPU budget:     ${worker_count} workers (${cpu_count} available)"
 echo "Stage 2:        ${stage2_description}"
 echo "Architectures:  ${STAGE1_ARCHITECTURES:-default lanes from the Stage 1 template}"
+echo "GPU contexts:   ${STAGE1_CONTEXTS_PER_GPU:-from workflow configuration (default 1)} per GPU, bounded by the CPU budget"
 echo "HTR modeling:   $([[ "${DISABLE_HTR:-0}" == 1 ]] && echo disabled || echo enabled)"
 
 exec "$python_bin" -m oci.inference.research_all_evidence_workflow "${args[@]}"

@@ -42,6 +42,7 @@ def test_preset_environment_reads_presets_and_keeps_explicit_values():
     gb300 = driver.preset_environment("dgx_station_gb300", _environ())
     assert gb300["PHYSICAL_GPUS"] == "1"
     assert gb300["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
+    assert gb300["STAGE1_CONTEXTS_PER_GPU"] == "4"
     assert gb300["STAGE2_MODEL"] == "nvidia/Gemma-4-26B-A4B-NVFP4"
     rtx = driver.preset_environment("rtxpro6000x8", _environ(STAGE2_MODEL="custom"))
     assert rtx["STAGE2_MODEL"] == "custom" and rtx["GPU_COUNT"] == "8"
@@ -368,6 +369,10 @@ def test_llm_url_runs_use_the_external_preset_and_the_machine_hardware():
         "1", "PCI_BUS_ID", "150",
     )
     assert env["STAGE2_MODELING_WORKERS"] == "64"
+    assert env["STAGE1_CONTEXTS_PER_GPU"] == "4"
+    assert driver.external_run_environment(
+        _environ(STAGE1_CONTEXTS_PER_GPU="2"), machine, servers
+    )["STAGE1_CONTEXTS_PER_GPU"] == "2"
     assert env["STAGE2_REQUEST_TIMEOUT"] == "9000"  # explicit values win
     assert not any(name.startswith(("STAGE2_VLLM_", "STAGE2_EXTRACTION_VLLM_")) for name in env)
     with pytest.raises(DriverError, match="unset STAGE2_MODEL"):
