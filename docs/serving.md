@@ -364,22 +364,22 @@ run. This choice is recorded in `model_phase.json` and kept on resume. Set
 
 ## Hardware presets
 
-`run_synthetic.sh` ships three presets in `scripts/presets/`
+`run_synthetic.sh` ships four presets in `scripts/presets/`
 ([Configuration](configuration.md#presets) lists the other defaults they set).
 GPU indices are logical, after any `PHYSICAL_GPUS` or `CUDA_VISIBLE_DEVICES`
 mapping.
 
-| | `external` | `h100x8` | `rtxpro6000x8` |
-|---|---|---|---|
-| Hardware | Any; servers started separately | 8 × H100 80 GB | 8 × RTX PRO 6000 Blackwell 96 GB |
-| Interpretation model | `RedHatAI/Gemma-4-31B-IT-FP8-Dynamic` at `http://127.0.0.1:8010/v1` | `RedHatAI/gemma-4-31B-it-FP8-dynamic`, managed, GPUs 0–3 | `nvidia/Gemma-4-26B-A4B-NVFP4`, managed |
-| Extraction model | `google/gemma-4-e4b-it` at `http://127.0.0.1:8020/v1` | `RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic`, managed, GPUs 4–7 | Same model as interpretation |
-| GPU scheduling | — | Two models alternate over all eight GPUs; configured split after rapid switching | One shared pool, one replica per GPU on all eight GPUs |
-| Tensor parallelism | — | 1 | 1 |
-| Public ports | 8010, 8020 | 8010–8017 and 8110–8117 | 8110–8117 |
-| Internal port bases | — | 20000 and 30000 | 30000 (shared pool) |
-| vLLM arguments | — | `--gpu-memory-utilization 0.90 --max-model-len 128000 --max-num-seqs 32` | `--gpu-memory-utilization 0.90 --max-model-len 262144 --max-num-seqs 32` |
-| Extraction window | 131,072 (code default; `one_conf_one_mod` uses 128,000) | 128,000, margin 4,096 | 262,144, margin 4,096 |
+| | `external` | `h100x8` | `rtxpro6000x8` | `dgx_station_gb300` |
+|---|---|---|---|---|
+| Hardware | Any; servers started separately | 8 × H100 80 GB | 8 × RTX PRO 6000 Blackwell 96 GB | DGX Station: 1 × GB300 (252 GB HBM3e), 72-core Grace (Arm) CPU |
+| Interpretation model | `RedHatAI/Gemma-4-31B-IT-FP8-Dynamic` at `http://127.0.0.1:8010/v1` | `RedHatAI/gemma-4-31B-it-FP8-dynamic`, managed, GPUs 0–3 | `nvidia/Gemma-4-26B-A4B-NVFP4`, managed | `nvidia/Gemma-4-26B-A4B-NVFP4`, managed |
+| Extraction model | `google/gemma-4-e4b-it` at `http://127.0.0.1:8020/v1` | `RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic`, managed, GPUs 4–7 | Same model as interpretation | Same model as interpretation |
+| GPU scheduling | — | Two models alternate over all eight GPUs; configured split after rapid switching | One shared pool, one replica per GPU on all eight GPUs | One shared server on the GB300, after Stage 1 has used it |
+| Tensor parallelism | — | 1 | 1 | 1 |
+| Public ports | 8010, 8020 | 8010–8017 and 8110–8117 | 8110–8117 | 8110 |
+| Internal port bases | — | 20000 and 30000 | 30000 (shared pool) | 30000 (shared server) |
+| vLLM arguments | — | `--gpu-memory-utilization 0.90 --max-model-len 128000 --max-num-seqs 32` | `--gpu-memory-utilization 0.90 --max-model-len 262144 --max-num-seqs 32` | `--gpu-memory-utilization 0.90 --max-model-len 262144 --max-num-seqs 64` |
+| Extraction window | 131,072 (code default; `one_conf_one_mod` uses 128,000) | 128,000, margin 4,096 | 262,144, margin 4,096 | 262,144, margin 4,096 |
 
 For the `external` preset, start the two servers yourself before launching, or
 point `STAGE2_ENDPOINT` and `STAGE2_EXTRACTION_ENDPOINT` elsewhere. With the
@@ -387,6 +387,16 @@ point `STAGE2_ENDPOINT` and `STAGE2_EXTRACTION_ENDPOINT` elsewhere. With the
 two models alternate, with GPUs 0–3 and 4–7 as the configured split. vLLM reads
 the FP8 and NVFP4 quantization from each checkpoint. NVIDIA's NVFP4 repository
 name omits `IT`, but the checkpoint is instruction tuned.
+
+The `dgx_station_gb300` preset expects the station's optional RTX PRO display
+GPU at PCI position 0 and the GB300 at position 1, the numbering `nvidia-smi`
+shows. CUDA's default order (fastest first) can number them differently, so
+the preset exports `CUDA_DEVICE_ORDER=PCI_BUS_ID` and sets `PHYSICAL_GPUS=1`.
+It also sets `MIN_FREE_GPU_GB=150`, which no display GPU can satisfy, so
+selecting the wrong GPU stops the launch at detection. On a station without a
+display GPU, set `PHYSICAL_GPUS=0`. Check the launcher's `GPU memory:` line for
+the GB300. The Grace CPU is Arm (aarch64): the lockfile's torch and vLLM have
+aarch64 wheels, but this preset has not yet been run on a station.
 
 A typical managed launch on an eight-GPU machine:
 

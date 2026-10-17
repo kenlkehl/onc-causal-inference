@@ -3,9 +3,10 @@
 The benchmark harness measures how well OCI recovers known treatment effects
 and data-generating roles across a set of synthetic scenarios. It builds the
 scenario cohorts, writes one workflow configuration per cohort, and compares
-the finished runs with the [oracle columns](glossary.md#oracle-columns). It
-never starts a workflow run or an LLM request: you launch the runs yourself
-with the printed commands.
+the finished runs with the [oracle columns](glossary.md#oracle-columns). These
+three commands never start a workflow run or an LLM request: you launch the
+runs yourself with the printed commands, or `run_benchmark.sh` runs every
+step.
 
 ```bash
 python scripts/benchmark.py materialize --scenarios S0,S1 --source SOURCE_DIR --out BENCH
@@ -15,7 +16,8 @@ python scripts/benchmark.py aggregate --out BENCH
 
 The code is `oci/evaluation/benchmark.py` (registry, seeds, commands, and
 metrics) and `oci/evaluation/benchmark_ceiling.py` (the oracle-covariate
-ceiling).
+ceiling). `run_benchmark.sh` runs every step on one machine, including the LLM
+text and the runs ([End-to-end driver](#end-to-end-driver)).
 
 ## Contents
 
@@ -24,6 +26,7 @@ ceiling).
 - [Source corpora](#source-corpora)
 - [Seeds and the confirmatory rule](#seeds-and-the-confirmatory-rule)
 - [Commands](#commands)
+- [End-to-end driver](#end-to-end-driver)
 - [Metrics](#metrics)
 - [Outputs](#outputs)
 - [Oracle safety](#oracle-safety)
@@ -202,6 +205,82 @@ with a reason (`not_materialized`, `no_config`, `not_started`, the
 | `--recovery-r2` | 0.5 | Held-out R² at which a variable recovers an oracle concept |
 | `--no-ceiling` | off | Skip the oracle-covariate ceiling refits |
 | `--ceiling-workers N` | 1 | CPU processes for the ceiling refits |
+
+## End-to-end driver
+
+`run_benchmark.sh` (`oci/evaluation/benchmark_driver.py`) runs the benchmark
+on one machine, named by a [hardware preset](serving.md#hardware-presets)
+(`external`, `h100x8`, `rtxpro6000x8`, or `dgx_station_gb300`):
+
+```bash
+./run_benchmark.sh MACHINE BENCH [--scenarios ...] [--sizes ...] [--seeds ...] [OPTION ...]
+./run_benchmark.sh rtxpro6000x8 /data/bench --scenarios S0 --sizes 1000 --seeds 101
+./run_benchmark.sh dgx_station_gb300 /data/bench --plan
+```
+
+It takes the selection options of the harness commands (`--scenarios`,
+`--sizes`, `--seeds`, `--confirmatory`, `--force`, `--registry`,
+`--seeds-file`, `--ledger`) and runs these steps in order. Rerunning the same
+command resumes: finished steps and runs are skipped, and an interrupted
+generator or run continues from its checkpoints.
+
+| Step | What it does |
+|---|---|
+| `generate` | Writes the LLM text the selected cells need: an expansion of the re-equation source with its saved DGP when a selected S0 to S4 cell is larger than the source, to `BENCH/corpora/<source>_n<size>/`, and the corpus of each selected S5- or S6-type scenario, to `BENCH/<scenario>/generation/corpus/` |
+| `materialize` | One cohort per cell, from the source (or its expansion) and the corpora |
+| `configs` | One workflow configuration per cell from `--base` (default `benchmarks/base_config.json`: the bundled cohorts' columns, clinical question, 5 × 5 folds, HTR and embedding models, and Stage 2 definition settings, as `run_synthetic.sh` uses them) |
+| `runs` | Each unfinished run, one at a time, smallest cells first, as `PRESET=MACHINE ./run_synthetic.sh BENCH/.../config.json`; the launcher adds the preset's serving settings and the detected devices and workers. A failed run is reported and the next one starts (`--stop-on-failure` stops instead) |
+| `aggregate` | The aggregate report in `BENCH/aggregate/` (`--no-ceiling`, `--ceiling-workers`) |
+
+`--through STEP` stops after a step, for example `--through materialize` to
+build the cohorts on a generation machine and run them elsewhere. `--plan`
+prints the plan (models, corpora, cells, and every run with its status) and
+writes nothing.
+
+**The re-equation source.** `--source` (default: the bundled five-confounder
+cohort) serves the S0 to S4 cells. When the largest selected cell is larger
+than the source, the driver expands the source to that size with the saved
+DGP; `--source-size N` expands to N patients up front. Every S0 to S4 cell of
+a benchmark directory comes from one source, recorded in
+`BENCH/driver/state.json`, so a later selection that needs a larger expansion
+is refused: start a new directory, or give the largest size with
+`--source-size` the first time.
+
+**Corpus generation.** The generator uses `GENERATOR_MODEL` (default
+`openai/gpt-oss-120b`, the model that wrote the bundled cohorts). On a managed
+preset the driver starts a vLLM pool for it on the GPUs that `run_synthetic.sh`
+would select (one server per GPU; ports from 8210, internal ports from 40000;
+`--gpu-memory-utilization 0.90 --max-model-len 131072`) and stops it before
+the first run. The generator spreads patients across the replicas with 32
+concurrent patients per server. `GENERATOR_ENDPOINT` (comma-separated URLs of
+running OpenAI-compatible servers) replaces the pool and is the default for
+the `external` preset (`http://127.0.0.1:8000/v1`).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GENERATOR_MODEL` | `openai/gpt-oss-120b` | Model that writes the notes |
+| `GENERATOR_ENDPOINT` | none (`http://127.0.0.1:8000/v1` for `external`) | Running servers instead of a managed pool |
+| `GENERATOR_API_KEY` | empty | Key for `GENERATOR_ENDPOINT` |
+| `GENERATOR_WORKERS` | 32 per server | Concurrent patients |
+| `GENERATOR_VLLM_GPUS` | the detected GPUs | Logical GPUs of the pool |
+| `GENERATOR_VLLM_GPUS_PER_SERVER` | 1 | Tensor-parallel width |
+| `GENERATOR_VLLM_BASE_PORT`, `GENERATOR_VLLM_INTERNAL_PORT_BASE` | 8210, 40000 | Public and internal ports |
+| `GENERATOR_VLLM_EXTRA_ARGS_JSON` | `["--gpu-memory-utilization","0.90","--max-model-len","131072"]` | vLLM arguments |
+
+The runs honor every `run_synthetic.sh` variable (`STAGE2_MODEL`,
+`STAGE2_ENDPOINT`, `STAGE2_WORKERS`, ...), and `OCI_PYTHON` selects the
+interpreter instead of synchronizing `.venv`.
+
+**Outputs.** `BENCH/driver/` holds `invocations.jsonl` (one line per
+invocation: time, machine, arguments, git state, and models), `state.json`,
+the generator configurations (`generation/`), the generator servers' logs and
+manifest (`generation_servers/`), and one log per generator run and workflow
+run (`logs/`). Each run also writes its own `logs/workflow.log` and
+`progress.json` in its output directory.
+
+**Confirmatory runs.** With `--confirmatory`, the first invocation writes the
+configurations and their ledger entries; a rerun finds every configuration in
+place and resumes the runs without a second ledger entry.
 
 ## Metrics
 

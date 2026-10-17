@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
 #
 # Run or resume the all-evidence workflow (Stage 1 -> handoff -> Stage 2) on a
-# bundled synthetic NSCLC cohort.
+# bundled synthetic NSCLC cohort, or on the cohort of a workflow configuration
+# file, with a serving and hardware preset.
 #
 # Usage:
 #   [PRESET=NAME] [VARIABLE=VALUE ...] ./run_synthetic.sh COHORT [OUTPUT_DIR] [WORKFLOW_OPTION ...]
+#   [PRESET=NAME] [VARIABLE=VALUE ...] ./run_synthetic.sh CONFIG.json [WORKFLOW_OPTION ...]
 #
 # COHORT
 #   one_conf_one_mod     one confounder and one effect modifier
 #   five_conf_five_mod   five confounders and five effect modifiers
+# CONFIG.json
+#   A workflow configuration (.json, .yaml, or .yml), for example a benchmark
+#   cell's runs/VARIANT/config.json.  It supplies the dataset, output
+#   directory, columns, science, and Stage 2 settings; the launcher adds only
+#   the preset's serving settings and the detected devices and workers (and
+#   STAGE1_ARCHITECTURES or DISABLE_HTR=1 when set).  The cohort defaults and
+#   the bundled cohorts' Stage 2 ontology settings do not apply, and there is
+#   no OUTPUT_DIR argument.
 # OUTPUT_DIR
 #   Defaults to artifacts/research_all_evidence/COHORT_nsclc_full for the
 #   external preset and COHORT_nsclc_PRESET_full for the others, with _no_htr
@@ -25,6 +35,10 @@
 #   h100x8        eight 80 GB H100 GPUs; OCI starts and stops both vLLM pools
 #   rtxpro6000x8  eight 96 GB RTX PRO 6000 GPUs; OCI serves one NVFP4 Gemma
 #                 model for both Stage 2 roles on all eight GPUs
+#   dgx_station_gb300
+#                 a DGX Station's GB300 GPU (252 GB), physical GPU 1 in PCI
+#                 order; OCI serves the same NVFP4 Gemma model for both roles
+#                 as one server
 #
 # Cohort defaults, applied after the preset for fresh runs:
 #   one_conf_one_mod    STAGE2_WORKERS=4, STAGE2_EXTRACTION_WORKERS=4,
@@ -74,21 +88,33 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-usage="Usage: $0 {one_conf_one_mod|five_conf_five_mod} [OUTPUT_DIR] [WORKFLOW_OPTION ...]"
+usage="Usage: $0 {one_conf_one_mod|five_conf_five_mod} [OUTPUT_DIR] [WORKFLOW_OPTION ...]
+   or: $0 CONFIG.json [WORKFLOW_OPTION ...]"
 datasets="${repo_root}/synthetic_data/example_synthetic_datasets"
+config_file=""
 case "${1:-}" in
     one_conf_one_mod)
         dataset="${datasets}/one_confounder_one_effect_modifier_nsclc_with_structured/dataset.parquet" ;;
     five_conf_five_mod)
         dataset="${datasets}/five_confounders_five_effect_modifiers_nsclc_with_structured/dataset.parquet" ;;
+    *.json|*.yaml|*.yml)
+        if [[ ! -f "$1" ]]; then
+            echo "Configuration file not found: $1" >&2
+            exit 2
+        fi
+        config_file="$(cd -- "$(dirname -- "$1")" && pwd)/$(basename -- "$1")" ;;
     *) echo "$usage" >&2; exit 2 ;;
 esac
 cohort="$1"
 shift
 output_dir=""
-if (( $# )) && [[ "$1" != --* ]]; then
+if [[ -z "$config_file" ]] && (( $# )) && [[ "$1" != --* ]]; then
     output_dir="$1"
     shift
+fi
+if [[ -n "$config_file" && "${STAGE2_ONLY:-0}" == 1 ]]; then
+    echo "STAGE2_ONLY=1 relaunches a saved run: pass a bundled COHORT with OCI_RUN_CONFIG=OUTPUT_DIR/run_config.json." >&2
+    exit 2
 fi
 workflow_options=("$@")
 preset="${PRESET:-external}"
@@ -219,7 +245,7 @@ if [[ ! -f "$preset_file" ]]; then
 fi
 # shellcheck source=/dev/null
 source "$preset_file"
-if [[ "$cohort" == one_conf_one_mod ]]; then
+if [[ -z "$config_file" && "$cohort" == one_conf_one_mod ]]; then
     : "${STAGE2_WORKERS:=4}"
     : "${STAGE2_EXTRACTION_WORKERS:=4}"
     : "${STAGE2_REQUEST_ATTEMPT_TIMEOUT:=1800}"
@@ -297,25 +323,33 @@ if (( managed_primary )); then
 fi
 
 output_dir="${output_dir:-${default_output_dir}}"
-args=(
-    --dataset "$dataset"
-    --output-dir "$output_dir"
-    --unit-id-column patient_id
-    --text-column clinical_text
-    --treatment-column treatment_indicator
-    --outcome-column outcome_indicator
-    --outcome-type binary
-    --clinical-question "For advanced or metastatic NSCLC, identify pretreatment text features that confound assignment to vinorelbine versus gemcitabine or modify their treatment effect."
-    --outer-folds 5
-    --inner-folds 5
-    --seed 42
-    --devices "$devices"
-    --workers "$worker_count"
-    --htr-model prajjwal1/bert-tiny
-    --embedding-model Qwen/Qwen3-Embedding-8B
-    --set science.stage1.architecture.multi_model_forest.embedding_contrast.max_chunks=512
-    --set science.stage1.architecture.htr_max_chunks=512
-)
+if [[ -n "$config_file" ]]; then
+    args=(
+        --config "$config_file"
+        --devices "$devices"
+        --workers "$worker_count"
+    )
+else
+    args=(
+        --dataset "$dataset"
+        --output-dir "$output_dir"
+        --unit-id-column patient_id
+        --text-column clinical_text
+        --treatment-column treatment_indicator
+        --outcome-column outcome_indicator
+        --outcome-type binary
+        --clinical-question "For advanced or metastatic NSCLC, identify pretreatment text features that confound assignment to vinorelbine versus gemcitabine or modify their treatment effect."
+        --outer-folds 5
+        --inner-folds 5
+        --seed 42
+        --devices "$devices"
+        --workers "$worker_count"
+        --htr-model prajjwal1/bert-tiny
+        --embedding-model Qwen/Qwen3-Embedding-8B
+        --set science.stage1.architecture.multi_model_forest.embedding_contrast.max_chunks=512
+        --set science.stage1.architecture.htr_max_chunks=512
+    )
+fi
 if [[ -n "${STAGE1_ARCHITECTURES:-}" ]]; then
     args+=(--architectures "$STAGE1_ARCHITECTURES")
 fi
@@ -323,17 +357,19 @@ if [[ "${DISABLE_HTR:-0}" == 1 ]]; then
     args+=(--disable-htr)
 fi
 if (( stage2_enabled )); then
-    # Stage 2 ontology settings shared by both bundled cohorts.
-    stage2_defaults=(
-        stage2.consolidation_batch_size=20
-        stage2.consolidation_max_rounds=55
-        stage2.operationalization_max_prompt_chars=640000
-        stage2.ontology_refinement_min_failure_patients=3
-        stage2.max_ontology_refinement_rounds=2
-    )
-    for setting in "${stage2_defaults[@]}"; do
-        args+=(--set "$setting")
-    done
+    if [[ -z "$config_file" ]]; then
+        # Stage 2 ontology settings shared by both bundled cohorts.
+        stage2_defaults=(
+            stage2.consolidation_batch_size=20
+            stage2.consolidation_max_rounds=55
+            stage2.operationalization_max_prompt_chars=640000
+            stage2.ontology_refinement_min_failure_patients=3
+            stage2.max_ontology_refinement_rounds=2
+        )
+        for setting in "${stage2_defaults[@]}"; do
+            args+=(--set "$setting")
+        done
+    fi
     add_stage2_runtime_args
     if (( managed_primary )); then
         stage2_description="managed vLLM ${STAGE2_MODEL:-} on ${STAGE2_VLLM_GPUS}"
@@ -362,10 +398,14 @@ else
 fi
 args+=("${workflow_options[@]}")
 
-echo "Dataset:        ${dataset}"
-echo "Output:         ${output_dir}"
-echo "Progress:       ${output_dir}/progress.json"
-echo "Log:            ${output_dir}/logs/workflow.log"
+if [[ -n "$config_file" ]]; then
+    echo "Configuration:  ${config_file} (dataset and output directory as configured)"
+else
+    echo "Dataset:        ${dataset}"
+    echo "Output:         ${output_dir}"
+    echo "Progress:       ${output_dir}/progress.json"
+    echo "Log:            ${output_dir}/logs/workflow.log"
+fi
 echo "Preset:         ${preset}"
 echo "CUDA devices:   ${devices}"
 echo "GPU memory:     ${gpu_summary}"

@@ -200,6 +200,7 @@ non-small-cell lung cancer cohorts (1,000 patients each, with known effects):
 | `external` (default) | Servers you already run: interpretation LLM at `http://127.0.0.1:8010/v1`, extraction LLM at `http://127.0.0.1:8020/v1` |
 | `h100x8` | OCI starts and stops vLLM pools on eight 80 GB H100 GPUs |
 | `rtxpro6000x8` | OCI starts and stops vLLM pools on eight 96 GB RTX PRO 6000 GPUs |
+| `dgx_station_gb300` | OCI starts and stops one vLLM server on a DGX Station's GB300 GPU (physical GPU 1 in PCI order) |
 
 ```bash
 PRESET=rtxpro6000x8 ./run_synthetic.sh five_conf_five_mod /path/to/output
@@ -213,6 +214,9 @@ workflow. Without an output directory, results go to
 `<cohort>_nsclc_<preset>_full` for a managed preset). See
 [Configuration](docs/configuration.md#the-synthetic-launcher-run_syntheticsh) and
 [Serving](docs/serving.md#hardware-presets).
+`./run_synthetic.sh CONFIG.json` instead runs the cohort of a workflow
+configuration file with the preset's serving settings and the detected
+devices.
 
 Synthetic notes never mention treatment or outcome, so one corpus serves many
 data-generating processes. `python -m synthetic_data.cli reequation` recomputes
@@ -454,6 +458,17 @@ need `--confirmatory` and are logged in `benchmarks/confirmatory_ledger.jsonl`:
 python scripts/benchmark.py materialize --scenarios S0,S1 --source /path/to/source_cohort --out /path/to/bench
 python scripts/benchmark.py configs --base /path/to/config.json --out /path/to/bench
 python scripts/benchmark.py aggregate --out /path/to/bench
+```
+
+`run_benchmark.sh` runs all of it on one machine, named by a hardware preset:
+it writes the LLM text the selected cells need (an expansion of the source
+cohort for cells larger than it, and the S5 and S6 corpora) on a vLLM pool it
+starts and stops, builds the cohorts and configurations, runs each cell in
+turn, and aggregates. Rerun the same command to resume:
+
+```bash
+./run_benchmark.sh rtxpro6000x8 /path/to/bench --scenarios S0 --sizes 1000 --seeds 101
+./run_benchmark.sh dgx_station_gb300 /path/to/bench --plan   # what would run, and what is done
 ```
 
 See [Benchmarks](docs/benchmarks.md).

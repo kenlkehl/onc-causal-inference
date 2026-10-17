@@ -27,7 +27,8 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 | Command | Code | Purpose |
 |---|---|---|
 | `python scripts/run_all_evidence.py` | `oci/inference/research_all_evidence_workflow.py` (`build_parser`, `main`) | Run, resume, or relaunch the all-evidence workflow (29 flags; everything else via `--set KEY=VALUE`) |
-| `./run_synthetic.sh COHORT [OUT]` | `run_synthetic.sh`, `scripts/presets/{external,h100x8,rtxpro6000x8}.env` | Run a bundled synthetic cohort with a serving preset |
+| `./run_synthetic.sh COHORT [OUT]` | `run_synthetic.sh`, `scripts/presets/{external,h100x8,rtxpro6000x8,dgx_station_gb300}.env` | Run a bundled synthetic cohort with a serving preset; `./run_synthetic.sh CONFIG.json` runs a configuration file's cohort with the preset's serving settings and the detected devices |
+| `./run_benchmark.sh MACHINE BENCH` | `run_benchmark.sh`, `oci/evaluation/benchmark_driver.py`, `benchmarks/base_config.json` | The benchmark end to end on one machine (a preset name): LLM corpora the selected cells need (source expansion with the saved DGP; S5/S6 corpora) on a vLLM pool it starts and stops, `materialize`, `configs`, each run through `run_synthetic.sh CONFIG`, `aggregate`; resumes on rerun; `--plan` prints the plan and status |
 | `oci-evaluate-stage1` | `oci/evaluation/stage1.py` | Oracle-safe evaluation of frozen Stage 1 architectures; writes `OUT/evaluation/stage1/` |
 | `oci-evaluate-attribution` | `oci/evaluation/attribution.py` | Credit Stage 2 variables to the Stage 1 architectures that supported them (any-source and sole-source); `--oracle` adds recovery by held-out R² |
 | `python scripts/ablate_stage1_architectures.py` | `oci/evaluation/ablation.py` | `prepare`: leave-one-architecture-out handoffs and `run_stage2_from_artifacts.py` configs (never launches LLM jobs); `compare`: finished ablations versus the full run |
@@ -55,6 +56,7 @@ oci/
 ├── evaluation/benchmark.py           # scripts/benchmark.py (registry, seed guard and ledger,
 │                                     #   materialize, configs, aggregate metrics)
 ├── evaluation/benchmark_ceiling.py   # Oracle-covariate ceiling via estimate_outer_fold
+├── evaluation/benchmark_driver.py    # run_benchmark.sh: generation, materialize, configs, runs, aggregate
 ├── extraction/                       # `oci run` extraction: explicit_features, complete_paged,
 │                                     #   contract_lexical_context, llm_routing, cache
 ├── models/
@@ -322,6 +324,7 @@ python scripts/ablate_stage1_architectures.py compare --run-dir OUT --ablation-d
 python scripts/benchmark.py materialize --scenarios S0,S1 --source SOURCE_DIR --out BENCH
 python scripts/benchmark.py configs --base CONFIG.json --out BENCH
 python scripts/benchmark.py aggregate --out BENCH
+./run_benchmark.sh rtxpro6000x8 BENCH --scenarios S0 --sizes 1000 --seeds 101   # all steps, resumable
 
 # Standalone explicit-feature workflow
 oci run --config example_configs/agentic_explicit_feature_forest_config.json

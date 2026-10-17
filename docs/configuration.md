@@ -601,11 +601,13 @@ synthetic cohorts ([Synthetic data](synthetic_data.md#bundled-cohorts)):
 
 ```bash
 [PRESET=NAME] [VARIABLE=VALUE ...] ./run_synthetic.sh COHORT [OUTPUT_DIR] [WORKFLOW_OPTION ...]
+[PRESET=NAME] [VARIABLE=VALUE ...] ./run_synthetic.sh CONFIG.json [WORKFLOW_OPTION ...]
 ```
 
 | Argument | Meaning |
 |---|---|
 | `COHORT` | `one_conf_one_mod` (one confounder, one effect modifier) or `five_conf_five_mod` (five of each) |
+| `CONFIG.json` | A workflow configuration file (`.json`, `.yaml`, or `.yml`), such as a benchmark cell's `runs/VARIANT/config.json`. It supplies the dataset, output directory, columns, science, and Stage 2 settings; the launcher adds only the preset's serving settings, the detected `--devices` and `--workers`, and `STAGE1_ARCHITECTURES` or `DISABLE_HTR=1` when set. The cohort defaults and the bundled cohorts' Stage 2 definition settings below do not apply, and there is no `OUTPUT_DIR` argument; `STAGE2_ONLY=1` is refused (relaunch through `OCI_RUN_CONFIG`) |
 | `OUTPUT_DIR` | Default `artifacts/research_all_evidence/COHORT_nsclc_full` for the `external` preset and `COHORT_nsclc_PRESET_full` otherwise, with `_no_htr` appended when `DISABLE_HTR=1`. Rerun the same command to resume |
 | `WORKFLOW_OPTION` | Passed to the workflow after the launcher's own options, so a later `--set` wins, for example `--set stage2.consolidation_max_rounds=12` |
 
@@ -633,6 +635,7 @@ Presets apply to every launch except Stage 2-only relaunches
 | `external` (default) | Prestarted OpenAI-compatible servers: interpretation at `http://127.0.0.1:8010/v1`, extraction at `http://127.0.0.1:8020/v1` | Model IDs only |
 | `h100x8` | Managed vLLM on eight 80 GB H100 GPUs; the two models alternate across all GPUs | 32 workers per role, 1800 s attempt timeout, 6000 s request timeout, 128,000-token extraction window with a 4,096-token margin |
 | `rtxpro6000x8` | Managed vLLM on eight 96 GB RTX PRO 6000 GPUs; one model serves both roles from one pool | As `h100x8`, plus `STAGE2_MODELING_WORKERS=128` and a 262,144-token extraction window |
+| `dgx_station_gb300` | Managed vLLM on a DGX Station's GB300 GPU; one model serves both roles from one server | `CUDA_DEVICE_ORDER=PCI_BUS_ID`, `PHYSICAL_GPUS=1`, `MIN_FREE_GPU_GB=150`, 32 workers per role, `STAGE2_MODELING_WORKERS=64`, the `h100x8` timeouts, and a 262,144-token extraction window |
 
 Except in Stage 2-only relaunches, the `one_conf_one_mod` cohort also defaults to
 `STAGE2_WORKERS=4`, `STAGE2_EXTRACTION_WORKERS=4`,

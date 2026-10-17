@@ -1,0 +1,35 @@
+{
+  "columns": {
+    "unit_id": "patient_id",
+    "text": "clinical_text",
+    "treatment": "treatment_indicator",
+    "outcome": "outcome_indicator"
+  },
+  "science": {
+    "clinical_question": "For advanced or metastatic NSCLC, identify pretreatment text features that confound assignment to vinorelbine versus gemcitabine or modify their treatment effect.",
+    "outcome_type": "binary",
+    "outer_folds": 5,
+    "inner_folds": 5,
+    "stage1": {
+      "architecture": {
+        "htr_max_chunks": 512,
+        "multi_model_forest": {
+          "embedding_contrast": {
+            "max_chunks": 512
+          }
+        }
+      }
+    }
+  },
+  "models": {
+    "htr": "prajjwal1/bert-tiny",
+    "embeddings": "Qwen/Qwen3-Embedding-8B"
+  },
+  "stage2": {
+    "consolidation_batch_size": 20,
+    "consolidation_max_rounds": 55,
+    "operationalization_max_prompt_chars": 640000,
+    "ontology_refinement_min_failure_patients": 3,
+    "max_ontology_refinement_rounds": 2
+  }
+}

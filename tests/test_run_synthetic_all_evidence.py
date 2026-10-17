@@ -29,6 +29,10 @@ FAKE_PYTHON = f"""#!{sys.executable}
 import json, os, sys
 with open(os.environ["FAKE_PYTHON_INVOCATION_LOG"], "a") as log:
     log.write(json.dumps(sys.argv[1:]) + "\\n")
+if os.environ.get("FAKE_PYTHON_ENVIRONMENT_LOG"):
+    with open(os.environ["FAKE_PYTHON_ENVIRONMENT_LOG"], "a") as log:
+        names = ("CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER")
+        log.write(json.dumps({{name: os.environ.get(name) for name in names}}) + "\\n")
 if sys.argv[1].endswith("detect_all_evidence_hardware.py"):
     args = sys.argv[1:]
     workers = args[args.index("--stage2-workers") + 1] if "--stage2-workers" in args else "32"
@@ -68,6 +72,20 @@ def _launch(tmp_path: Path, *arguments: str, check: bool = True, **variables: st
         else []
     )
     return completed, invocations
+
+
+def _bundled_cell_config(tmp_path: Path, **stage2) -> Path:
+    """A benchmark-style configuration file: dataset, output, science, and Stage 2."""
+
+    config = json.loads((REPO_ROOT / "benchmarks" / "base_config.json").read_text(encoding="utf-8"))
+    config["dataset"] = str(COHORT_DATASETS["five_conf_five_mod"])
+    config["output_dir"] = str(tmp_path / "cell_output")
+    config["science"]["seed"] = 101
+    config["stage2"].update(stage2)
+    path = tmp_path / "cell" / "config.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config), encoding="utf-8")
+    return path
 
 
 def _workflow_args(invocations):
@@ -325,6 +343,7 @@ def test_saved_run_preflight_only_reselection_and_explicit_config(tmp_path, save
             {"STAGE2_ONLY": "1", "OCI_RUN_CONFIG": "/tmp/run_config.json"},
             "either OCI_RUN_CONFIG or OUTPUT_DIR",
         ),
+        (["/nonexistent/config.json"], {}, "Configuration file not found"),
     ],
 )
 def test_launcher_rejects_invalid_requests_before_python(tmp_path, arguments, variables, message):
@@ -333,3 +352,93 @@ def test_launcher_rejects_invalid_requests_before_python(tmp_path, arguments, va
     assert completed.returncode == 2
     assert message in completed.stderr
     assert invocations == []
+
+
+def test_config_file_mode_adds_only_machine_settings(tmp_path):
+    config_path = _bundled_cell_config(tmp_path, consolidation_max_rounds=7)
+    completed, invocations = _launch(
+        tmp_path, str(config_path), "--set", "stage2.max_review_rounds=1",
+        PRESET="rtxpro6000x8",
+    )
+    arguments = _workflow_args(invocations)
+    assert arguments[:6] == [
+        "--config", str(config_path),
+        "--devices", ",".join(f"cuda:{index}" for index in range(8)),
+        "--workers", "12",
+    ]
+    assert arguments[-2:] == ["--set", "stage2.max_review_rounds=1"]
+    assert "--dataset" not in arguments and "--seed" not in arguments
+    config = _compile(arguments)
+
+    # The file's cohort, output, science, and Stage 2 settings stand.
+    assert config.dataset == COHORT_DATASETS["five_conf_five_mod"]
+    assert config.output_dir == tmp_path / "cell_output"
+    assert config.seed == 101
+    assert config.stage2.consolidation_max_rounds == 7
+    assert config.stage2.max_review_rounds == 1
+    # The preset supplies the serving settings.
+    assert config.stage2.model == config.stage2.extraction_llm.model == "nvidia/Gemma-4-26B-A4B-NVFP4"
+    assert config.stage2.vllm.server_count == config.stage2.extraction_llm.vllm.server_count == 4
+    assert config.stage2.modeling_workers == 128
+    assert f"Configuration:  {config_path}" in completed.stdout
+
+
+def test_config_file_mode_with_external_servers_and_no_cohort_defaults(tmp_path):
+    config_path = _bundled_cell_config(tmp_path)
+    _completed, invocations = _launch(tmp_path, str(config_path))
+    config = _compile(_workflow_args(invocations))
+
+    assert config.stage2.endpoint == "http://127.0.0.1:8010/v1"
+    assert config.stage2.extraction_llm.endpoint == "http://127.0.0.1:8020/v1"
+    assert config.stage2.workers == config.stage2.extraction_llm.workers == 32
+    assert config.stage2.consolidation_max_rounds == 55
+
+
+def test_config_file_mode_rejects_stage2_only(tmp_path):
+    completed, invocations = _launch(
+        tmp_path, str(_bundled_cell_config(tmp_path)), check=False, STAGE2_ONLY="1"
+    )
+
+    assert completed.returncode == 2
+    assert "OCI_RUN_CONFIG" in completed.stderr
+    assert invocations == []
+
+
+def test_dgx_station_preset_selects_the_gb300_and_one_shared_server(tmp_path):
+    environment_log = tmp_path / "environment.jsonl"
+    completed, invocations = _launch(
+        tmp_path, "five_conf_five_mod", PRESET="dgx_station_gb300",
+        FAKE_PYTHON_ENVIRONMENT_LOG=str(environment_log),
+    )
+    detect = invocations[-2]
+    assert detect[detect.index("--min-free-vram-gib") + 1] == "150"
+    environments = [json.loads(line) for line in environment_log.read_text().splitlines()]
+    assert environments[-1] == {"CUDA_VISIBLE_DEVICES": "1", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"}
+    config = _compile(_workflow_args(invocations))
+
+    stage2 = config.stage2
+    extraction = stage2.extraction_llm
+    assert stage2.model == extraction.model == "nvidia/Gemma-4-26B-A4B-NVFP4"
+    for pool in (stage2.vllm, extraction.vllm):
+        assert pool.gpus == ("cuda:0",) and pool.server_count == 1
+        assert list(pool.extra_args) == [
+            "--gpu-memory-utilization", "0.90", "--max-model-len", "262144",
+            "--max-num-seqs", "64",
+        ]
+    assert stage2.workers == extraction.workers == 32
+    assert stage2.modeling_workers == 64
+    assert stage2.extraction_context_window_tokens == 262_144
+    assert "one shared pool" in completed.stdout
+
+
+def test_dgx_station_preset_keeps_explicit_gpu_choices(tmp_path):
+    environment_log = tmp_path / "environment.jsonl"
+    _completed, invocations = _launch(
+        tmp_path, "five_conf_five_mod", PRESET="dgx_station_gb300",
+        PHYSICAL_GPUS="0", CUDA_DEVICE_ORDER="FASTEST_FIRST", MIN_FREE_GPU_GB="20",
+        FAKE_PYTHON_ENVIRONMENT_LOG=str(environment_log),
+    )
+    detect = invocations[-2]
+    assert detect[detect.index("--min-free-vram-gib") + 1] == "20"
+    last = json.loads(environment_log.read_text().splitlines()[-1])
+    assert last == {"CUDA_VISIBLE_DEVICES": "0", "CUDA_DEVICE_ORDER": "FASTEST_FIRST"}
