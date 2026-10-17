@@ -110,9 +110,13 @@ reports (falling back to the served ID): names containing `qwen3`, `gemma4`, or
 `lfm25` (ignoring punctuation and case) select the Qwen 3, Gemma 4, or LFM 2.5
 family, and names containing `nemotron-3.5` (with `-`, `_`, a space, or nothing
 between the parts, and `.` or `_` in the version) select Nemotron 3.5, for
-example `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4`. Earlier
-Nemotron releases and anything else are treated generically. The family
-determines:
+example `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4`. Names
+containing `beam-1` as a separate word (with `-`, `_`, a space, or nothing
+between the parts, and optionally a minor version such as `1.0`) select
+Reflection's Beam 1, for example `reflection/Beam-1.0-501B-A23B-NVFP4`; a
+served alias such as `beam` resolves through the backing model ID. Earlier
+Nemotron releases, other Beam versions, and anything else are treated
+generically. The family determines:
 
 - **Thinking controls.** Recognized families receive the thinking switch through
   `chat_template_kwargs.enable_thinking` (LFM 2.5 also `enableThinking`).
@@ -120,11 +124,17 @@ determines:
   prompt in case the switch is rejected. Nemotron 3.5 receives only the
   chat-template switch its model card documents, with `medium_effort: true`
   for reasoning effort `low` or `medium`, and never `reasoning_effort`.
-  Generic models receive only `reasoning_effort`.
+  Beam 1 always reasons, so it has no switch: it receives the level as
+  `reasoning_effort`, as vLLM's Beam recipe documents, or, if the server
+  rejects that field, as `chat_template_kwargs.reasoning_effort`, with
+  `none` sent as `minimal`, its lowest level. Every Beam request names a level,
+  because its chat template reasons at its maximum level (`max`) when a request
+  names none. Generic models receive only `reasoning_effort`.
 - **Reasoning effort.** `stage2.interpretation_reasoning_effort` (default
   `auto`) resolves to `high` (`xhigh` for Qwen 3.8 Flash Next).
   `stage2.extraction_reasoning_effort` (default `none`) turns thinking off for
-  initial extraction requests. Repairs after the fifth turn thinking on.
+  initial extraction requests (`minimal` for Beam 1). Repairs after the fifth
+  turn thinking on.
 - **Sampling.** Each family has a checked-in sampling profile
   ([Sampling profiles](configuration.md#sampling-profiles)).
 
@@ -136,7 +146,9 @@ extra fields. Each variant uses one HTTP attempt from `transport_max_attempts`
 (default 6), so a server that rejects many controls can exhaust the attempt
 budget; raise `transport_max_attempts` for such servers. Qwen 3.8 Flash Next is
 strict: only the JSON response-format hint may be dropped, and rejection of its
-reasoning or sampling controls fails the request.
+reasoning or sampling controls fails the request. Beam 1 may move its reasoning
+level from the top-level field to the template variable and may drop the JSON
+hint or rejected sampling controls, but no Beam request omits the level.
 
 Timeouts, retries, and repairs are listed in
 [Request and recovery defaults](configuration.md#request-and-recovery-defaults).
@@ -260,7 +272,13 @@ names containing `gemma`, OCI adds `--reasoning-parser gemma4
 --language-model-only`; for names containing `qwen`, `--reasoning-parser qwen3
 --language-model-only`; for Nemotron 3.5 names, `--reasoning-parser
 nemotron_v3 --trust-remote-code`, as in NVIDIA's model card (set
-`trust_remote_code` to `false` to leave the flag out). Set `reasoning_parser` to `""` and
+`trust_remote_code` to `false` to leave the flag out); for Beam 1 names,
+`--reasoning-parser beam`, as in vLLM's Beam recipe, which requires a vLLM
+release with Beam support. Beam replicas also get
+`VLLM_ENGINE_READY_TIMEOUT_S=3600` unless that variable is already set, because
+the recipe reports a first start of about 10 minutes and vLLM's default limit
+is 600 seconds. Hardware-specific recipe flags (`--moe-backend`,
+`--kv-cache-dtype`, speculative decoding) go in `extra_args`. Set `reasoning_parser` to `""` and
 `language_model_only` to null to suppress these for a model they do not fit.
 Thinking is selected per request, never as a server default. `extra_args`
 cannot contain flags that OCI sets itself (`--model`, `--host`, `--port`,

@@ -731,7 +731,7 @@ backing model ID when the server advertises one, so an alias still resolves).
 The interpretation and extraction LLMs resolve separately. The Gemma 4 and
 Qwen 3.8 Flash Next profiles follow the publishers' recommendations as
 verified on 2026-09-23, the Qwen 3 and LFM 2.5 profiles on 2026-09-12, and the
-Nemotron 3.5 profile on 2026-10-16.
+Nemotron 3.5 and Beam 1 profiles on 2026-10-16.
 
 | Model family | Mode | Temperature | Top-p | Top-k | Presence penalty | Repetition penalty |
 |---|---|---|---|---|---|---|
@@ -744,6 +744,7 @@ Nemotron 3.5 profile on 2026-10-16.
 | LFM 2.5 2.6B | either | 0.1 | 1.0 | 50 | 0 | 1.1 |
 | LFM 2.5 1.2B | either | 0.1 | 1.0 | 50 | 0 | 1.05 |
 | Nemotron 3.5 | either | 1.0 | 0.95 | 0 (off) | 0 | 1.0 |
+| Beam 1 | any reasoning level | 0.7 | 0.99 | 0 (off) | 0 | 1.0 |
 | Any other model | — | server defaults | | | | |
 
 Sources: [Gemma 4](https://huggingface.co/google/gemma-4-31B-it#best-practices),
@@ -756,7 +757,10 @@ Sources: [Gemma 4](https://huggingface.co/google/gemma-4-31B-it#best-practices),
 [LFM 2.5 1.2B](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct),
 [Nemotron 3.5](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16)
 (its text setting; the card's vision setting, temperature 0.6, does not apply
-because Stage 2 sends text only).
+because Stage 2 sends text only),
+[Beam 1](https://huggingface.co/reflection/Beam-1.0-501B-A23B) (its
+`generation_config.json`, which matches the settings of the model card's
+evaluations; the card gives no other recommendation).
 
 - Recognized profiles also send frequency penalty 0 and min-p 0, so a server's
   `generation_config.json` cannot add a different penalty. Where a publisher
@@ -774,7 +778,8 @@ because Stage 2 sends text only).
   Qwen 3.8 Flash Next and `high` for every other model.
   `extraction_reasoning_effort: none` sends initial extraction requests with
   thinking off and the non-thinking profile; `auto` for extraction resolves to
-  `none`, except `xhigh` for Flash Next.
+  `none`, except `xhigh` for Flash Next. Beam 1 cannot turn reasoning off and
+  receives `none` as `minimal`.
 - The resolved interpretation request policy (model, reasoning, output
   ceiling, and sampling) is part of the feature-definition checkpoint identity,
   so changing sampling settings on a saved run invalidates its completed

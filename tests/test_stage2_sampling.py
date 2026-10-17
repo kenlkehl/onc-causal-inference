@@ -387,3 +387,114 @@ def test_nemotron_3_5_managed_vllm_and_oci_run_reasoning_parser():
     assert _model_family_defaults(NEMOTRON) == ("nemotron_v3", None, None)
     assert _model_family_defaults("nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8") == ("", None, None)
     assert infer_vllm_reasoning_parser(NEMOTRON) == "nemotron_v3"
+
+
+BEAM = "reflection/Beam-1.0-501B-A23B-NVFP4"
+
+
+@pytest.mark.parametrize(
+    "model,family",
+    [
+        (BEAM, "beam1"),
+        ("reflection/Beam-1.0-501B-A23B", "beam1"),
+        ("reflection/Beam-1.0-501B-A23B-FP8", "beam1"),
+        ("/models/beam1", "beam1"),
+        # Other versions and names that merely contain "beam".
+        ("reflection/Beam-2.0-1T", "other"),
+        ("beam-10-test", "other"),
+        ("acme/SunBeam-1.0-7B", "other"),
+        ("beam", "other"),
+    ],
+)
+def test_reflection_beam_1_family_detection(model, family):
+    assert stage2._stage2_model_family(model) == family
+
+
+@pytest.mark.parametrize("effort", ["high", "none"])
+def test_reflection_beam_1_profile_follows_the_generation_config(effort):
+    policy = stage2._stage2_request_policy(
+        config(BEAM, interpretation_reasoning_effort=effort)
+    )
+    assert {k: policy[k] for k in SAMPLING_FIELDS} == {
+        "temperature": 0.7,
+        "top_p": 0.99,
+        "top_k": 0,
+        "min_p": 0.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
+        "repetition_penalty": 1.0,
+    }
+    assert policy["sampling_provenance"]["profile"] == "beam1"
+
+
+@pytest.mark.parametrize(
+    "effort,wire",
+    [("none", "minimal"), ("minimal", "minimal"), ("medium", "medium"),
+     ("high", "high"), ("xhigh", "xhigh"), ("max", "max")],
+)
+def test_reflection_beam_1_reasoning_effort_on_wire(monkeypatch, effort, wire):
+    calls = []
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"ok":true}'),
+                finish_reason="stop",
+            )
+        ]
+    )
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return response
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("openai.OpenAI", Client)
+    messages = [{"role": "system", "content": "S"}, {"role": "user", "content": "Test"}]
+    stage2._openai_completion(
+        messages, config(BEAM, interpretation_reasoning_effort=effort)
+    )
+    assert calls[0]["reasoning_effort"] == wire
+    assert calls[0]["temperature"] == 0.7 and calls[0]["top_p"] == 0.99
+    assert calls[0]["extra_body"] == {"top_k": 0, "min_p": 0.0, "repetition_penalty": 1.0}
+    # No prompt directive: the recipe documents only the reasoning_effort field.
+    assert calls[0]["messages"] == messages
+
+
+def test_reflection_beam_1_fallbacks_never_drop_the_reasoning_level():
+    policy = stage2._stage2_request_policy(config(BEAM), "extraction")
+    variants = stage2._openai_request_variants(
+        base_kwargs={"model": BEAM, "response_format": {"type": "json_schema"}},
+        request_policy=policy,
+        model_family="beam1",
+    )
+    assert len(variants) == 6
+    for variant in variants:
+        template = (variant.get("extra_body") or {}).get("chat_template_kwargs") or {}
+        assert (variant.get("reasoning_effort"), template.get("reasoning_effort")).count(
+            "minimal"
+        ) == 1
+    assert variants[0]["reasoning_effort"] == "minimal"
+    assert "response_format" not in variants[-1]
+
+
+def test_reflection_beam_1_managed_vllm_and_oci_run_reasoning_parser():
+    from oci.extraction.explicit_features import infer_vllm_reasoning_parser
+    from oci.inference.vllm_server_pool import (
+        _model_family_defaults,
+        _model_family_environment,
+        _model_family_trusts_remote_code,
+    )
+
+    assert _model_family_defaults(BEAM) == ("beam", None, None)
+    assert _model_family_defaults("acme/SunBeam-1.0-7B") == ("", None, None)
+    assert _model_family_environment(BEAM) == {"VLLM_ENGINE_READY_TIMEOUT_S": "3600"}
+    assert _model_family_environment("google/gemma-4-31B-it") == {}
+    # Beam is a native vLLM architecture; its repository has no remote code.
+    assert _model_family_trusts_remote_code(BEAM) is False
+    assert infer_vllm_reasoning_parser(BEAM) == "beam"

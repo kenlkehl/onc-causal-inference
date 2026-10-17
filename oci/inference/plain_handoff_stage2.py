@@ -67,7 +67,7 @@ from .stage2_role_adjudication import (
 )
 from .stage2_sampling import (
     SAMPLING_FIELDS, recommended_sampling, default_reasoning,
-    is_nemotron_3_5, is_qwen_flash_next, sampling_provenance,
+    is_nemotron_3_5, is_qwen_flash_next, is_reflection_beam_1, sampling_provenance,
 )
 from .stage2_endpoint_pool import ExtractionEndpoint, EndpointPool, endpoints_from_mapping
 from .stage2_discovery_prompt import DISCOVERY_PROMPT_VERSION, DISCOVERY_SYSTEM_PROMPT
@@ -1075,7 +1075,7 @@ class PlainHandoffStage2Config:
                 "stage2.runtime_transport_attempt_budget must be null or a positive integer"
             )
         if self.runtime_model_family not in {
-            "", "qwen3", "gemma4", "lfm2.5", "nemotron3.5", "other",
+            "", "qwen3", "gemma4", "lfm2.5", "nemotron3.5", "beam1", "other",
         }:
             raise ValueError("stage2.runtime_model_family is not recognized")
         if self.runtime_context_window_tokens is not None and (
@@ -1768,6 +1768,8 @@ def _stage2_model_family(model: str) -> str:
         return "lfm2.5"
     if is_nemotron_3_5(str(model)):
         return "nemotron3.5"
+    if is_reflection_beam_1(str(model)):
+        return "beam1"
     return "other"
 
 
@@ -2383,6 +2385,10 @@ def _wire_reasoning_effort(
         # Its documented control is the chat-template switch alone
         # (enable_thinking, with medium_effort for the medium level).
         return None
+    if model_family == "beam1":
+        # Beam always reasons; its lowest level stands in for "none". Its other
+        # levels (minimal through max) match the pipeline's names.
+        return "minimal" if effort == "none" else effort
     if model_family in {"qwen3", "gemma4", "lfm2.5"} and not enabled:
         # These families have an explicit hard switch in extra_body (and a
         # prompt fallback). Sending reasoning_effort="none" as well breaks
@@ -2423,6 +2429,28 @@ def _openai_request_variants(
         # External compatible servers can reject JSON schemas. Retain the task
         # reminder and semantic validator when negotiating JSON-only serving.
         response_formats.append({"type": "json_object"})
+    if model_family == "beam1":
+        # Beam's chat template reasons at its maximum level when a request
+        # names none, so no variant drops the level: the documented top-level
+        # field first, then the template variable for servers whose
+        # reasoning_effort field does not accept the level.
+        bodies = [
+            {
+                **dict(base_kwargs),
+                "reasoning_effort": wire_reasoning_effort,
+                **({"extra_body": sampling_extra} if sampling_extra else {}),
+            },
+            {
+                **dict(base_kwargs),
+                "extra_body": {
+                    **sampling_extra,
+                    "chat_template_kwargs": {"reasoning_effort": wire_reasoning_effort},
+                },
+            },
+        ]
+        return [
+            {**body, "response_format": fmt} for body in bodies for fmt in response_formats
+        ] + [{k: v for k, v in body.items() if k != "response_format"} for body in bodies]
     family_bodies: list[dict[str, Any]] = []
     if model_family == "nemotron3.5":
         effort = str(request_policy["reasoning_effort"]).strip().lower()

@@ -33,6 +33,12 @@ def is_nemotron_3_5(model: str) -> bool:
     return bool(re.search(r"nemotron[-_ ]?3[._]5(?![0-9])", str(model), re.I))
 
 
+def is_reflection_beam_1(model: str) -> bool:
+    """Reflection's Beam 1 releases (for example reflection/Beam-1.0-501B-A23B)."""
+
+    return bool(re.search(r"(?<![a-z0-9])beam[-_ ]?1(?:[._][0-9]+)*(?![0-9])", str(model), re.I))
+
+
 def default_reasoning(model: str, request_kind: str) -> str:
     if is_qwen_flash_next(model):
         return "xhigh"
@@ -49,6 +55,9 @@ def sampling_provenance(model: str, family: str) -> dict[str, Any]:
     if family == "nemotron3.5":
         return {"profile": "nemotron3.5", "verified_on": "2026-10-16",
                 "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16"}
+    if family == "beam1":
+        return {"profile": "beam1", "verified_on": "2026-10-16",
+                "source": "https://huggingface.co/reflection/Beam-1.0-501B-A23B"}
     return {"profile": family if family in {"qwen3", "lfm2.5"} else "server_defaults",
             "verified_on": "2026-09-12" if family in {"qwen3", "lfm2.5"} else None}
 
@@ -89,6 +98,11 @@ def recommended_sampling(model: str, family: str, thinking: bool) -> dict[str, A
         # "Text: temperature 1.0, top_p 0.95" with reasoning on or off (the
         # card's vision setting does not apply: Stage 2 sends text only).
         defaults.update(top_p=0.95)
+    elif family == "beam1":
+        # https://huggingface.co/reflection/Beam-1.0-501B-A23B: generation_config.json
+        # (temperature 0.7, top_p 0.99, repetition_penalty 1.0), the settings
+        # of the card's evaluations ("temp=0.7, top_p=0.99").
+        defaults.update(temperature=0.7, top_p=0.99)
     elif family == "lfm2.5":
         # https://huggingface.co/LiquidAI/LFM2.5-2.6B
         # https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct

@@ -75,6 +75,22 @@ def _is_nemotron_3_5(model: str) -> bool:
     return bool(re.search(r"nemotron[-_ ]?3[._]5(?![0-9])", str(model), re.I))
 
 
+def _is_reflection_beam_1(model: str) -> bool:
+    return bool(
+        re.search(r"(?<![a-z0-9])beam[-_ ]?1(?:[._][0-9]+)*(?![0-9])", str(model), re.I)
+    )
+
+
+def _model_family_environment(model: str) -> dict[str, str]:
+    """Child-process defaults for recognized families (set only when unset)."""
+
+    if _is_reflection_beam_1(model):
+        # vLLM's Beam recipe allows the first start, about 10 minutes, an
+        # hour rather than vLLM's 600-second engine-ready default.
+        return {"VLLM_ENGINE_READY_TIMEOUT_S": "3600"}
+    return {}
+
+
 def _model_family_trusts_remote_code(model: str) -> bool:
     """Families whose publisher serves them with ``--trust-remote-code``."""
 
@@ -89,6 +105,9 @@ def _model_family_defaults(model: str) -> tuple[str, bool | None, Mapping[str, A
     if _is_nemotron_3_5(normalized):
         # NVIDIA's model card serves Nemotron 3.5 with this parser.
         return "nemotron_v3", None, None
+    if _is_reflection_beam_1(normalized):
+        # vLLM's Beam recipe serves it with this parser (text only).
+        return "beam", None, None
     if "gemma" in normalized:
         # Thinking is selected per request through reasoning_effort. A server
         # default would force extraction and interpretation into one mode.
@@ -659,6 +678,8 @@ class ManagedVLLMServerPool:
                 )
                 environment["VLLM_PORT"] = str(internal_port_base)
                 environment.setdefault("PYTHONUNBUFFERED", "1")
+                for name, value in _model_family_environment(self.model).items():
+                    environment.setdefault(name, value)
                 try:
                     process = subprocess.Popen(
                         command,
