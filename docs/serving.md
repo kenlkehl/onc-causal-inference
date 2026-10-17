@@ -248,6 +248,7 @@ when a managed pool is configured.
 | `reasoning_parser` | family default | Passed as `--reasoning-parser` |
 | `language_model_only` | family default | `true` or `false` adds `--language-model-only` or `--no-language-model-only`; null adds neither |
 | `default_chat_template_kwargs` | none | Passed as `--default-chat-template-kwargs` |
+| `trust_remote_code` | `true` for Nemotron 3.5 names, otherwise `false` | `true` adds `--trust-remote-code`, which lets vLLM run code from the model repository |
 | `extra_args` | `[]` | Additional vLLM command-line tokens, as a JSON list (for example `["--gpu-memory-utilization", "0.90", "--max-model-len", "128000"]`) |
 | `enabled` | `true` | `false` disables the pool |
 
@@ -258,9 +259,8 @@ plus the named options, `--api-key` when the role's key is not `EMPTY`, and
 names containing `gemma`, OCI adds `--reasoning-parser gemma4
 --language-model-only`; for names containing `qwen`, `--reasoning-parser qwen3
 --language-model-only`; for Nemotron 3.5 names, `--reasoning-parser
-nemotron_v3`. NVIDIA's model card also serves Nemotron 3.5 with
-`--trust-remote-code`, which OCI does not add itself: pass it in `extra_args`
-(`["--trust-remote-code"]`). Set `reasoning_parser` to `""` and
+nemotron_v3 --trust-remote-code`, as in NVIDIA's model card (set
+`trust_remote_code` to `false` to leave the flag out). Set `reasoning_parser` to `""` and
 `language_model_only` to null to suppress these for a model they do not fit.
 Thinking is selected per request, never as a server default. `extra_args`
 cannot contain flags that OCI sets itself (`--model`, `--host`, `--port`,

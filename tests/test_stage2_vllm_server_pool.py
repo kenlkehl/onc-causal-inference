@@ -1300,3 +1300,40 @@ def test_managed_pool_context_stops_before_propagating_termination_signal(
 
     assert stops == ["interrupted"]
     assert signal.getsignal(signal.SIGTERM) is original_handler
+
+
+@pytest.mark.parametrize(
+    "model,vllm_block,expected_flag",
+    [
+        ("nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4", {}, True),
+        ("nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4", {"trust_remote_code": False}, False),
+        ("google/gemma-4-31B-it", {}, False),
+        ("google/gemma-4-31B-it", {"trust_remote_code": True}, True),
+    ],
+)
+def test_trust_remote_code_family_default_and_override(model, vllm_block, expected_flag):
+    config = server_pool.managed_vllm_config_from_mapping(
+        {"gpus": ["0"], **vllm_block}, model=model
+    )
+    assert config.trust_remote_code is expected_flag
+    command = server_pool._build_vllm_command(
+        config, model=model, api_key="EMPTY", port=8010, tensor_parallel_size=1
+    )
+    assert ("--trust-remote-code" in command) is expected_flag
+    if "nemotron" in model.lower():
+        assert command[command.index("--reasoning-parser") + 1] == "nemotron_v3"
+
+
+def test_trust_remote_code_is_not_repeated_from_extra_args():
+    model = "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16"
+    config = server_pool.managed_vllm_config_from_mapping(
+        {"gpus": ["0"], "extra_args": ["--trust-remote-code"]}, model=model
+    )
+    command = server_pool._build_vllm_command(
+        config, model=model, api_key="EMPTY", port=8010, tensor_parallel_size=1
+    )
+    assert command.count("--trust-remote-code") == 1
+    with pytest.raises(ValueError, match="trust_remote_code"):
+        server_pool.managed_vllm_config_from_mapping(
+            {"gpus": ["0"], "trust_remote_code": "yes"}, model=model
+        )
