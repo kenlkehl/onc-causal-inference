@@ -2412,6 +2412,7 @@ name = "onc-causal-inference"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cloudpickle" },
     { name = "econml" },
     { name = "huggingface-hub" },
     { name = "joblib" },
@@ -2456,6 +2457,7 @@ local-llm = [
 [package.metadata]
 requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
+    { name = "cloudpickle", specifier = ">=3.1.0" },
     { name = "cuda-toolkit", extras = ["nvcc", "cccl", "crt", "nvvm"], marker = "sys_platform == 'linux' and extra == 'local-llm'", specifier = "==13.0.3" },
     { name = "econml", specifier = ">=0.14.0" },
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=6.0.0" },

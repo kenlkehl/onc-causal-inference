@@ -4,6 +4,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 import os
+import subprocess
+import sys
+import textwrap
 import time
 
 import pytest
@@ -20,6 +23,35 @@ def _timed_job(value):
     start = time.monotonic()
     time.sleep(0.08)
     return value, os.getpid(), start, time.monotonic(), pool.enabled()
+
+
+def test_modeling_pool_does_not_require_joblib_vendored_cloudpickle():
+    # Initialize joblib first: older releases legitimately use their vendored
+    # copy internally, but the modeling pool must not depend on that layout.
+    script = textwrap.dedent("""
+        import builtins
+        import joblib
+
+        original_import = builtins.__import__
+
+        def without_vendored_cloudpickle(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == 'joblib.externals' and 'cloudpickle' in (fromlist or ()):
+                raise ImportError('joblib does not vendor cloudpickle')
+            return original_import(name, globals, locals, fromlist, level)
+
+        builtins.__import__ = without_vendored_cloudpickle
+        from oci.inference import stage2_modeling_pool as pool
+
+        def make_job(value):
+            return lambda: value + 1
+
+        payload = pool.cloudpickle.dumps(make_job(41))
+        assert pool._execute(payload) == 42
+    """)
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_global_pool_shares_budget_freezes_closures_and_disables_nested_pools():
