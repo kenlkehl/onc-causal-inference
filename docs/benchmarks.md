@@ -117,8 +117,10 @@ and prints two commands: the generator run (`python -m synthetic_data.cli --conf
 and the `materialize --generated` call that uses its output. The settings
 generate 5,000 patients: S5 sets `documentation_rate` 0.7 with the `mnar`
 mechanism (`documentation_mnar_slope` 1.0), so whether the note writer sees a
-characteristic depends on its value; S6 sets `post_treatment_notes` with rate
-1.0. Edit `benchmarks/scenarios.json` to change them. With `--generated DIR`, S5 cells are re-equated from
+characteristic depends on its value; S6 generates six features (three
+confounders and three effect modifiers) and sets `post_treatment_notes` with
+rate 1.0. Edit `benchmarks/scenarios.json` to change them. The registry validates
+generation settings before any corpus is generated. With `--generated DIR`, S5 cells are re-equated from
 the corpus with the S0 DGP, and S6 cells are seeded subsamples without
 replacement of its patients and their rows of `notes.parquet`, because
 re-equation refuses corpora with post-treatment notes; S6 keeps the generated

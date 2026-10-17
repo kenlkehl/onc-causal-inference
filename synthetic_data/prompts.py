@@ -28,30 +28,20 @@ Each variable must be tagged with one or both causal roles:
 Requirements:
 1. Include {feature_count_instruction}
 2. Mix of categorical (3-5 categories each) and continuous variables
-3. Common variables might include: age, sex (if applicable to the cancer type), performance status, comorbidities, prior treatments, biomarkers, disease stage, etc.
+3. Choose variables whose values are known before treatment begins
 4. Be specific to the clinical context of the question
-5. Some variables may have both roles; assign roles based on clinical plausibility
+5. Assign roles based on clinical plausibility, using both roles only when the requested counts permit overlap
 6. A variable tagged with both roles counts toward both requested role totals
+7. Use unique variable names and verify the total, confounder, and effect_modifier counts before responding
 
-Respond with a JSON object in this exact format:
-{{
-  "features": [
-    {{
-      "name": "age",
-      "type": "continuous",
-      "description": "Patient age in years",
-      "roles": ["confounder"]
-    }},
-    {{
-      "name": "ecog_performance_status",
-      "type": "categorical",
-      "categories": ["0", "1", "2", "3"],
-      "description": "ECOG performance status score",
-      "roles": ["confounder", "effect_modifier"]
-    }},
-    ...
-  ]
-}}"""
+Respond with a JSON object containing a "features" array. Each feature must contain:
+- "name": a unique snake_case variable name
+- "type": either "continuous" or "categorical"
+- "description": a brief description of the variable
+- "roles": a non-empty JSON array containing "confounder", "effect_modifier", or both, consistent with the requested role allocation
+- "categories": a non-empty array of distinct category labels, required for categorical variables; the first category is the reference
+
+Return the complete requested feature list with no commentary."""
 
 
 # =============================================================================

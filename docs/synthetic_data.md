@@ -111,6 +111,17 @@ overlapping role counts, the generator path already expresses dual roles:
 `--num-confounders 4 --num-effect-modifiers 3 --num-features 6` gives exactly one
 variable with both roles.
 
+When both role counts are given and `--num-features` is omitted, the total is
+their sum, so the two groups must be disjoint. For example, 5 confounders and
+5 effect modifiers means 10 distinct variables with no dual-role variables.
+The generator derives this allocation from the requested counts and spells
+it out in the prompt, without fixed variable examples. If the returned
+feature definitions or role counts fail validation, it makes up to three
+feature-generation attempts (the initial request plus two repairs), sending
+the rejected response and validation error back to the model. It stops with
+the last validation error if all attempts fail. These retries are separate
+from the LLM client's JSON parsing retries.
+
 ## Running the generator
 
 A binary-outcome cohort with one confounder and one effect modifier, including

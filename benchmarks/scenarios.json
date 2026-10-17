@@ -241,7 +241,7 @@
       "generation": {
         "clinical_question": "Compare vinorelbine to gemcitabine for advanced/metastatic NSCLC.",
         "dataset_size": 5000,
-        "num_features": 10,
+        "num_features": 6,
         "num_confounders": 3,
         "num_effect_modifiers": 3,
         "outcome_type": "binary",

@@ -201,6 +201,46 @@ def test_generation_fails_closed_when_the_corpus_is_incomplete(tmp_path):
     assert commands[0][commands[0].index("--num-workers") + 1] == "32"
 
 
+def test_generation_resumes_s6_with_fixed_counts_and_skips_completed_s5(tmp_path):
+    from synthetic_data.config import SyntheticDataConfig
+
+    plan = driver.build_plan(machine="external", bench=tmp_path, scenarios="S5,S6",
+                             seeds="101")
+    s5, s6 = plan.jobs
+    s5.output_dir.mkdir(parents=True)
+    (s5.output_dir / "dataset.parquet").write_bytes(b"completed S5 corpus")
+    (s5.output_dir / "metadata.json").write_text("{}")
+    # A failed invocation already wrote the old, invalid driver configuration.
+    stale_path = tmp_path / "driver" / "generation" / "S6.generator_config.json"
+    stale_path.parent.mkdir(parents=True)
+    stale_path.write_text(json.dumps({**s6.settings, "num_features": 10}))
+    commands = []
+
+    def runner(command, log, env):
+        commands.append(command)
+        config_path = Path(command[command.index("--config") + 1])
+        assert config_path == stale_path
+        config = SyntheticDataConfig.from_json(str(config_path))
+        config.validate()
+        assert (config.num_features, config.num_confounders, config.num_effect_modifiers) == (6, 3, 3)
+        assert config.post_treatment_enabled()
+        assert command[command.index("--output-dir") + 1] == str(s6.output_dir)
+        s6.output_dir.mkdir(parents=True)
+        (s6.output_dir / "dataset.parquet").write_bytes(b"completed S6 corpus")
+        (s6.output_dir / "metadata.json").write_text("{}")
+        return 0
+
+    @contextlib.contextmanager
+    def endpoints(_plan, _env):
+        yield ("http://x/v1",), 1
+
+    driver.run_generation(plan, {}, runner=runner, endpoints_context=endpoints)
+    assert len(commands) == 1
+    assert (s5.output_dir / "dataset.parquet").read_bytes() == b"completed S5 corpus"
+    driver.run_generation(plan, {}, runner=runner, endpoints_context=endpoints)
+    assert len(commands) == 1
+
+
 def test_runs_skip_finished_cells_and_continue_after_a_failure(tmp_path):
     plan = driver.build_plan(machine="h100x8", bench=tmp_path, scenarios="S0,S1,S2",
                              sizes="1000", seeds="101")

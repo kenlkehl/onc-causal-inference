@@ -633,6 +633,15 @@ def _build_feature_count_instruction(
         parts.append(f"exactly {num_effect_modifiers} features with the effect_modifier role")
     if num_confounders is not None or num_effect_modifiers is not None:
         parts.append("features tagged with both roles count toward both role totals")
+    if num_confounders is not None and num_effect_modifiers is not None:
+        overlap = num_confounders + num_effect_modifiers - resolved_num_features
+        parts.extend([
+            f"exactly {resolved_num_features - num_effect_modifiers} confounder-only features",
+            f"exactly {resolved_num_features - num_confounders} effect_modifier-only features",
+            f"exactly {overlap} features tagged with both roles",
+        ])
+        if overlap == 0:
+            parts.append("the two groups must be disjoint: do not tag any feature with both roles")
     return "; ".join(parts)
 
 
@@ -701,7 +710,7 @@ def _enforce_feature_count_request(
         "LLM-generated feature counts do not satisfy request. "
         f"Requested total={resolved_num_features}, confounders={num_confounders}, "
         f"effect_modifiers={num_effect_modifiers}; got {_count_features_by_role(features)}. "
-        "Retry generation, adjust the counts, or specify --num-features to allow overlap."
+        "Return a complete feature list satisfying the requested total and role counts."
     )
 
 
@@ -711,29 +720,58 @@ def _generate_confounders(
     num_features: Optional[int] = None,
     num_confounders: Optional[int] = None,
     num_effect_modifiers: Optional[int] = None,
+    *,
+    max_attempts: int = 3,
 ) -> List[Dict[str, Any]]:
-    """Generate role-tagged explicit features using LLM."""
-    prompt = CONFOUNDER_GENERATION_PROMPT.format(
+    """Generate features, feeding validation failures back for bounded repair."""
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+    base_prompt = CONFOUNDER_GENERATION_PROMPT.format(
         clinical_question=clinical_question,
         feature_count_instruction=_build_feature_count_instruction(
             num_features, num_confounders, num_effect_modifiers
         ),
     )
-    
-    response = client.generate_json(
-        prompt=prompt,
-        system_prompt=CLINICAL_SYSTEM_PROMPT,
-        temperature=0.7,
-    )
-    
-    confounders = response.get("features", response.get("confounders", []))
-
-    # Validate structure; the LLM tags only confounder and effect-modifier roles.
-    confounders = _validate_feature_roles(confounders)
-
-    return _enforce_feature_count_request(
-        confounders, num_features, num_confounders, num_effect_modifiers
-    )
+    prompt = base_prompt
+    for attempt in range(1, max_attempts + 1):
+        # The client owns JSON parsing retries. Only successfully parsed but
+        # invalid feature definitions enter the semantic repair loop below.
+        response = client.generate_json(
+            prompt=prompt,
+            system_prompt=CLINICAL_SYSTEM_PROMPT,
+            temperature=0.7,
+        )
+        try:
+            if not isinstance(response, dict):
+                raise ValueError("Feature response must be a JSON object containing a 'features' array")
+            confounders = response.get("features", response.get("confounders", []))
+            confounders = _validate_feature_roles(confounders)
+            if not confounders:
+                raise ValueError("Feature response must contain a non-empty 'features' array")
+            return _enforce_feature_count_request(
+                confounders, num_features, num_confounders, num_effect_modifiers
+            )
+        except ValueError as error:
+            if attempt == max_attempts:
+                raise ValueError(
+                    f"Feature generation failed validation after {max_attempts} attempts. "
+                    f"Last validation error: {error}"
+                ) from error
+            logger.warning(
+                "Feature validation failed (attempt %d/%d): %s Retrying with error feedback.",
+                attempt, max_attempts, error,
+            )
+            # Keep only the latest rejected response so context does not grow
+            # with every attempt. Never silently change the requested roles.
+            prompt = (
+                f"{base_prompt}\n\n"
+                "Your previous response failed validation.\n"
+                f"Rejected response:\n{json.dumps(response, ensure_ascii=False)}\n"
+                f"Validation error: {error}\n"
+                "Correct the feature definitions and recount all role totals before responding. "
+                "Keep the original requested counts. Return the complete corrected JSON object "
+                "with a 'features' array, not a patch or an explanation."
+            )
 
 
 def _validate_feature_roles(
@@ -749,12 +787,30 @@ def _validate_feature_roles(
     ``prognostic`` roles and role-free variables (``allowed_roles=ALL_ROLES,
     allow_empty=True``).
     """
+    if not isinstance(features, list):
+        raise ValueError("Features must be a JSON array of feature objects")
     validated = []
+    names = set()
     for feature in features:
-        if "name" not in feature or "type" not in feature:
+        if not isinstance(feature, dict) or "name" not in feature or "type" not in feature:
             raise ValueError(f"Invalid feature structure: {feature}")
-        if feature["type"] == "categorical" and "categories" not in feature:
-            raise ValueError(f"Categorical feature missing categories: {feature}")
+        name = feature["name"]
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"Feature name must be a non-empty string: {feature}")
+        if name in names:
+            raise ValueError(f"Duplicate feature name: {name!r}; each feature must have a unique name")
+        names.add(name)
+        if feature["type"] not in ("continuous", "categorical"):
+            raise ValueError(f"Feature '{name}' type must be 'continuous' or 'categorical'")
+        if feature["type"] == "categorical" and (
+            not isinstance(feature.get("categories"), list) or not feature["categories"]
+        ):
+            raise ValueError(
+                f"Categorical feature missing categories or invalid categories; "
+                f"expected a non-empty JSON array: {feature}"
+            )
+        if feature.get("roles") is not None and not isinstance(feature["roles"], list):
+            raise ValueError(f"Feature '{name}' roles must be a JSON array")
         roles = validate_role_combination(
             feature.get("name"), feature.get("roles") or [], allow_empty=allow_empty
         )

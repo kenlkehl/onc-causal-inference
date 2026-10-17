@@ -251,6 +251,11 @@ def test_bundled_registry_and_seeds_follow_the_design():
     assert registry.scenarios["S5"].generation["documentation_mechanism"] == "mnar"
     s6 = registry.scenarios["S6"]
     assert s6.dgp is None and s6.generation["post_treatment_notes"]
+    assert s6.generation["num_confounders"] == base["roles"]["confounder"]
+    assert s6.generation["num_effect_modifiers"] == base["roles"]["effect_modifier"]
+    assert s6.generation["num_features"] == (
+        s6.generation["num_confounders"] + s6.generation["num_effect_modifiers"]
+    )
     variants = {variant.name: variant for variant in s6.variants}
     assert variants["text_column"].columns == {"text": "clinical_text_with_post_treatment"}
     assert variants["dated_notes"].notes["index_date_column"] == "index_date"
@@ -269,6 +274,22 @@ def test_registry_rejects_inconsistent_scenarios(tmp_path: Path):
         load_registry(path)
     with pytest.raises(ValueError, match="unknown scenario"):
         load_registry(_registry(tmp_path)).select("S9")
+
+
+@pytest.mark.parametrize("settings, message", [
+    ({"num_features": 10, "num_confounders": 3, "num_effect_modifiers": 3},
+     "num_features cannot exceed"),
+    ({"documentation_rate": 1.1}, "documentation_rate must be"),
+    ({"unknown_generation_option": True}, "unknown_generation_option"),
+])
+def test_registry_validates_generation_settings_before_any_job(tmp_path, settings, message):
+    path = _registry(tmp_path)
+    payload = json.loads(path.read_text())
+    payload["scenarios"][-1]["generation"].update(settings)
+    _write_json(path, payload)
+
+    with pytest.raises(ValueError, match=f"scenario S6: invalid generation settings: .*{message}"):
+        load_registry(path)
 
 
 def test_seed_guard_refuses_confirmatory_seeds_without_the_flag(tmp_path: Path):

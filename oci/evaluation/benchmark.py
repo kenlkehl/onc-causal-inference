@@ -322,6 +322,17 @@ def load_registry(path: Path | None = None) -> Registry:
                 raise ValueError(
                     f"scenario {scenario_id}: generation.dataset_size is below the minimum source size"
                 )
+            # Validate every generated corpus before an earlier scenario spends
+            # time writing notes. Use the generator's own rules, and validate a
+            # copy because validation can normalize nested factor settings.
+            from synthetic_data.config import SyntheticDataConfig
+
+            try:
+                SyntheticDataConfig.from_dict(copy.deepcopy(dict(generation))).validate()
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"scenario {scenario_id}: invalid generation settings: {error}"
+                ) from error
         variants = tuple(
             RunVariant(
                 name=str(item["name"]),
