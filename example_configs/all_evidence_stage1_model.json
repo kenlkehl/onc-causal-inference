@@ -44,7 +44,7 @@
         "e_clip": 0.01,
         "effect_folds": 5,
         "embedding_contrast": {
-          "batch_size": 1,
+          "batch_size": 16,
           "cache_dir": "CONFIGURED_BY_RUNNER",
           "chunk_overlap_words": 64,
           "chunk_size_words": 256,
