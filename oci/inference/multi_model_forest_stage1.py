@@ -2286,6 +2286,7 @@ class MultiModelForestStage1Runner:
                 config=self.config,
                 device=self.device,
                 checkpoint_store=self.checkpoint_store,
+                num_workers=self.num_workers,
             )
         return self._default_htr_provider
 

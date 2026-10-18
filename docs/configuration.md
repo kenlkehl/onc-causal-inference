@@ -530,6 +530,25 @@ fills in the dataset, columns, folds, seed, devices, HTR and embedding models,
 and the embedding cache location itself. The resolved templates are written to
 `resolved_stage1_model_config.json` and `resolved_neural_query_config.json`.
 
+HTR optimization and loading settings are relative to `science.stage1.training`:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `batch_size` | 8 | Patients per nuisance-training and prediction batch |
+| `effect_batch_size` | 8 | Patients per effect-training batch; `null` inherits `batch_size` |
+| `dataloader_workers` | 2 | CPU preprocessing processes per HTR trainer; `0` loads synchronously |
+| `dataloader_prefetch_factor` | 2 | Batches prepared ahead per preprocessing worker |
+
+Stage 1 caps preprocessing workers at the context's CPU allocation minus one
+CPU for training. For example, an allocation of three CPUs permits two loader
+workers; one CPU keeps loading synchronous. Workers start fresh interpreters
+(`spawn`, or a compatible `loky` context inside the workflow process pool),
+persist across epochs, and prepare CPU tensors pinned for CUDA transfer. The training
+process owns the model and GPU. Loss averages are copied to CPU once per epoch;
+batch progress messages report progress and learning rate without reading losses.
+Changing batch size changes the number of optimizer steps per epoch. Explicit
+settings in existing configurations still override these defaults.
+
 ## Command-line flags
 
 `python scripts/run_all_evidence.py [FLAGS]`. Flags override the configuration

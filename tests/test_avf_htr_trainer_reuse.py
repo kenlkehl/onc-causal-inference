@@ -83,20 +83,21 @@ def test_avf_runner_keeps_thread_local_device_for_inherited_methods(tmp_path):
     assert runner.device == torch.device("cpu")
 
 
-def test_loader_worker_policy_is_stage1_in_process_and_avf_configurable(
+def test_loader_worker_policy_prefetches_within_cpu_budget_and_avf_is_configurable(
     tmp_path,
     monkeypatch,
 ):
     monkeypatch.delenv("OCI_AVF_DATALOADER_WORKERS", raising=False)
     positions = np.arange(3)
-    stage1 = HTRTrainer(config=AppliedInferenceConfig(), device="cpu")
+    stage1 = HTRTrainer(config=AppliedInferenceConfig(), device="cpu", num_workers=3)
     stage1_loader = stage1._make_text_loader(
         _NoExtractorModel(), _frame(), positions, total_folds=2
     )
-    assert stage1_loader.num_workers == 0
-    assert stage1_loader.persistent_workers is False
+    assert stage1_loader.num_workers == 2
+    assert stage1_loader.persistent_workers is True
+    assert stage1_loader.multiprocessing_context.get_start_method() == "spawn"
 
-    runner = _runner(tmp_path, num_workers=2)
+    runner = _runner(tmp_path, num_workers=3)
     assert threading.current_thread() is threading.main_thread()
     avf_loader = runner._make_text_loader(_NoExtractorModel(), runner.dataset, positions)
     assert avf_loader.num_workers == 2

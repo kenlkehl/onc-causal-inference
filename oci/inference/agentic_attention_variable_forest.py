@@ -143,7 +143,7 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
     ):
         self._thread_state = threading.local()
         # Sets ``config``, ``device`` (via the property setter) and ``avf_config``.
-        super().__init__(config=config, device=device)
+        super().__init__(config=config, device=device, num_workers=num_workers)
         self.dataset = drop_oracle_columns(dataset).reset_index(drop=True).copy()
         self.dataset["_oci_row_id"] = np.arange(len(self.dataset), dtype=int)
         self.output_path = Path(output_path)
@@ -2164,7 +2164,7 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
         return device_group_queue
 
     def _data_loader_workers(self, total_folds: Optional[int] = None) -> int:
-        """Override HTRTrainer's in-process default with multiprocessing workers."""
+        """Apply standalone fold/thread guards to the shared loader worker budget."""
         env_workers = os.environ.get("OCI_AVF_DATALOADER_WORKERS")
         if env_workers is not None:
             return max(0, int(env_workers))
@@ -2178,7 +2178,7 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
             return 0
         if total_folds is not None and self._fold_n_jobs(total_folds) > 1:
             return 0
-        return max(0, int(self.num_workers or 0))
+        return super()._data_loader_workers(total_folds=total_folds)
 
     def _crossfit_checkpoint_fingerprint(
         self,

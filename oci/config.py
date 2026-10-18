@@ -2675,10 +2675,20 @@ class TrainingConfig:
     lr_schedule: str = "linear"
     epochs: int = 50
     batch_size: int = 8
-    effect_batch_size: Optional[int] = 32
+    effect_batch_size: Optional[int] = 8
+    # Per-trainer preprocessing processes, capped by the context's CPU budget.
+    # Zero retains synchronous loading; prefetch_factor is per worker.
+    dataloader_workers: int = 2
+    dataloader_prefetch_factor: int = 2
     alpha_propensity: float = 1.0
     weight_decay: float = 0.01  # L2 regularization (AdamW decoupled weight decay)
     gradient_clip_norm: float = 1.0  # Max gradient norm (0 to disable)
+
+    def __post_init__(self):
+        for name, minimum in (("dataloader_workers", 0), ("dataloader_prefetch_factor", 1)):
+            value = getattr(self, name)
+            if type(value) is not int or value < minimum:
+                raise ValueError(f"training.{name} must be an integer >= {minimum}")
 
 
 @dataclass
@@ -2948,7 +2958,7 @@ def create_default_config(output_path: str) -> None:
                 model_type="agentic_explicit_feature_forest",
                 feature_extractor_type="hierarchical_transformer",
             ),
-            training=TrainingConfig(epochs=50, batch_size=8),
+            training=TrainingConfig(),
         ),
     )
 

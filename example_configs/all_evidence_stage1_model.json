@@ -291,7 +291,9 @@
     "training": {
       "alpha_propensity": 1,
       "batch_size": 8,
-      "effect_batch_size": 32,
+      "effect_batch_size": 8,
+      "dataloader_workers": 2,
+      "dataloader_prefetch_factor": 2,
       "epochs": 50,
       "gradient_clip_norm": 1,
       "learning_rate": 0.0001,
