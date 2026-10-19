@@ -26,6 +26,7 @@
     "embeddings": "Qwen/Qwen3-Embedding-8B"
   },
   "stage2": {
+    "max_review_rounds": 4,
     "consolidation_batch_size": 20,
     "consolidation_max_rounds": 55,
     "operationalization_max_prompt_chars": 640000,

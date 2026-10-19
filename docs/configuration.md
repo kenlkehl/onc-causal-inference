@@ -295,7 +295,7 @@ Configure exactly one of `endpoint`, `endpoints`, or `vllm`.
 | `consolidation_max_prompt_chars` | 640000 | Character limit for duplicate-merging prompts |
 | `consolidation_policy` | see below | How merging batches are formed and when merging stops |
 | `operationalization_max_prompt_chars` | 640000 | Character limit for prompts that write [extraction definitions](glossary.md#extraction-definition-ontology) |
-| `max_review_rounds` | 2 | Rounds of aggregate extraction review per outer fold |
+| `max_review_rounds` | 4 | Maximum aggregate extraction-review rounds per outer fold; stops early when definitions are unchanged and no validation fallbacks remain |
 | `ontology_refinement_min_failure_patients` | 3 | A recurring extraction failure triggers definition refinement when it affects at least this many patients (minimum 2) |
 | `max_ontology_refinement_rounds` | 2 | Refinement rounds per review round; 0 disables refinement |
 | `required_architectures`, `included_architectures` | the eight default architectures; all | Architectures whose evidence must be present, and architectures whose evidence is compiled. The workflow sets both from the frozen Stage 1 selection; they matter only for `scripts/run_stage2_from_artifacts.py`. Accept a list, a comma-separated string, or `all` |

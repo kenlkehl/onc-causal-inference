@@ -845,9 +845,9 @@ class PlainHandoffStage2Config:
     extraction_llm: Stage2ExtractionLLMConfig | None = None
     # Global CPU fit budget, independent of LLM request concurrency and GPUs.
     modeling_workers: int = 1
-    # Limits aggregate ontology-supervisor reviews. These reviews cannot add,
-    # drop, rename, or assign roles to candidate features.
-    max_review_rounds: int = 2
+    # Limits aggregate ontology-supervisor reviews, including retries of
+    # unresolved validation fallbacks. Reviews may clarify or split definitions.
+    max_review_rounds: int = 4
     ontology_refinement_min_failure_patients: int = DEFAULT_ONTOLOGY_REFINEMENT_MIN_FAILURE_PATIENTS
     max_ontology_refinement_rounds: int = DEFAULT_MAX_ONTOLOGY_REFINEMENT_ROUNDS
     estimand_ontology: EstimandOntologyConfig = field(default_factory=EstimandOntologyConfig)
@@ -1574,7 +1574,7 @@ def plain_stage2_config_from_mapping(
         workers=configured_workers,
         modeling_workers=raw.get("modeling_workers", 1),
         extraction_llm=extraction_llm,
-        max_review_rounds=int(raw.get("max_review_rounds", 2)),
+        max_review_rounds=int(raw.get("max_review_rounds", 4)),
         ontology_refinement_min_failure_patients=int(
             raw.get(
                 "ontology_refinement_min_failure_patients",

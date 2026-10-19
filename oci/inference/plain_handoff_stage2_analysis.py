@@ -5873,6 +5873,14 @@ def _validate_ontology_refinement(
         "reason": str(value.get("reason") or "").strip(),
     }
     if action == "keep":
+        # Older cached checkpoints lost this flag during normalization. Their
+        # generated reason still identifies the conservative fallback, so they
+        # must not become successful reviews when resumed or reused.
+        if value.get("validation_fallback") is True or decision["reason"].startswith(
+            ("Scalar contract check rejected proposed changes:",
+             "Invalid supervisor response; conservative keep:")
+        ):
+            decision["validation_fallback"] = True
         return decision
 
     if action == "split":
@@ -6297,6 +6305,10 @@ def _request_aggregate_ontology_supervisor(
         ),
         "review_request_sources": dict(sorted(request_sources.items())),
         "changed_feature_ids": changed_ids,
+        "validation_fallback_feature_ids": [
+            str(feature["feature_id"]) for feature in definitions
+            if decisions[str(feature["feature_id"])].get("validation_fallback") is True
+        ],
         "decisions": [decisions[str(feature["feature_id"])] for feature in definitions],
         "prohibited_information_supplied": False,
     }
@@ -9059,6 +9071,9 @@ def run_fold_analysis(
                 "supervisor_changed_feature_ids": list(
                     review_report["changed_feature_ids"]
                 ),
+                "supervisor_validation_fallback_feature_ids": list(
+                    review_report.get("validation_fallback_feature_ids") or []
+                ),
             }
         )
         _write_json(
@@ -9068,10 +9083,13 @@ def run_fold_analysis(
                 "schema_version": REVIEW_CHECKPOINT_SCHEMA_VERSION,
                 "completed_at": _now(),
                 "ontology_changed": changed,
+                "validation_fallback_feature_ids": list(
+                    review_report.get("validation_fallback_feature_ids") or []
+                ),
                 "features": len(current),
             },
         )
-        if not changed:
+        if not changed and not review_report.get("validation_fallback_feature_ids"):
             review_converged = True
             break
 
