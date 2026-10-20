@@ -1,4 +1,4 @@
-"""Read-only validation of an existing Stage 1 handoff and Stage 2 reuse plan."""
+"""Read-only validation of handoff-based or explicit-only Stage 2 inputs."""
 
 from __future__ import annotations
 
@@ -99,9 +99,11 @@ def preflight_stage2(
     *,
     reselect: bool = False,
 ) -> dict[str, Any]:
-    """Validate without directory creation, fold resampling, fitting, or network calls."""
+    """Validate without writes, model fitting, or network calls; reuse saved folds."""
     if config.components != ("stage2",) or config.stage2 is None:
         raise ValueError("preflight requires Stage 2-only mode and enabled Stage 2")
+    if config.explicit_only:
+        return _preflight_explicit(config, reselect=reselect)
     root = config.output_dir
     if not root.is_dir() or not os.access(root, os.W_OK):
         raise RuntimeError(f"existing output directory is missing or not writable: {root}")
@@ -253,6 +255,49 @@ def preflight_stage2(
         or Path(cache["semantic_metadata"]["dataset_path"]).resolve() != config.analysis_dataset
     ):
         raise RuntimeError("Stage 1 embedding cache dataset identity mismatch")
+    return _finish_preflight(
+        config, data=data, splits=splits, identity=identity, columns=columns,
+        reselect=reselect,
+        stage1_action="reuse frozen handoff, splits and components; no Stage 1 execution",
+    )
+
+
+def _preflight_explicit(config: workflow.ResearchStage1Config, *, reselect: bool):
+    workflow.ResearchAllEvidenceWorkflow(config)
+    from .pretreatment_notes import (
+        build_pretreatment_text, manifest_path, read_notes_table, read_table,
+    )
+
+    if config.notes is not None and not manifest_path(config.output_dir).exists():
+        # Preview the same dated-note assembly entirely in memory on a first run.
+        data = read_table(config.dataset).reset_index(drop=True)
+        data[config.text_column] = build_pretreatment_text(
+            data, read_notes_table(config.notes), config=config.notes,
+            unit_id_column=config.unit_id_column, text_column=config.text_column,
+        ).texts
+    else:
+        data = workflow._load_analysis_dataset(config)
+    manifest = workflow._prepare_explicit_workflow_inputs(config, data, persist=False)
+    return _finish_preflight(
+        config, data=data,
+        splits={split["outer_fold"]: split for split in manifest["splits"]},
+        identity={"content_fingerprint": manifest["inputs"]["dataset_fingerprint"]},
+        columns={
+            "unit_id": config.unit_id_column, "text": config.text_column,
+            "treatment": config.treatment_column, "outcome": config.outcome_column,
+        },
+        reselect=reselect,
+        stage1_action="skipped; extract only investigator-specified variables",
+    )
+
+
+def _finish_preflight(
+    config: workflow.ResearchStage1Config, *, data, splits, identity, columns,
+    reselect: bool, stage1_action: str,
+) -> dict[str, Any]:
+    from .plain_handoff_stage2 import _has_extraction_dependent_checkpoints
+
+    root = config.output_dir
     stage2 = root / "stage2"
     for fold, split in splits.items():
         outer = stage2 / f"outer_{fold:03d}"
@@ -260,7 +305,7 @@ def preflight_stage2(
         if selection_path.exists():
             selection = _object(selection_path)
             if selection.get("inner_splits") != split["inner_splits"]:
-                raise RuntimeError(f"outer fold {fold} selection splits differ from frozen Stage 1")
+                raise RuntimeError(f"outer fold {fold} selection splits differ from frozen split plan")
         snapshot_path = outer / "preselection" / "input.json"
         if snapshot_path.exists():
             from .plain_handoff_stage2_analysis import _load_frozen_preselection_snapshot
@@ -328,11 +373,14 @@ def preflight_stage2(
         "extraction_model": extraction.model,
         "primary_serving": "managed" if config.stage2.vllm else "external",
         "extraction_serving": "managed" if extraction.vllm else "external",
-        "stage1": "reuse frozen handoff, splits and components; no Stage 1 execution",
+        "stage1": stage1_action,
         "stage2_action": (
             "guarded reselection"
             if reselect
-            else ("resume" if stage2.exists() else "fresh Stage 2 discovery and extraction")
+            else ("resume" if stage2.exists() else (
+                "fresh explicit-feature extraction and estimation" if config.explicit_only
+                else "fresh Stage 2 discovery and extraction"
+            ))
         ),
         "migration": migration,
         "live_endpoints_checked": False,

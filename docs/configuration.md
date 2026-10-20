@@ -225,7 +225,7 @@ change it.
 | `workers` | 1 | Stage 1 CPU budget; also the default for `stage2.workers` (capped at 4) |
 | `contexts_per_gpu` | 1 | Maximum concurrent text-model/HTR and neural-query discovery contexts per GPU, each in a separate process. Extra lanes are capped by `workers`, and the CPU budget is divided across lanes. Safe to change on resume |
 | `components` | all five Stage 1 components | Subset of `embedding_cache`, `tfidf`, `text_models`, `neural_queries`, `handoff`. With an architecture selection, components the selection does not need are skipped |
-| `mode` | `full` when Stage 2 is configured, otherwise `stage1` | `full`, `stage1`, or `stage2` (the flags `--stage1-only` and `--stage2-only` set this) |
+| `mode` | `full` when Stage 2 is configured, otherwise `stage1` | `full`, `stage1`, `stage2`, or `explicit_only` (the flags `--stage1-only`, `--stage2-only`, and `--explicit-only` set the corresponding mode) |
 | `log_level` | `INFO` | Logging level for `logs/workflow.log` |
 
 ### `stage2`
@@ -300,6 +300,7 @@ Configure exactly one of `endpoint`, `endpoints`, or `vllm`.
 | `max_ontology_refinement_rounds` | 2 | Refinement rounds per review round; 0 disables refinement |
 | `required_architectures`, `included_architectures` | the eight default architectures; all | Architectures whose evidence must be present, and architectures whose evidence is compiled. The workflow sets both from the frozen Stage 1 selection; they matter only for `scripts/run_stage2_from_artifacts.py`. Accept a list, a comma-separated string, or `all` |
 | `explicit_features` | `[]` | Investigator-specified variables (see [Explicit features](#explicit-features)) |
+| `feature_source` | `all_evidence` | `all_evidence` adds supplied features to discovery. `explicit_only` skips Stage 1 and discovery; set automatically by `--explicit-only` or `run.mode=explicit_only` |
 
 `stage2.consolidation_policy`:
 
@@ -502,6 +503,53 @@ always included: they stay outside the Benjamini–Hochberg family of the
 orthogonal tests and do not count toward the `balanced_evidence` modifier
 budget.
 
+### Explicit-only workflow
+
+`--explicit-only` or `run.mode=explicit_only` starts a fresh analysis using
+only `stage2.explicit_features`. It needs no Stage 1 models, templates,
+architecture selection, evidence handoff, or previous run. It still extracts
+values from the configured text column (or the existing `notes` input); it
+does not ingest pre-extracted covariate columns.
+
+Start from
+[`example_configs/research_explicit_only.json`](../example_configs/research_explicit_only.json).
+Configure the cohort, treatment/outcome columns, clinical question, primary
+and extraction endpoints, and a nonempty list of complete feature definitions.
+Each variable must declare its causal roles. The usual Stage 2 machinery
+handles extraction, nuisance fitting, effect estimation, held-out predictions,
+and diagnostics. Definitions and declared roles retain the protections
+described above; `selection_consolidation.protect_explicit_features` must stay
+`true`. No additional variables are discovered.
+
+Both `science.outer_folds` and `science.inner_folds` must be at least two.
+The first run creates nested splits with the same joint treatment/outcome
+stratification and deterministic fallback used by the all-evidence workflow.
+`stage2/explicit_inputs.json` stores the complete split plan, ordered cohort
+fingerprint, question, seed, column settings, and supplied ontologies.
+Resuming checks and reuses this file, including when Stage 2 is already complete.
+Changing these inputs requires a fresh output directory. A missing or altered
+split file after Stage 2 has started is an error. All-evidence and explicit-only
+runs must use separate output directories.
+
+```bash
+# Fresh analysis, or resume the same analysis
+uv run python scripts/run_all_evidence.py --config study.json --explicit-only
+
+# Read-only validation; on a fresh run the split plan is previewed in memory
+# Specify both model IDs in the config for preflight (no endpoint lookup).
+uv run python scripts/run_all_evidence.py --config study.json --explicit-only --preflight-only
+
+# Resume from the resolved configuration; explicit-only mode is preserved
+uv run python scripts/run_all_evidence.py --config OUTPUT_DIR/run_config.json --stage2-only
+
+# Reselect with changed downstream settings, retaining definitions and measurements
+uv run python scripts/run_all_evidence.py --config OUTPUT_DIR/run_config.json --stage2-only --stage2-reselect
+```
+
+The output uses the same `stage2/outer_*`, `cross_fitted_predictions.csv`,
+`causal_estimate.json`, and diagnostic artifacts as the all-evidence workflow.
+The run also saves `run_config.json`, `progress.json`, and workflow logs.
+
 ### Stage 1 template settings
 
 Stage 1 model settings live in the template file and are overridden through
@@ -583,14 +631,15 @@ file; `--set` can change any other value.
 | `--disable-htr` | `science.htr_enabled=false` | Disable all HTR modeling, keeping the other evidence families |
 | `--embedding-model ID` | `models.embeddings` | Embedding model for the embedding and neural-query architectures |
 
-**Run mode** (`--stage1-only` and `--stage2-only` are mutually exclusive)
+**Run mode** (`--stage1-only`, `--stage2-only`, and `--explicit-only` are mutually exclusive)
 
 | Flag | Meaning |
 |---|---|
 | `--stage1-only` | Run or resume Stage 1 through the handoff, then stop |
 | `--stage2-only` | Skip Stage 1 and run or resume Stage 2 from the saved handoff, usually with `--config OUTPUT_DIR/run_config.json` |
-| `--stage2-reselect` | With `--stage2-only`: archive a completed Stage 2 selection and everything after it, then rerun selection from the frozen definitions and outer-training extractions ([Guarded reselection](#guarded-reselection)) |
-| `--preflight-only` | With `--stage2-only`: validate the saved run and the Stage 2 reuse plan without writing files, starting servers, or fitting models; prints a JSON report |
+| `--explicit-only` | Extract `stage2.explicit_features` and run downstream analysis without Stage 1; creates and persists its own nested splits |
+| `--stage2-reselect` | With Stage 2-only or explicit-only mode: archive a completed Stage 2 selection and everything after it, then rerun selection from the frozen definitions and outer-training extractions ([Guarded reselection](#guarded-reselection)) |
+| `--preflight-only` | With Stage 2-only or explicit-only mode: validate inputs and the Stage 2 reuse plan without writing files, starting servers, or fitting models; prints a JSON report |
 | `--rerun COMPONENT` | Remove a component's completion markers (not its outputs or identity-checked checkpoints) so it runs again ([details](#checkpoints-and-resuming)); repeatable. One of `embedding_cache`, `tfidf`, `text_models`, `neural_queries`, `handoff`, `stage2` |
 | `--status` | Print `progress.json` and exit |
 

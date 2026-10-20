@@ -228,6 +228,22 @@ text are generator options: correlated covariates, MCAR or MNAR documentation,
 post-treatment dated notes, and near-duplicate proxies. See
 [Synthetic data](docs/synthetic_data.md#re-equation).
 
+## Extract supplied variables without Stage 1
+
+Use `--explicit-only` (or `"run": {"mode": "explicit_only"}`) to extract
+investigator-specified variables and run the existing Stage 2 estimation and
+diagnostics without an evidence handoff or Stage 1 models:
+
+```bash
+uv run python scripts/run_all_evidence.py --config example_configs/research_explicit_only.json
+```
+
+Set the cohort and model endpoints, and supply complete ontologies in
+`stage2.explicit_features`. Their definitions and causal roles remain fixed.
+The first run saves nested folds and the input identity; subsequent runs reuse
+them. See [explicit-only configuration](docs/configuration.md#explicit-only-workflow)
+for preflight, resume, and the example schema.
+
 ## Resume, inspect, or rerun selection
 
 The output directory is the checkpoint. **Rerunning the same command resumes an

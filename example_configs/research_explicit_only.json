@@ -1,0 +1,53 @@
+{
+  "dataset": "../synthetic_data/example_synthetic_datasets/one_confounder_one_effect_modifier_nsclc_with_structured/dataset.parquet",
+  "output_dir": "../artifacts/research_explicit_only",
+  "columns": {
+    "unit_id": "patient_id",
+    "text": "clinical_text",
+    "treatment": "treatment_indicator",
+    "outcome": "outcome_indicator"
+  },
+  "science": {
+    "clinical_question": "Estimate treatment effects using investigator-specified pretreatment variables.",
+    "outcome_type": "binary",
+    "outer_folds": 5,
+    "inner_folds": 5,
+    "seed": 42
+  },
+  "run": {
+    "mode": "explicit_only",
+    "workers": 4
+  },
+  "stage2": {
+    "endpoint": "http://127.0.0.1:8010/v1",
+    "model": "",
+    "workers": 4,
+    "extraction_llm": {
+      "endpoint": "http://127.0.0.1:8020/v1",
+      "model": "",
+      "workers": 4
+    },
+    "explicit_features": [
+      {
+        "name": "age_at_treatment",
+        "description": "Age at the pretreatment decision point.",
+        "value_type": "continuous",
+        "categories_or_unit": ["years"],
+        "measurement_definition": "Extract the age in completed years explicitly documented at the pretreatment decision point.",
+        "missing_value_rule": "Return null if age at the decision point is not documented.",
+        "conflict_resolution": {"strategy": "mode"},
+        "roles": ["confounder"]
+      },
+      {
+        "name": "ecog_performance_status",
+        "description": "Pretreatment ECOG performance status.",
+        "value_type": "ordinal",
+        "categories_or_unit": ["0", "1", "2", "3", "4"],
+        "measurement_definition": "Extract the explicitly documented pretreatment ECOG score. Do not infer a score from symptoms or functional descriptions.",
+        "missing_value_rule": "Return null if no pretreatment ECOG score is documented.",
+        "conflict_resolution": {"strategy": "mode"},
+        "roles": ["confounder", "effect_modifier"]
+      }
+    ]
+  }
+}

@@ -21,6 +21,8 @@ The module also provides:
   ``input/analysis_cohort.parquet`` once per output directory
   (``pretreatment_notes.py``); every step then reads that file instead of
   ``dataset``;
+* an explicit-only mode (``--explicit-only``), which freezes nested folds and
+  extracts investigator-specified ontologies without Stage 1 discovery;
 * guarded Stage 2 reselection (``--stage2-reselect``).  It archives a completed
   Stage 2 selection and everything downstream of it under
   ``stage2/reselection_archives`` and reruns selection from the frozen feature
@@ -379,6 +381,10 @@ class ResearchStage1Config:
     contexts_per_gpu: int = 1
 
     @property
+    def explicit_only(self) -> bool:
+        return self.stage2 is not None and self.stage2.feature_source == "explicit_only"
+
+    @property
     def analysis_dataset(self) -> Path:
         """The cohort file that every workflow step analyzes.
 
@@ -473,31 +479,44 @@ def compile_config(
     raw_components = run.get("components", list(STAGE1_COMPONENT_ORDER))
     if isinstance(raw_components, str):
         raw_components = [part.strip() for part in raw_components.split(",") if part.strip()]
-    unknown_components = sorted(set(raw_components) - set(STAGE1_COMPONENT_ORDER))
+    unknown_components = sorted(set(raw_components) - set(WORKFLOW_COMPONENT_ORDER))
     if unknown_components:
         raise ValueError(f"unknown Stage 1 components: {unknown_components}")
 
+    stage2_mapping = dict(raw.get("stage2") or {})
+    if str(run.get("mode", "")).lower() == "explicit_only":
+        stage2_mapping["feature_source"] = "explicit_only"
     stage2 = plain_stage2_config_from_mapping(
-        dict(raw.get("stage2") or {}),
+        stage2_mapping,
         default_workers=max(1, int(run.get("workers", 1))),
     )
     mode = str(run.get("mode") or ("full" if stage2 is not None else "stage1")).lower()
-    if mode not in {"full", "stage1", "stage2"}:
-        raise ValueError("run.mode must be 'full', 'stage1', or 'stage2'")
-    if mode in {"full", "stage2"} and stage2 is None:
+    if mode not in {"full", "stage1", "stage2", "explicit_only"}:
+        raise ValueError("run.mode must be 'full', 'stage1', 'stage2', or 'explicit_only'")
+    if mode in {"full", "stage2", "explicit_only"} and stage2 is None:
         raise ValueError(f"run.mode={mode!r} requires stage2.endpoint or stage2.vllm")
-    selected_components = tuple(str(value) for value in raw_components)
+    if stage2 is not None and stage2.feature_source == "explicit_only":
+        if mode == "stage1":
+            raise ValueError("explicit-only Stage 2 cannot be combined with Stage 1-only mode")
+        mode = "explicit_only"
+        if stage2.extraction_llm is None:
+            raise ValueError("explicit-only Stage 2 requires stage2.extraction_llm")
+        if int(science.get("outer_folds", 5)) < 2 or int(science.get("inner_folds", 5)) < 2:
+            raise ValueError("explicit-only requires outer_folds and inner_folds >= 2")
+    selected_components = tuple(str(value) for value in raw_components if value != "stage2")
     if mode == "full":
         if "handoff" not in selected_components:
             selected_components = (*selected_components, "handoff")
         selected_components = (*selected_components, "stage2")
-    elif mode == "stage2":
+    elif mode in {"stage2", "explicit_only"}:
         selected_components = ("stage2",)
 
     architecture_selection = canonicalize_stage1_architectures(
         science.get("stage1_architectures"),
         allow_none=True,
     )
+    if mode == "explicit_only" and architecture_selection is not None:
+        raise ValueError("explicit-only mode cannot select Stage 1 architectures")
 
     stage1_template = raw.get("stage1_template", DEFAULT_STAGE1_TEMPLATE)
     neural_template = raw.get("neural_query_template", DEFAULT_NEURAL_QUERY_TEMPLATE)
@@ -1705,6 +1724,22 @@ def _stage2_component(
 ) -> Mapping[str, Any]:
     """Extract, review, and estimate from the plain fold-scoped handoff."""
 
+    if context.config.explicit_only:
+        return run_plain_handoff_stage2(
+            handoff_path=None,
+            output_dir=component_dir,
+            clinical_question=context.config.clinical_question,
+            config=context.config.stage2,
+            dataset=context.dataset,
+            unit_id_column=context.config.unit_id_column,
+            text_column=context.config.text_column,
+            treatment_column=context.config.treatment_column,
+            outcome_column=context.config.outcome_column,
+            outcome_type=context.config.outcome_type,
+            outer_folds=context.config.outer_folds,
+            inner_folds=context.config.inner_folds,
+            seed=context.config.seed,
+        )
     handoff_path = context.output_dir / "handoff" / "evidence.jsonl"
     handoff_complete = handoff_path.parent / "complete.json"
     if not handoff_path.is_file() or not handoff_complete.is_file():
@@ -1813,6 +1848,24 @@ def _load_analysis_dataset(
     return dataset.reset_index(drop=True)
 
 
+def _prepare_explicit_workflow_inputs(
+    config: ResearchStage1Config,
+    dataset: pd.DataFrame,
+    *,
+    persist: bool = True,
+) -> dict[str, Any]:
+    from .stage2_explicit_inputs import prepare_explicit_inputs
+
+    return prepare_explicit_inputs(
+        dataset=dataset, output_dir=config.output_dir / "stage2", config=config.stage2,
+        clinical_question=config.clinical_question,
+        unit_id_column=config.unit_id_column, text_column=config.text_column,
+        treatment_column=config.treatment_column, outcome_column=config.outcome_column,
+        outcome_type=config.outcome_type, outer_folds=config.outer_folds,
+        inner_folds=config.inner_folds, seed=config.seed, persist=persist,
+    )
+
+
 class ResearchAllEvidenceWorkflow:
     """Run and resume the plain-directory all-evidence workflow."""
 
@@ -1823,6 +1876,22 @@ class ResearchAllEvidenceWorkflow:
         component_runners: Mapping[str, ComponentRunner] | None = None,
     ) -> None:
         check_notes_output_directory(config.output_dir, config.notes)
+        from .stage2_explicit_inputs import INPUT_FILE
+
+        if not config.explicit_only and (config.output_dir / "stage2" / INPUT_FILE).exists():
+            raise ValueError("cannot switch between explicit-only and all-evidence runs "
+                             "in the same output directory")
+        saved_path = config.output_dir / "run_config.json"
+        if saved_path.is_file():
+            saved = _read_mapping(saved_path)
+            saved_explicit = (saved.get("stage2") or {}).get("feature_source") == "explicit_only"
+            if saved_explicit != config.explicit_only:
+                raise ValueError("cannot switch between explicit-only and all-evidence runs "
+                                 "in the same output directory")
+        if config.explicit_only and any(
+            (config.output_dir / name).exists() for name in ("components", "handoff")
+        ):
+            raise ValueError("explicit-only mode requires an output directory without Stage 1 artifacts")
         saved_selection = _saved_architecture_selection(config.output_dir)
         if (
             config.stage1_architectures is not None
@@ -1983,6 +2052,17 @@ class ResearchAllEvidenceWorkflow:
     def _stage2_only_context(self) -> Stage1RunContext:
         """Build the lightweight context needed to invoke an existing handoff."""
 
+        if self.config.explicit_only:
+            dataset = _load_analysis_dataset(self.config, materialize=True)
+            _prepare_explicit_workflow_inputs(self.config, dataset)
+            _write_json(
+                self.config.output_dir / "run_config.json",
+                _redact_credentials(self.config.as_dict()),
+            )
+            return Stage1RunContext(
+                config=self.config, dataset=dataset, applied_config=None,
+                neural_query_config=None, selected_architectures=(),
+            )
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
         (self.config.output_dir / "logs").mkdir(exist_ok=True)
         resolved_config_path = (
@@ -2365,6 +2445,10 @@ def prepare_stage2_reselection(
         )
     if config.stage2 is None:
         raise ValueError("--stage2-reselect requires a Stage 2 configuration")
+    if config.explicit_only:
+        _prepare_explicit_workflow_inputs(
+            config, _load_analysis_dataset(config), persist=False,
+        )
     stage2_dir = config.output_dir / "stage2"
     if not stage2_dir.is_dir():
         raise RuntimeError(f"no existing Stage 2 output to reselect: {stage2_dir}")
@@ -2955,6 +3039,11 @@ def build_parser() -> argparse.ArgumentParser:
             "usually with --config OUTPUT_DIR/run_config.json"
         ),
     )
+    mode.add_argument(
+        "--explicit-only",
+        action="store_true",
+        help="extract stage2.explicit_features and run Stage 2 without Stage 1 discovery",
+    )
     parser.add_argument(
         "--stage2-reselect",
         action="store_true",
@@ -2968,7 +3057,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--preflight-only",
         action="store_true",
         help=(
-            "with --stage2-only, validate the saved Stage 1 output and the Stage 2 "
+            "with --stage2-only or --explicit-only, validate inputs and the Stage 2 "
             "reuse plan without writing files or running models, then print a "
             "JSON report"
         ),
@@ -3098,6 +3187,9 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
         # component in its flat component list.  Stage 2-only mode does not
         # consult that Stage 1 list, so prevent it from being rejected before
         # the mode-specific component resolution below.
+        run["components"] = []
+    elif args.explicit_only:
+        run["mode"] = "explicit_only"
         run["components"] = []
     if raw.get("stage2") is not None and not isinstance(raw["stage2"], MutableMapping):
         raise ValueError("stage2 must be a configuration object or null")

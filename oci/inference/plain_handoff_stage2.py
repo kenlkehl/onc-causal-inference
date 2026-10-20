@@ -903,6 +903,7 @@ class PlainHandoffStage2Config:
     frequency_penalty: float | None = None
     repetition_penalty: float | None = None
     explicit_features: tuple[Stage2ExplicitFeature, ...] = ()
+    feature_source: str = "all_evidence"
     vllm: ManagedVLLMConfig | None = None
     # When two pipeline-managed models request each other again within this
     # interval, keep both resident on their configured GPU splits for the rest
@@ -943,6 +944,13 @@ class PlainHandoffStage2Config:
         require_model: bool = True,
         require_endpoint: bool = True,
     ) -> None:
+        if self.feature_source not in {"all_evidence", "explicit_only"}:
+            raise ValueError("stage2.feature_source must be all_evidence or explicit_only")
+        if self.feature_source == "explicit_only":
+            if not self.explicit_features:
+                raise ValueError("explicit-only Stage 2 requires nonempty stage2.explicit_features")
+            if not self.selection_consolidation.protect_explicit_features:
+                raise ValueError("explicit-only Stage 2 requires protect_explicit_features=true")
         if self.endpoint:
             parsed = urlparse(self.endpoint)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -1484,6 +1492,7 @@ def plain_stage2_config_from_mapping(
     config = PlainHandoffStage2Config(
         endpoint=endpoint.rstrip("/"),
         model=model,
+        feature_source=str(raw.get("feature_source", "all_evidence")),
         frozen_feature_definition_model=raw.get("frozen_feature_definition_model", ""),
         api_key=api_key,
         request_timeout=float(raw.get("request_timeout", DEFAULT_REQUEST_TIMEOUT)),
@@ -2252,7 +2261,10 @@ def _feature_definition_input_value(
         "alias_merge_prompt_version": clinical_prompts.ALIAS_MERGE_PROMPT_VERSION,
         "outer_fold": int(outer_fold),
         "compiler": EVIDENCE_COMPILER_VERSION,
-        "candidate_discovery_source": "all_semantic_evidence_cards",
+        "candidate_discovery_source": (
+            "explicit_features" if config.feature_source == "explicit_only"
+            else "all_semantic_evidence_cards"
+        ),
         "interpretation_schema": INTERPRETATION_SCHEMA_VERSION,
         "primary_llm": {
             "model": config.model,
@@ -6360,7 +6372,10 @@ class PlainHandoffStage2:
                     ),
                     "consolidation_schema": CONSOLIDATION_SCHEMA_VERSION,
                     "global_candidate_pool_schema": MIXED_SCHEMA,
-                    "candidate_selection": "none_exhaustive_discovery",
+                    "candidate_selection": (
+                        "explicit_features" if self.config.feature_source == "explicit_only"
+                        else "none_exhaustive_discovery"
+                    ),
                     "consolidation_batch_size": int(self.config.consolidation_batch_size),
                     "consolidation_max_rounds": int(self.config.consolidation_max_rounds),
                     "consolidation_policy": self.config.consolidation_policy.public_dict(),
@@ -6577,7 +6592,7 @@ class PlainHandoffStage2:
     def run(
         self,
         *,
-        handoff_path: Path,
+        handoff_path: Path | None,
         output_dir: Path,
         dataset: pd.DataFrame | None = None,
         split_provenance_path: Path | None = None,
@@ -6586,10 +6601,19 @@ class PlainHandoffStage2:
         treatment_column: str = "treatment_indicator",
         outcome_column: str = "outcome_indicator",
         outcome_type: str = "binary",
+        outer_folds: int = 5,
         inner_folds: int = 5,
         seed: int = 42,
     ) -> Mapping[str, Any]:
-        handoff_path = Path(handoff_path)
+        explicit_only = self.config.feature_source == "explicit_only"
+        if explicit_only:
+            if dataset is None:
+                raise ValueError("explicit-only Stage 2 requires a dataset")
+            if handoff_path is not None or split_provenance_path is not None:
+                raise ValueError("explicit-only Stage 2 does not accept a Stage 1 handoff or splits")
+        elif handoff_path is None:
+            raise ValueError("all-evidence Stage 2 requires a Stage 1 handoff")
+        handoff_path = Path(handoff_path) if handoff_path is not None else None
         output_dir = Path(output_dir)
         if dataset is not None and (
             self.extraction_request_config is None or self.extraction_completion is None
@@ -6598,14 +6622,31 @@ class PlainHandoffStage2:
                 "dataset-backed Stage 2 requires stage2.extraction_llm so patient "
                 "value extraction has its own request policy"
             )
+        from .stage2_explicit_inputs import INPUT_FILE, prepare_explicit_inputs
+
+        explicit_inputs = None
+        if explicit_only:
+            explicit_inputs = prepare_explicit_inputs(
+                dataset=dataset, output_dir=output_dir, config=self.config,
+                clinical_question=self.clinical_question,
+                unit_id_column=unit_id_column, text_column=text_column,
+                treatment_column=treatment_column, outcome_column=outcome_column,
+                outcome_type=outcome_type, outer_folds=outer_folds,
+                inner_folds=inner_folds, seed=seed,
+            )
+        elif (output_dir / INPUT_FILE).exists():
+            raise RuntimeError("cannot reuse an explicit-only output for all-evidence Stage 2")
         output_dir.mkdir(parents=True, exist_ok=True)
         self._check_and_record_model_identity(output_dir)
         _write_json(output_dir / "config.json", self.config.public_dict())
-        compiled_packets, compilation_summary = self._load_or_compile_evidence(
-            handoff_path=handoff_path,
-            output_dir=output_dir,
-            seed=seed,
-        )
+        if explicit_only:
+            compiled_packets, compilation_summary = [], {"status": "skipped_explicit_only"}
+        else:
+            compiled_packets, compilation_summary = self._load_or_compile_evidence(
+                handoff_path=handoff_path,
+                output_dir=output_dir,
+                seed=seed,
+            )
         discovery_packets = compiled_packets
 
         packets_by_outer: dict[int, list[Mapping[str, Any]]] = defaultdict(list)
@@ -6634,16 +6675,20 @@ class PlainHandoffStage2:
                 raise ValueError("Stage 2 outcome column must be complete and numeric")
             if outcome_type == "binary" and not set(outcome_numeric.unique()) <= {0.0, 1.0}:
                 raise ValueError("binary Stage 2 outcome must contain only 0 and 1")
-            splits = _load_stage2_splits(
-                provenance_path=split_provenance_path,
-                dataset_rows=len(dataset),
-                outer_fold_ids=sorted(packets_by_outer),
-            )
-            _verify_stage2_splits_against_handoff(
-                splits,
-                handoff_path=handoff_path,
-                outer_fold_ids=sorted(packets_by_outer),
-            )
+            if explicit_inputs is not None:
+                splits = {split["outer_fold"]: split for split in explicit_inputs["splits"]}
+                packets_by_outer = {fold: [] for fold in splits}
+            else:
+                splits = _load_stage2_splits(
+                    provenance_path=split_provenance_path,
+                    dataset_rows=len(dataset),
+                    outer_fold_ids=sorted(packets_by_outer),
+                )
+                _verify_stage2_splits_against_handoff(
+                    splits,
+                    handoff_path=handoff_path,
+                    outer_fold_ids=sorted(packets_by_outer),
+                )
         outer_fold_ids = sorted(packets_by_outer)
         fold_results_by_id: dict[int, Mapping[str, Any]] = {}
         if outer_fold_ids:
@@ -6706,12 +6751,17 @@ class PlainHandoffStage2:
             name_counts.update(names_in_fold)
         summary = {
             "outer_folds": len(fold_results),
-            "candidate_discovery_source": "all_semantic_evidence_cards",
+            "candidate_discovery_source": (
+                "explicit_features" if explicit_only else "all_semantic_evidence_cards"
+            ),
             "evidence_packets": len(discovery_packets),
             "candidate_discovery_packets": len(discovery_packets),
             "compiled_evidence_packets": len(compiled_packets),
             "evidence_compiler": EVIDENCE_COMPILER_VERSION,
-            "evidence_compilation_path": str(output_dir / "evidence_compilation"),
+            "evidence_compilation_path": (
+                None if explicit_only else str(output_dir / "evidence_compilation")
+            ),
+            **({"split_provenance_path": str(output_dir / INPUT_FILE)} if explicit_only else {}),
             "evidence_compilation": compilation_summary,
             "features_by_fold": {
                 str(result["outer_fold"]): len(result["features"]) for result in fold_results
@@ -6991,7 +7041,7 @@ def _all_gpu_extraction_vllm_config(
 
 def run_plain_handoff_stage2(
     *,
-    handoff_path: Path,
+    handoff_path: Path | None,
     output_dir: Path,
     clinical_question: str,
     config: PlainHandoffStage2Config,
@@ -7005,9 +7055,29 @@ def run_plain_handoff_stage2(
     treatment_column: str = "treatment_indicator",
     outcome_column: str = "outcome_indicator",
     outcome_type: str = "binary",
+    outer_folds: int = 5,
     inner_folds: int = 5,
     seed: int = 42,
 ) -> Mapping[str, Any]:
+    # Managed servers write beneath output_dir before the runner starts. Freeze
+    # explicit-only provenance first so those files cannot masquerade as a run
+    # whose split manifest was lost.
+    if config.feature_source == "explicit_only" and (
+        config.vllm is not None
+        or (config.extraction_llm is not None and config.extraction_llm.vllm is not None)
+    ):
+        from .stage2_explicit_inputs import prepare_explicit_inputs
+
+        if dataset is None or handoff_path is not None or split_provenance_path is not None:
+            raise ValueError("explicit-only Stage 2 requires a dataset and no Stage 1 artifacts")
+        prepare_explicit_inputs(
+            dataset=dataset, output_dir=output_dir, config=config,
+            clinical_question=clinical_question, unit_id_column=unit_id_column,
+            text_column=text_column, treatment_column=treatment_column,
+            outcome_column=outcome_column, outcome_type=outcome_type,
+            outer_folds=outer_folds, inner_folds=inner_folds, seed=seed,
+        )
+
     def run_with_config(
         runtime_config: PlainHandoffStage2Config,
         *,
@@ -7032,6 +7102,7 @@ def run_plain_handoff_stage2(
             treatment_column=treatment_column,
             outcome_column=outcome_column,
             outcome_type=outcome_type,
+            outer_folds=outer_folds,
             inner_folds=inner_folds,
             seed=seed,
         )
@@ -7447,7 +7518,11 @@ def run_plain_handoff_stage2(
         extraction_has_started = bool(
             dataset is not None and _has_extraction_dependent_checkpoints(output_dir)
         )
-        if not extraction_has_started:
+        if config.feature_source == "explicit_only":
+            active_role = phase_role(saved_state) or "extraction"
+            transition = saved_transition
+            switch_tracker.mark_switch()
+        elif not extraction_has_started:
             interpretation_result = run_managed_role(
                 "interpretation",
                 runtime_dataset=None,
