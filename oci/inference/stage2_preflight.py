@@ -45,12 +45,41 @@ def validate_selection_resume(config: workflow.ResearchStage1Config) -> None:
             "Stage 2 multi-model selection schema changed; use guarded --stage2-reselect"
         )
     saved_policy = statistical_selection_config_from_mapping(saved.get("statistical_selection"))
-    if saved_policy.public_dict() != config.stage2.statistical_selection.public_dict():
+    # The selected-modifier penalty keys affect only final estimation, which
+    # has its own identity and refits on resume.
+    if saved_policy.selection_dict() != config.stage2.statistical_selection.selection_dict():
         raise RuntimeError("Stage 2 multi-model policy changed; use guarded --stage2-reselect")
-    if saved.get("estimation_trees") != config.stage2.estimation_trees:
+    orthogonal = (
+        config.stage2.statistical_selection.multi_model.modifier_selection.rule
+        == "orthogonal_tests"
+    )
+    # Only the balanced_evidence count search scores forests of estimation_trees;
+    # under orthogonal_tests a change refits final estimation only.
+    if not orthogonal and saved.get("estimation_trees") != config.stage2.estimation_trees:
         raise RuntimeError(
             "Stage 2 modifier-count estimation_trees changed; use guarded --stage2-reselect"
         )
+    if (
+        orthogonal
+        and "propensity_clip" in saved
+        and saved["propensity_clip"] != config.stage2.propensity_clip
+    ):
+        raise RuntimeError(
+            "Stage 2 propensity_clip changed and the orthogonal_tests modifier rule uses it; "
+            "use guarded --stage2-reselect"
+        )
+    # The modifier tests use the final nuisance learner.
+    if orthogonal and "nuisance_learner" in saved:
+        from ..models.super_learner_nuisance import learner_spec, super_learner_config_from_mapping
+
+        saved_learner = learner_spec(
+            saved["nuisance_learner"], super_learner_config_from_mapping(saved.get("super_learner"))
+        )
+        if saved_learner != config.stage2.nuisance_learner_spec():
+            raise RuntimeError(
+                "Stage 2 nuisance_learner or super_learner changed and the orthogonal_tests "
+                "modifier rule uses it; use guarded --stage2-reselect"
+            )
 
 
 def _validate_partition(fit: list[int], heldout: list[int], universe: set[int]) -> None:
@@ -78,8 +107,12 @@ def preflight_stage2(
         raise RuntimeError(f"existing output directory is missing or not writable: {root}")
     # Constructor checks the saved architecture contract and does not write.
     workflow.ResearchAllEvidenceWorkflow(config)
+    # Only the saved Stage 1 settings are compared. A --stage1-only run saves
+    # stage2: null and takes its Stage 2 settings from this request, so the
+    # saved settings are resolved as the Stage 1 run they describe; the mode
+    # changes none of the compared fields.
     baseline = _object(root / "run_config.json")
-    baseline["run"] = {**baseline.get("run", {}), "mode": "stage2", "components": []}
+    baseline["run"] = {**baseline.get("run", {}), "mode": "stage1", "components": []}
     saved = workflow.compile_config(baseline, config_dir=root)
     for name in (
         "dataset",
@@ -99,6 +132,7 @@ def preflight_stage2(
         "embedding_model",
         "stage1_overrides",
         "neural_query_overrides",
+        "notes",
     ):
         if getattr(saved, name) != getattr(config, name):
             raise RuntimeError(f"saved Stage 1 configuration mismatch: {name}")
@@ -107,7 +141,7 @@ def preflight_stage2(
     if marker.get("status") != "complete":
         raise RuntimeError("Stage 1 handoff is not complete")
     index = _object(handoff / "index.json")
-    if Path(index.get("dataset", "")).resolve() != config.dataset:
+    if Path(index.get("dataset", "")).resolve() != config.analysis_dataset:
         raise RuntimeError("handoff dataset does not match saved configuration")
     columns = {
         "unit_id": config.unit_id_column,
@@ -216,7 +250,7 @@ def preflight_stage2(
         raise RuntimeError("completed Stage 1 embedding cache is missing")
     if cache and (
         cache["semantic_metadata"].get("num_samples") != len(data)
-        or Path(cache["semantic_metadata"]["dataset_path"]).resolve() != config.dataset
+        or Path(cache["semantic_metadata"]["dataset_path"]).resolve() != config.analysis_dataset
     ):
         raise RuntimeError("Stage 1 embedding cache dataset identity mismatch")
     stage2 = root / "stage2"
@@ -274,7 +308,12 @@ def preflight_stage2(
     return {
         "status": "validated",
         "read_only": True,
-        "dataset": str(config.dataset),
+        "dataset": str(config.analysis_dataset),
+        **(
+            {"source_dataset": str(config.dataset), "notes": config.notes.as_dict()}
+            if config.notes is not None
+            else {}
+        ),
         "output_dir": str(root),
         "rows": len(data),
         "columns": columns,

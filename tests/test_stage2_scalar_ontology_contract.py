@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 
 import pandas as pd
 import pytest
@@ -54,7 +55,10 @@ def test_split_is_stable_atomic_and_does_not_invent_patient_values():
     assert all(c["supporting_packet_ids"] == ["card_1"] for c in children)
     assert all(c["ontology_parent_feature_id"] == original["feature_id"] for c in children)
     assert all(c["conflict_resolution"]["strategy"] == "latest" for c in children)
-    assert all("not assessed or not mentioned" in c["missing_value_rule"] for c in children)
+    assert all("null when this component is not mentioned" in c["missing_value_rule"]
+               for c in children)
+    assert all("documented_unknown when the record states that it was not assessed"
+               in c["missing_value_rule"] for c in children)
     assert all("explicit negative finding" in c["missing_value_rule"] for c in children)
     assert "brain_sites" not in [c["name"] for c in children]
     values = {c["clinical_label"]: "Present" for c in children}
@@ -130,6 +134,120 @@ def test_both_review_paths_checkpoint_split_and_reuse_it(tmp_path, failure_revie
     assert len(calls) == 2
     assert run()[0] == children
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize("legacy_reason", [
+    None,
+    "Scalar contract check rejected proposed changes: Temporal rule changed.",
+    "Invalid supervisor response; conservative keep: Invalid categories.",
+])
+def test_supervisor_resumes_fallback_but_retries_it_in_later_rounds(
+    tmp_path, monkeypatch, legacy_reason,
+):
+    original = feature()
+    requests = []
+
+    def decide(**kwargs):
+        requests.append(kwargs["output_dir"])
+        return {
+            "feature_id": original["feature_id"],
+            "feature_name": original["name"],
+            "action": "keep",
+            "reason": (legacy_reason or "Review failed validation.") if len(requests) == 1
+            else "The definition is consistent.",
+            **({"validation_fallback": True} if len(requests) == 1 else {}),
+        }
+
+    monkeypatch.setattr(analysis, "_request_scalar_ontology_decision", decide)
+    root = tmp_path / "ontology_supervision"
+
+    def run(number):
+        return analysis._request_aggregate_ontology_supervisor(
+            definitions=[original], summaries=[{"feature_id": original["feature_id"]}],
+            failure_summary={}, output_dir=root / f"round_{number:03d}" / "supervisor",
+            request_json=None, workers=1,
+        )[2]
+
+    assert run(1)["validation_fallback_feature_ids"] == [original["feature_id"]]
+    first_leaf = root / "round_001" / "supervisor" / "feature_0001"
+    second_leaf = root / "round_002" / "supervisor" / "feature_0001"
+    shutil.copytree(first_leaf, second_leaf)
+    completion = json.loads((first_leaf / "complete.json").read_text())
+    fingerprint = completion["input_fingerprint"]
+    cache_leaf = root / "supervisor_cache" / fingerprint[:2] / fingerprint
+    # Reproduce a prior run's polluted shared cache and second-round checkpoint.
+    shutil.copytree(first_leaf, cache_leaf)
+    if legacy_reason:
+        for leaf in (second_leaf, cache_leaf):
+            decision = json.loads((leaf / "result.json").read_text())
+            decision.pop("validation_fallback")
+            (leaf / "result.json").write_text(json.dumps(decision))
+
+    for number in (1, 2):
+        resumed = run(number)
+        assert resumed["validation_fallback_feature_ids"] == [original["feature_id"]]
+        assert resumed["local_checkpoint_reused_features"] == 1
+    assert len(requests) == 1
+
+    third = run(3)
+    assert third["model_requested_features"] == 1
+    assert third["cache_reused_features"] == 0
+    assert third["validation_fallback_feature_ids"] == []
+    assert len(requests) == 2
+    assert run(4)["cache_reused_features"] == 1
+    assert len(requests) == 2
+
+
+@pytest.mark.parametrize("resolve_on_round", [2, None])
+def test_review_loop_does_not_converge_on_conservative_keeps(
+    tmp_path, monkeypatch, resolve_on_round,
+):
+    original = feature()
+    reviews = []
+    matrix = pd.DataFrame({"_oci_row_id": [0, 1], "brain_sites": ["frontal", "cerebellum"]})
+
+    def extract(**kwargs):
+        feedback = kwargs["feedback_dir"]
+        feedback.mkdir(parents=True, exist_ok=True)
+        (feedback / "final_failure_summary.json").write_text("{}")
+        return matrix.copy(), kwargs["definitions"], 0
+
+    def review(**kwargs):
+        reviews.append(kwargs["output_dir"])
+        unresolved = resolve_on_round is None or len(reviews) < resolve_on_round
+        return kwargs["definitions"], False, {
+            "changed_feature_ids": [],
+            "validation_fallback_feature_ids": [original["feature_id"]] if unresolved else [],
+        }
+
+    class ReviewFinished(Exception):
+        pass
+
+    def stop_before_selection(*args, **kwargs):
+        raise ReviewFinished
+
+    monkeypatch.setattr(analysis, "_extract_training_with_ontology_feedback", extract)
+    monkeypatch.setattr(analysis, "_harmonize_training_extraction",
+                        lambda **kw: (kw["extracted"], kw["definitions"], {}))
+    monkeypatch.setattr(analysis, "_request_aggregate_ontology_supervisor", review)
+    monkeypatch.setattr(analysis, "_filter_sparse_training_candidates", stop_before_selection)
+    with pytest.raises(ReviewFinished):
+        analysis.run_fold_analysis(
+            dataset=pd.DataFrame({"id": [0, 1, 2], "text": ["a", "b", "c"],
+                                  "t": [0, 1, 0], "y": [0, 1, 1]}),
+            definitions=[original],
+            split={"fit_row_ids": [0, 1], "heldout_row_ids": [2],
+                   "inner_splits": [{"fit_row_ids": [0], "heldout_row_ids": [1]}]},
+            clinical_question="Effect?", unit_id_column="id", text_column="text",
+            treatment_column="t", outcome_column="y", outcome_type="binary",
+            inner_folds=2, seed=1, output_dir=tmp_path, request_json=None,
+            config=workflow.PlainHandoffStage2Config(
+                endpoint="http://test/v1", model="test", max_review_rounds=4,
+            ),
+        )
+    assert len(reviews) == (resolve_on_round or 4)
+    completion = json.loads((reviews[-1].parent / "complete.json").read_text())
+    assert bool(completion["validation_fallback_feature_ids"]) is (resolve_on_round is None)
 
 
 def test_incremental_split_preserves_other_measurements_and_resumes(tmp_path):

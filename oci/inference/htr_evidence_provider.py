@@ -21,16 +21,20 @@ class HTREvidenceProvider:
         config: AppliedInferenceConfig,
         device: Optional[Any] = None,
         checkpoint_store: Optional[Stage1CheckpointStore] = None,
+        num_workers: int = 1,
     ) -> None:
         self.config = config
         self.device = torch.device(device or "cpu")
         self.checkpoint_store = checkpoint_store
+        self.num_workers = num_workers
         self._runner: Optional[HTRTrainer] = None
 
     def _ensure_runner(self, discovery_df: pd.DataFrame) -> HTRTrainer:
         del discovery_df
         if self._runner is None:
-            self._runner = HTRTrainer(config=self.config, device=self.device)
+            self._runner = HTRTrainer(
+                config=self.config, device=self.device, num_workers=self.num_workers
+            )
         return self._runner
 
 

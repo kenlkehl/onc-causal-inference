@@ -2,9 +2,10 @@
 
 These calibration diagnostics are descriptive only: they never recalibrate
 predictions or use held-out outcomes to choose propensity eligibility. (Stage 2
-recalibrates its nuisances separately, with ``oci.utils.calibration.
-cross_fitted_platt`` fit on training out-of-fold predictions only; these
-functions report calibration before and after that step.)
+calibrates its held-out nuisances separately, with one
+``oci.utils.calibration.PlattRecalibration`` per inner-fold model fit on that
+model's own out-of-fold training predictions; these functions report
+calibration before and after that step.)
 """
 
 from __future__ import annotations

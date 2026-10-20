@@ -60,13 +60,20 @@ def _frame_hash(frame: pd.DataFrame) -> str:
 def numerical_identity(
     *, frame, labels, definitions, inner_splits, outcome_type, seed, policy
 ):
-    """Count-search settings do not change the underlying numerical evidence."""
+    """Count-search settings do not change the underlying numerical evidence.
+
+    The modifier rule matters only through the evidence scope: the fitted
+    families and whether the univariable interaction test runs.
+    """
     numerical_policy = policy.public_dict()
     numerical_policy["multi_model"].pop("modifier_count", None)
+    numerical_policy["multi_model"].pop("modifier_selection", None)
     numerical_policy["multi_model"].pop("interaction_ranking_weight", None)
     return {
         "schema_version": SCHEMA_VERSION,
         "policy": numerical_policy,
+        "evidence_families": list(policy.multi_model.active_families(outcome_type)),
+        "univariable_effect_tests": policy.multi_model.computes_effect_evidence,
         "seed": int(seed),
         "definitions": definitions,
         "inner_splits": list(inner_splits),
@@ -281,6 +288,8 @@ def _fit_linear(
     modifier_ids=None,
     path_submit=None,
     adjustment=None,
+    unpenalized_modifier_ids=None,
+    modifier_ridge=None,
 ):
     """Tune inside training, leaving the explicit treatment main effect unpenalized.
 
@@ -288,11 +297,38 @@ def _fit_linear(
     (m, p), "names": [...]}``: per-row covariates that enter as unpenalized main
     effects, never interacted with T. They are standardized on the training rows
     of each fit (CV partition or final refit).
+
+    ``unpenalized_modifier_ids`` (interaction models only) exempts those
+    modifiers' main-effect and interaction groups from the tuned penalty in
+    every CV fit and the refit; the tuning then applies to the remaining
+    groups. ``modifier_ridge`` instead gives those groups the fixed ridge
+    ``0.5 * modifier_ridge * ||b||^2`` (mean-loss scale), whatever the tuned
+    regularization.
     """
     y = np.asarray(y, dtype=float)
     treatment = np.asarray(treatment, dtype=float)
     if adjustment is not None and kind != "interactions":
         raise ValueError("nuisance adjustment covariates apply only to interaction models")
+    exempt_modifiers = sorted(set(map(str, unpenalized_modifier_ids or ())))
+    if exempt_modifiers and kind != "interactions":
+        raise ValueError("unpenalized modifier groups apply only to interaction models")
+    if modifier_ids is not None and not set(exempt_modifiers).issubset(modifier_ids):
+        raise ValueError("unpenalized modifiers must be interaction modifiers")
+    if modifier_ridge is not None and (
+        not exempt_modifiers
+        or isinstance(modifier_ridge, bool)
+        or not np.isfinite(float(modifier_ridge))
+        or float(modifier_ridge) <= 0
+    ):
+        raise ValueError("a fixed modifier ridge must be positive and needs exempt modifiers")
+    modifier_groups = tuple(
+        group for key in exempt_modifiers for group in (f"main:{key}", f"effect:{key}")
+    )
+    modifier_ridge_map = (
+        {group: float(modifier_ridge) for group in modifier_groups}
+        if modifier_ridge is not None
+        else None
+    )
     if adjustment is not None:
         adjustment_train = np.asarray(adjustment["train"], dtype=float)
         adjustment_valid = np.asarray(adjustment["valid"], dtype=float)
@@ -381,7 +417,9 @@ def _fit_linear(
         if fold_adjustment is not None:
             fold_unpenalized = (*fold_unpenalized, *fold_adjustment.groups)
         group_structure = linear._group_structure(
-            group_ids, unpenalized_feature_ids=fold_unpenalized
+            group_ids,
+            unpenalized_feature_ids=(*fold_unpenalized, *modifier_groups),
+            fixed_ridge=modifier_ridge_map,
         )
         initial = None
         iterations = []
@@ -429,7 +467,11 @@ def _fit_linear(
         linear._fit_group_elastic_net,
         x,
         y,
-        groups=linear._group_structure(groups, unpenalized_feature_ids=unpenalized_groups),
+        groups=linear._group_structure(
+            groups,
+            unpenalized_feature_ids=(*unpenalized_groups, *modifier_groups),
+            fixed_ridge=modifier_ridge_map,
+        ),
         regularization=float(alphas[best]),
         group_ratio=ratio,
         binary=binary,
@@ -440,6 +482,7 @@ def _fit_linear(
     state = modeling.call(refit) if path_submit is not None else refit()
     if not state.converged:
         raise NotEstimable("final_penalized_fit_did_not_converge")
+    present_modifier_groups = [group for group in modifier_groups if group in set(groups)]
     return {
         "prediction": linear._state_prediction(state, xv, binary=binary),
         "coefficients": state.coefficients,
@@ -457,7 +500,23 @@ def _fit_linear(
             "cv_loss": float(means[best]),
             "selected_on_grid_boundary": best in {0, len(alphas) - 1},
             "cv_optimizer_audit": cv_iterations,
-            "unpenalized_groups": list(unpenalized_groups),
+            "unpenalized_groups": [
+                *unpenalized_groups,
+                *(present_modifier_groups if modifier_ridge is None else []),
+            ],
+            **(
+                {
+                    "selected_modifier_groups": {
+                        "groups": present_modifier_groups,
+                        "penalty": "none" if modifier_ridge is None else "fixed_ridge",
+                        "fixed_ridge": (
+                            None if modifier_ridge is None else float(modifier_ridge)
+                        ),
+                    }
+                }
+                if modifier_groups
+                else {}
+            ),
         },
         "adjustment": final_adjustment,
     }
@@ -645,13 +704,15 @@ def _subsample(treatment, fraction, rng):
     return np.asarray(sorted(indices), dtype=int)
 
 
-def _univariable(train, definitions, t, y, *, binary, policy, nuisance, effect_keep=None):
+def _univariable(train, definitions, t, y, *, binary, policy, nuisance, effect_keep=None,
+                 effect_tests=True):
+    """Treatment/outcome associations and, with ``effect_tests``, adjusted interactions."""
     records = []
     if effect_keep is None:
         effect_keep = np.ones(len(train), dtype=bool)
     effect_train = train.loc[effect_keep].reset_index(drop=True)
     effect_t, effect_y = t[effect_keep], y[effect_keep]
-    effect_evaluable = len(effect_t) >= 4 and len(np.unique(effect_t)) == 2
+    effect_evaluable = effect_tests and len(effect_t) >= 4 and len(np.unique(effect_t)) == 2
     e, m = (np.asarray(nuisance[key], dtype=float) for key in ("e", "m"))
     if e.shape != t.shape or m.shape != t.shape:
         raise ValueError("interaction-test nuisances must align with training rows")
@@ -700,6 +761,8 @@ def _univariable(train, definitions, t, y, *, binary, policy, nuisance, effect_k
             else None,
         )
         for role, p in zip(ROLES, values):
+            if role == "effect" and not effect_tests:
+                continue
             records.append(
                 _record(
                     _key(feature),
@@ -718,21 +781,25 @@ def _univariable(train, definitions, t, y, *, binary, policy, nuisance, effect_k
         for row, q in zip(rows, linear._benjamini_hochberg([r["p_value"] for r in rows])):
             row["q_value"] = q
             row["q_supported"] = q < policy.multi_model.q_threshold if q is not None else None
-    return {
-        "records": records,
-        "audit": {
-            "modifier_model": "Y ~ T + candidate + T:candidate + f(propensity_oof) + g(outcome_oof)",
-            "interaction_adjustment": adjustment_audit,
-            "outcome_association_model": "Y ~ T + candidate",
-            "multiplicity": "BH_within_resample_and_endpoint",
-            "hard_gate": False,
-            "association_fit_row_ids": train._oci_row_id.astype(int).tolist(),
-            "effect_fit_row_ids": effect_train._oci_row_id.astype(int).tolist(),
-            "effect_status": "ok"
-            if effect_evaluable
-            else "insufficient_eligible_rows_or_treatment_arms",
-        },
+    audit = {
+        "modifier_model": "Y ~ T + candidate + T:candidate + f(propensity_oof) + g(outcome_oof)",
+        "interaction_adjustment": adjustment_audit,
+        "outcome_association_model": "Y ~ T + candidate",
+        "multiplicity": "BH_within_resample_and_endpoint",
+        "hard_gate": False,
+        "association_fit_row_ids": train._oci_row_id.astype(int).tolist(),
+        "effect_fit_row_ids": effect_train._oci_row_id.astype(int).tolist(),
+        "effect_status": "ok"
+        if effect_evaluable
+        else "insufficient_eligible_rows_or_treatment_arms",
     }
+    if not effect_tests:
+        audit.update(
+            modifier_model=None,
+            effect_fit_row_ids=[],
+            effect_status="not_run_under_orthogonal_tests",
+        )
+    return {"records": records, "audit": audit}
 
 
 def _penalized_family(
@@ -1050,7 +1117,7 @@ def select_stage2_features_multi_model(
             [],
             {
                 "schema_version": SCHEMA_VERSION,
-                "policy": policy.public_dict(),
+                "policy": policy.selection_dict(),
                 "status": "complete_no_candidates",
                 "decisions": [],
             },
@@ -1222,6 +1289,7 @@ def select_stage2_features_multi_model(
                                         effect_keep=linear.propensity_eligibility(
                                             e[rows], policy.min_propensity, policy.max_propensity
                                         ),
+                                        effect_tests=cfg.computes_effect_evidence,
                                     )
                                 elif binary and family in {
                                     "orthogonal_linear",
@@ -1385,13 +1453,34 @@ def select_stage2_features_multi_model(
         "schema_version": SCHEMA_VERSION,
         "status": "complete",
         "temporal_scope": "pre_index_treatment",
-        "policy": policy.public_dict(),
+        "policy": policy.selection_dict(),
         "input_fingerprint": fingerprint,
         "inner_folds": len(inner_splits),
         "partition_repeats": cfg.stability.partition_repeats,
         "measurement_groups": representative_groups,
         "measurement_observed_fractions": {f['feature_id']: float(frame[f['name']].notna().mean()) for f in definitions},
         "model_families": list(families),
+        **(
+            {}
+            if cfg.computes_effect_evidence
+            else {
+                "skipped_effect_evidence": {
+                    "families": [
+                        f for f in replace(
+                            cfg, modifier_selection=replace(
+                                cfg.modifier_selection, rule="balanced_evidence")
+                        ).active_families(outcome_type)
+                        if f not in families
+                    ],
+                    "univariable_interaction_test": True,
+                    "reason": (
+                        "modifier_selection.rule is orthogonal_tests: modifiers come from "
+                        "the orthogonal tests, and no role, nuisance, or kept output reads "
+                        "this effect evidence"
+                    ),
+                }
+            }
+        ),
         "evaluable_cells_by_family": availability,
         "multi_model_evidence": summaries,
         "cells": cells,

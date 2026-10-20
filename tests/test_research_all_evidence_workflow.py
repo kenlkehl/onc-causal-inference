@@ -18,6 +18,7 @@ from oci.inference.embedding_contrast_discovery import (
 from oci.inference.all_evidence_fusion import HTR_NEURAL, MATCHED_PAIR_UPLIFT
 from oci.inference.plain_handoff_stage2_evidence import SUPPORTED_STAGE2_ARCHITECTURES
 from oci.inference.stage1_architectures import DEFAULT_STAGE1_ARCHITECTURES
+from oci.inference.stage1_checkpointing import row_id_identity
 from oci.inference.research_all_evidence_workflow import (
     STAGE1_COMPONENT_ORDER as COMPONENT_ORDER,
     ResearchAllEvidenceWorkflow,
@@ -98,8 +99,21 @@ def test_multi_model_forest_defaults_to_the_full_stage1_architecture_set():
     assert config.htr_evidence_enabled is True
     assert config.embedding_contrast.enabled is True
     assert config.matched_pair_uplift_enabled is True
-    assert config.matched_pair_bow_enabled is True
-    assert config.matched_pair_htr_enabled is True
+    assert config.matched_pair_prognostic_caliper is None
+    assert config.matched_pair_l1_ratio == 0.5
+    assert config.matched_pair_cv_folds == 5
+    for retired in (
+        "matched_pair_bow_enabled",
+        "matched_pair_htr_enabled",
+        "matched_pair_htr_attention_pairs_per_fold",
+        "matched_pair_max_controls_per_candidate",
+        "matched_pair_nearest_fallback_controls",
+        "matched_pair_bow_l2_alpha",
+        "matched_pair_outcome_caliper",
+    ):
+        assert not hasattr(config, retired)
+        with pytest.raises(TypeError):
+            MultiModelForestConfig(**{retired: 1})
 
 
 def test_generic_applied_dispatch_rejects_retired_multi_model_orchestration(tmp_path):
@@ -197,7 +211,7 @@ def test_disable_htr_keeps_bow_and_embedding_without_scheduling_htr(
     assert model_config.embedding_contrast.enabled is True
     assert model_config.htr_evidence_enabled is False
     assert model_config.htr_evidence_disable_reason == "disabled by research workflow option"
-    assert model_config.matched_pair_htr_enabled is False
+    assert model_config.matched_pair_uplift_enabled is True
     required = _required_stage2_architectures(context)
     assert HTR_NEURAL not in required
     assert MATCHED_PAIR_UPLIFT in required
@@ -508,6 +522,188 @@ def test_rerun_tfidf_invalidates_exact_context_metadata_but_keeps_products(tmp_p
     assert fitted_product.exists()
 
 
+@pytest.mark.parametrize(
+    "name,removed,kept",
+    [
+        ("embedding_cache", ["complete.json"], ["cache/abc/metadata.json"]),
+        (
+            "text_models",
+            ["complete.json", "outer_001_full/complete.json"],
+            [
+                "outer_001_full/checkpoints/v1/units/bow/fit/" + "0" * 64 + "/complete.json",
+                "outer_001_full/checkpoints/v1/units/assembly/handoff_context/"
+                + "1" * 64
+                + "/complete.json",
+                "outer_001_full/evidence.json",
+                "evidence.jsonl",
+            ],
+        ),
+        (
+            "neural_queries",
+            ["complete.json", "outer_001_inner_002/complete.json"],
+            ["outer_001_inner_002/evidence.json"],
+        ),
+        ("handoff", ["complete.json"], ["evidence.jsonl", "index.json"]),
+        (
+            "stage2",
+            ["complete.json"],
+            [
+                "outer_001/complete.json",
+                "outer_001/selection/complete.json",
+                "outer_001/estimation/complete.json",
+                "outer_001/interpretations/architecture_01/batch_001/complete.json",
+                "outer_001/extraction/fit/serial_chunks/chunk_00001/complete.json",
+                "reselection_archives/reselection_x/artifacts/outer_001/complete.json",
+            ],
+        ),
+    ],
+)
+def test_rerun_removes_only_completion_state_without_identity(
+    tmp_path: Path, name, removed, kept
+):
+    component_dir = tmp_path / name
+    for relative in (*removed, *kept):
+        path = component_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n", encoding="utf-8")
+    workflow = SimpleNamespace(_component_dir=lambda _name: component_dir)
+
+    all_evidence_workflow._invalidate_component_for_rerun(workflow, name)
+
+    assert [relative for relative in removed if (component_dir / relative).exists()] == []
+    assert [relative for relative in kept if not (component_dir / relative).exists()] == []
+
+
+TEXT_MODEL_RERUN_CONTEXTS = 2 * (1 + 2)
+
+
+def _text_model_rerun_fixture(tmp_path: Path, monkeypatch):
+    """Launch a text_models-only run whose contexts fit two checkpointed units.
+
+    Returns the study configuration, its path, the log of computed units, and
+    a function that runs ``main`` on the configuration with extra flags.
+    """
+
+    raw, _config = _inputs(tmp_path, components=("text_models",))
+    raw["run"]["workers"] = 1
+    config_path = tmp_path / "study.json"
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    computed: list[tuple[str, str, int]] = []
+
+    def run_context(*, config, context, handoff_dir, checkpoint_store, **_unused):
+        epochs = int(config.training.epochs)
+        rows = {
+            "fit": row_id_identity(context["train_idx"]),
+            "heldout": row_id_identity(context["heldout_idx"]),
+        }
+        fitted = {}
+        for unit in ("bow/fit", "htr/fit"):
+
+            def compute(unit=unit):
+                computed.append((str(context["scope_id"]), unit, epochs))
+                return {"epochs": epochs}
+
+            fitted[unit] = checkpoint_store.run(
+                unit, compute, parameters={"epochs": epochs}, rows=rows
+            ).value["epochs"]
+        # Written beside the checkpoints, like worker_artifacts/**/predictions.parquet.
+        artifact = Path(handoff_dir) / "worker_artifacts" / "fitted.json"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(json.dumps(fitted), encoding="utf-8")
+        return {
+            "outer_fold": context["outer_fold"],
+            "inner_fold": context.get("inner_fold"),
+            "scope": context["scope"],
+            "fitted": fitted,
+        }
+
+    monkeypatch.setattr(multi_model_stage1, "run_multi_model_forest_handoff_context", run_context)
+    monkeypatch.setattr(all_evidence_workflow, "_configure_logging", lambda *_args: None)
+
+    def launch(*extra: str) -> None:
+        assert all_evidence_workflow.main(["--config", str(config_path), *extra]) == 0
+
+    return raw, config_path, computed, launch
+
+
+def _text_model_rows(output_dir: Path) -> list[dict]:
+    path = output_dir / "components" / "text_models" / "evidence.jsonl"
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_rerun_text_models_reuses_checkpoint_units_whose_identity_matches(
+    tmp_path: Path, monkeypatch
+):
+    _raw, _path, computed, launch = _text_model_rerun_fixture(tmp_path, monkeypatch)
+    output_dir = tmp_path / "output"
+    component_dir = output_dir / "components" / "text_models"
+    launch()
+    assert len(computed) == 2 * TEXT_MODEL_RERUN_CONTEXTS
+    rows = _text_model_rows(output_dir)
+    unit_markers = sorted(component_dir.glob("*/checkpoints/v1/units/**/complete.json"))
+    # bow/fit, htr/fit, and the context's assembly/handoff_context unit.
+    assert len(unit_markers) == 3 * TEXT_MODEL_RERUN_CONTEXTS
+
+    computed.clear()
+    launch("--rerun", "text_models")
+
+    assert computed == []
+    assert sorted(component_dir.glob("*/checkpoints/v1/units/**/complete.json")) == unit_markers
+    assert _text_model_rows(output_dir) == rows
+    progress = json.loads((output_dir / "progress.json").read_text(encoding="utf-8"))
+    assert progress["components"]["text_models"]["status"] == "complete"
+    for context_dir in sorted(path.parent for path in component_dir.glob("*/evidence.json")):
+        assert (context_dir / "complete.json").is_file()
+        units = json.loads(
+            (context_dir / "checkpoints" / "v1" / "checkpoint_progress.json").read_text(
+                encoding="utf-8"
+            )
+        )["units"]
+        assert units["assembly/handoff_context"]["status"] == "reused"
+
+
+def test_rerun_text_models_recomputes_checkpoint_units_whose_identity_changed(
+    tmp_path: Path, monkeypatch
+):
+    raw, config_path, computed, launch = _text_model_rerun_fixture(tmp_path, monkeypatch)
+    output_dir = tmp_path / "output"
+    component_dir = output_dir / "components" / "text_models"
+
+    def set_epochs(epochs: int) -> None:
+        raw["science"]["stage1"]["training"]["epochs"] = epochs
+        config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    launch()
+    computed.clear()
+    set_epochs(4)
+    launch()  # Completion markers record no identity; an ordinary resume skips.
+    assert computed == []
+
+    launch("--rerun", "text_models")
+    assert len(computed) == 2 * TEXT_MODEL_RERUN_CONTEXTS
+    assert {epochs for *_unused, epochs in computed} == {4}
+    assert all(
+        row["fitted"] == {"bow/fit": 4, "htr/fit": 4} for row in _text_model_rows(output_dir)
+    )
+
+    # The earlier settings' units are still valid and are restored, and each
+    # context's evidence and side files are rebuilt from them rather than left
+    # from the settings that ran last.
+    computed.clear()
+    set_epochs(3)
+    launch("--rerun", "text_models")
+    assert computed == []
+    assert all(
+        row["fitted"] == {"bow/fit": 3, "htr/fit": 3} for row in _text_model_rows(output_dir)
+    )
+    artifacts = sorted(component_dir.glob("*/worker_artifacts/fitted.json"))
+    assert len(artifacts) == TEXT_MODEL_RERUN_CONTEXTS
+    assert all(
+        json.loads(path.read_text(encoding="utf-8")) == {"bow/fit": 3, "htr/fit": 3}
+        for path in artifacts
+    )
+
+
 def test_legacy_handoff_references_sources_without_copy_or_architecture_expansion(
     tmp_path: Path,
 ):
@@ -657,6 +853,159 @@ def test_gpu_context_lanes_use_every_gpu_without_device_overlap():
     assert _lane_cpu_worker_budgets(len(lanes), workers=10) == [4, 3, 3]
 
 
+@pytest.mark.parametrize(
+    "devices,workers,limit,expected",
+    [
+        (("cuda:0",), 30, 4, ["cuda:0"] * 4),
+        (("cuda:0", "cuda:1"), 30, 3, ["cuda:0", "cuda:1"] * 3),
+        (("cuda:0", "cuda:1"), 3, 4, ["cuda:0", "cuda:1", "cuda:0"]),
+        (("cuda:0", "cuda:1"), 1, 4, ["cuda:0", "cuda:1"]),
+        (("cuda:0", "cuda:0"), 30, 2, ["cuda:0"] * 2),
+        (("cpu",), 3, 8, ["cpu"] * 3),
+    ],
+)
+def test_context_concurrency_respects_gpu_and_cpu_limits(devices, workers, limit, expected):
+    pending = [{"scope_id": f"context_{i}", "train_idx": range(i + 1)} for i in range(11)]
+    lanes = _context_execution_lanes(
+        pending, devices=devices, workers=workers, contexts_per_gpu=limit,
+    )
+    assert [device for device, _ in lanes] == expected
+    scheduled = [spec["scope_id"] for _, specs in lanes for spec in specs]
+    assert sorted(scheduled) == sorted(spec["scope_id"] for spec in pending)
+    assert all(specs for _, specs in lanes)
+    assert sum(_lane_cpu_worker_budgets(len(lanes), workers)) == max(workers, len(lanes))
+    # The last few unfinished contexts must not spawn idle processes.
+    assert len(_context_execution_lanes(
+        pending[:1], devices=devices, workers=workers, contexts_per_gpu=limit,
+    )) == 1
+
+
+def test_contexts_per_gpu_round_trips_and_keeps_scientific_configuration(tmp_path):
+    raw, serial = _inputs(tmp_path, components=("text_models",))
+    assert serial.contexts_per_gpu == 1
+    raw["run"]["contexts_per_gpu"] = 4
+    parallel = compile_config(raw, config_dir=tmp_path)
+    assert parallel.contexts_per_gpu == 4
+    restored = compile_config(parallel.as_dict(), config_dir=tmp_path)
+    assert restored.contexts_per_gpu == 4
+    assert all_evidence_workflow._load_stage1_template(serial) == (
+        all_evidence_workflow._load_stage1_template(parallel)
+    )
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(raw))
+    args = build_parser().parse_args(["--config", str(path), "--contexts-per-gpu", "2"])
+    override, base = _raw_config_from_args(args)
+    assert compile_config(override, config_dir=base).contexts_per_gpu == 2
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5, "4", None])
+def test_invalid_contexts_per_gpu_fails_before_training(tmp_path, value):
+    raw, _ = _inputs(tmp_path)
+    raw["run"]["contexts_per_gpu"] = value
+    with pytest.raises(ValueError, match="contexts_per_gpu must be a positive integer"):
+        compile_config(raw, config_dir=tmp_path)
+
+
+def test_text_model_checkpoint_units_survive_context_concurrency_change(tmp_path, monkeypatch):
+    _raw, _path, computed, launch = _text_model_rerun_fixture(tmp_path, monkeypatch)
+    launch()
+    previous = _text_model_rows(tmp_path / "output")
+    computed.clear()
+    launch("--contexts-per-gpu", "4", "--rerun", "text_models")
+    assert computed == []
+    assert _text_model_rows(tmp_path / "output") == previous
+
+
+def test_same_gpu_contexts_use_isolated_processes_and_resume(tmp_path, monkeypatch):
+    """Exercise the real process scheduler and checkpoints without a CUDA device."""
+    import os
+    import joblib
+
+    _raw, config = _inputs(tmp_path, components=("text_models",))
+    config = replace(config, devices=("cuda:0",), workers=30, contexts_per_gpu=4)
+    context = ResearchAllEvidenceWorkflow(config)._resolved_context()
+    original_lane = all_evidence_workflow._run_text_model_context_lane
+    starts = tmp_path / "worker_starts"
+    starts.mkdir()
+
+    def cpu_test_lane(**kwargs):
+        import os
+        import time
+        import random
+        import numpy as np
+        import torch
+        from oci.inference import multi_model_forest_stage1 as stage1
+
+        assert kwargs["device"] == "cuda:0"
+        (starts / str(os.getpid())).write_text(str(kwargs["cpu_workers"]))
+        # All four process lanes must have started before any is allowed to
+        # finish. This catches thread/sequential fallbacks without using a GPU.
+        deadline = time.monotonic() + 30
+        while len(list(starts.iterdir())) < 4:
+            if time.monotonic() >= deadline:
+                raise AssertionError("four independent context processes did not start")
+            time.sleep(0.02)
+
+        def cheap_training(*, context, checkpoint_store, handoff_dir, **unused):
+            def fit():
+                (Path(handoff_dir) / "training_calls").touch()
+                return [random.random(), float(np.random.random()), float(torch.rand(()))]
+
+            result = checkpoint_store.run(
+                "htr/nuisance/fold_001", fit, deterministic_seed=True,
+            ).value
+            return {
+                "outer_fold": context["outer_fold"],
+                "inner_fold": context["inner_fold"],
+                "scope": context["scope"],
+                "draws": result,
+            }
+
+        previous_runner = stage1.run_multi_model_forest_handoff_context
+        stage1.run_multi_model_forest_handoff_context = cheap_training
+        try:
+            kwargs["device"] = "cpu"
+            return original_lane(**kwargs)
+        finally:
+            stage1.run_multi_model_forest_handoff_context = previous_runner
+
+    monkeypatch.setattr(all_evidence_workflow, "_run_text_model_context_lane", cpu_test_lane)
+    parallel_calls = []
+    real_parallel = joblib.Parallel
+
+    def record_parallel(**kwargs):
+        parallel_calls.append(kwargs)
+        return real_parallel(**kwargs)
+
+    monkeypatch.setattr(joblib, "Parallel", record_parallel)
+    component_dir = context.component_dir("text_models")
+    first = all_evidence_workflow._text_models_component(context, component_dir)
+    assert first["contexts"] == 6
+    assert parallel_calls[0]["n_jobs"] == 4
+    assert parallel_calls[0]["backend"] == "loky"
+    assert len(list(starts.iterdir())) == 4
+    assert str(os.getpid()) not in {path.name for path in starts.iterdir()}
+    assert sorted(int(path.read_text()) for path in starts.iterdir()) == [7, 7, 8, 8]
+    previous = _text_model_rows(config.output_dir)
+    assert len({tuple(row["draws"]) for row in previous}) == 6
+
+    # Resume a mixture of completed and interrupted contexts with a different
+    # lane count. The interrupted ones retain their checkpointed training.
+    for scope in ("outer_001_full", "outer_001_inner_001"):
+        (component_dir / scope / "complete.json").unlink()
+        for marker in (component_dir / scope).glob(
+            "checkpoints/v1/units/assembly/handoff_context/*/complete.json"
+        ):
+            marker.unlink()
+    for marker in component_dir.glob("*/training_calls"):
+        marker.unlink()
+    resumed = replace(context, config=replace(config, contexts_per_gpu=1))
+    all_evidence_workflow._text_models_component(resumed, component_dir)
+    assert parallel_calls[-1]["n_jobs"] == 1
+    assert not list(component_dir.glob("*/training_calls"))
+    assert _text_model_rows(config.output_dir) == previous
+
+
 def test_cpu_worker_budget_is_divided_without_being_duplicated():
     assert _lane_cpu_worker_budgets(3, workers=10) == [4, 3, 3]
     assert sum(_lane_cpu_worker_budgets(7, workers=23)) == 23
@@ -669,7 +1018,9 @@ def test_handoff_context_uses_stage1_runner_and_exact_heldout_rows(tmp_path, mon
     captured: dict[str, object] = {}
 
     class FakeStage1Runner:
-        def __init__(self, *, dataset, config, output_path, device, num_workers, checkpoint_store):
+        def __init__(
+            self, *, dataset, config, output_path, device, num_workers, checkpoint_store, timer
+        ):
             captured["runner"] = "stage1"
             captured["output_path"] = output_path
             captured["num_workers"] = num_workers
@@ -733,6 +1084,26 @@ def test_research_config_requires_only_its_enabled_stage2_architectures(
         SUPPORTED_STAGE2_ARCHITECTURES if enable_optional else DEFAULT_STAGE1_ARCHITECTURES
     )
     assert _required_stage2_architectures(context) == expected
+
+
+@pytest.mark.parametrize("selection", [None, "all"])
+def test_continuous_outcomes_run_the_matched_pair_lane(tmp_path, selection):
+    raw, _config = _inputs(tmp_path)
+    raw["science"]["outcome_type"] = "continuous"
+    if selection is not None:
+        raw["science"]["stage1_architectures"] = selection
+    config = compile_config(raw, config_dir=tmp_path)
+    context = ResearchAllEvidenceWorkflow(config)._resolved_context()
+    model = context.applied_config.architecture.multi_model_forest
+
+    assert model.matched_pair_uplift_enabled is True
+    assert model.bow_discovery_enabled is True
+    required = _required_stage2_architectures(context)
+    assert MATCHED_PAIR_UPLIFT in required
+    if selection is None:
+        assert required == DEFAULT_STAGE1_ARCHITECTURES and len(required) == 8
+    else:
+        assert required == SUPPORTED_STAGE2_ARCHITECTURES and len(required) == 10
 
 
 @pytest.mark.parametrize(

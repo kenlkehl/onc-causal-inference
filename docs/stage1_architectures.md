@@ -23,7 +23,7 @@ report.
 |---|---|---|---|---|
 | 1 | `bow_nuisance` | on | Words and phrases that predict treatment or outcome | Ranked terms with scores, per text view |
 | 2 | `bow_r_loss` | on | Words and phrases that explain treatment-effect variation after nuisance adjustment | Ranked terms with scores |
-| 3 | `matched_pair_uplift` | on (binary outcomes only) | Text that separates outcomes within matched treated/untreated pairs | Ranked terms and attended text chunks |
+| 3 | `matched_pair_uplift` | on | Words and phrases that modify the treatment effect within matched treated/untreated pairs | Signed ranked terms, per text view |
 | 4 | `htr_neural` | on | Context-dependent passages used by neural treatment, outcome, and effect heads | Attended text chunks per head |
 | 5 | `embedding_whole_cohort` | on | Semantic directions separating patient groups across the cohort | Text chunks at both ends of each direction |
 | 6 | `embedding_clustered` | on | The same directions computed within clusters of similar patients | Text chunks at both ends of each cluster-based direction |
@@ -37,7 +37,11 @@ write under `components/text_models/`, architectures 8 and 9 under
 `components/tfidf/`, and architecture 10 under `components/neural_queries/`. A
 shared chunk-embedding cache (`components/embedding_cache/`) serves
 architectures 5, 6, 7, and 10. Most components also write row-level prediction
-files that the [oracle-safe evaluator](#oracle-safe-evaluation) reads.
+files that the [oracle-safe evaluator](#oracle-safe-evaluation) reads; for
+architectures 5 and 6 these hold each context's held-out patients projected on
+exactly the directions whose excerpts enter the handoff. Every component also
+records the wall time of each context's sections, attributed to the
+architecture they serve (see [Cost per architecture](#cost-per-architecture)).
 
 For binary outcomes, every effect-variation screen below (architectures 2, 4,
 5, 6, 8, 9, and 10) uses the [DINA](glossary.md#dina) objective, built from
@@ -45,7 +49,8 @@ cross-fitted propensity and arm-specific outcome predictions; effects are
 reported on the log-odds-ratio scale inside the model and converted to risk
 differences for prediction. For continuous outcomes the same screens use the
 residualized relation `Y − m(X) ≈ τ(X)·(T − e(X))` that underlies the
-[R-loss](glossary.md#r-loss).
+[R-loss](glossary.md#r-loss). Architecture 3 instead compares the members of
+matched treated/untreated pairs.
 
 ### 1. Sparse treatment and outcome associations (`bow_nuisance`)
 
@@ -68,18 +73,93 @@ ordinary outcome prediction, but they do not show that the named characteristic
 modifies the treatment effect. The [R-learner weighting note](design_notes/r_learner_weighting.md)
 discusses the weighted and unweighted forms.
 
-### 3. Matched-pair uplift (`matched_pair_uplift`)
+### 3. Matched-pair effect modification (`matched_pair_uplift`)
 
-Treated patients are matched one-to-one to untreated patients whose
-cross-fitted propensity and outcome probability both lie within a caliper (0.05
-by default), using a maximum bipartite matching. A bag-of-words model and an
-[HTR](glossary.md#htr) model then predict each treated patient's outcome with the
-matched control's predicted risk as an offset, so the text features explain the
-difference within pairs. The architecture asks what differs in the records of
-otherwise similar patients who received different treatments. Matching balances
-only what the nuisance models capture, so the result is evidence for a candidate
-characteristic, not an individual treatment effect. It runs only for binary
-outcomes.
+Within each training context, treated patients are matched one-to-one, without
+replacement, to untreated patients. A pair is allowed only when both
+cross-fitted scores lie within a caliper: the propensity `ê` (absolute
+caliper `matched_pair_propensity_caliper`, 0.05 by default) and the
+[prognostic score](glossary.md#prognostic-score) `μ̂0`, the predicted outcome
+without treatment (`matched_pair_prognostic_caliper`: absolute on the
+probability scale for binary outcomes, 0.05 by default; in standard deviations
+of `μ̂0` over the training patients for continuous outcomes, 0.2 by default).
+Using a prognostic score alongside the propensity follows Hansen (2008). The
+matching is a maximum bipartite matching (Hopcroft–Karp) in which
+each treated patient tries its closest eligible controls first; a treated
+patient with no control inside both calipers stays unmatched. Each treated
+patient's candidate list keeps at most its 256 closest eligible controls,
+which matters only in large cohorts.
+
+Both scores are out of fold for every training patient:
+
+- `ê` is the mean of the bag-of-words nuisance propensities (architecture 1),
+  each predicted by a model fitted on the other nuisance folds. The HTR
+  propensity is not used, because its calibration step is fitted on
+  predictions from models that saw the patient.
+- For binary outcomes, `μ̂0` is the untreated-arm probability from the
+  context's cross-fitted DINA nuisance models (a ridge logistic regression on
+  untreated patients, fitted on the other folds). For continuous outcomes it is
+  a cross-fitted elastic-net linear regression on the untreated patients of the
+  other folds, using the first bag-of-words view's vocabulary.
+
+A pair is described by the average of its two members' bag-of-words vectors:
+one block of features per pair, with no treated or control side. One model is
+fitted per distinct vocabulary among the configured bag-of-words views, so
+views that differ only in their learner share a fit.
+
+**Binary outcomes: conditional logistic regression on discordant pairs.**
+Only pairs in which exactly one member had the event inform a matched-pair
+comparison; pairs in which both or neither had it are discarded (Breslow and
+Day 1980, chapters 5 and 7). With `D = 1` when the treated member had the
+event, the model is
+
+```text
+logit P(D = 1 | discordant pair) = [logit μ̂0(x_t) − logit μ̂0(x_c)] + α + β·x̄_pair
+```
+
+The bracketed term is a fixed offset that absorbs prognostic imbalance left
+inside the pair. The intercept `α` is the average conditional log odds ratio of
+treatment (features are centered, so it applies at the average pair), and each
+coefficient is effect modification on the log-odds-ratio scale.
+
+**Continuous outcomes: adjusted paired differences.** Every matched pair is
+kept, and the target is
+`Δ = (Y_t − Y_c) − (μ̂0(x_t) − μ̂0(x_c))`, regressed on the pair features. The
+intercept is the average effect and the coefficients are additive effect
+modification.
+
+Both fits are elastic nets (`matched_pair_l1_ratio`, 0.5 by default) on
+standardized pair features with an unpenalized intercept. The penalty is chosen
+from a 30-value path by `matched_pair_cv_folds`-fold cross-validation over
+pairs (5 by default), minimizing the held-out conditional negative
+log-likelihood (binary) or squared error (continuous). The vocabulary and the
+column scaling are fitted on the analysis pairs' records without outcome
+information. The evidence is the `top_n_features` terms with the largest
+absolute standardized coefficients, kept with their sign: a positive term
+means a higher conditional odds of the outcome (binary) or a larger outcome
+(continuous) for a treated patient than for a similar untreated patient. Stage
+2 attaches supporting sentences to these terms the same way it does for the
+other bag-of-words architectures.
+
+**Validation.** A nested cross-fit over the same pair folds, in which each
+fold's penalty is chosen by an inner cross-validation on the other folds'
+pairs, reports the held-out log-likelihood gain (binary) or squared-error
+reduction (continuous) of the fitted model over the intercept-only,
+constant-effect model with the same offset. It is reported in the evidence and
+in the evaluator's metrics and never filters evidence. For the outer held-out
+patients the architecture also writes a prediction
+`τ̂(x) = intercept + coefficients · x` from each patient's own features; nothing
+is fitted on those patients.
+
+**Power.** Only discordant pairs inform the binary fit, roughly `2p(1 − p)` of
+the matched pairs when the outcome rate is `p`, and patients without a match
+within the calipers contribute nothing. When a context has fewer than
+`matched_pair_min_discordant_pairs` discordant pairs (binary) or
+`matched_pair_min_pairs` matched pairs (continuous), both 30 by default, the
+architecture emits no evidence for that context and records the reason.
+Matching balances only what the nuisance models capture, so a term is evidence
+for a candidate effect modifier, not an estimate of an individual treatment
+effect.
 
 ### 4. Hierarchical transformer (`htr_neural`)
 
@@ -91,8 +171,7 @@ nuisance predictions fitted and frozen inside the effect-training fold. Its
 attention identifies the chunks the model relied on. Unlike a bag-of-words
 model, it can distinguish some uses of the same vocabulary and combine
 information spread across a long history. Attention describes what the model
-used, not a causal explanation. `--disable-htr` turns off this architecture and
-the HTR half of `matched_pair_uplift`.
+used, not a causal explanation. `--disable-htr` turns off this architecture.
 
 ### 5. Whole-cohort embedding contrasts (`embedding_whole_cohort`)
 
@@ -199,6 +278,31 @@ default) are saved as witnesses, together with phrases that distinguish those
 chunks from background text. Queries can learn several distinct detectors for
 the same objective, which a single mean-difference direction cannot.
 
+Each bank is fitted in two steps within a training context:
+
+1. **Candidates.** The context's training rows are split into inner folds
+   (`query_inner_folds`, 5 by default). On each inner fold the bank is fitted
+   on the other folds' rows, and every candidate query is then scored on the
+   rows it did not see: a held-out standardized moment statistic (z) for the
+   bank's objective and its two-sided p-value.
+2. **Consensus and refit.** All candidates of a bank are grouped by k-means on
+   their patient activation patterns into exactly as many groups as the bank
+   has queries. Each group's medoid initializes one query, and the bank is
+   refitted on all of the context's training rows.
+
+Groups are ordered by the median absolute held-out z of their members, then
+by the median absolute training statistic, then by the medoid candidate's ID.
+A group whose members have no held-out statistic follows every group that has
+one, and the number of such groups is recorded. The order only sets the query
+IDs (`<bank>_query_001` ranks first): no query is gated or dropped, so each
+bank keeps its configured number of queries. The held-out rows of this step
+are inner partitions of the context's own training rows; the context's
+held-out rows never enter it. Each query's evidence records its rank, both
+medians, the median held-out p-value, and every member's held-out z, held-out
+p-value, and training statistic (`member_heldout_statistics`);
+`components/neural_queries/<context>/query_records.json` holds the same values
+for every group and member.
+
 ### What agreement and disagreement mean
 
 Agreement across architectures increases confidence that a concept is not an
@@ -216,8 +320,8 @@ The selector is `science.stage1_architectures` in the configuration file, or
 
 | Selector | Architectures that run and enter the handoff |
 |---|---|
-| Omitted | The architectures enabled in the Stage 1 template `example_configs/all_evidence_stage1_model.json`. With the bundled template these are the eight marked "on" above, or seven for continuous outcomes because `matched_pair_uplift` requires a binary outcome. |
-| `all` | All ten. Because `matched_pair_uplift` requires a binary outcome, `all` is rejected for a continuous outcome; list the other nine instead. |
+| Omitted | The architectures enabled in the Stage 1 template `example_configs/all_evidence_stage1_model.json`. With the bundled template these are the eight marked "on" above, for binary and continuous outcomes. |
+| `all` | All ten |
 | Comma-separated list, for example `bow_nuisance,tfidf_topics` | Exactly those, in canonical order |
 
 Rules that apply to an explicit selection:
@@ -231,7 +335,9 @@ Rules that apply to an explicit selection:
   models. For example, the embedding architectures need nuisance predictions
   from a text model, so selecting only embedding architectures still fits the
   bag-of-words nuisance models (or the HTR models when bag-of-words is disabled
-  in the template), and `neural_query_moments` needs the embedding cache.
+  in the template), `matched_pair_uplift` needs the bag-of-words views and
+  their nuisance propensities, and `neural_query_moments` needs the embedding
+  cache.
   Prerequisites run as private support; only the selected architectures'
   evidence enters the handoff and Stage 2.
 - **Availability checks.** Naming either optional architecture enables it. A
@@ -265,28 +371,265 @@ uv run oci-evaluate-stage1 \
 | `--architectures` | Comma-separated IDs, or `all` (default) for every architecture present in the run |
 | `--dataset` | The dataset with [oracle columns](glossary.md#oracle-columns); defaults to the path in the run's `run_config.json` |
 | `--metadata` | The generator's `metadata.json`, which names the true confounders and modifiers; defaults to `metadata.json` beside the dataset |
-| `--output-dir` | Defaults to `<run-dir>/evaluations/stage1` |
+| `--output-dir` | Defaults to `<run-dir>/evaluation/stage1` |
+| `--null-draws` | Random-chunk null draws per architecture and context for the lexical recovery metric (default 200; 0 disables the null) |
 
-The evaluator hashes every Stage 1 evidence and score file it will use before it
-opens the oracle-bearing dataset, keeps the loaded copies in memory, and
-records the hashes in `evaluation_manifest.json`. It never changes pipeline
-checkpoints or completion markers. If the run has no per-architecture
+The evaluator hashes every Stage 1 evidence, score, split, and timing file it
+will use before it opens the oracle-bearing dataset, keeps the loaded copies in
+memory, and records the hashes in `evaluation_manifest.json`. It never changes
+pipeline checkpoints or completion markers. If the run has no per-architecture
 sidecars, it builds them from the handoff first.
 
 Metrics are computed on outer held-out rows where row-level scores exist. They
 include:
 
 - **Recovery:** whether evidence text mentions the true features (best lexical
-  token recall), and how strongly row-level scores associate with each true
-  feature's value;
+  token recall, compared with a random-chunk null below), and how strongly
+  row-level scores associate with each true feature's value. For the embedding
+  architectures the row-level scores are the held-out patients' mean and
+  maximum chunk cosine with each handed-off direction (columns
+  `direction__<contrast>__mean_chunk_cosine` and `__max_chunk_cosine`), and
+  `handed_off_direction_score_coverage` reports the share of an outer fold's
+  handed-off directions that have scores;
 - **Nuisance quality:** the treatment-prediction AUC of nuisance scores;
 - **Effect quality:** the best normalized R-loss gain and the association of
   effect scores with the true individual effect;
 - **Stability:** overlap of evidence across inner folds, plus
   architecture-specific measures such as topic, query, or cluster stability and
-  matching or retrieval coverage.
+  retrieval coverage;
+- **Matched pairs** (`matched_pair_uplift`, read from the frozen text-model
+  evidence, which is hashed with the other inputs): the numbers of matched and
+  discordant pairs, the counts of pairs in which only the treated member
+  (`n10`) or only the control (`n01`) had the event, the McNemar log odds ratio
+  `log(n10/n01)` (binary) or the mean adjusted paired difference (continuous),
+  the mean and maximum within-pair `|Δê|` and `|Δμ̂0|`, the held-out gain over
+  the constant-effect model, and the number of nonzero terms, per context.
 
-Outputs: `metrics.jsonl` (all metrics), `architectures/<id>/metrics.jsonl`,
-`comparison.csv` (one summary row per architecture and metric), `summary.json`,
-and `evaluation_manifest.json`. See [Synthetic data](synthetic_data.md) for the
-oracle columns and the bundled cohorts.
+### Random-chunk null for lexical recovery
+
+Long excerpts contain many words, so an architecture that emits long text can
+reach a high token recall by chance. For each architecture and discovery
+context (an outer fold's full training set or one of its inner training
+folds), the evaluator draws `--null-draws` sets of random text windows from
+that context's training rows (from `components/tfidf/split_provenance.jsonl`).
+Each set has one window per evidence item of the architecture in that context,
+with the same number of characters; a window starts at a word boundary of a
+training row long enough to hold it (an item longer than every training row
+takes a whole row, counted as `length_unmatched_items`). The same best token
+recall is computed on every set. The draws are seeded from the run seed, the
+architecture, and the context, so a repeated evaluation reproduces them. For
+each true feature and context the evaluator reports the observed value, the
+null mean, the null 95th percentile, and the empirical p-value
+`(1 + #{null ≥ observed}) / (draws + 1)`.
+
+### Cost per architecture
+
+Each Stage 1 context records the wall time of its sections in
+`components/<component>/<context>/timing.json`, and each component collects its
+contexts in `components/<component>/timing.jsonl`
+(`components/embedding_cache/timing.jsonl` holds the one cache build). A
+section that serves one architecture is attributed to it; a section that
+several architectures need, such as the bag-of-words nuisance fits, the
+nuisance ensemble, the TF-IDF nuisance stacks, and the embedding cache, is
+attributed to `shared` and lists its consumers. A context whose sections
+restored checkpoints is marked `partially_restored` with the restored units; a
+context restored whole keeps the record written when it was computed; a
+context restored from a checkpoint written without timing is marked
+`unknown`, and the evaluator reports a completed component without a
+`timing.jsonl` the same way. Timing never enters a checkpoint identity or any
+fitted value.
+
+### Outputs
+
+The evaluator writes to `<run-dir>/evaluation/stage1/` (or `--output-dir`):
+
+| File | Content |
+|---|---|
+| `metrics.jsonl` | Every metric row, including the null comparisons (`oracle_feature_recovery_null`) and per-context wall seconds (`cost`) |
+| `architectures/<id>/metrics.jsonl` | The same rows for one architecture |
+| `comparison.csv` | One summary row per architecture, metric, and target (mean, standard deviation, and count over estimates) |
+| `lexical_recovery_null.csv` | One row per architecture, context, and true feature: observed recall, null mean, null 95th percentile, empirical p-value, draws, evidence items, length-unmatched items, and seed |
+| `timing.csv` | One row per timed section and context: component, context, status, unit, attribution, consumers, and seconds |
+| `summary.json` | Counts, the comparison table, the null settings, and the timing summary (per-architecture and shared seconds, context status counts, and contexts with unknown timing) |
+| `evaluation_manifest.json` | Input paths and hashes, the oracle columns read, and the number of null draws |
+
+See [Synthetic data](synthetic_data.md) for the oracle columns and the bundled
+cohorts.
+
+## Attribution and ablation
+
+Two post-hoc tools measure what each architecture contributes to Stage 2. Both
+read frozen outputs and change nothing a run reads; the ablation tool only
+prepares inputs for separate Stage 2 runs.
+
+### Attribution of Stage 2 variables
+
+`oci-evaluate-attribution` credits each Stage 2 variable to the architectures
+whose evidence supported it, fold by fold:
+
+```bash
+uv run oci-evaluate-attribution --run-dir /path/to/output
+uv run oci-evaluate-attribution --run-dir /path/to/output --oracle   # synthetic cohorts
+```
+
+It follows the lineage Stage 2 records. Each evidence card lists its
+`source_architectures` (`stage2/evidence_compilation/outer_00k/cards.jsonl`);
+each candidate cites the cards it was proposed from
+(`outer_00k/interpreted_candidates.json`); and each defined variable lists its
+cards and, through `candidate_dispositions`, its candidates
+(`outer_00k/feature_definitions.json`). An architecture supports a variable
+when it produced one of the variable's cards or one of its candidates' cards,
+or when the variable lists it in `supporting_architectures`. Variables created
+later inherit lineage: a variable split by the extraction review, or an
+estimand-search variant, from its parent definition; a consolidated latent from
+all of its measurement dependencies. A variable is **sole-source** when exactly
+one architecture supports it and it is not investigator-specified
+(`stage2.explicit_features`); every supporting architecture gets
+**any-source** credit.
+
+For each fold, in total, and for each architecture, the report gives the
+any-source and sole-source count at each level:
+
+| Level | Items |
+|---|---|
+| `cards` | Evidence cards compiled for the fold |
+| `candidates` | Candidates proposed by interpretation |
+| `variables_defined` | Variables in `feature_definitions.json` |
+| `variables_passing_filter` | Variables kept by the informativeness and extraction-failure filter (`extraction/candidate_missingness_filter.json`, and the estimand-search filter when it ran) |
+| `nuisance_set` | Selected variables with the `confounder` role (`final_definitions.json`) |
+| `selected_modifiers` | Selected variables with the `effect_modifier` role |
+
+Each level also counts its items with several supporting architectures, its
+investigator-specified items, and items without recorded lineage. Every card
+and candidate comes from one architecture, so credit starts to be shared where
+candidates merge into variables.
+
+**Oracle recovery (`--oracle`).** For synthetic cohorts, the report then
+measures which data-generating variables the selected variables capture. It
+first reads and hashes every Stage 2 artifact it uses and closes its reader;
+only then does it load the `true_<variable>` columns named in the generator's
+`metadata.json` (without metadata, every `true_*` column except the outcome-model
+and effect columns such as `true_ite`). On each fold's outer held-out rows, it
+regresses each oracle column on each variable's columns from the frozen
+held-out extraction (`estimation/nuisance_candidate_heldout.csv`, encoded as in
+the Stage 2 diagnostics: a numeric value or one indicator per level, with
+not-documented, documented-unknown, and extraction-failure indicators) by
+ordinary least squares with an intercept. A categorical oracle column is
+one-hot encoded, and its R² is 1 − ΣSSE/ΣSST over its levels. A variable
+recovers an oracle concept when R² ≥ `--recovery-r2`; a variable's name plays
+no part. The report lists, per fold and architecture, the concepts recovered
+by the selected variables it supported, any-source and sole-source, for all
+selected variables, the nuisance set, and the modifiers. The R² is computed on
+the same held-out rows it describes, so it is slightly optimistic for variables
+with many levels.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--run-dir DIR` | required | Workflow output directory, or an ablation directory written by `prepare` |
+| `--oracle` | off | Add oracle recovery |
+| `--recovery-r2 R` | 0.5 | Held-out R² at which a variable recovers an oracle concept |
+| `--dataset PATH` | `input/analysis_cohort.parquet` when present, else `dataset` from `run_config.json` | Dataset with oracle columns (`--oracle`); for an ablation directory, its source run's |
+| `--metadata PATH` | `metadata.json` beside the run's dataset | Generator metadata (`--oracle`) |
+| `--out DIR` | `RUN_DIR/evaluation/attribution` | Output directory; inside the run directory it must be under `evaluation/` |
+
+Outputs: `attribution.json` (all counts, and recovery with `--oracle`),
+`attribution_counts.csv` (one row per fold, level, and architecture),
+`variables.csv` (each variable's cards, candidates, architectures, and levels),
+`attribution_manifest.json` (the SHA-256 of every Stage 2 artifact read, and
+the oracle inputs), and with `--oracle`, `oracle_recovery.csv` (recovered
+concepts per fold, level, and architecture) and `oracle_recovery_r2.csv`
+(every variable–concept R²).
+
+### Leave-one-architecture-out ablation
+
+`scripts/ablate_stage1_architectures.py` measures what Stage 2 loses without
+each architecture by rerunning Stage 2 on the run's handoff minus that
+architecture's evidence. Its `prepare` step writes the inputs and prints the
+commands; it never starts an LLM request. Each ablation is a
+[`run_stage2_from_artifacts.py`](configuration.md#stage-2-in-a-separate-directory-from-preserved-stage-1-artifacts)
+launch with the run's split file, dataset, Stage 2 settings, and seed.
+
+```bash
+python scripts/ablate_stage1_architectures.py prepare \
+  --run-dir /path/to/output --out /path/to/ablations \
+  --stage2-config endpoints.json --include-control
+# run the printed launcher commands, then:
+python scripts/ablate_stage1_architectures.py compare \
+  --run-dir /path/to/output --ablation-dir /path/to/ablations --oracle
+```
+
+`prepare` writes `without_<architecture>/` for each architecture of the run, or
+for those named by `--architectures`. The run's architectures are its explicit
+selection (`stage1_architectures/manifest.json`), else the architectures its
+Stage 2 compiled, else those with evidence in the handoff.
+
+| File | Content |
+|---|---|
+| `handoff/evidence.jsonl` | The run's handoff without the architecture's evidence |
+| `handoff/index.json` | The remaining architectures, and the component evidence files Stage 2 reads to check the split file |
+| `components/tfidf/split_provenance.jsonl` | Copy of the run's split file |
+| `components/embedding_cache` | Link to the run's embedding cache, when the run has one, so evidence cards are grouped as in the run |
+| `stage2_from_artifacts.json` | Launcher configuration; Stage 2 writes to `stage2/` and the launcher's status files go to `stage2_report/` |
+| `ablation.json` | Row counts, the filtering rule, the launch commands, and the SHA-256 of every input |
+
+`ABLATION_DIR/ablations.json` indexes the prepared and skipped ablations.
+
+Filtering works on architecture rows. In a handoff written for an explicit
+selection, each row holds one architecture's evidence, so the ablated
+architecture's rows are dropped and every other line is copied unchanged.
+Without a selection, the handoff streams component rows, and one text-model row
+can hold several architectures' evidence (BoW nuisance and R-loss views,
+matched pairs, embedding contrasts, HTR). `prepare` then first projects the
+handoff into one row per architecture occurrence with the extractor Stage 2
+uses, writes the projection to `ABLATION_DIR/projection/`, and drops the
+ablated architecture's rows, so the other architectures keep their evidence
+from shared rows. The projection compiles to the same evidence cards as the
+original handoff. In each launcher configuration, `stage2.included_architectures`
+lists the remaining architectures and `stage2.required_architectures` those of
+them present in every outer fold. An ablation that would leave an empty handoff
+is skipped with a message.
+
+Stage 2's LLM steps vary from run to run, so an ablation's differences from the
+full run combine the removed evidence with that variation. `--include-control`
+adds `full_control/`, a rerun with every architecture, which measures the
+variation alone.
+
+The Stage 2 settings come from the run's `run_config.json`. `--stage2-config`
+names a JSON file whose `stage2` block is merged over them, and which may also
+set `concurrency_control_path` and `tokenizer_cache_dir`. Use it to point at
+running servers: the launcher does not start managed vLLM pools, and an
+endpoint in the template replaces the run's `vllm` block. API keys stay
+`<redacted>` unless the template sets them; the launcher then reads
+`OCI_STAGE2_API_KEY`, `OCI_STAGE2_EXTRACTION_API_KEY`, and
+`OCI_STAGE2_EXTRACTION_RUNTIME_API_KEY` when it starts. A key in the template
+is copied into every launcher configuration, so prefer the environment
+variables. The dataset is `input/analysis_cohort.parquet` when the run used
+dated notes, else the run's dataset; a CSV dataset is written to
+`ABLATION_DIR/shared/stage2_cohort.parquet` with only the four declared
+columns, because the launcher reads Parquet.
+
+`compare` reads each finished ablation (one whose `stage2/` holds
+`causal_estimate.json` and `heterogeneity_diagnostics.json`) and lists the
+others as pending, with the launcher's last status. Fold by fold, it matches
+the ablation's selected modifiers, and separately its nuisance set, to the full
+run's by concept with the cross-fold matching rule of the
+[outer-fold confirmation](stage2_selection.md#outer-fold-confirmation)
+(TF-IDF similarity of name, description, and measurement definition, threshold
+0.7, at most one variable per side in a concept), and reports the Jaccard
+overlap of the concepts (1 when both sets are empty) and the concepts lost and
+gained. It also reports the ATE and ATO with their 95% CIs, the pooled BLP β2
+with the primary heterogeneity test's p-value, per fold where available, and,
+with `--oracle`, the oracle concepts each side's selected variables recover, as
+in the attribution report. It writes `comparison.json`, `summary.csv` (one row
+per ablation, with the full run as reference), `folds.csv` (one row per
+ablation and fold), and `summary.md` to `ABLATION_DIR/comparison/`, or to
+`--out`. `compare` accepts the same `--oracle`, `--recovery-r2`, `--dataset`,
+and `--metadata` options as `oci-evaluate-attribution`.
+
+## References
+
+- Breslow NE, Day NE. *Statistical Methods in Cancer Research, Volume I: The
+  Analysis of Case-Control Studies.* IARC Scientific Publications No. 32. Lyon:
+  International Agency for Research on Cancer; 1980.
+- Hansen BB. The prognostic analogue of the propensity score. *Biometrika*
+  2008;95(2):481–488.

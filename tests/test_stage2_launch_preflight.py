@@ -27,8 +27,10 @@ def tree(root):
     }
 
 
-def saved_fixture(tmp_path, managed=False):
+def saved_fixture(tmp_path, managed=False, prepare_raw=None):
     raw, _ = _inputs(tmp_path, components=())
+    if prepare_raw is not None:
+        prepare_raw(raw, tmp_path)
     raw["run"]["mode"] = "stage2"
     raw["stage2"] = {
         "endpoint": "http://primary.test/v1",
@@ -43,7 +45,7 @@ def saved_fixture(tmp_path, managed=False):
     write(root / "run_config.json", config.as_dict())
     applied = workflow._load_stage1_template(config)
     write(root / "resolved_stage1_model_config.json", applied)
-    data = pd.read_parquet(config.dataset)
+    data = workflow._load_analysis_dataset(config, materialize=True)
     identity = tfidf_topic_dataset_fingerprints(
         data, workflow.ExperimentConfig.from_dict({"applied_inference": applied}).applied_inference
     )
@@ -95,7 +97,7 @@ def saved_fixture(tmp_path, managed=False):
     write(
         root / "handoff/index.json",
         {
-            "dataset": str(config.dataset),
+            "dataset": str(config.analysis_dataset),
             "columns": {
                 "unit_id": config.unit_id_column,
                 "text": config.text_column,
@@ -352,3 +354,108 @@ def test_normal_resume_finalizes_existing_migration_without_rearchival(tmp_path,
     assert persisted["status"] == "complete"
     assert persisted["reselection_id"] == state["reselection_id"]
     assert len(list((config.output_dir / "stage2/reselection_archives").iterdir())) == 1
+
+
+_STAGE2_SETTINGS = {
+    "endpoint": "http://primary.test/v1",
+    "model": "preserved-primary",
+    "extraction_llm": {"endpoint": "http://extract.test/v1", "model": "preserved-extractor"},
+}
+_STAGE2_SET_ARGS = (
+    "--set", "stage2.endpoint=http://primary.test/v1",
+    "--set", "stage2.model=preserved-primary",
+    "--set", "stage2.extraction_llm.endpoint=http://extract.test/v1",
+    "--set", "stage2.extraction_llm.model=preserved-extractor",
+)
+
+
+def stage1_only_fixture(tmp_path):
+    """A completed --stage1-only run, whose run_config.json saves stage2: null.
+
+    Also returns the nested study configuration that launched it, without a
+    stage2 block.
+    """
+    study = {}
+    config = saved_fixture(
+        tmp_path, prepare_raw=lambda raw, _path: study.update(json.loads(json.dumps(raw)))
+    )
+    stage1_run = replace(
+        config, mode="stage1", components=workflow.STAGE1_COMPONENT_ORDER, stage2=None
+    )
+    write(config.output_dir / "run_config.json", stage1_run.as_dict())
+    saved = json.loads((config.output_dir / "run_config.json").read_text())
+    assert saved["stage2"] is None and saved["mode"] == "stage1"
+    return config, study
+
+
+def _preflight_cli(capsys, *argv):
+    assert workflow.main([*argv, "--stage2-only", "--preflight-only"]) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+@pytest.mark.parametrize(
+    "stage2_args",
+    [
+        _STAGE2_SET_ARGS,
+        # The documented Stage 2-only command, plus the two model IDs.
+        (
+            "--set", "stage2.endpoint=http://primary.test/v1",
+            "--stage2-extraction-endpoint", "http://extract.test/v1",
+            "--set", "stage2.model=preserved-primary",
+            "--set", "stage2.extraction_llm.model=preserved-extractor",
+        ),
+    ],
+)
+def test_preflight_of_stage1_only_run_accepts_stage2_settings_from_set(
+    tmp_path, capsys, stage2_args
+):
+    config, _study = stage1_only_fixture(tmp_path)
+    before = tree(tmp_path)
+    run_config = str(config.output_dir / "run_config.json")
+    result = _preflight_cli(capsys, "--config", run_config, *stage2_args)
+    assert result["status"] == "validated"
+    assert result["stage2_action"] == "fresh Stage 2 discovery and extraction"
+    assert (result["primary_model"], result["extraction_model"]) == (
+        "preserved-primary",
+        "preserved-extractor",
+    )
+    assert tree(tmp_path) == before
+
+
+def test_preflight_of_stage1_only_run_accepts_a_config_stage2_block(tmp_path, capsys):
+    config, study = stage1_only_fixture(tmp_path)
+    study_path = tmp_path / "study_with_stage2.json"
+    write(study_path, {**study, "stage2": _STAGE2_SETTINGS})
+    before = tree(tmp_path)
+    result = _preflight_cli(capsys, "--config", str(study_path))
+    assert result["status"] == "validated"
+    assert result["output_dir"] == str(config.output_dir)
+    assert tree(tmp_path) == before
+
+
+@pytest.mark.parametrize(
+    "override,name",
+    [
+        (("--set", "science.seed=99"), "seed"),
+        (("--set", "science.outer_folds=3"), "outer_folds"),
+        (("--set", 'science.stage1={"training": {"epochs": 4}}'), "stage1_overrides"),
+        (("--disable-htr",), "htr_enabled"),
+        (("--set", "models.embeddings=other-embedding-model"), "embedding_model"),
+    ],
+)
+def test_preflight_of_stage1_only_run_still_detects_stage1_mismatch(
+    tmp_path, capsys, override, name
+):
+    config, study = stage1_only_fixture(tmp_path)
+    study_path = tmp_path / "study_with_stage2.json"
+    write(study_path, {**study, "stage2": _STAGE2_SETTINGS})
+    before = tree(tmp_path)
+    for argv in (
+        ["--config", str(config.output_dir / "run_config.json"), *_STAGE2_SET_ARGS],
+        ["--config", str(study_path)],
+    ):
+        with pytest.raises(SystemExit) as raised:
+            workflow.main([*argv, *override, "--stage2-only", "--preflight-only"])
+        assert raised.value.code == 2
+        assert f"saved Stage 1 configuration mismatch: {name}" in capsys.readouterr().err
+    assert tree(tmp_path) == before

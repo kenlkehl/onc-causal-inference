@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -70,10 +71,43 @@ def _normalized_gpu(value: Any) -> str:
     return f"cuda:{int(text)}"
 
 
+def _is_nemotron_3_5(model: str) -> bool:
+    return bool(re.search(r"nemotron[-_ ]?3[._]5(?![0-9])", str(model), re.I))
+
+
+def _is_reflection_beam_1(model: str) -> bool:
+    return bool(
+        re.search(r"(?<![a-z0-9])beam[-_ ]?1(?:[._][0-9]+)*(?![0-9])", str(model), re.I)
+    )
+
+
+def _model_family_environment(model: str) -> dict[str, str]:
+    """Child-process defaults for recognized families (set only when unset)."""
+
+    if _is_reflection_beam_1(model):
+        # vLLM's Beam recipe allows the first start, about 10 minutes, an
+        # hour rather than vLLM's 600-second engine-ready default.
+        return {"VLLM_ENGINE_READY_TIMEOUT_S": "3600"}
+    return {}
+
+
+def _model_family_trusts_remote_code(model: str) -> bool:
+    """Families whose publisher serves them with ``--trust-remote-code``."""
+
+    # NVIDIA's Nemotron 3.5 model card serves it with --trust-remote-code.
+    return _is_nemotron_3_5(model)
+
+
 def _model_family_defaults(model: str) -> tuple[str, bool | None, Mapping[str, Any] | None]:
     """Return requested vLLM defaults for recognized reasoning-model families."""
 
     normalized = str(model).strip().lower()
+    if _is_nemotron_3_5(normalized):
+        # NVIDIA's model card serves Nemotron 3.5 with this parser.
+        return "nemotron_v3", None, None
+    if _is_reflection_beam_1(normalized):
+        # vLLM's Beam recipe serves it with this parser (text only).
+        return "beam", None, None
     if "gemma" in normalized:
         # Thinking is selected per request through reasoning_effort. A server
         # default would force extraction and interpretation into one mode.
@@ -171,6 +205,7 @@ class ManagedVLLMConfig:
     reasoning_parser: str = ""
     language_model_only: bool | None = None
     default_chat_template_kwargs: Mapping[str, Any] | None = None
+    trust_remote_code: bool = False
     extra_args: tuple[str, ...] = ()
 
     def validate(self) -> None:
@@ -226,6 +261,8 @@ class ManagedVLLMConfig:
             self.default_chat_template_kwargs, Mapping
         ):
             raise ValueError("stage2.vllm.default_chat_template_kwargs must be an object or null")
+        if not isinstance(self.trust_remote_code, bool):
+            raise ValueError("stage2.vllm.trust_remote_code must be true or false")
         for argument in self.extra_args:
             token = str(argument)
             flag = token.split("=", 1)[0]
@@ -347,6 +384,11 @@ def managed_vllm_config_from_mapping(
         if "default_chat_template_kwargs" not in raw
         else raw.get("default_chat_template_kwargs")
     )
+    trust_remote_code = (
+        _model_family_trusts_remote_code(model)
+        if "trust_remote_code" not in raw
+        else raw.get("trust_remote_code")
+    )
 
     config = ManagedVLLMConfig(
         server_count=server_count,
@@ -365,6 +407,7 @@ def managed_vllm_config_from_mapping(
         reasoning_parser=reasoning_parser,
         language_model_only=language_model_only,
         default_chat_template_kwargs=default_chat_template_kwargs,
+        trust_remote_code=trust_remote_code,
         extra_args=tuple(str(argument) for argument in raw_extra_args),
     )
     config.validate()
@@ -433,6 +476,8 @@ def _build_vllm_command(
         command.extend(["--download-dir", config.download_dir])
     if config.reasoning_parser:
         command.extend(["--reasoning-parser", config.reasoning_parser])
+    if config.trust_remote_code and "--trust-remote-code" not in config.extra_args:
+        command.append("--trust-remote-code")
     if config.language_model_only is True:
         command.append("--language-model-only")
     elif config.language_model_only is False:
@@ -633,6 +678,8 @@ class ManagedVLLMServerPool:
                 )
                 environment["VLLM_PORT"] = str(internal_port_base)
                 environment.setdefault("PYTHONUNBUFFERED", "1")
+                for name, value in _model_family_environment(self.model).items():
+                    environment.setdefault(name, value)
                 try:
                     process = subprocess.Popen(
                         command,

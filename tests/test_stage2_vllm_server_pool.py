@@ -1300,3 +1300,90 @@ def test_managed_pool_context_stops_before_propagating_termination_signal(
 
     assert stops == ["interrupted"]
     assert signal.getsignal(signal.SIGTERM) is original_handler
+
+
+@pytest.mark.parametrize(
+    "model,vllm_block,expected_flag",
+    [
+        ("nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4", {}, True),
+        ("nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4", {"trust_remote_code": False}, False),
+        ("google/gemma-4-31B-it", {}, False),
+        ("google/gemma-4-31B-it", {"trust_remote_code": True}, True),
+    ],
+)
+def test_trust_remote_code_family_default_and_override(model, vllm_block, expected_flag):
+    config = server_pool.managed_vllm_config_from_mapping(
+        {"gpus": ["0"], **vllm_block}, model=model
+    )
+    assert config.trust_remote_code is expected_flag
+    command = server_pool._build_vllm_command(
+        config, model=model, api_key="EMPTY", port=8010, tensor_parallel_size=1
+    )
+    assert ("--trust-remote-code" in command) is expected_flag
+    if "nemotron" in model.lower():
+        assert command[command.index("--reasoning-parser") + 1] == "nemotron_v3"
+
+
+def test_trust_remote_code_is_not_repeated_from_extra_args():
+    model = "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16"
+    config = server_pool.managed_vllm_config_from_mapping(
+        {"gpus": ["0"], "extra_args": ["--trust-remote-code"]}, model=model
+    )
+    command = server_pool._build_vllm_command(
+        config, model=model, api_key="EMPTY", port=8010, tensor_parallel_size=1
+    )
+    assert command.count("--trust-remote-code") == 1
+    with pytest.raises(ValueError, match="trust_remote_code"):
+        server_pool.managed_vllm_config_from_mapping(
+            {"gpus": ["0"], "trust_remote_code": "yes"}, model=model
+        )
+
+
+@pytest.mark.parametrize("exported,expected", [(None, "3600"), ("900", "900")])
+def test_beam_pool_extends_the_engine_ready_timeout_unless_exported(
+    tmp_path, monkeypatch, exported, expected
+):
+    model = "reflection/Beam-1.0-501B-A23B-NVFP4"
+    popen_calls = []
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            self.command = list(command)
+            self.kwargs = kwargs
+            self.pid = 10_000
+            self.returncode = None
+            popen_calls.append(self)
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            if self.returncode is None:
+                self.returncode = 0
+            return self.returncode
+
+    def fake_signal(server, sig):
+        server.process.returncode = -sig
+
+    if exported is None:
+        monkeypatch.delenv("VLLM_ENGINE_READY_TIMEOUT_S", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_ENGINE_READY_TIMEOUT_S", exported)
+    monkeypatch.setattr(server_pool, "_assert_port_available", lambda *_args: None)
+    monkeypatch.setattr(server_pool, "_server_model_ids", lambda *_args, **_kwargs: [model])
+    monkeypatch.setattr(server_pool.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(
+        ManagedVLLMServerPool, "_signal_process_group", staticmethod(fake_signal)
+    )
+    config = server_pool.managed_vllm_config_from_mapping({"gpus": ["0"]}, model=model)
+    pool = ManagedVLLMServerPool(
+        config=config, model=model, api_key="EMPTY", output_dir=tmp_path / "servers"
+    )
+    pool.start()
+    pool.stop()
+
+    (call,) = popen_calls
+    assert call.kwargs["env"]["VLLM_ENGINE_READY_TIMEOUT_S"] == expected
+    assert call.command[call.command.index("--reasoning-parser") + 1] == "beam"
+    assert "--trust-remote-code" not in call.command
+    assert "--language-model-only" not in call.command

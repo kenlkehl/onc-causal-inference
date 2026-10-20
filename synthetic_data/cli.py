@@ -606,8 +606,139 @@ def run_confounder_extraction(
 # CLI
 # ---------------------------------------------------------------------------
 
-def main():
-    """Main entry point for CLI."""
+def _comma_list(value: str) -> List[str]:
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    if not items:
+        raise argparse.ArgumentTypeError("expected a comma-separated list")
+    return items
+
+
+def _add_dgp_factor_arguments(parser: argparse.ArgumentParser) -> None:
+    """Role, equation-shape, and generation-time factor flags (all default to the config)."""
+
+    roles = parser.add_argument_group("additional roles and equation shape")
+    roles.add_argument(
+        "--num-instruments", type=int, default=None,
+        help="Variables that enter the treatment equation only (default: 0)",
+    )
+    roles.add_argument(
+        "--num-prognostic", type=int, default=None,
+        help="Variables that enter the outcome equation only (default: 0)",
+    )
+    roles.add_argument(
+        "--modifier-main-effects", action="store_true", default=None,
+        help="Give effect-modifier-only variables an outcome main effect too",
+    )
+    roles.add_argument(
+        "--nonlinearity", choices=["none", "threshold", "quadratic"], default=None,
+        help="Shape of continuous outcome main terms and treatment interactions (default: none)",
+    )
+    roles.add_argument(
+        "--treatment-logit-std", type=float, default=None,
+        help="SD of the treatment linear predictor (default: --target-logit-std)",
+    )
+    roles.add_argument(
+        "--outcome-logit-std", type=float, default=None,
+        help="SD of the outcome linear predictor (default: --target-logit-std)",
+    )
+    roles.add_argument(
+        "--modifier-strength", type=float, default=None,
+        help="Multiplier for the treatment x effect-modifier coefficients (default: 2.0)",
+    )
+
+    factors = parser.add_argument_group("generation-time factors")
+    factors.add_argument(
+        "--covariate-correlation", type=float, default=None,
+        help="Exchangeable latent correlation of a Gaussian copula over the variables (default: 0)",
+    )
+    factors.add_argument(
+        "--documentation-rate", type=float, default=None,
+        help="Probability that each variable's value is given to the note writer (default: 1.0)",
+    )
+    factors.add_argument(
+        "--documentation-mechanism", choices=["mcar", "mnar"], default=None,
+        help="mcar: constant probability; mnar: logistic in the standardized value (default: mcar)",
+    )
+    factors.add_argument(
+        "--documentation-mnar-slope", type=float, default=None,
+        help="Logistic slope of the MNAR documentation probability (default: 1.0)",
+    )
+    factors.add_argument(
+        "--documented-variables", type=_comma_list, default=None,
+        help="Comma-separated variables under documentation control (default: all)",
+    )
+    factors.add_argument(
+        "--post-treatment-rate", type=float, default=None,
+        help="Enable post-treatment dated notes: probability that a patient has them",
+    )
+    factors.add_argument(
+        "--post-treatment-events", type=_comma_list, default=None,
+        help="Comma-separated post-treatment events (default: toxicity,early_response)",
+    )
+    factors.add_argument(
+        "--post-treatment-regimen-mention-prob", type=float, default=None,
+        help="Probability that a post-treatment note names the regimen (default: 0.5)",
+    )
+    factors.add_argument(
+        "--num-proxy-variables", type=int, default=None,
+        help="Confounders that get a near-duplicate proxy variable (default: 0)",
+    )
+    factors.add_argument(
+        "--proxy-correlation", type=float, default=None,
+        help="Latent correlation of each proxy with its confounder (default: 0.9)",
+    )
+
+
+_FACTOR_ARGUMENTS = (
+    "num_instruments",
+    "num_prognostic",
+    "modifier_main_effects",
+    "nonlinearity",
+    "treatment_logit_std",
+    "outcome_logit_std",
+    "modifier_strength",
+    "covariate_correlation",
+    "documentation_rate",
+    "documentation_mechanism",
+    "documentation_mnar_slope",
+    "num_proxy_variables",
+    "proxy_correlation",
+)
+
+
+def _apply_dgp_factor_arguments(config: SyntheticDataConfig, args: argparse.Namespace) -> None:
+    """Set every factor flag that was given; the others keep the config's value."""
+
+    for name in _FACTOR_ARGUMENTS:
+        value = getattr(args, name)
+        if value is not None:
+            setattr(config, name, value)
+    if args.documented_variables is not None:
+        config.documented_variables_subset = list(args.documented_variables)
+    post = {
+        key: value
+        for key, value in (
+            ("rate", args.post_treatment_rate),
+            ("events", args.post_treatment_events),
+            ("regimen_mention_prob", args.post_treatment_regimen_mention_prob),
+        )
+        if value is not None
+    }
+    if post:
+        config.post_treatment_notes = {**(config.post_treatment_notes or {}), **post}
+
+
+def main(argv: Optional[List[str]] = None):
+    """Main entry point for CLI.
+
+    ``reequation`` as the first argument runs the re-equation command
+    (``synthetic_data.reequation``); any other arguments run the generator.
+    """
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "reequation":
+        from .reequation import reequation_main
+        return reequation_main(argv[1:])
+
     parser = argparse.ArgumentParser(
         description="Generate synthetic clinical datasets with known causal structure using LLM.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -630,6 +761,9 @@ Examples:
 
   # Generate and extract features in one step
   python -m synthetic_data.cli --dataset-size 100 --extract-features
+
+  # Re-equation: new treatment and outcome equations over an existing cohort's text
+  python -m synthetic_data.cli reequation --source original --scenario scenario.json --seed 1 --output-dir ./reequated
         """,
     )
 
@@ -897,7 +1031,9 @@ Examples:
         help="Batch size for confounder extraction (default: 10)",
     )
 
-    args = parser.parse_args()
+    _add_dgp_factor_arguments(parser)
+
+    args = parser.parse_args(argv)
 
     if args.num_features is None and (
         args.num_confounders is not None or args.num_effect_modifiers is not None
@@ -979,6 +1115,7 @@ Examples:
             config.llm.model_name = args.model
         if args.max_tokens != 50000:
             config.llm.max_tokens = args.max_tokens
+        _apply_dgp_factor_arguments(config, args)
     else:
         # Build config from CLI args; unset options keep the dataclass defaults.
         optional_overrides = {
@@ -1023,6 +1160,7 @@ Examples:
                 max_tokens=args.max_tokens,
             ),
         )
+        _apply_dgp_factor_arguments(config, args)
 
     # Save config to output directory before generation
     output_dir = Path(config.output_dir)
@@ -1096,4 +1234,4 @@ Examples:
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,4 +1,4 @@
-"""HTR training core for the Stage 1 neural and matched-pair lanes.
+"""HTR training core for the Stage 1 neural lane.
 
 The networks, loaders, and training loops live here so that Stage 1 never
 imports the agentic runners or constructs their LLM agent and extraction
@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import gc
 import logging
+import multiprocessing
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -19,7 +20,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, RandomSampler
 
 from ..config import (
     HTR_EFFECT_OBJECTIVES,
@@ -93,8 +94,8 @@ def torch_pseudo_outcome_mse_loss_vector(
         & torch.isfinite(t_residual)
         & (torch.abs(t_residual) > min_abs_t_residual)
     )
-    pseudo_target = torch.zeros_like(y_residual)
-    pseudo_target[valid] = y_residual[valid] / t_residual[valid]
+    # Keep fixed shapes: boolean indexing on CUDA needs a host-visible count.
+    pseudo_target = torch.where(valid, y_residual, 0.0) / torch.where(valid, t_residual, 1.0)
     return torch.square(effect - pseudo_target), valid
 
 
@@ -268,8 +269,8 @@ class HTRTrainer:
     """Create, train, and score HTR nuisance and effect networks on one device.
 
     Stage 1 fits folds serially inside one exact discovery context, so the
-    trainer owns a single device and uses in-process data loading
-    (``_data_loader_workers`` returns 0).
+    trainer owns a single device. CPU-only preprocessing workers prefetch
+    batches within the context's CPU budget.
     """
 
     def __init__(
@@ -277,9 +278,11 @@ class HTRTrainer:
         *,
         config: AppliedInferenceConfig,
         device: torch.device | str,
+        num_workers: Optional[int] = None,
     ) -> None:
         self.config = config
         self.device = torch.device(device)
+        self.num_workers = num_workers
         self.avf_config: AgenticAttentionVariableForestConfig = copy.deepcopy(
             getattr(
                 config.architecture,
@@ -302,9 +305,9 @@ class HTRTrainer:
 
     def _create_extractor(self) -> nn.Module:
         arch = self.config.architecture
-        extractor_type = str(
-            getattr(arch, "feature_extractor_type", "hierarchical_transformer")
-        ).strip().lower()
+        extractor_type = (
+            str(getattr(arch, "feature_extractor_type", "hierarchical_transformer")).strip().lower()
+        )
         if extractor_type not in {
             "hierarchical_transformer",
             "hier_transformer",
@@ -312,8 +315,7 @@ class HTRTrainer:
             "short_chunk_transformer",
         }:
             raise ValueError(
-                "Stage 1 HTR evidence requires feature_extractor_type="
-                "'hierarchical_transformer'"
+                "Stage 1 HTR evidence requires feature_extractor_type=" "'hierarchical_transformer'"
             )
         return HierarchicalTransformerExtractor(
             device=self.device,
@@ -460,14 +462,12 @@ class HTRTrainer:
             )
 
     def _data_loader_workers(self, total_folds: Optional[int] = None) -> int:
-        """Return the DataLoader worker count; Stage 1 always loads in-process.
-
-        The standalone attention-variable forest runner overrides this hook
-        to use multiprocessing loader workers.
-        """
-
+        """Reserve one CPU for training and use the remaining budget to prefetch."""
         del total_folds
-        return 0
+        workers = self.config.training.dataloader_workers
+        if self.num_workers is not None:
+            workers = min(workers, max(0, int(self.num_workers) - 1))
+        return workers
 
     def _make_text_loader(
         self,
@@ -486,24 +486,41 @@ class HTRTrainer:
             text_preprocessor = extractor.make_batch_preprocessor()
         workers = self._data_loader_workers(total_folds=total_folds)
         effective_batch_size = self.config.training.batch_size if batch_size is None else batch_size
+        dataset = _FoldTextDataset(
+            texts=df[self.config.text_column].astype(str).tolist(),
+            positions=positions,
+            fields=fields,
+        )
+        # Worker startup/reset must not advance the sampler or model RNG.
+        # Separate generators keep ordering and dropout independent of the
+        # number of workers and whether they persist between epochs.
+        rng_state = torch.get_rng_state()
         loader_kwargs: Dict[str, Any] = {
             "batch_size": max(1, int(effective_batch_size)),
-            "shuffle": bool(shuffle),
+            "sampler": (
+                RandomSampler(dataset, generator=torch.Generator().set_state(rng_state))
+                if shuffle
+                else None
+            ),
+            "generator": torch.Generator().set_state(rng_state),
             "collate_fn": _FoldTextBatchCollator(text_preprocessor),
             "num_workers": workers,
             "pin_memory": self.device.type == "cuda",
         }
         if workers > 0:
             loader_kwargs["persistent_workers"] = True
-            loader_kwargs["prefetch_factor"] = 2
-        return DataLoader(
-            _FoldTextDataset(
-                texts=df[self.config.text_column].astype(str).tolist(),
-                positions=positions,
-                fields=fields,
-            ),
-            **loader_kwargs,
-        )
+            loader_kwargs["prefetch_factor"] = self.config.training.dataloader_prefetch_factor
+            # Never fork a context that already owns CUDA state/threads.
+            # A loky parent must use loky's fresh-interpreter context: stdlib
+            # spawn otherwise propagates an unregistered 'loky' start method
+            # to its child and fails before the loader can initialize.
+            if multiprocessing.get_start_method(allow_none=True) in {"loky", "loky_init_main"}:
+                from joblib.externals.loky.backend.context import get_context
+
+                loader_kwargs["multiprocessing_context"] = get_context("loky")
+            else:
+                loader_kwargs["multiprocessing_context"] = "spawn"
+        return DataLoader(dataset, **loader_kwargs)
 
     def _train_nuisance_model(
         self,
@@ -578,9 +595,7 @@ class HTRTrainer:
         )
         for epoch in range(1, nuisance_epochs + 1):
             model.train()
-            loss_sum = 0.0
-            prop_sum = 0.0
-            outcome_sum = 0.0
+            loss_sums = torch.zeros(3, device=self.device, dtype=torch.float64)
             batch_count = 0
             for batch_idx, batch in enumerate(train_loader, start=1):
                 t = batch["t"].to(self.device, non_blocking=True)
@@ -606,16 +621,12 @@ class HTRTrainer:
                 loss.backward()
                 self._clip_and_step(model, optimizer, scheduler)
                 batch_count += 1
-                loss_value = float(loss.detach().cpu())
-                prop_value = float(prop_loss.detach().cpu())
-                outcome_value = float(outcome_loss.detach().cpu())
-                loss_sum += loss_value
-                prop_sum += prop_value
-                outcome_sum += outcome_value
+                loss_sums.add_(
+                    torch.stack((loss.detach(), prop_loss.detach(), outcome_loss.detach()))
+                )
                 if batch_idx == 1 or batch_idx == num_batches or batch_idx % progress_every == 0:
                     logger.info(
-                        "Outer fold %s nuisance fold %s/%s epoch %s/%s "
-                        "batch %s/%s loss=%.4f outcome=%.4f propensity=%.4f lr=%.3g%s",
+                        "Outer fold %s nuisance fold %s/%s epoch %s/%s " "batch %s/%s lr=%.3g%s",
                         outer_fold,
                         fold,
                         total_folds,
@@ -623,13 +634,10 @@ class HTRTrainer:
                         nuisance_epochs,
                         batch_idx,
                         num_batches,
-                        loss_value,
-                        outcome_value,
-                        prop_value,
                         current_lr(optimizer),
                         self._cuda_memory_summary(),
                     )
-            denom = max(1, batch_count)
+            loss_mean, prop_mean, outcome_mean = (loss_sums / max(1, batch_count)).cpu().tolist()
             logger.info(
                 "Outer fold %s nuisance fold %s/%s epoch %s/%s complete: "
                 "loss=%.4f outcome=%.4f propensity=%.4f lr=%.3g%s",
@@ -638,9 +646,9 @@ class HTRTrainer:
                 total_folds,
                 epoch,
                 nuisance_epochs,
-                loss_sum / denom,
-                outcome_sum / denom,
-                prop_sum / denom,
+                loss_mean,
+                outcome_mean,
+                prop_mean,
                 current_lr(optimizer),
                 self._cuda_memory_summary(),
             )
@@ -722,7 +730,7 @@ class HTRTrainer:
         )
         for epoch in range(1, effect_epochs + 1):
             model.train()
-            loss_sum = 0.0
+            loss_sum = torch.zeros((), device=self.device, dtype=torch.float64)
             batch_count = 0
             for batch_idx, batch in enumerate(train_loader, start=1):
                 y_residual = batch["y_residual"].to(self.device, non_blocking=True)
@@ -741,7 +749,14 @@ class HTRTrainer:
                         y_residual,
                         t_residual,
                     )
-                    loss = loss_vector[valid].mean() if torch.any(valid) else loss_vector.mean()
+                    valid_count = valid.sum()
+                    # Preserve the all-invalid fallback without a per-batch
+                    # CUDA scalar read from a Python boolean condition.
+                    loss = torch.where(
+                        valid_count > 0,
+                        torch.where(valid, loss_vector, 0.0).sum() / valid_count.clamp_min(1),
+                        loss_vector.mean(),
+                    )
                 else:
                     residual = y_residual - effect * t_residual
                     # Direct R-loss avoids high-variance y_residual / t_residual pseudo-labels.
@@ -749,12 +764,10 @@ class HTRTrainer:
                 loss.backward()
                 self._clip_and_step(model, optimizer, scheduler)
                 batch_count += 1
-                loss_value = float(loss.detach().cpu())
-                loss_sum += loss_value
+                loss_sum.add_(loss.detach())
                 if batch_idx == 1 or batch_idx == num_batches or batch_idx % progress_every == 0:
                     logger.info(
-                        "Outer fold %s effect fold %s/%s epoch %s/%s "
-                        "batch %s/%s %s=%.4f lr=%.3g%s",
+                        "Outer fold %s effect fold %s/%s epoch %s/%s " "batch %s/%s lr=%.3g%s",
                         outer_fold,
                         fold,
                         total_folds,
@@ -762,11 +775,10 @@ class HTRTrainer:
                         effect_epochs,
                         batch_idx,
                         num_batches,
-                        effect_loss_label(effect_objective),
-                        loss_value,
                         current_lr(optimizer),
                         self._cuda_memory_summary(),
                     )
+            loss_mean = float((loss_sum / max(1, batch_count)).cpu())
             logger.info(
                 "Outer fold %s effect fold %s/%s epoch %s/%s complete: " "%s=%.4f lr=%.3g%s",
                 outer_fold,
@@ -775,7 +787,7 @@ class HTRTrainer:
                 epoch,
                 effect_epochs,
                 effect_loss_label(effect_objective),
-                loss_sum / max(1, batch_count),
+                loss_mean,
                 current_lr(optimizer),
                 self._cuda_memory_summary(),
             )

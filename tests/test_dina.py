@@ -84,12 +84,18 @@ def test_group_solver_sparse_dense_and_whole_categorical_selection():
 
 
 def test_dina_is_additional_binary_architecture_and_evidence_family():
-    from oci.inference.stage2_multi_model_config import Stage2MultiModelConfig
+    from oci.inference.stage2_multi_model_config import (
+        ModifierSelectionConfig,
+        Stage2MultiModelConfig,
+    )
     from oci.inference.stage2_effect_estimators import effect_model_family
 
-    cfg = Stage2MultiModelConfig()
+    cfg = Stage2MultiModelConfig(
+        modifier_selection=ModifierSelectionConfig(rule="balanced_evidence"))
     assert {"causal_forest", "dina"} <= set(cfg.active_families("binary"))
     assert "dina" not in cfg.active_families("continuous")
+    # The default orthogonal_tests rule reads no DINA or forest effect evidence.
+    assert "dina" not in Stage2MultiModelConfig().active_families("binary")
     assert set(cfg.modifier_count.estimators) == {"causal_forest", "linear_interactions", "dina"}
     assert effect_model_family("dina", "binary") == "grouped_bernoulli_dina"
     with pytest.raises(ValueError):

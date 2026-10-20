@@ -11,7 +11,7 @@ from contextlib import contextmanager
 import logging
 import threading
 
-from joblib.externals import cloudpickle
+import cloudpickle
 from joblib.externals.loky import ProcessPoolExecutor
 from joblib import parallel_backend
 from threadpoolctl import threadpool_limits

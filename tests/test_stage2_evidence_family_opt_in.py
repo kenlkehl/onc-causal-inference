@@ -30,6 +30,7 @@ from oci.inference.stage2_multi_model_config import (
     SCHEMA_VERSION,
     MatchedBatchConfig,
     ModifierCountConfig,
+    ModifierSelectionConfig,
     Stage2MultiModelConfig,
     multi_model_config_from_mapping,
 )
@@ -65,6 +66,8 @@ def _policy(diagnostic_families=(), *, concept_review=False):
         "feature_subset_size": 4,
         "permutation_repeats": 2,
         "stability": {"partition_repeats": 1, "subset_partitions": 1},
+        # These tests exercise the nested budget search and its concept review.
+        "modifier_selection": {"rule": "balanced_evidence"},
         "modifier_count": {
             "candidate_counts": [0, 2, 4],
             "max_ranked_modifiers": 4,
@@ -325,7 +328,19 @@ def test_concept_review_reads_neither_family_and_does_not_enable_them(runs):
 
 
 def test_active_family_policy_and_parsing():
-    default = Stage2MultiModelConfig()
+    # The default orthogonal_tests rule fits only the univariable family (its
+    # treatment/outcome associations) besides any requested opt-in family.
+    orthogonal = Stage2MultiModelConfig()
+    assert orthogonal.computes_effect_evidence is False
+    assert orthogonal.active_families("binary") == ("univariable",)
+    assert replace(orthogonal, matched_batch=MatchedBatchConfig(enabled=True),
+                   diagnostic_families=BOTH).active_families("binary") == (
+        "univariable", "penalized_main", "predictive_forest", "matched_batch_contrast")
+    assert set(EVIDENCE_FAMILY_POLICY["orthogonal_tests_skipped"]) == set(
+        EVIDENCE_FAMILY_POLICY["default_active"]) - {"univariable"}
+    default = replace(orthogonal, modifier_selection=ModifierSelectionConfig(
+        rule="balanced_evidence"))
+    assert default.computes_effect_evidence is True
     assert default.diagnostic_families == ()
     for outcome in (None, "binary", "continuous"):
         active = default.active_families(outcome)

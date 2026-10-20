@@ -46,6 +46,7 @@ from .stage1_architectures import (
     BOW_NUISANCE,
     BOW_R_LOSS,
     HTR_NEURAL,
+    MATCHED_PAIR_EVIDENCE_SCHEMA_VERSION,
     MATCHED_PAIR_UPLIFT,
     NEURAL_QUERY_MOMENTS,
     STAGE1_ARCHITECTURES,
@@ -629,13 +630,38 @@ def _extract_sparse_occurrences(
     if not isinstance(importance, Mapping):
         return []
     output: list[dict[str, Any]] = []
-    containers = [("importance", importance)]
+    bow_fields = {
+        "treatment_positive": ({"treatment"}, "positive", BOW_NUISANCE),
+        "treatment_negative": ({"treatment"}, "negative", BOW_NUISANCE),
+        "outcome_positive": ({"outcome"}, "positive", BOW_NUISANCE),
+        "outcome_negative": ({"outcome"}, "negative", BOW_NUISANCE),
+        "pseudo_target_positive": ({"residual_effect"}, "positive", BOW_R_LOSS),
+        "pseudo_target_negative": ({"residual_effect"}, "negative", BOW_R_LOSS),
+        "confounder_overlap": ({"treatment", "outcome"}, "unsigned", BOW_NUISANCE),
+    }
+    # Signed effect-modification terms of the matched-pair conditional logit
+    # (binary) or adjusted paired-difference regression (continuous).
+    matched_pair_fields = {
+        "effect_modification_positive": ({"matched_pair"}, "positive", MATCHED_PAIR_UPLIFT),
+        "effect_modification_negative": ({"matched_pair"}, "negative", MATCHED_PAIR_UPLIFT),
+    }
+    containers = [("importance", importance, bow_fields)]
     ensemble = importance.get("ensemble_r")
     if isinstance(ensemble, Mapping):
-        containers.append(("importance.ensemble_r", ensemble))
+        containers.append(("importance.ensemble_r", ensemble, bow_fields))
     matched_pair = importance.get("matched_pair_uplift")
     if isinstance(matched_pair, Mapping):
-        containers.append(("importance.matched_pair_uplift", matched_pair))
+        if matched_pair.get("schema_version") != MATCHED_PAIR_EVIDENCE_SCHEMA_VERSION:
+            if matched_pair.get("views"):
+                raise ValueError(
+                    f"handoff row {handoff_row} has matched_pair_uplift evidence from an "
+                    "earlier treated/control-side schema; rebuild Stage 1 with the "
+                    "current workflow"
+                )
+        else:
+            containers.append(
+                ("importance.matched_pair_uplift", matched_pair, matched_pair_fields)
+            )
 
     def add_term(
         compact: Mapping[str, Any],
@@ -647,12 +673,6 @@ def _extract_sparse_occurrences(
         view_name: str = "",
     ) -> None:
         term = compact.get("term")
-        pair_side = None
-        if family == MATCHED_PAIR_UPLIFT and isinstance(term, str) and "::" in term:
-            prefix, candidate = term.split("::", 1)
-            if prefix in {"control", "treated"} and candidate.strip():
-                pair_side = prefix
-                term = candidate.strip()
         item = _occurrence(
             text=term,
             evidence_kind="lexical_term",
@@ -661,46 +681,13 @@ def _extract_sparse_occurrences(
             source_families=[family],
             architecture=family,
             reference=_base_reference(row, handoff_row=handoff_row, json_path=path),
-            details={"term": term, "view_name": view_name, "pair_side": pair_side},
+            details={"term": term, "view_name": view_name},
             scores=_finite_scores(compact),
         )
         if item is not None:
             output.append(item)
 
-    ranked_fields = {
-        "treatment_positive": ({"treatment"}, "positive", BOW_NUISANCE),
-        "treatment_negative": ({"treatment"}, "negative", BOW_NUISANCE),
-        "outcome_positive": ({"outcome"}, "positive", BOW_NUISANCE),
-        "outcome_negative": ({"outcome"}, "negative", BOW_NUISANCE),
-        "pseudo_target_positive": ({"residual_effect"}, "positive", BOW_R_LOSS),
-        "pseudo_target_negative": ({"residual_effect"}, "negative", BOW_R_LOSS),
-        "confounder_overlap": ({"treatment", "outcome"}, "unsigned", BOW_NUISANCE),
-        "uplift_pair_features": ({"matched_pair"}, "unsigned", MATCHED_PAIR_UPLIFT),
-        "uplift_delta_logit_positive": (
-            {"matched_pair"},
-            "positive",
-            MATCHED_PAIR_UPLIFT,
-        ),
-        "uplift_delta_logit_negative": (
-            {"matched_pair"},
-            "negative",
-            MATCHED_PAIR_UPLIFT,
-        ),
-        "ridge_delta_probability_positive": (
-            {"matched_pair"},
-            "positive",
-            MATCHED_PAIR_UPLIFT,
-        ),
-        "ridge_delta_probability_negative": (
-            {"matched_pair"},
-            "negative",
-            MATCHED_PAIR_UPLIFT,
-        ),
-        # Read old handoffs without making these obsolete aliases the producer contract.
-        "matched_pair_positive": ({"matched_pair"}, "positive", MATCHED_PAIR_UPLIFT),
-        "matched_pair_negative": ({"matched_pair"}, "negative", MATCHED_PAIR_UPLIFT),
-    }
-    for container_path, container in containers:
+    for container_path, container, ranked_fields in containers:
         views = container.get("views")
         if isinstance(views, Sequence) and not isinstance(views, (str, bytes)):
             for view_index, view in enumerate(views):
@@ -722,6 +709,8 @@ def _extract_sparse_occurrences(
                             family=family,
                             view_name=view_name,
                         )
+        if ranked_fields is matched_pair_fields:
+            continue
         for field in ("phrase_consensus", "phrase_features"):
             values = container.get(field)
             if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
@@ -918,13 +907,14 @@ def _extract_htr_occurrences(
         if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
             continue
         normalized_branch = branch_name.lower()
-        is_matched_pair = "pair_uplift" in normalized_branch
-        axes = (
-            {"matched_pair"}
-            if is_matched_pair
-            else ({"residual_effect"} if "effect" in normalized_branch else {"treatment", "outcome"})
-        )
-        family = MATCHED_PAIR_UPLIFT if is_matched_pair else HTR_NEURAL
+        if "pair_uplift" in normalized_branch:
+            raise ValueError(
+                f"handoff row {handoff_row} has HTR matched-pair attention from an "
+                "earlier matched_pair_uplift schema; rebuild Stage 1 with the current "
+                "workflow"
+            )
+        axes = {"residual_effect"} if "effect" in normalized_branch else {"treatment", "outcome"}
+        family = HTR_NEURAL
         for item_index, raw in enumerate(values):
             if not isinstance(raw, Mapping):
                 continue
@@ -1126,6 +1116,15 @@ def _extract_occurrences(rows: Iterable[Mapping[str, Any]]) -> dict[int, list[di
             if architecture == NEURAL_QUERY_MOMENTS:
                 validate_query_retrieval_policy(
                     (occurrence.get("details") or {}).get("retrieval_policy")
+                )
+            if architecture == MATCHED_PAIR_UPLIFT and (
+                "pair_side" in (occurrence.get("details") or {})
+                or occurrence.get("evidence_kind") != "lexical_term"
+            ):
+                raise ValueError(
+                    f"handoff row {handoff_row} has matched_pair_uplift evidence from an "
+                    "earlier treated/control-side schema; rebuild Stage 1 with the "
+                    "current workflow"
                 )
             _rebind_compact_handoff_references(
                 occurrence,

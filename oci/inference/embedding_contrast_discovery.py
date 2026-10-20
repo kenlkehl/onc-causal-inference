@@ -27,6 +27,13 @@ from ..models.concept_embedding_cache import (
     clear_sentence_transformer_cache,
     load_sentence_transformer,
 )
+from .all_evidence_fusion import _embedding_family
+from .stage1_architectures import (
+    EMBEDDING_CLUSTERED,
+    EMBEDDING_WHOLE_COHORT,
+    TFIDF_SEMANTIC_RETRIEVAL,
+)
+from .stage1_timing import EMBEDDING_ARCHITECTURES, SHARED_ATTRIBUTION, NullTimer
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +234,9 @@ class EmbeddingContrastEvidenceGenerator:
         self._concept_probe_skip_reason: Optional[str] = None
         self._cluster_fit_row_ids: tuple[int, ...] | None = None
         self._cluster_group_seed: int | None = None
+        # Set only inside build_evidence_with_directions / build_evidence.
+        self._direction_capture: Optional[List[Tuple[Dict[str, Any], np.ndarray]]] = None
+        self._timer: Any = NullTimer()
 
     @property
     def enabled(self) -> bool:
@@ -302,8 +312,73 @@ class EmbeddingContrastEvidenceGenerator:
         pseudo_target_names: Optional[Sequence[str]] = None,
         importance: Optional[Dict[str, Any]] = None,
         dina_nuisance=None,
+        timer: Any = None,
     ) -> Dict[str, Any]:
-        """Return agent-facing embedding contrast evidence for one discovery fold."""
+        """Return agent-facing embedding contrast evidence for one discovery fold.
+
+        ``timer`` (reporting only) receives one lap per section, attributed to
+        the whole-cohort, cluster-based, or retrieval-vocabulary architecture.
+        """
+        self._timer = timer or NullTimer()
+        try:
+            return self._build_evidence(
+                discovery_df=discovery_df,
+                y=y,
+                t=t,
+                pseudo_target=pseudo_target,
+                t_resid=t_resid,
+                pseudo_target_names=pseudo_target_names,
+                importance=importance,
+                dina_nuisance=dina_nuisance,
+            )
+        finally:
+            self._timer = NullTimer()
+
+    def build_evidence_with_directions(
+        self,
+        **kwargs: Any,
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Return :meth:`build_evidence` output and the exact directions it used.
+
+        Each direction entry names the contrast record it retrieved for
+        (``contrast_index`` into ``evidence["contrasts"]`` and ``name``), its
+        architecture, and the unit-norm vector.  The vectors are the ones the
+        handed-off chunks were ranked by; they never enter the evidence itself.
+        """
+
+        self._direction_capture = []
+        try:
+            evidence = self.build_evidence(**kwargs)
+            captured = list(self._direction_capture)
+        finally:
+            self._direction_capture = None
+        directions: List[Dict[str, Any]] = []
+        for index, contrast in enumerate(evidence.get("contrasts") or []):
+            for record, vector in captured:
+                if record is contrast:
+                    directions.append(
+                        {
+                            "contrast_index": int(index),
+                            "name": str(contrast.get("name") or f"contrast_{index}"),
+                            "architecture": _embedding_family(contrast),
+                            "direction": np.asarray(vector, dtype=np.float32),
+                        }
+                    )
+                    break
+        return evidence, directions
+
+    def _build_evidence(
+        self,
+        *,
+        discovery_df: pd.DataFrame,
+        y: np.ndarray,
+        t: np.ndarray,
+        pseudo_target: Any,
+        t_resid: Any,
+        pseudo_target_names: Optional[Sequence[str]],
+        importance: Optional[Dict[str, Any]],
+        dina_nuisance=None,
+    ) -> Dict[str, Any]:
         if not self.enabled:
             return {}
         if not self._prepared:
@@ -336,6 +411,11 @@ class EmbeddingContrastEvidenceGenerator:
         concept_phrases = self._concept_phrases(importance or {})
         self._concept_probe_skip_reason = None
         concept_embeddings = self._encode_concepts(concept_phrases) if concept_phrases else None
+        self._timer.lap(
+            "embedding_patient_pooling_and_concept_encoding",
+            attribution=SHARED_ATTRIBUTION,
+            consumers=EMBEDDING_ARCHITECTURES,
+        )
         y_array = np.asarray(y, dtype=float)
         t_array = np.asarray(t, dtype=float)
         pseudo_targets = _named_pseudo_targets(
@@ -382,6 +462,10 @@ class EmbeddingContrastEvidenceGenerator:
                     concept_embeddings=concept_embeddings,
                 )
             )
+        self._timer.lap(
+            "embedding_whole_cohort_contrasts",
+            attribution=EMBEDDING_WHOLE_COHORT,
+        )
         if bool(self.embedding_config.include_cluster_contrast_vectors):
             cluster_contrasts, cluster_contrast_summary = self._build_cluster_contrast_vectors(
                 positions=positions,
@@ -392,6 +476,10 @@ class EmbeddingContrastEvidenceGenerator:
                 concept_embeddings=concept_embeddings,
             )
             contrasts.extend(cluster_contrasts)
+            self._timer.lap(
+                "embedding_cluster_contrasts",
+                attribution=EMBEDDING_CLUSTERED,
+            )
 
         evidence = {
             "enabled": True,
@@ -537,6 +625,43 @@ class EmbeddingContrastEvidenceGenerator:
                 raise KeyError(f"embedding cache has no dataset row {row_id!r}")
             output.append(list(self._chunks_by_position[int(position)]))
         return output
+
+    def chunk_cosine_summaries(
+        self,
+        row_ids: Sequence[Any],
+        directions: Sequence[np.ndarray],
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Return each row's mean and maximum chunk cosine with each direction.
+
+        The result arrays have shape ``(rows, directions)``.  A row without
+        chunks scores 0 for every direction.  This is a projection of fixed,
+        already-fitted directions; it reads no labels.
+        """
+
+        matrix = np.vstack(
+            [_normalize_vector(np.asarray(value, dtype=np.float32)) for value in directions]
+        ) if len(directions) else np.zeros((0, 0), dtype=np.float32)
+        rows = list(row_ids)
+        means = np.zeros((len(rows), len(directions)), dtype=np.float32)
+        maxes = np.zeros((len(rows), len(directions)), dtype=np.float32)
+        if not len(directions):
+            return means, maxes
+        for index, chunks in enumerate(self.chunk_matrices(rows)):
+            if chunks.size == 0:
+                continue
+            scores = np.asarray(chunks @ matrix.T, dtype=float)
+            finite = np.isfinite(scores)
+            counts = finite.sum(axis=0)
+            if not np.any(counts):
+                continue
+            safe = np.where(finite, scores, 0.0)
+            means[index] = np.where(
+                counts > 0, safe.sum(axis=0) / np.maximum(counts, 1), 0.0
+            )
+            maxes[index] = np.where(
+                counts > 0, np.where(finite, scores, -np.inf).max(axis=0), 0.0
+            )
+        return means, maxes
 
     def _patient_embeddings(self, positions: Sequence[int]) -> np.ndarray:
         config = self.embedding_config.cluster_local_scientific
@@ -1537,6 +1662,8 @@ class EmbeddingContrastEvidenceGenerator:
             record["retrieval_skipped"] = "zero_direction"
             return record
         direction = _normalize_vector(direction)
+        if self._direction_capture is not None:
+            self._direction_capture.append((record, np.array(direction, copy=True)))
         record["direction_norm"] = _finite_or_none(float(np.linalg.norm(direction)))
         record["positive_aligned_chunks"] = self._retrieve_chunks(
             positions,
@@ -1549,6 +1676,15 @@ class EmbeddingContrastEvidenceGenerator:
             descending=False,
         )
         if bool(self.embedding_config.retrieval_tfidf_enabled):
+            family = _embedding_family(record)
+            self._timer.lap(
+                (
+                    "embedding_cluster_contrasts"
+                    if family == EMBEDDING_CLUSTERED
+                    else "embedding_whole_cohort_contrasts"
+                ),
+                attribution=family,
+            )
             record["tfidf_retrieval_terms"] = _retrieval_tfidf_terms(
                 record["positive_aligned_chunks"],
                 record["negative_aligned_chunks"],
@@ -1576,6 +1712,10 @@ class EmbeddingContrastEvidenceGenerator:
                 ),
                 "selected_terms": len(record["tfidf_retrieval_terms"]),
             }
+            self._timer.lap(
+                "tfidf_semantic_retrieval_terms",
+                attribution=TFIDF_SEMANTIC_RETRIEVAL,
+            )
         record["concept_probe_scores"] = self._score_concepts(
             concept_phrases,
             concept_embeddings,

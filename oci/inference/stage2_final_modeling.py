@@ -1,7 +1,10 @@
 """Resumable final-fit predictions and independent penalty-CV paths.
 
-Only JSON predictions and optimizer diagnostics are cached, never executable
-model pickles. The caller supplies the complete estimation input identity.
+These checkpoints hold only JSON predictions and optimizer diagnostics. The
+caller supplies the complete estimation input identity. (The inner-fold
+nuisance models of the orthogonal modifier tests are stored separately with
+joblib by ``plain_handoff_stage2_analysis`` and loaded only after their
+fingerprint and file hash are verified.)
 """
 
 from functools import partial
@@ -35,11 +38,17 @@ def prediction_result(future, rows):
 
 
 def penalty_path_submitter(directory, fingerprint):
-    """Each path keeps its original penalty order and warm starts in one worker."""
+    """Each path keeps its original penalty order and warm starts in one worker.
 
-    def submit(index, compute):
+    ``variant`` names a different penalty structure of the same interaction
+    model (the selected-modifier penalty paths); its paths are checkpointed in
+    ``interaction_cv_<variant>/`` so no structure reuses another's losses.
+    """
+
+    def submit(index, compute, variant=None):
+        prefix = "interaction_cv" if variant is None else f"interaction_cv_{variant}"
         return numerical.checkpoint_future(
-            directory, f"interaction_cv/fold_{index + 1:03d}", fingerprint, compute
+            directory, f"{prefix}/fold_{index + 1:03d}", fingerprint, compute
         )
 
     return submit

@@ -143,9 +143,11 @@ def _fit_subfold(
 ) -> dict[str, Any]:
     """Fit one nested subfold entirely in memory.
 
-    Validation labels are used only to create audit scores.  Those scores are
-    retained for diagnostics but are never passed to the ungated consensus
-    constructor or used to select queries.
+    The subfold's validation rows are an inner partition of the context's own
+    fit rows; the context's held-out rows never reach this function.  Their
+    labels produce held-out standardized statistics and p-values for every
+    candidate query.  The consensus constructor uses those statistics only to
+    order its groups; they never gate, filter, or count queries.
     """
 
     resolved_chunks = _resolve_task_chunks(
@@ -315,7 +317,12 @@ def _fit_subfold(
                     "validation_audit_standardized_score": float(
                         audit["standardized_scores"][query_index]
                     ),
-                    "validation_audit_only_not_used_for_gating": True,
+                    "validation_audit_two_sided_p_value": float(
+                        audit["two_sided_p_values"][query_index]
+                    ),
+                    "validation_rows": int(len(validation_indices)),
+                    "validation_used_for_ranking": True,
+                    "validation_used_for_gating": False,
                     "query_drift": float(result["query_drift"][query_index]),
                 }
             )

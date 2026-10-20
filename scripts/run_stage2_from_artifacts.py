@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run fresh Stage 2 against preserved Stage 1 evidence and split provenance."""
+"""Run fresh Stage 2 against preserved Stage 1 evidence and split provenance.
+
+When the source run used dated notes, set ``dataset`` to its derived
+``OUTPUT_DIR/input/analysis_cohort.parquet``, not to the cohort file.
+"""
 from __future__ import annotations
 
 import argparse

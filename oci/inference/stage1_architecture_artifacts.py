@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from .stage1_architectures import (
+    EMBEDDING_CLUSTERED,
+    EMBEDDING_WHOLE_COHORT,
     STAGE1_ARCHITECTURE_REGISTRY,
     TFIDF_TOPICS,
     canonicalize_stage1_architectures,
@@ -18,6 +20,48 @@ from .stage1_architectures import (
 
 ARCHITECTURE_EVIDENCE_SCHEMA_VERSION = "stage1_architecture_evidence_v2_compact_occurrences"
 ARCHITECTURE_MANIFEST_SCHEMA_VERSION = "stage1_architecture_manifest_v2_compact_occurrences"
+
+# Row-level scores of the embedding directions handed to Stage 2: each
+# context's held-out rows projected on the exact directions whose aligned
+# chunks entered the handoff (``predictions.parquet`` under text_models).
+EMBEDDING_DIRECTION_SCORE_SOURCES = {
+    EMBEDDING_WHOLE_COHORT: "embedding__whole_cohort__handed_off_directions",
+    EMBEDDING_CLUSTERED: "embedding__clustered__handed_off_directions",
+}
+EMBEDDING_DIRECTION_SCORE_STATISTICS = ("mean_chunk_cosine", "max_chunk_cosine")
+_EMBEDDING_DIRECTION_COLUMN_PREFIX = "direction__"
+
+
+def embedding_direction_slug(name: Any) -> str:
+    """Return the column-safe form of an embedding contrast name."""
+
+    output: list[str] = []
+    for character in str(name).strip().lower():
+        if character.isascii() and character.isalnum():
+            output.append(character)
+        elif output and output[-1] != "_":
+            output.append("_")
+    return "".join(output).strip("_") or "contrast"
+
+
+def embedding_direction_score_column(name: Any, statistic: str) -> str:
+    if statistic not in EMBEDDING_DIRECTION_SCORE_STATISTICS:
+        raise ValueError(f"unknown embedding direction statistic: {statistic!r}")
+    return f"{_EMBEDDING_DIRECTION_COLUMN_PREFIX}{embedding_direction_slug(name)}__{statistic}"
+
+
+def embedding_direction_from_score_column(column: Any) -> str | None:
+    """Return the contrast slug a handed-off direction score column belongs to."""
+
+    text = str(column)
+    if not text.startswith(_EMBEDDING_DIRECTION_COLUMN_PREFIX):
+        return None
+    for statistic in EMBEDDING_DIRECTION_SCORE_STATISTICS:
+        suffix = f"__{statistic}"
+        if text.endswith(suffix):
+            slug = text[len(_EMBEDDING_DIRECTION_COLUMN_PREFIX) : -len(suffix)]
+            return slug or None
+    return None
 
 
 def _now() -> str:
@@ -285,6 +329,11 @@ def iter_stage1_architecture_evidence(
 __all__ = [
     "ARCHITECTURE_EVIDENCE_SCHEMA_VERSION",
     "ARCHITECTURE_MANIFEST_SCHEMA_VERSION",
+    "EMBEDDING_DIRECTION_SCORE_SOURCES",
+    "EMBEDDING_DIRECTION_SCORE_STATISTICS",
+    "embedding_direction_from_score_column",
+    "embedding_direction_score_column",
+    "embedding_direction_slug",
     "iter_stage1_architecture_evidence",
     "materialize_stage1_architecture_artifacts",
 ]

@@ -1113,7 +1113,7 @@ def test_extraction_category_error_lists_allowed_literals_and_prompts_forbid_ali
 
     message = str(error.value)
     assert "value 1 is invalid" in message
-    assert '["not documented","documented"] or null' in message
+    assert '["not documented","documented"], documented_unknown, or null' in message
 
     extraction = stage2_analysis._extraction_prompt(definitions=[definition], rows=[{"row_id": 7, "text": "Prior immunotherapy was documented."}])
     page = stage2_analysis._page_extraction_prompt(definitions=[definition], row={"row_id": 7, "text": "Prior immunotherapy was documented."})
@@ -4748,7 +4748,8 @@ def test_operationalization_validates_structured_conflict_resolution():
     [
         ("binary", ["binary"], "exactly two distinct"),
         ("binary", ["enabled or disabled"], "exactly two distinct"),
-        ("binary", ["disabled", "enabled", "unknown"], "exactly two distinct"),
+        # An "unknown" label is the reserved documented_unknown state, not a category.
+        ("binary", ["disabled", "enabled", "partial"], "exactly two distinct"),
         ("categorical", ["only_state"], "at least two distinct"),
         ("ordinal", ["single_level"], "at least two distinct"),
         ("binary", ["Disabled", "disabled"], "distinct after case and spacing"),
@@ -5823,16 +5824,20 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     )
     from dataclasses import replace
 
-    from oci.inference.stage2_multi_model_config import ModifierCountConfig
+    from oci.inference.stage2_multi_model_config import (
+        ModifierCountConfig,
+        ModifierSelectionConfig,
+    )
     from tests.test_stage2_multi_model import small_policy
 
-    # Exercise the real multi-model selector with a small numerical budget and
-    # a causal-forest final estimator.
+    # Exercise the real multi-model selector with the nested balanced_evidence
+    # rule, a small numerical budget and a causal-forest final estimator.
     selection_policy = small_policy()
     selection_policy = replace(
         selection_policy,
         multi_model=replace(
             selection_policy.multi_model,
+            modifier_selection=ModifierSelectionConfig(rule="balanced_evidence"),
             modifier_count=ModifierCountConfig(estimators=("causal_forest",)),
         ),
     )
@@ -5855,6 +5860,10 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
         # Tiny synthetic cohorts: count-based informativeness rule with K=2.
         min_informative_patients=2,
         required_architectures=(),
+        # The default super learner is exercised end to end by
+        # tests/test_stage2_orthogonal_selection.py; this pipeline test keeps
+        # the faster elastic-net nuisances.
+        nuisance_learner="elastic_net",
     )
 
     first = run_plain_handoff_stage2(
@@ -5884,15 +5893,25 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     assert str(heterogeneity_path) in first["artifacts"]
     heterogeneity_text = heterogeneity_path.read_text(encoding="utf-8")
     heterogeneity = json.loads(heterogeneity_text)
-    assert heterogeneity["schema_version"] == "stage2_heterogeneity_diagnostics_v1"
+    assert heterogeneity["schema_version"] == (
+        "stage2_heterogeneity_diagnostics_v5_unmeasured_confounding"
+    )
     assert heterogeneity["oracle_columns_consumed"] is False
     assert "true_ite" not in heterogeneity_text
     assert heterogeneity["inputs"]["outer_folds"] == ["1", "2"]
     assert heterogeneity["inputs"]["rows"] == 40
     assert heterogeneity["inputs"]["recomputed_psi_max_abs_difference_from_aipw_score"] < 1e-9
     assert set(heterogeneity["pooling_rules"]) == {
-        "blp", "gates", "clan", "rate", "overlap", "balance"
+        "blp", "gates", "clan", "rate", "overlap", "balance", "modifier_confirmation",
+        "cate_variance_decomposition", "clip_sensitivity", "overlap_flags",
+        "unmeasured_confounding_sensitivity",
     }
+    # Reporting-only held-out confirmation also covers balanced_evidence selections.
+    assert heterogeneity["modifier_confirmation"]["status"] == "ok"
+    assert set(heterogeneity["modifier_confirmation"]["per_fold"]) == {"1", "2"}
+    decomposition = heterogeneity["cate_variance_decomposition"]
+    assert decomposition["status"] in {"ok", "unavailable"} and decomposition["interpretation"]
+    assert set(decomposition["per_fold"]) == {"1", "2"}
     for name in (
         "blp", "gates", "clan", "rate", "overlap_weighted_ate", "ipw_weights", "trimming_curve"
     ):
@@ -5925,6 +5944,38 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     assert {"ate", "standard_error", "mean_estimated_cate", "predictions_path"} <= set(
         persisted_estimate
     )
+    # Co-primary estimands: the clipped AIPW ATE (lead by default) and the ATO.
+    co_primary = persisted_estimate["co_primary_estimands"]
+    assert co_primary["lead_estimand"] == "ate" and co_primary["order"] == ["ate", "ato"]
+    assert co_primary["ate"]["estimate"] == pytest.approx(persisted_estimate["ate"])
+    assert co_primary["ate"]["standard_error"] == pytest.approx(
+        persisted_estimate["standard_error"])
+    assert set(co_primary["ato"]["per_fold"]) == {"1", "2"}
+    assert persisted_estimate["overlap_flags"]["bounds"] == [0.05, 0.95]
+    cross_fitted = pd.read_csv(output / "cross_fitted_predictions.csv")
+    assert cross_fitted["outside_overlap"].dtype == bool
+    assert int(cross_fitted["outside_overlap"].sum()) == (
+        persisted_estimate["overlap_flags"]["pooled"]["outside_overlap"])
+    assert [p["clip"] for p in heterogeneity["clip_sensitivity"]["pooled"]["points"]] == [
+        0.01, 0.02, 0.05]
+    # Reporting-only unmeasured-confounding sensitivity: E-values, OVB bounds, benchmarks.
+    sensitivity = heterogeneity["unmeasured_confounding_sensitivity"]
+    assert sensitivity["status"] == "ok" and sensitivity["outcome_type"] == "binary"
+    assert sensitivity["references"] and sensitivity["interpretation"]["evalue"]
+    for estimand in ("ate", "ato"):
+        assert set(sensitivity["evalues"][estimand]["per_fold"]) == {"1", "2"}
+        assert set(sensitivity["omitted_variable_bias"][estimand]["per_fold"]) == {"1", "2"}
+    ovb_ate = sensitivity["omitted_variable_bias"]["ate"]["pooled"]
+    assert ovb_ate["status"] == "ok" and len(ovb_ate["contour"]) == 25
+    assert ovb_ate["estimate"] == pytest.approx(persisted_estimate["ate"])
+    assert sensitivity["benchmarks"]["status"] in {"ok", "unavailable"}
+    for fold in ("1", "2"):
+        benchmark_file = output / f"outer_00{fold}" / "estimation" / (
+            "sensitivity_benchmarks") / "benchmarks.json"
+        assert json.loads(benchmark_file.read_text(encoding="utf-8"))["status"] == "ok"
+    compact = persisted_estimate["unmeasured_confounding_sensitivity"]
+    assert compact == heterogeneity_summary["unmeasured_confounding_sensitivity"]
+    assert compact["status"] == "ok" and {"ate", "ato", "benchmarks"} <= set(compact)
     selection_path = output / "outer_001" / "selection" / "elastic_net_selection.json"
     assert selection_path.is_file()
     selection = json.loads(selection_path.read_text(encoding="utf-8"))
@@ -6590,8 +6641,24 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     resumed = run_fold_analysis(**arguments)
     assert resumed["estimation"]["estimator"] == "linear_interactions"
     assert count_calls == [10]
+    # Under the default orthogonal_tests rule the trees do not enter selection.
     run_fold_analysis(**{**arguments, "config": replace(config, estimation_trees=20)})
-    assert count_calls == [10, 20]
+    assert count_calls == [10]
+    # The balanced_evidence count search scores forests of that size.
+    from oci.inference.stage2_multi_model_config import ModifierSelectionConfig
+
+    selection_policy = config.statistical_selection
+    balanced = replace(config, statistical_selection=replace(
+        selection_policy,
+        multi_model=replace(
+            selection_policy.multi_model,
+            modifier_selection=ModifierSelectionConfig(rule="balanced_evidence"),
+        ),
+    ))
+    run_fold_analysis(**{**arguments, "config": balanced})
+    assert count_calls == [10, 10]
+    run_fold_analysis(**{**arguments, "config": replace(balanced, estimation_trees=20)})
+    assert count_calls == [10, 10, 20]
 
 
 def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_missing(

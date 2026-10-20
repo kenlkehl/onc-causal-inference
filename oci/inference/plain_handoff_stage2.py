@@ -67,7 +67,7 @@ from .stage2_role_adjudication import (
 )
 from .stage2_sampling import (
     SAMPLING_FIELDS, recommended_sampling, default_reasoning,
-    is_qwen_flash_next, sampling_provenance,
+    is_nemotron_3_5, is_qwen_flash_next, is_reflection_beam_1, sampling_provenance,
 )
 from .stage2_endpoint_pool import ExtractionEndpoint, EndpointPool, endpoints_from_mapping
 from .stage2_discovery_prompt import DISCOVERY_PROMPT_VERSION, DISCOVERY_SYSTEM_PROMPT
@@ -86,6 +86,12 @@ from .stage2_estimand_ontology_config import (
     EstimandOntologyConfig,
     estimand_ontology_config_from_mapping,
 )
+from ..models.super_learner_nuisance import (
+    SuperLearnerConfig,
+    learner_spec,
+    super_learner_config_from_mapping,
+)
+from .stage2_sensitivity import SensitivityConfig, sensitivity_config_from_mapping
 from .vllm_server_pool import (
     ManagedVLLMConfig,
     launch_managed_vllm_servers,
@@ -158,7 +164,7 @@ EXTRACTION_ONTOLOGY_FEEDBACK_SCHEMA_VERSION = (
     "training_failure_ontology_refinement_v1_explicit_feature_invariants"
 )
 OPERATIONALIZATION_SCHEMA_VERSION = (
-    "feature_name_bounded_supporting_text_v7_conflict_resolution"
+    "feature_name_bounded_supporting_text_v8_documented_unknown"
 )
 INTERPRETATION_SCHEMA_VERSION = DISCOVERY_PROMPT_VERSION
 INTERPRETATION_AUDIT_SCHEMA_VERSION = (
@@ -491,6 +497,7 @@ class Stage2ExplicitFeature:
                 value_type=value_type,
                 values=categories,
                 source=f"stage2 explicit feature {name!r}",
+                keep_unknown_like=True,
             )
         measurement_definition = str(self.measurement_definition or "").strip()
         if not measurement_definition:
@@ -838,9 +845,9 @@ class PlainHandoffStage2Config:
     extraction_llm: Stage2ExtractionLLMConfig | None = None
     # Global CPU fit budget, independent of LLM request concurrency and GPUs.
     modeling_workers: int = 1
-    # Limits aggregate ontology-supervisor reviews. These reviews cannot add,
-    # drop, rename, or assign roles to candidate features.
-    max_review_rounds: int = 2
+    # Limits aggregate ontology-supervisor reviews, including retries of
+    # unresolved validation fallbacks. Reviews may clarify or split definitions.
+    max_review_rounds: int = 4
     ontology_refinement_min_failure_patients: int = DEFAULT_ONTOLOGY_REFINEMENT_MIN_FAILURE_PATIENTS
     max_ontology_refinement_rounds: int = DEFAULT_MAX_ONTOLOGY_REFINEMENT_ROUNDS
     estimand_ontology: EstimandOntologyConfig = field(default_factory=EstimandOntologyConfig)
@@ -860,9 +867,23 @@ class PlainHandoffStage2Config:
         default_factory=Stage2RoleAdjudicationConfig
     )
     estimation_trees: int = 200
+    # Learner for the final-estimation and modifier-test nuisances e, mu0, mu1.
+    # The selection-stage role models and the causal forest's internal
+    # nuisances stay elastic nets.
+    nuisance_learner: str = "super_learner"
+    super_learner: SuperLearnerConfig = field(default_factory=SuperLearnerConfig)
     min_propensity: float | None = None
     max_propensity: float | None = None
     propensity_clip: float = 0.02
+    # Which co-primary estimand the study pre-specifies to lead with ("ate" or
+    # "ato"); it changes only labels and order in causal_estimate.json.
+    lead_estimand: str = "ate"
+    # Reporting-only bounds of the outside_overlap flag in
+    # cross_fitted_predictions.csv; never used to drop rows or change estimates.
+    overlap_flag_bounds: tuple[float, float] = (0.05, 0.95)
+    # Reporting-only unmeasured-confounding sensitivity (E-values, omitted-
+    # variable-bias bounds, benchmark refits); never read by selection or estimation.
+    sensitivity: SensitivityConfig = field(default_factory=SensitivityConfig)
     # Count-based candidate informativeness rule (outer-training rows only):
     # keep a candidate only if at least this many patients have an observed
     # value and, for categorical features, at least two levels (counting "not
@@ -1053,7 +1074,9 @@ class PlainHandoffStage2Config:
             raise ValueError(
                 "stage2.runtime_transport_attempt_budget must be null or a positive integer"
             )
-        if self.runtime_model_family not in {"", "qwen3", "gemma4", "lfm2.5", "other"}:
+        if self.runtime_model_family not in {
+            "", "qwen3", "gemma4", "lfm2.5", "nemotron3.5", "beam1", "other",
+        }:
             raise ValueError("stage2.runtime_model_family is not recognized")
         if self.runtime_context_window_tokens is not None and (
             isinstance(self.runtime_context_window_tokens, bool)
@@ -1185,6 +1208,11 @@ class PlainHandoffStage2Config:
         self.role_adjudication.validate()
         if self.estimation_trees < 10:
             raise ValueError("stage2.estimation_trees must be at least 10")
+        if self.nuisance_learner not in {"super_learner", "elastic_net"}:
+            raise ValueError("stage2.nuisance_learner must be super_learner or elastic_net")
+        if not isinstance(self.super_learner, SuperLearnerConfig):
+            raise ValueError("stage2.super_learner must be a SuperLearnerConfig")
+        self.super_learner.validate()
         validate_propensity_bounds(self.min_propensity, self.max_propensity)
         if (
             self.statistical_selection.min_propensity is not None
@@ -1195,6 +1223,22 @@ class PlainHandoffStage2Config:
             )
         if not 0.0 < self.propensity_clip < 0.5:
             raise ValueError("stage2.propensity_clip must be between 0 and 0.5")
+        if self.lead_estimand not in {"ate", "ato"}:
+            raise ValueError("stage2.lead_estimand must be ate or ato")
+        bounds = self.overlap_flag_bounds
+        if (
+            not isinstance(bounds, tuple)
+            or len(bounds) != 2
+            or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                   for v in bounds)
+            or not 0.0 < bounds[0] < bounds[1] < 1.0
+        ):
+            raise ValueError(
+                "stage2.overlap_flag_bounds must be two numbers low < high strictly between 0 and 1"
+            )
+        if not isinstance(self.sensitivity, SensitivityConfig):
+            raise ValueError("stage2.sensitivity must be a SensitivityConfig")
+        self.sensitivity.validate()
         if (
             isinstance(self.min_informative_patients, bool)
             or not isinstance(self.min_informative_patients, int)
@@ -1272,7 +1316,19 @@ class PlainHandoffStage2Config:
         values["estimand_ontology"] = self.estimand_ontology.public_dict()
         values["statistical_selection"] = self.statistical_selection.public_dict()
         values["role_adjudication"] = self.role_adjudication.public_dict()
+        values["super_learner"] = self.super_learner.public_dict()
+        values["sensitivity"] = self.sensitivity.public_dict()
         return values
+
+    def nuisance_learner_spec(self) -> dict[str, Any]:
+        """The nuisance learner passed to the final-estimation and modifier-test fits."""
+        return learner_spec(self.nuisance_learner, self.super_learner)
+
+
+def _overlap_flag_bounds(value: Any) -> tuple[Any, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError("stage2.overlap_flag_bounds must be a list of two numbers")
+    return tuple(value)
 
 
 def _reject_unknown_stage2_keys(
@@ -1518,7 +1574,7 @@ def plain_stage2_config_from_mapping(
         workers=configured_workers,
         modeling_workers=raw.get("modeling_workers", 1),
         extraction_llm=extraction_llm,
-        max_review_rounds=int(raw.get("max_review_rounds", 2)),
+        max_review_rounds=int(raw.get("max_review_rounds", 4)),
         ontology_refinement_min_failure_patients=int(
             raw.get(
                 "ontology_refinement_min_failure_patients",
@@ -1540,9 +1596,16 @@ def plain_stage2_config_from_mapping(
         ),
         role_adjudication=role_adjudication_config_from_mapping(raw.get("role_adjudication")),
         estimation_trees=int(raw.get("estimation_trees", 200)),
+        # Validated (not coerced) by PlainHandoffStage2Config.validate().
+        nuisance_learner=raw.get("nuisance_learner", "super_learner"),
+        super_learner=super_learner_config_from_mapping(raw.get("super_learner")),
         min_propensity=raw.get("min_propensity"),
         max_propensity=raw.get("max_propensity"),
         propensity_clip=float(raw.get("propensity_clip", 0.02)),
+        # Validated (not coerced) by PlainHandoffStage2Config.validate().
+        lead_estimand=raw.get("lead_estimand", "ate"),
+        overlap_flag_bounds=_overlap_flag_bounds(raw.get("overlap_flag_bounds", (0.05, 0.95))),
+        sensitivity=sensitivity_config_from_mapping(raw.get("sensitivity")),
         # Validated (not coerced) by PlainHandoffStage2Config.validate().
         min_informative_patients=raw.get("min_informative_patients", 20),
         max_extraction_failure_fraction=raw.get("max_extraction_failure_fraction", 0.10),
@@ -1703,6 +1766,10 @@ def _stage2_model_family(model: str) -> str:
         return "gemma4"
     if "lfm25" in compact:
         return "lfm2.5"
+    if is_nemotron_3_5(str(model)):
+        return "nemotron3.5"
+    if is_reflection_beam_1(str(model)):
+        return "beam1"
     return "other"
 
 
@@ -2314,6 +2381,14 @@ def _wire_reasoning_effort(
 
     effort = str(configured_effort).strip().lower()
     enabled = _reasoning_enabled(effort)
+    if model_family == "nemotron3.5":
+        # Its documented control is the chat-template switch alone
+        # (enable_thinking, with medium_effort for the medium level).
+        return None
+    if model_family == "beam1":
+        # Beam always reasons; its lowest level stands in for "none". Its other
+        # levels (minimal through max) match the pipeline's names.
+        return "minimal" if effort == "none" else effort
     if model_family in {"qwen3", "gemma4", "lfm2.5"} and not enabled:
         # These families have an explicit hard switch in extra_body (and a
         # prompt fallback). Sending reasoning_effort="none" as well breaks
@@ -2354,7 +2429,40 @@ def _openai_request_variants(
         # External compatible servers can reject JSON schemas. Retain the task
         # reminder and semantic validator when negotiating JSON-only serving.
         response_formats.append({"type": "json_object"})
+    if model_family == "beam1":
+        # Beam's chat template reasons at its maximum level when a request
+        # names none, so no variant drops the level: the documented top-level
+        # field first, then the template variable for servers whose
+        # reasoning_effort field does not accept the level.
+        bodies = [
+            {
+                **dict(base_kwargs),
+                "reasoning_effort": wire_reasoning_effort,
+                **({"extra_body": sampling_extra} if sampling_extra else {}),
+            },
+            {
+                **dict(base_kwargs),
+                "extra_body": {
+                    **sampling_extra,
+                    "chat_template_kwargs": {"reasoning_effort": wire_reasoning_effort},
+                },
+            },
+        ]
+        return [
+            {**body, "response_format": fmt} for body in bodies for fmt in response_formats
+        ] + [{k: v for k, v in body.items() if k != "response_format"} for body in bodies]
     family_bodies: list[dict[str, Any]] = []
+    if model_family == "nemotron3.5":
+        effort = str(request_policy["reasoning_effort"]).strip().lower()
+        family_bodies.append(
+            {
+                **sampling_extra,
+                "chat_template_kwargs": {
+                    "enable_thinking": enabled,
+                    **({"medium_effort": True} if enabled and effort in {"low", "medium"} else {}),
+                },
+            }
+        )
     if model_family in {"qwen3", "gemma4", "lfm2.5"}:
         if model_family == "lfm2.5":
             family_bodies.append(
@@ -6657,6 +6765,16 @@ class PlainHandoffStage2:
             if len(set(row_ids)) != len(row_ids):
                 raise ValueError("a dataset row appears in more than one outer heldout fold")
             predictions = predictions.sort_values("_oci_row_id").reset_index(drop=True)
+            from .stage2_diagnostics import (
+                co_primary_estimands,
+                outside_overlap_flags,
+                overlap_flag_summary,
+            )
+
+            # Reporting only: never used to drop patients or change estimates.
+            predictions["outside_overlap"] = outside_overlap_flags(
+                predictions["propensity"], self.config.overlap_flag_bounds
+            )
             predictions_path = output_dir / "cross_fitted_predictions.csv"
             temporary = predictions_path.with_name(f".{predictions_path.name}.{os.getpid()}.tmp")
             predictions.to_csv(temporary, index=False)
@@ -6688,13 +6806,39 @@ class PlainHandoffStage2:
             # from the frozen predictions and per-fold artifacts. Never raises.
             from .stage2_diagnostics import write_heterogeneity_diagnostics
 
+            modifier_selection = self.config.statistical_selection.multi_model.modifier_selection
             heterogeneity_path, heterogeneity_summary = write_heterogeneity_diagnostics(
                 output_dir=output_dir,
                 predictions=predictions,
                 propensity_clip=float(self.config.propensity_clip),
                 seed=seed,
+                overlap_flag_bounds=self.config.overlap_flag_bounds,
+                outcome_type=outcome_type,
+                # Reporting only: held-out confirmation of each fold's selected
+                # modifiers, computed after every prediction is frozen.
+                modifier_confirmation_policy={
+                    "outcome_type": outcome_type,
+                    "q": modifier_selection.q,
+                    "weights": modifier_selection.weights,
+                    "min_count": self.config.statistical_selection.categorical_min_count,
+                },
+            )
+            co_primary = co_primary_estimands(
+                predictions,
+                propensity_clip=float(self.config.propensity_clip),
+                lead_estimand=self.config.lead_estimand,
             )
             causal_estimate = {
+                "co_primary_estimands": co_primary,
+                # Reporting only: E-values, omitted-variable-bias robustness values
+                # and the strongest benchmark (heterogeneity_diagnostics.json has
+                # the full analysis).
+                "unmeasured_confounding_sensitivity": heterogeneity_summary.get(
+                    "unmeasured_confounding_sensitivity"
+                ),
+                "overlap_flags": overlap_flag_summary(
+                    predictions, self.config.overlap_flag_bounds
+                ),
                 "estimator": "cross-fitted_aipw_with_fold_trained_nuisance_models",
                 "estimand": (
                     "average_treatment_effect_in_propensity_eligible_population"

@@ -33,6 +33,7 @@ from .stage2_statistical_selection import (
 )
 from .stage2_multi_model_config import Stage2MultiModelConfig, multi_model_config_from_mapping
 from .stage2_extraction_failures import failure_flags, has_failure_indicator
+from .stage2_documented_unknown import documented_unknown_mask, without_documented_unknown
 
 
 TEMPORAL_SCOPE = "pre_index_treatment"
@@ -131,6 +132,10 @@ class Stage2ElasticNetSelectionConfig:
                 result.pop(name)
         result["multi_model"] = self.multi_model.public_dict()
         return result
+
+    def selection_dict(self) -> dict[str, Any]:
+        """``public_dict`` for selection identities: omits final-estimation-only keys."""
+        return {**self.public_dict(), "multi_model": self.multi_model.selection_dict()}
 
 
 def statistical_selection_config_from_mapping(
@@ -246,6 +251,33 @@ def _append_failure_column(
     )
 
 
+def _append_documented_unknown_column(
+    train_columns: list[np.ndarray],
+    valid_columns: list[np.ndarray],
+    column_feature_ids: list[str],
+    column_names: list[str],
+    *,
+    feature_id: str,
+    name: str,
+    train_unknown: pd.Series,
+    valid_unknown: pd.Series,
+) -> None:
+    """Grouped documented_unknown indicator (dropped when constant in training)."""
+
+    if not bool(train_unknown.any()):
+        return
+    _append_variable_column(
+        train_columns,
+        valid_columns,
+        column_feature_ids,
+        column_names,
+        feature_id=feature_id,
+        name=f"{name}:documented_unknown",
+        train_values=train_unknown.to_numpy(dtype=float),
+        valid_values=valid_unknown.to_numpy(dtype=float),
+    )
+
+
 def _ordered_values(
     train_series: pd.Series,
     valid_series: pd.Series,
@@ -302,6 +334,18 @@ def _encode_design(
         # they get their own indicator in the parent feature's column group.
         train_failed = failure_flags(train, definition).reset_index(drop=True)
         valid_failed = failure_flags(valid, definition).reset_index(drop=True)
+        # documented_unknown gets its own grouped indicator and is neither a
+        # level nor missing. Without training occurrences it is encoded as missing.
+        train_unknown = documented_unknown_mask(train_series)
+        valid_unknown = (
+            documented_unknown_mask(valid_series)
+            if bool(train_unknown.any())
+            else pd.Series(False, index=valid_series.index)
+        )
+        train_series = without_documented_unknown(train_series)
+        valid_series = without_documented_unknown(valid_series)
+        train_excluded = train_failed | train_unknown
+        valid_excluded = valid_failed | valid_unknown
         strategy = _feature_strategy(definition)
         if strategy in {
             "continuous",
@@ -364,17 +408,22 @@ def _encode_design(
                 name=f"{name}:missing",
                 train_values=(
                     (train_numeric.isna() if strategy == "ordinal" else train_series.isna())
-                    & ~train_failed
+                    & ~train_excluded
                 ).to_numpy(),
                 valid_values=(
                     (valid_numeric.isna() if strategy == "ordinal" else valid_series.isna())
-                    & ~valid_failed
+                    & ~valid_excluded
                 ).to_numpy(),
             )
             _append_failure_column(
                 train_columns, valid_columns, column_feature_ids, column_names,
                 definition=definition, feature_id=feature_id, name=name,
                 train_failed=train_failed, valid_failed=valid_failed,
+            )
+            _append_documented_unknown_column(
+                train_columns, valid_columns, column_feature_ids, column_names,
+                feature_id=feature_id, name=name,
+                train_unknown=train_unknown, valid_unknown=valid_unknown,
             )
             continue
 
@@ -419,13 +468,18 @@ def _encode_design(
             column_names,
             feature_id=feature_id,
             name=f"{name}:missing",
-            train_values=(train_missing & ~train_failed).to_numpy(),
-            valid_values=(valid_missing & ~valid_failed).to_numpy(),
+            train_values=(train_missing & ~train_excluded).to_numpy(),
+            valid_values=(valid_missing & ~valid_excluded).to_numpy(),
         )
         _append_failure_column(
             train_columns, valid_columns, column_feature_ids, column_names,
             definition=definition, feature_id=feature_id, name=name,
             train_failed=train_failed, valid_failed=valid_failed,
+        )
+        _append_documented_unknown_column(
+            train_columns, valid_columns, column_feature_ids, column_names,
+            feature_id=feature_id, name=name,
+            train_unknown=train_unknown, valid_unknown=valid_unknown,
         )
     return _EncodedDesign(
         train=(
@@ -450,6 +504,9 @@ class _GroupStructure:
     weights: np.ndarray
     feature_ids: tuple[str, ...]
     penalty_factors: np.ndarray
+    # Per-group ridge that does not scale with the tuned regularization; None
+    # when no group has one. Used for groups exempt from the tuned penalty.
+    fixed_ridge: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -464,8 +521,13 @@ def _group_structure(
     column_feature_ids: Sequence[str],
     *,
     unpenalized_feature_ids: Sequence[str] = (),
+    fixed_ridge: Mapping[str, float] | None = None,
 ) -> _GroupStructure:
-    """Build feature groups, explicitly exempting any supplied IDs from both penalties."""
+    """Build feature groups, explicitly exempting any supplied IDs from both penalties.
+
+    ``fixed_ridge`` maps feature IDs to a ridge penalty ``0.5 * value * ||b||^2``
+    (on the mean-loss scale) that is applied whatever the tuned regularization.
+    """
     if not column_feature_ids:
         return _GroupStructure(
             starts=np.asarray([], dtype=int),
@@ -495,6 +557,11 @@ def _group_structure(
         weights=np.sqrt(sizes.astype(float)),
         feature_ids=tuple(feature_ids),
         penalty_factors=np.asarray([key not in unpenalized for key in feature_ids], dtype=float),
+        fixed_ridge=(
+            np.asarray([float(fixed_ridge.get(key, 0.0)) for key in feature_ids], dtype=float)
+            if fixed_ridge
+            else None
+        ),
     )
 
 
@@ -556,10 +623,13 @@ def _group_ridge_prox(
         * groups.penalty_factors
     )
     scales = np.maximum(0.0, 1.0 - thresholds / np.maximum(norms, 1e-30))
-    scales /= 1.0 + (
+    ridge = (
         float(step) * float(regularization) * (1.0 - float(group_ratio))
         * groups.penalty_factors
     )
+    if groups.fixed_ridge is not None:
+        ridge = ridge + float(step) * groups.fixed_ridge
+    scales /= 1.0 + ridge
     return values * np.repeat(scales, groups.sizes)
 
 

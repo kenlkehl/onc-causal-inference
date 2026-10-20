@@ -108,16 +108,33 @@ with `endpoints`.
 Stage 2 detects the model family from the backing model ID that `/models`
 reports (falling back to the served ID): names containing `qwen3`, `gemma4`, or
 `lfm25` (ignoring punctuation and case) select the Qwen 3, Gemma 4, or LFM 2.5
-family; anything else is treated generically. The family determines:
+family, and names containing `nemotron-3.5` (with `-`, `_`, a space, or nothing
+between the parts, and `.` or `_` in the version) select Nemotron 3.5, for
+example `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4`. Names
+containing `beam-1` as a separate word (with `-`, `_`, a space, or nothing
+between the parts, and optionally a minor version such as `1.0`) select
+Reflection's Beam 1, for example `reflection/Beam-1.0-501B-A23B-NVFP4`; a
+served alias such as `beam` resolves through the backing model ID. Earlier
+Nemotron releases, other Beam versions, and anything else are treated
+generically. The family determines:
 
 - **Thinking controls.** Recognized families receive the thinking switch through
-  `chat_template_kwargs.enable_thinking` (LFM 2.5 also `enableThinking`) and,
-  when that is rejected, a short instruction added to the prompt. Generic
-  models receive only `reasoning_effort`.
+  `chat_template_kwargs.enable_thinking` (LFM 2.5 also `enableThinking`).
+  Qwen 3, Gemma 4, and LFM 2.5 also get a short instruction added to the
+  prompt in case the switch is rejected. Nemotron 3.5 receives only the
+  chat-template switch its model card documents, with `medium_effort: true`
+  for reasoning effort `low` or `medium`, and never `reasoning_effort`.
+  Beam 1 always reasons, so it has no switch: it receives the level as
+  `reasoning_effort`, as vLLM's Beam recipe documents, or, if the server
+  rejects that field, as `chat_template_kwargs.reasoning_effort`, with
+  `none` sent as `minimal`, its lowest level. Every Beam request names a level,
+  because its chat template reasons at its maximum level (`max`) when a request
+  names none. Generic models receive only `reasoning_effort`.
 - **Reasoning effort.** `stage2.interpretation_reasoning_effort` (default
   `auto`) resolves to `high` (`xhigh` for Qwen 3.8 Flash Next).
   `stage2.extraction_reasoning_effort` (default `none`) turns thinking off for
-  initial extraction requests. Repairs after the fifth turn thinking on.
+  initial extraction requests (`minimal` for Beam 1). Repairs after the fifth
+  turn thinking on.
 - **Sampling.** Each family has a checked-in sampling profile
   ([Sampling profiles](configuration.md#sampling-profiles)).
 
@@ -129,7 +146,9 @@ extra fields. Each variant uses one HTTP attempt from `transport_max_attempts`
 (default 6), so a server that rejects many controls can exhaust the attempt
 budget; raise `transport_max_attempts` for such servers. Qwen 3.8 Flash Next is
 strict: only the JSON response-format hint may be dropped, and rejection of its
-reasoning or sampling controls fails the request.
+reasoning or sampling controls fails the request. Beam 1 may move its reasoning
+level from the top-level field to the template variable and may drop the JSON
+hint or rejected sampling controls, but no Beam request omits the level.
 
 Timeouts, retries, and repairs are listed in
 [Request and recovery defaults](configuration.md#request-and-recovery-defaults).
@@ -241,6 +260,7 @@ when a managed pool is configured.
 | `reasoning_parser` | family default | Passed as `--reasoning-parser` |
 | `language_model_only` | family default | `true` or `false` adds `--language-model-only` or `--no-language-model-only`; null adds neither |
 | `default_chat_template_kwargs` | none | Passed as `--default-chat-template-kwargs` |
+| `trust_remote_code` | `true` for Nemotron 3.5 names, otherwise `false` | `true` adds `--trust-remote-code`, which lets vLLM run code from the model repository |
 | `extra_args` | `[]` | Additional vLLM command-line tokens, as a JSON list (for example `["--gpu-memory-utilization", "0.90", "--max-model-len", "128000"]`) |
 | `enabled` | `true` | `false` disables the pool |
 
@@ -250,7 +270,15 @@ plus the named options, `--api-key` when the role's key is not `EMPTY`, and
 `extra_args`. The served model ID equals the configured model string. For model
 names containing `gemma`, OCI adds `--reasoning-parser gemma4
 --language-model-only`; for names containing `qwen`, `--reasoning-parser qwen3
---language-model-only`. Set `reasoning_parser` to `""` and
+--language-model-only`; for Nemotron 3.5 names, `--reasoning-parser
+nemotron_v3 --trust-remote-code`, as in NVIDIA's model card (set
+`trust_remote_code` to `false` to leave the flag out); for Beam 1 names,
+`--reasoning-parser beam`, as in vLLM's Beam recipe, which requires a vLLM
+release with Beam support. Beam replicas also get
+`VLLM_ENGINE_READY_TIMEOUT_S=3600` unless that variable is already set, because
+the recipe reports a first start of about 10 minutes and vLLM's default limit
+is 600 seconds. Hardware-specific recipe flags (`--moe-backend`,
+`--kv-cache-dtype`, speculative decoding) go in `extra_args`. Set `reasoning_parser` to `""` and
 `language_model_only` to null to suppress these for a model they do not fit.
 Thinking is selected per request, never as a server default. `extra_args`
 cannot contain flags that OCI sets itself (`--model`, `--host`, `--port`,
@@ -336,22 +364,22 @@ run. This choice is recorded in `model_phase.json` and kept on resume. Set
 
 ## Hardware presets
 
-`run_synthetic.sh` ships three presets in `scripts/presets/`
+`run_synthetic.sh` ships four presets in `scripts/presets/`
 ([Configuration](configuration.md#presets) lists the other defaults they set).
 GPU indices are logical, after any `PHYSICAL_GPUS` or `CUDA_VISIBLE_DEVICES`
 mapping.
 
-| | `external` | `h100x8` | `rtxpro6000x8` |
-|---|---|---|---|
-| Hardware | Any; servers started separately | 8 × H100 80 GB | 8 × RTX PRO 6000 Blackwell 96 GB |
-| Interpretation model | `RedHatAI/Gemma-4-31B-IT-FP8-Dynamic` at `http://127.0.0.1:8010/v1` | `RedHatAI/gemma-4-31B-it-FP8-dynamic`, managed, GPUs 0–3 | `nvidia/Gemma-4-26B-A4B-NVFP4`, managed |
-| Extraction model | `google/gemma-4-e4b-it` at `http://127.0.0.1:8020/v1` | `RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic`, managed, GPUs 4–7 | Same model as interpretation |
-| GPU scheduling | — | Two models alternate over all eight GPUs; configured split after rapid switching | One shared pool, one replica per GPU on all eight GPUs |
-| Tensor parallelism | — | 1 | 1 |
-| Public ports | 8010, 8020 | 8010–8017 and 8110–8117 | 8110–8117 |
-| Internal port bases | — | 20000 and 30000 | 30000 (shared pool) |
-| vLLM arguments | — | `--gpu-memory-utilization 0.90 --max-model-len 128000 --max-num-seqs 32` | `--gpu-memory-utilization 0.90 --max-model-len 262144 --max-num-seqs 32` |
-| Extraction window | 131,072 (code default; `one_conf_one_mod` uses 128,000) | 128,000, margin 4,096 | 262,144, margin 4,096 |
+| | `external` | `h100x8` | `rtxpro6000x8` | `dgx_station_gb300` |
+|---|---|---|---|---|
+| Hardware | Any; servers started separately | 8 × H100 80 GB | 8 × RTX PRO 6000 Blackwell 96 GB | DGX Station: 1 × GB300 (252 GB HBM3e), 72-core Grace (Arm) CPU |
+| Interpretation model | `RedHatAI/Gemma-4-31B-IT-FP8-Dynamic` at `http://127.0.0.1:8010/v1` | `RedHatAI/gemma-4-31B-it-FP8-dynamic`, managed, GPUs 0–3 | `nvidia/Gemma-4-26B-A4B-NVFP4`, managed | `nvidia/Gemma-4-26B-A4B-NVFP4`, managed |
+| Extraction model | `google/gemma-4-e4b-it` at `http://127.0.0.1:8020/v1` | `RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic`, managed, GPUs 4–7 | Same model as interpretation | Same model as interpretation |
+| GPU scheduling | — | Two models alternate over all eight GPUs; configured split after rapid switching | One shared pool, one replica per GPU on all eight GPUs | One shared server on the GB300, after Stage 1 has used it |
+| Tensor parallelism | — | 1 | 1 | 1 |
+| Public ports | 8010, 8020 | 8010–8017 and 8110–8117 | 8110–8117 | 8110 |
+| Internal port bases | — | 20000 and 30000 | 30000 (shared pool) | 30000 (shared server) |
+| vLLM arguments | — | `--gpu-memory-utilization 0.90 --max-model-len 128000 --max-num-seqs 32` | `--gpu-memory-utilization 0.90 --max-model-len 262144 --max-num-seqs 32` | `--gpu-memory-utilization 0.90 --max-model-len 262144 --max-num-seqs 64` |
+| Extraction window | 131,072 (code default; `one_conf_one_mod` uses 128,000) | 128,000, margin 4,096 | 262,144, margin 4,096 | 262,144, margin 4,096 |
 
 For the `external` preset, start the two servers yourself before launching, or
 point `STAGE2_ENDPOINT` and `STAGE2_EXTRACTION_ENDPOINT` elsewhere. With the
@@ -359,6 +387,25 @@ point `STAGE2_ENDPOINT` and `STAGE2_EXTRACTION_ENDPOINT` elsewhere. With the
 two models alternate, with GPUs 0–3 and 4–7 as the configured split. vLLM reads
 the FP8 and NVFP4 quantization from each checkpoint. NVIDIA's NVFP4 repository
 name omits `IT`, but the checkpoint is instruction tuned.
+
+The `dgx_station_gb300` preset expects the station's optional RTX PRO display
+GPU at PCI position 0 and the GB300 at position 1, the numbering `nvidia-smi`
+shows. CUDA's default order (fastest first) can number them differently, so
+the preset exports `CUDA_DEVICE_ORDER=PCI_BUS_ID` and sets `PHYSICAL_GPUS=1`.
+It also sets `MIN_TOTAL_GPU_GB=150`, which no display GPU (at most 96 GB) can
+satisfy, so selecting the wrong GPU stops the launch at detection; the check
+uses total rather than free memory because a vLLM server on the GB300 leaves
+Stage 1 less than that free. On a station without a display GPU, set
+`PHYSICAL_GPUS=0`. Check the launcher's `GPU memory:` line for
+the GB300. Stage 1 defaults to four concurrent text-model/HTR and neural-query
+contexts on that GPU, each in a separate process sharing the CPU budget.
+Set `STAGE1_CONTEXTS_PER_GPU=2` (or another positive integer) to change that
+limit, including when using benchmark `--llm-url`. More processes use more GPU
+memory; this is a concurrency limit, not automatic memory sizing. Restart the
+workflow to apply it; completed contexts and checkpointed training folds remain
+reusable. Individual HTR folds stay serial within each process.
+The Grace CPU is Arm (aarch64): the lockfile's torch and vLLM have
+aarch64 wheels, but this preset has not yet been run on a station.
 
 A typical managed launch on an eight-GPU machine:
 
@@ -386,6 +433,7 @@ summary) and requires PyTorch to see at least one CUDA GPU:
 | `--workers` | `auto` | Stage 1 workers; `auto` is the smaller of the CPU count and the larger of outer × (inner + 1) and the GPUs' capacity at 8 GiB per worker |
 | `--stage2-workers` | 32 | Stage 2 request concurrency; `auto` caps 32 at the CPU count |
 | `--min-free-vram-gib` | 20 (`run_synthetic.sh` passes `MIN_FREE_GPU_GB`, default 0) | Free memory a GPU needs to be eligible |
+| `--min-total-vram-gib` | 0 (`run_synthetic.sh` passes `MIN_TOTAL_GPU_GB`, default 0) | Total memory a GPU needs to be eligible, which identifies a GPU model |
 | `--stage1-vram-gib-per-worker` | 8 | GPU memory assumed per concurrent Stage 1 context |
 
 ## Troubleshooting

@@ -2,7 +2,7 @@
 """Configuration classes for synthetic data generation."""
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import json
 
 
@@ -97,6 +97,38 @@ class SyntheticDataConfig:
     # Outcome type: "binary" or "continuous"
     outcome_type: str = "binary"
     outcome_noise_std: float = 1.0  # Noise std for continuous outcomes
+
+    # Additional causal roles and equation shape (see ``dgp_terms``). The LLM
+    # still tags variables only as confounders or effect modifiers: Python
+    # turns ``num_instruments`` + ``num_prognostic`` of the confounder-only
+    # variables into instruments (treatment equation only) and prognostic
+    # variables (outcome equation only) and draws their coefficients.
+    num_instruments: int = 0
+    num_prognostic: int = 0
+    # Give effect-modifier-only variables an outcome main effect as well.
+    modifier_main_effects: bool = False
+    # Shape of continuous terms in the outcome main terms and the treatment
+    # interactions: "none" (linear z), "threshold" (1[z > 0]), "quadratic" (z^2).
+    nonlinearity: str = "none"
+    # Separate logit SDs; None uses ``target_logit_std``.
+    treatment_logit_std: Optional[float] = None
+    outcome_logit_std: Optional[float] = None
+    # Multiplier for the treatment x effect-modifier interaction coefficients.
+    modifier_strength: float = 2.0
+
+    # Generation-time factors (see ``generation_factors``); all off by default.
+    # Exchangeable correlation of the latent normals of a Gaussian copula.
+    covariate_correlation: float = 0.0
+    # Probability that a variable's value is given to the note writer.
+    documentation_rate: float = 1.0
+    documentation_mechanism: str = "mcar"  # "mcar" or "mnar"
+    documentation_mnar_slope: float = 1.0
+    documented_variables_subset: Optional[List[str]] = None
+    # {"rate": P, "events": [...], "regimen_mention_prob": P}; None disables.
+    post_treatment_notes: Optional[Dict[str, Any]] = None
+    # Noisy copies of confounders that enter no equation.
+    num_proxy_variables: int = 0
+    proxy_correlation: float = 0.9
 
     # Generation mode. Only "two_stage" (event timeline, then per-event note
     # expansion) is supported; the field is kept because saved generation
@@ -225,3 +257,70 @@ class SyntheticDataConfig:
                 "num_features cannot exceed num_confounders + num_effect_modifiers "
                 "when both role counts are specified"
             )
+        self.validate_dgp_factors()
+
+    def validate_dgp_factors(self) -> None:
+        """Validate the role, equation-shape, and generation-time factor fields."""
+        from .dgp_terms import NONLINEARITIES
+        from .generation_factors import validate_post_treatment_notes
+
+        for field_name in ("num_instruments", "num_prognostic", "num_proxy_variables"):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+        if not isinstance(self.modifier_main_effects, bool):
+            raise ValueError("modifier_main_effects must be true or false")
+        if self.nonlinearity not in NONLINEARITIES:
+            raise ValueError(
+                f"nonlinearity must be one of {list(NONLINEARITIES)}, got {self.nonlinearity!r}"
+            )
+        for field_name in ("treatment_logit_std", "outcome_logit_std"):
+            value = getattr(self, field_name)
+            if value is not None and not value > 0:
+                raise ValueError(f"{field_name} must be positive")
+        if not self.target_logit_std > 0:
+            raise ValueError("target_logit_std must be positive")
+        if not self.modifier_strength >= 0:
+            raise ValueError("modifier_strength must be non-negative")
+        if not (0.0 <= self.covariate_correlation < 1.0):
+            raise ValueError("covariate_correlation must be in [0, 1)")
+        if not (0.0 <= self.documentation_rate <= 1.0):
+            raise ValueError("documentation_rate must be between 0 and 1")
+        if self.documentation_mechanism not in {"mcar", "mnar"}:
+            raise ValueError("documentation_mechanism must be 'mcar' or 'mnar'")
+        if self.documented_variables_subset is not None:
+            subset = self.documented_variables_subset
+            if (
+                not isinstance(subset, list)
+                or not subset
+                or not all(isinstance(name, str) and name.strip() for name in subset)
+                or len(set(subset)) != len(subset)
+            ):
+                raise ValueError(
+                    "documented_variables_subset must be a non-empty list of distinct "
+                    "variable names"
+                )
+        if not (0.0 < self.proxy_correlation < 1.0):
+            raise ValueError("proxy_correlation must be between 0 and 1 (exclusive)")
+        if self.post_treatment_notes is not None:
+            self.post_treatment_notes = validate_post_treatment_notes(self.post_treatment_notes)
+
+    def logit_stds(self) -> Tuple[float, float]:
+        """Target SDs of the treatment and outcome linear predictors."""
+        treatment = (
+            self.treatment_logit_std if self.treatment_logit_std is not None
+            else self.target_logit_std
+        )
+        outcome = (
+            self.outcome_logit_std if self.outcome_logit_std is not None
+            else self.target_logit_std
+        )
+        return float(treatment), float(outcome)
+
+    def documentation_enabled(self) -> bool:
+        """Whether some variable values are withheld from the note writer."""
+        return self.documentation_rate < 1.0
+
+    def post_treatment_enabled(self) -> bool:
+        """Whether post-treatment dated notes are generated."""
+        return self.post_treatment_notes is not None

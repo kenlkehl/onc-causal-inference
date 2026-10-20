@@ -100,10 +100,13 @@ def test_training_and_heldout_nuisances_share_the_all_candidate_construction(
     assert isinstance(audits["refit_iteration_limit_reached"], list)
     assert all(isinstance(f["refit_iterations"], int) for f in audits["fits"])
     calibration = result["nuisance_calibration"]
-    assert calibration["predictions_used_downstream"] == "recalibrated"
+    assert calibration["predictions_used_downstream"] == (
+        "raw_training_out_of_fold_and_own_fold_calibrated_heldout")
     assert set(calibration["calibration_slope_summary"]) >= {
         "fit_out_of_fold_treatment", "heldout_treatment"}
-    assert calibration["recalibration"]["propensity"]["method"].startswith("cross_fitted_platt")
+    assert calibration["recalibration"]["propensity"]["method"] == "own_fold_platt_then_average"
+    assert calibration["recalibration"]["training"] == (
+        "raw_inner_out_of_fold_predictions_not_recalibrated")
     if estimator == "dina":
         # DINA trains and predicts with the same (recalibrated) construction.
         eligible_fit = fit.effect_eligible.to_numpy(bool)
@@ -130,13 +133,13 @@ def test_heldout_candidate_frame_must_cover_the_heldout_rows(tmp_path):
         )
 
 
-def test_cross_fitted_platt_recalibration_improves_an_overfit_propensity(
+def test_own_fold_platt_calibration_improves_an_overfit_heldout_propensity(
     tmp_path, monkeypatch
 ):
-    """M-02: overfit nuisances are recalibrated using training OOF predictions only."""
+    """M-02: overfit held-out nuisances are calibrated per fold model on training rows."""
     rng = np.random.default_rng(2026)
     # Five inner folds, as in the shipped configs. Held-out rows get the average
-    # of the five fold models; the calibrator is learned from their OOF output.
+    # of the five fold models, each calibrated on its own inner-validation rows.
     n_fit, n_held, p = 800, 800, 50
     n = n_fit + n_held
     x = rng.normal(size=(n, p))
@@ -147,7 +150,7 @@ def test_cross_fitted_platt_recalibration_improves_an_overfit_propensity(
     definitions = [{**feature(f"x{j}"), "roles": ["confounder"],
                     "nuisance_model_roles": ["treatment", "outcome"]} for j in range(p)]
 
-    def overfit_classifier(design, target, *, seed):
+    def overfit_classifier(design, target, *, seed, learner=None):
         # Nearly unpenalized logistic regression: OOF slopes well below one.
         return LogisticRegression(C=1e4, max_iter=5000).fit(design, target.astype(int))
 
@@ -181,17 +184,21 @@ def test_cross_fitted_platt_recalibration_improves_an_overfit_propensity(
     before, after = held["before"]["calibration_slope"], held["after"]["calibration_slope"]
     assert before < 0.85
     assert abs(after - 1.0) < abs(before - 1.0)
+    # Training out-of-fold predictions are used raw: before and after agree.
     oof = summary["fit_out_of_fold_treatment"]
     assert oof["before"]["calibration_slope"] < 0.85
-    assert abs(oof["after"]["calibration_slope"] - 1.0) < 0.15
+    assert oof["after"] == oof["before"]
     # Log loss also improves on the untouched held-out patients.
     calibration = result["nuisance_calibration"]
     assert (calibration["heldout_treatment"]["log_loss"]
             < calibration["before_recalibration"]["heldout_treatment"]["log_loss"])
     audit = calibration["recalibration"]
-    assert audit["propensity"]["heldout"]["status"] == "fitted"
-    assert set(audit["propensity"]["per_fold"]) == {"1", "2", "3", "4", "5"}
-    assert "out-of-fold" in audit["description"]
+    assert audit["propensity"]["identity_calibrators"] == 0
+    per_fold = audit["propensity"]["per_fold"]
+    assert set(per_fold) == {"1", "2", "3", "4", "5"}
+    assert {item["status"] for item in per_fold.values()} == {"fitted"}
+    assert {item["fit_rows"] for item in per_fold.values()} == {n_fit // 5}
+    assert "own inner-validation rows" in audit["description"]
 
 
 def test_binary_forest_cate_varies_with_prognosis_under_a_constant_odds_ratio(tmp_path):
@@ -259,3 +266,112 @@ def test_continuous_outcome_forest_keeps_constant_design_without_modifiers(
     assert result["prognostic_score_in_x"] is False
     assert result["constant_effect_design"] is True
     assert designs and np.ptp(designs[0]) == 0
+
+
+def _calibration_fixture(n_fit=240, n_held=60, seed=11):
+    rng = np.random.default_rng(seed)
+    n = n_fit + n_held
+    x = rng.normal(size=(n, 3))
+    t = rng.binomial(1, expit(0.9 * x[:, 0])).astype(float)
+    y = rng.binomial(1, expit(-0.3 + 0.8 * x[:, 1] + 0.6 * t)).astype(float)
+    frame = pd.DataFrame({"_oci_row_id": range(n), **{f"x{j}": x[:, j] for j in range(3)}})
+    definitions = [{**feature(f"x{j}"), "roles": ["confounder"],
+                    "nuisance_model_roles": ["treatment", "outcome"]} for j in range(3)]
+    split = {"fit_row_ids": list(range(n_fit)), "heldout_row_ids": list(range(n_fit, n))}
+    split["inner_splits"] = analysis._fallback_inner_splits(range(n_fit), folds=3, seed=2)
+    return dict(
+        dataset=pd.DataFrame({"patient_id": range(n), "treatment": t, "outcome": y}),
+        extracted_fit=frame.iloc[:n_fit], extracted_heldout=frame.iloc[n_fit:],
+        definitions=definitions, split=split, unit_id_column="patient_id",
+        treatment_column="treatment", outcome_column="outcome", outcome_type="binary",
+        inner_folds=3, seed=4, propensity_clip=0.02, estimation_trees=8,
+        nuisance_candidate_definitions=definitions, nuisance_candidate_fit=frame.iloc[:n_fit],
+        nuisance_candidate_heldout=frame.iloc[n_fit:],
+    )
+
+
+def test_training_nuisances_are_raw_and_heldout_averages_own_fold_calibrations(tmp_path):
+    from oci.utils.calibration import PlattRecalibration
+
+    kw = _calibration_fixture()
+    result = analysis.estimate_outer_fold(
+        **kw, estimator="linear_interactions", statistical_policy=small_policy(),
+        output_dir=tmp_path)
+    fit = pd.read_csv(tmp_path / "nuisance_fit_predictions.csv", float_precision="round_trip")
+    held = pd.read_csv(tmp_path / "predictions.csv", float_precision="round_trip")
+    # Training out-of-fold nuisances are the raw fold-model predictions.
+    for name in ("propensity", "mu0", "mu1"):
+        np.testing.assert_array_equal(fit[name], fit[f"{name}_uncalibrated"])
+    # Held-out values: each fold model's held-out predictions calibrated by a Platt
+    # fit on that model's own validation rows (arm rows for mu), then averaged.
+    checkpoints = next((tmp_path / "fit_checkpoints").iterdir())
+    dataset, n_held = kw["dataset"], len(kw["split"]["heldout_row_ids"])
+    audit = result["nuisance_calibration"]["recalibration"]
+    fitted = 0
+    for name, arm in (("propensity", None), ("mu0", 0), ("mu1", 1)):
+        expected = []
+        for k, inner in enumerate(kw["split"]["inner_splits"], 1):
+            prediction = np.asarray(json.loads(
+                (checkpoints / f"cross_fit/fold_{k:03d}/{name}.json").read_text()
+            )["result"]["prediction"])
+            rows = np.asarray(inner["heldout_row_ids"])
+            own, heldout = prediction[:len(rows)], prediction[len(rows):]
+            assert len(heldout) == n_held
+            t = dataset.loc[rows, "treatment"].to_numpy()
+            label = t if arm is None else dataset.loc[rows, "outcome"].to_numpy()
+            keep = np.ones(len(rows), bool) if arm is None else t == arm
+            calibrator = PlattRecalibration.fit(own[keep], label[keep])
+            recorded = audit[name]["per_fold"][str(k)]
+            assert recorded["fit_rows"] == int(keep.sum())
+            assert recorded["status"] == calibrator.status
+            assert recorded["slope"] == pytest.approx(calibrator.slope)
+            fitted += calibrator.status == "fitted"
+            expected.append(calibrator.transform(heldout))
+        np.testing.assert_allclose(held[name], np.mean(expected, axis=0), rtol=0, atol=1e-12)
+        assert audit[name]["method"] == "own_fold_platt_then_average"
+    assert fitted >= 3  # at least the propensity calibrators are estimated
+    summary = result["nuisance_calibration"]["calibration_slope_summary"]
+    assert summary["fit_out_of_fold_treatment"]["before"] == (
+        summary["fit_out_of_fold_treatment"]["after"])
+
+
+def test_each_heldout_calibrator_uses_only_its_own_fold_rows():
+    rng = np.random.default_rng(5)
+    n = 120
+    treatment = rng.binomial(1, 0.5, size=n).astype(float)
+    outcome = rng.binomial(1, 0.4, size=n).astype(float)
+    fit = tuple(np.clip(rng.uniform(0.1, 0.9, size=n), 0, 1) for _ in range(3))
+    folds = [
+        {"inner_fold": k + 1, "validation_positions": list(range(40 * k, 40 * (k + 1))),
+         "heldout": tuple(rng.uniform(0.1, 0.9, size=10) for _ in range(3))}
+        for k in range(3)
+    ]
+    heldout = tuple(np.mean([f["heldout"][i] for f in folds], axis=0) for i in range(3))
+
+    def run(treatment, outcome):
+        return analysis._recalibrated_nuisances(
+            treatment=treatment, outcome=outcome, binary=True, fit=fit, heldout=heldout,
+            heldout_folds=folds)
+
+    base = run(treatment, outcome)
+    # Training values are returned unchanged.
+    for raw, final in zip(fit, base["fit"]):
+        np.testing.assert_array_equal(raw, final)
+    # Changing labels in fold 3 changes only fold 3's calibrators.
+    flipped_t, flipped_y = treatment.copy(), outcome.copy()
+    flipped_t[80:] = 1 - flipped_t[80:]
+    flipped_y[80:] = 1 - flipped_y[80:]
+    changed = run(flipped_t, flipped_y)
+    for name in ("propensity", "mu0", "mu1"):
+        for fold in ("1", "2"):
+            assert changed["audit"][name]["per_fold"][fold] == base["audit"][name]["per_fold"][fold]
+        assert changed["audit"][name]["per_fold"]["3"] != base["audit"][name]["per_fold"]["3"]
+    assert base["audit"]["mu0"]["per_fold"]["1"]["fit_rows"] == int((treatment[:40] == 0).sum())
+    with pytest.raises(ValueError, match="each fold model"):
+        analysis._recalibrated_nuisances(
+            treatment=treatment, outcome=outcome, binary=True, fit=fit, heldout=heldout)
+    continuous = analysis._recalibrated_nuisances(
+        treatment=treatment, outcome=rng.normal(size=n), binary=False, fit=fit,
+        heldout=heldout, heldout_folds=folds)
+    np.testing.assert_array_equal(continuous["heldout"][1], heldout[1])
+    assert continuous["audit"]["mu0"] == {"method": "none", "reason": "continuous outcome"}

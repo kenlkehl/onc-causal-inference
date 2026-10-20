@@ -1,0 +1,276 @@
+{
+  "schema_version": "oci_benchmark_registry_v1",
+  "description": "Benchmark scenarios for scripts/benchmark.py. S0 is the baseline; each other scenario switches on one factor family relative to it. Re-equation scenarios recompute treatment and outcome on an existing text corpus through synthetic_data.reequation.reequation_cohort; S5 and S6 need text written with generation-time switches. See docs/benchmarks.md.",
+  "scenarios": [
+    {
+      "id": "S0",
+      "family": "S0",
+      "label": "Baseline",
+      "factor": "Confounders and effect modifiers only, as in the generator's default process",
+      "materialization": "reequation",
+      "sizes": [1000, 5000, 10000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 10000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 6 features; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S0_baseline",
+        "roles": {"confounder": 3, "effect_modifier": 3},
+        "role_assignment": "random",
+        "modifier_main_effects": false,
+        "nonlinearity": "none",
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.5,
+        "target_control_outcome_rate": 0.5,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S1",
+      "family": "S1",
+      "label": "Instruments and prognostic-only variables",
+      "factor": "Two instruments (treatment equation only) and two prognostic-only variables (outcome equation only) added to the baseline roles",
+      "materialization": "reequation",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 5000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 10 features; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S1_instruments_and_prognostic",
+        "roles": {"confounder": 3, "effect_modifier": 3, "instrument": 2, "prognostic": 2},
+        "role_assignment": "random",
+        "modifier_main_effects": false,
+        "nonlinearity": "none",
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.5,
+        "target_control_outcome_rate": 0.5,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S2",
+      "family": "S2",
+      "label": "Dual-role variables and modifier main effects",
+      "factor": "Two variables that are both confounders and effect modifiers, and outcome main effects for every effect modifier",
+      "materialization": "reequation",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 5000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 8 features; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S2_dual_role_and_modifier_main_effects",
+        "roles": {"confounder": 3, "effect_modifier": 3, "dual_role": 2},
+        "role_assignment": "random",
+        "modifier_main_effects": true,
+        "nonlinearity": "none",
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.5,
+        "target_control_outcome_rate": 0.5,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S3",
+      "family": "S3",
+      "label": "Nonlinear h(M)",
+      "factor": "Threshold nonlinearity of continuous features in the outcome main terms and the treatment interaction terms",
+      "materialization": "reequation",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 5000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 6 features, some continuous; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S3_threshold_nonlinearity",
+        "roles": {"confounder": 3, "effect_modifier": 3},
+        "role_assignment": "random",
+        "modifier_main_effects": false,
+        "nonlinearity": "threshold",
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.5,
+        "target_control_outcome_rate": 0.5,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S4a",
+      "family": "S4",
+      "label": "One unmeasured confounder, strength 0.5",
+      "factor": "One latent standard-normal confounder U that never appears in the text, entering both equations at half the scale of the measured confounders",
+      "materialization": "reequation",
+      "sizes": [1000, 5000, 10000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 10000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 6 features; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S4_unmeasured_confounder_strength_0.5",
+        "roles": {"confounder": 3, "effect_modifier": 3},
+        "role_assignment": "random",
+        "modifier_main_effects": false,
+        "nonlinearity": "none",
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 1,
+        "unmeasured_strength": 0.5,
+        "target_treatment_rate": 0.5,
+        "target_control_outcome_rate": 0.5,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S4b",
+      "family": "S4",
+      "label": "One unmeasured confounder, strength 1.0",
+      "factor": "One latent standard-normal confounder U that never appears in the text, entering both equations at the scale of the measured confounders",
+      "materialization": "reequation",
+      "sizes": [1000, 5000, 10000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 10000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 6 features; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S4_unmeasured_confounder_strength_1.0",
+        "roles": {"confounder": 3, "effect_modifier": 3},
+        "role_assignment": "random",
+        "modifier_main_effects": false,
+        "nonlinearity": "none",
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 1,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.5,
+        "target_control_outcome_rate": 0.5,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S5",
+      "family": "S5",
+      "label": "MNAR documentation",
+      "factor": "Each characteristic is shown to the note writer with a probability that depends on its value (missing not at random); the baseline roles are re-equated on that corpus",
+      "materialization": "reequation_of_generated",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "generated_corpus",
+        "minimum_patients": 5000,
+        "requirements": "a corpus generated with the generation settings below (LLM text); it is then re-equated with the baseline roles for every size and seed"
+      },
+      "generation": {
+        "clinical_question": "Compare vinorelbine to gemcitabine for advanced/metastatic NSCLC.",
+        "dataset_size": 5000,
+        "num_features": 10,
+        "num_confounders": 5,
+        "num_effect_modifiers": 5,
+        "outcome_type": "binary",
+        "continuous_covariate_distribution": "positive_lognormal",
+        "structured_data": {"enabled": true},
+        "documentation_rate": 0.7,
+        "documentation_mechanism": "mnar",
+        "documentation_mnar_slope": 1.0,
+        "seed": 42
+      },
+      "dgp": {
+        "name": "S5_mnar_documentation",
+        "roles": {"confounder": 3, "effect_modifier": 3},
+        "role_assignment": "random",
+        "modifier_main_effects": false,
+        "nonlinearity": "none",
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.5,
+        "target_control_outcome_rate": 0.5,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S6",
+      "family": "S6",
+      "label": "Post-treatment leak",
+      "factor": "Notes dated after the index date describe a treatment-caused event; one run reads them through the text column and one run uses dated-notes input, which drops them",
+      "materialization": "subsample_of_generated",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "generated_corpus",
+        "minimum_patients": 5000,
+        "requirements": "a corpus generated with the generation settings below (LLM text, with notes.parquet, index_date and clinical_text_with_post_treatment); re-equation refuses such corpora, so cells are seeded subsamples of it"
+      },
+      "generation": {
+        "clinical_question": "Compare vinorelbine to gemcitabine for advanced/metastatic NSCLC.",
+        "dataset_size": 5000,
+        "num_features": 6,
+        "num_confounders": 3,
+        "num_effect_modifiers": 3,
+        "outcome_type": "binary",
+        "continuous_covariate_distribution": "positive_lognormal",
+        "structured_data": {"enabled": true},
+        "post_treatment_notes": {"rate": 1.0},
+        "seed": 42
+      },
+      "dgp": null,
+      "run_variants": [
+        {
+          "name": "text_column",
+          "description": "clinical_text_with_post_treatment as the text column, so post-index notes reach the analysis",
+          "columns": {"text": "clinical_text_with_post_treatment"}
+        },
+        {
+          "name": "dated_notes",
+          "description": "dated-notes input from notes.parquet, which keeps only notes dated before index_date",
+          "columns": {"text": "dated_notes_text"},
+          "notes": {
+            "path": "notes.parquet",
+            "columns": {"unit_id": "patient_id", "date": "note_date", "text": "note_text", "note_type": "note_type"},
+            "index_date_column": "index_date",
+            "include_index_date": false,
+            "lookback_days": null,
+            "note_header": "relative_days"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -20,18 +20,23 @@ with a two-stage, science-first workflow:
 User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 `how_it_works.md`, `stage1_architectures.md`, `stage2_selection.md`,
 `configuration.md`, `serving.md`, `optional_extensions.md`,
-`synthetic_data.md`, and `design_notes/`.
+`synthetic_data.md`, `benchmarks.md`, and `design_notes/`.
 
 ## Entry points
 
 | Command | Code | Purpose |
 |---|---|---|
 | `python scripts/run_all_evidence.py` | `oci/inference/research_all_evidence_workflow.py` (`build_parser`, `main`) | Run, resume, or relaunch the all-evidence workflow (29 flags; everything else via `--set KEY=VALUE`) |
-| `./run_synthetic.sh COHORT [OUT]` | `run_synthetic.sh`, `scripts/presets/{external,h100x8,rtxpro6000x8}.env` | Run a bundled synthetic cohort with a serving preset |
-| `oci-evaluate-stage1` | `oci/evaluation/stage1.py` | Oracle-safe evaluation of frozen Stage 1 architectures |
-| `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only) |
+| `./run_synthetic.sh COHORT [OUT]` | `run_synthetic.sh`, `scripts/presets/{external,h100x8,rtxpro6000x8,dgx_station_gb300}.env` | Run a bundled synthetic cohort with a serving preset; `./run_synthetic.sh CONFIG.json` runs a configuration file's cohort with the preset's serving settings and the detected devices |
+| `./run_benchmark.sh MACHINE BENCH` | `run_benchmark.sh`, `oci/evaluation/benchmark_driver.py`, `benchmarks/base_config.json` | The benchmark end to end on one machine (a preset name): LLM corpora the selected cells need (source expansion with the saved DGP; S5/S6 corpora) on a vLLM pool it starts and stops, `materialize`, `configs`, each run through `run_synthetic.sh CONFIG`, `aggregate`; resumes on rerun; `--plan` prints the plan and status; `--llm-url URLS` uses running vLLM servers for every LLM role in place of the preset's managed ones |
+| `oci-evaluate-stage1` | `oci/evaluation/stage1.py` | Oracle-safe evaluation of frozen Stage 1 architectures; writes `OUT/evaluation/stage1/` |
+| `oci-evaluate-attribution` | `oci/evaluation/attribution.py` | Credit Stage 2 variables to the Stage 1 architectures that supported them (any-source and sole-source); `--oracle` adds recovery by held-out R² |
+| `python scripts/ablate_stage1_architectures.py` | `oci/evaluation/ablation.py` | `prepare`: leave-one-architecture-out handoffs and `run_stage2_from_artifacts.py` configs (never launches LLM jobs); `compare`: finished ablations versus the full run |
+| `python scripts/benchmark.py` | `oci/evaluation/benchmark.py`, `oci/evaluation/benchmark_ceiling.py`, `benchmarks/{scenarios,seeds}.json` | `materialize`: one cohort per scenario, size, and seed (re-equation through `synthetic_data.reequation`, or the generator commands for S5/S6); `configs`: one workflow configuration per cell (never launches runs; confirmatory seeds need `--confirmatory` and are logged in `benchmarks/confirmatory_ledger.jsonl`); `aggregate`: finished runs versus oracle truth, with an oracle-covariate ceiling through Stage 2's `estimate_outer_fold` |
+| `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only; for a dated-notes run, `dataset` is its `input/analysis_cohort.parquet`) |
 | `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
-| `python -m synthetic_data.cli` | `synthetic_data/` | Synthetic cohort generator |
+| `python -m synthetic_data.cli` | `synthetic_data/` (`generator.py`, `generation_factors.py`, `dgp_terms.py`) | Synthetic cohort generator: confounder, effect-modifier, instrument, and prognostic roles; generation-time factors (covariate correlation, MCAR/MNAR documentation, post-treatment dated notes, proxies) |
+| `python -m synthetic_data.cli reequation` | `synthetic_data/reequation.py` (`reequation_cohort`) | Recompute treatment and outcome over an existing synthetic cohort's true characteristics for a scenario (no LLM; text copied unchanged; refuses cohorts with post-treatment notes) |
 
 Helper scripts: `scripts/detect_all_evidence_hardware.py` (GPU and worker
 sizing for `run_synthetic.sh`) and `scripts/configure_local_cuda.py` (exposes
@@ -43,25 +48,39 @@ the `local-llm` CUDA toolkit inside `.venv` for vLLM).
 oci/
 ├── config.py                         # Stage 1 template and `oci run` dataclasses (ExperimentConfig)
 ├── cli.py                            # `oci init`, `oci run`
-├── evaluation/stage1.py              # oci-evaluate-stage1
+├── evaluation/stage1.py              # oci-evaluate-stage1 (scores the handed-off embedding directions)
+├── evaluation/stage1_lexical_null.py # Random-chunk null for lexical recovery (--null-draws)
+├── evaluation/stage1_timing_report.py  # Per-architecture Stage 1 wall time in the evaluation output
+├── evaluation/attribution.py         # oci-evaluate-attribution (Stage 2 lineage, oracle recovery by R²)
+├── evaluation/ablation.py            # scripts/ablate_stage1_architectures.py (prepare, compare)
+├── evaluation/benchmark.py           # scripts/benchmark.py (registry, seed guard and ledger,
+│                                     #   materialize, configs, aggregate metrics)
+├── evaluation/benchmark_ceiling.py   # Oracle-covariate ceiling via estimate_outer_fold
+├── evaluation/benchmark_driver.py    # run_benchmark.sh: generation, materialize, configs, runs, aggregate
 ├── extraction/                       # `oci run` extraction: explicit_features, complete_paged,
 │                                     #   contract_lexical_context, llm_routing, cache
 ├── models/
 │   ├── causal_forest_head.py         # CausalForestDML wrapper with elastic-net nuisances
 │   ├── elastic_net_nuisance.py       # Clone-safe elastic-net nuisance estimators and fit audits
+│   ├── super_learner_nuisance.py     # Stacked nuisance learner (elastic net, boosting, forest)
 │   ├── dina.py                       # Gao–Hastie Bernoulli DINA objectives
 │   ├── hierarchical_transformer_extractor.py   # HTR model
 │   ├── concept_embedding_cache.py    # Chunk embedding cache (Stage 1)
 │   └── explicit_feature_featurizer.py          # `oci run` featurization
-├── utils/calibration.py              # Platt recalibration of nuisance predictions
+├── utils/calibration.py              # Platt calibration of nuisance predictions
 └── inference/
     │ # Workflow and Stage 1
     ├── research_all_evidence_workflow.py   # Components, config compilation, resume, reselection
+    ├── pretreatment_notes.py         # Optional dated-notes input (`notes`): builds and verifies
+    │                                 #   input/analysis_cohort.parquet, its manifest, and the audit
     ├── stage1_architectures.py       # Canonical registry and selector semantics
     ├── stage1_architecture_artifacts.py    # Per-architecture views for explicit selections
     ├── stage1_checkpointing.py       # Per-context Stage 1 checkpoints
+    ├── stage1_timing.py              # Reporting-only section timer; components/*/timing.jsonl
     ├── multi_model_forest_stage1.py  # BoW, HTR, embedding, matched-pair text models per context
-    ├── htr_trainer.py, htr_evidence_provider.py, multi_model_pair_uplift.py, stage1_dina.py
+    ├── htr_trainer.py, htr_evidence_provider.py, stage1_dina.py
+    ├── multi_model_pair_uplift.py    # matched_pair_uplift: caliper matching on e and mu0, BoW pair
+    │                                 #   conditional logit (binary) / paired-difference elastic net
     ├── sparse_text_modeling.py, stage1_modeling_support.py   # Shared Stage 1 modeling primitives
     ├── embedding_contrast_discovery.py     # Embedding contrasts (whole-cohort, clustered, retrieval)
     ├── tfidf_topic_stage1.py, tfidf_topic_discovery.py, tfidf_topic_score_selection.py
@@ -75,11 +94,18 @@ oci/
     │                                 #   selection driver, held-out extraction, final estimation
     ├── stage2_multi_model_config.py, stage2_elastic_net_selection.py   # Selection policy (config)
     ├── stage2_multi_model_selection.py     # Resampled evidence families, predictive nuisance selection
-    ├── stage2_modifier_ranking.py, stage2_modifier_count.py   # Modifier ranking, budget/estimator choice
+    ├── stage2_modifier_tests.py      # Orthogonal modifier tests, Cauchy combination, BH, labels
+    ├── stage2_modifier_ranking.py, stage2_modifier_count.py   # Modifier selection (orthogonal_tests,
+    │                                 #   or balanced_evidence ranking and budget/estimator choice)
     ├── stage2_nuisance_selection.py, stage2_statistical_selection.py, stage2_interaction_screen.py
     ├── stage2_effect_estimators.py, stage2_dina.py, stage2_final_modeling.py   # Final effect models
-    ├── stage2_diagnostics.py         # Oracle-free BLP, GATES, CLAN, RATE, ATO, trimming, SMDs
+    ├── stage2_diagnostics.py         # Oracle-free BLP (primary test), GATES, CLAN, RATE, ATO,
+    │                                 #   trimming, SMDs, CATE variance decomposition, outer-fold
+    │                                 #   modifier confirmation (reporting only)
+    ├── stage2_sensitivity.py         # Unmeasured-confounding sensitivity: E-values, OVB bounds,
+    │                                 #   robustness values, per-fold benchmark refits (reporting only)
     ├── stage2_extraction_failures.py # Extraction-failure masks and reports
+    ├── stage2_documented_unknown.py  # Reserved documented_unknown state: mapping rules, reports
     ├── nuisance_diagnostics.py       # Held-out nuisance diagnostics, overlap policy
     ├── stage2_estimand_ontology*.py, stage2_modifier_concepts.py, stage2_multi_model_adjudication.py,
     │   stage2_matched_batch.py, stage2_sequential_consolidation.py   # Optional extensions
@@ -117,47 +143,117 @@ The canonical order in `oci/inference/stage1_architectures.py` is:
 When `science.stage1_architectures` (`--architectures`) is omitted, the
 architectures enabled by the Stage 1 template's switches run: eight with the
 bundled template (all except `tfidf_semantic_retrieval_contrasts`
-and `tfidf_orphan_ngrams`), seven for continuous outcomes because
-`matched_pair_uplift` is skipped. `all` selects all ten and is rejected for
-continuous outcomes, where `matched_pair_uplift` is unavailable. An explicit
-selection is recorded in `stage1_architectures/manifest.json` and cannot change
-on resume. Private prerequisites (for example BoW nuisance fits for embedding
-architectures) may run, but only selected architectures enter the handoff.
+and `tfidf_orphan_ngrams`), for binary and continuous outcomes. `all` selects
+all ten. An explicit selection is recorded in
+`stage1_architectures/manifest.json` and cannot change on resume. Private
+prerequisites (for example BoW nuisance fits for embedding architectures) may
+run, but only selected architectures enter the handoff.
 Keep the omitted-selector path's behavior unchanged.
+
+Neural-query consensus groups are ordered by the median absolute held-out z of
+their members (scored on inner partitions of the context's training rows,
+never its held-out rows), then by the training score; the order sets query IDs
+and never gates queries. For evaluation only, each text-model context writes
+its held-out rows' scores on the exact handed-off embedding directions
+(`EMBEDDING_DIRECTION_SCORE_SOURCES` in `stage1_architecture_artifacts.py`).
+Every Stage 1 component writes reporting-only wall time per architecture
+(`components/*/timing.jsonl`, `stage1_timing.py`); timing never enters a
+checkpoint identity or a fitted value.
 
 ## Stage 2
 
 `multi_model` is the only selection mode and the default. Per outer fold:
 evidence cards → interpretation → candidate merging → extraction definitions →
 outer-training extraction with aggregate review and failure-driven definition
-refinement → informativeness and extraction-failure filter
+refinement (each cell is a value, not documented (null), the reserved
+`documented_unknown`, or an extraction failure; every encoder keeps the three
+non-value states as separate grouped indicators) → informativeness and
+extraction-failure filter
 (`min_informative_patients`, `max_extraction_failure_fraction`) → optional
 estimand search and selection consolidation → resampled evidence families and
-predictive nuisance selection → modifier ranking and `balanced_evidence`
-budget/estimator choice (`causal_forest`, `linear_interactions`, `dina`) →
-held-out extraction of the full nuisance-candidate catalog → final refit with
-recalibrated nuisances → cross-fitted predictions, AIPW ATE, and
-`heterogeneity_diagnostics.json`. Details: `docs/how_it_works.md` and
-`docs/stage2_selection.md`.
+predictive nuisance selection (under `orthogonal_tests` only the nuisance
+models and the univariable treatment/outcome associations run; the effect-only
+families are skipped) → modifier selection by `orthogonal_tests` (the
+default: training-row final-estimation nuisances, whose inner-fold models are
+stored in `selection/nuisance_models/` for reuse; `r_projection`,
+`aipw_projection`, and `outcome_interaction` tests per candidate; Cauchy
+combination; BH at `modifier_selection.q`) → held-out extraction of the full
+nuisance-candidate catalog → final refit with nuisances from the configured
+nuisance learner (super learner by default; raw out-of-fold predictions for
+training rows; for held-out rows, the average of the inner-fold models, each
+Platt-calibrated on its own inner-validation rows; the stored inner-fold models
+score the held-out rows when their fingerprint verifies) of the
+estimator ensemble (unweighted mean of `causal_forest`, `linear_interactions`,
+and `dina` for binary outcomes; the interaction model leaves the selected
+modifiers' interactions and main effects unpenalized, guarded by events per
+parameter with a separation fallback) → cross-fitted predictions (with the
+reporting-only `outside_overlap` flag), the co-primary clipped AIPW ATE and
+overlap-weighted ATO (`stage2.lead_estimand` labels which leads) with their
+reporting-only sensitivity to unmeasured confounding (E-values, omitted-variable-bias
+bounds and robustness values, and per-fold elastic-net benchmark refits without each
+of the top `stage2.sensitivity.benchmark_groups` discovered variables), and
+`heterogeneity_diagnostics.json` (the pooled BLP `beta2` > 0 is the
+pre-specified primary heterogeneity test; GATES and RATE are secondary),
+including the reporting-only outer-fold confirmation of the selected modifiers
+(the inferential result: held-out tests and effect sizes, cross-fold concept
+matching with Meinshausen–Meier–Bühlmann aggregation; training-row modifier-test
+p-values are screening values) and the CATE variance decomposition (prognosis
+versus selected modifiers). No per-patient CATE interval is reported for the
+ensemble.
+`modifier_selection.rule:
+"balanced_evidence"` instead runs the nested modifier ranking and
+budget/estimator choice; concept review requires it. Details:
+`docs/how_it_works.md` and `docs/stage2_selection.md`.
 
 Configuration rules:
 
-- Unknown keys under `stage2` are errors (`_reject_unknown_stage2_keys`).
+- Unknown keys under `stage2` are errors (`_reject_unknown_stage2_keys`), and
+  so are unknown keys under `notes`.
+- With `notes` (dated-notes input), every loader reads
+  `input/analysis_cohort.parquet` (`ResearchStage1Config.analysis_dataset`, via
+  `_load_analysis_dataset`), which the first Stage 1 start builds. Later starts
+  verify the source hashes, the `notes` settings, and the derived file against
+  `input/pretreatment_notes_manifest.json` and reuse it without rewriting it
+  (Stage 1 checkpoints use its path, size, and mtime); any mismatch fails
+  closed. `run_config.json` omits `notes` when it is not configured.
 - Stage 2 requires the frozen split file
   `components/tfidf/split_provenance.jsonl` and never resamples folds.
 - `run_config.json` redacts API keys; Stage 2 checks model identity
   (`stage2/model_identity.json`) and selection policy on resume. Selection or
   estimation policy changes on a completed run go through
-  `--stage2-only --stage2-reselect`.
+  `--stage2-only --stage2-reselect`; under `orthogonal_tests`,
+  `estimation_trees` is not part of the selection identity, so changing it
+  refits only the final estimation. The same holds for
+  `modifier_selection.unpenalized_selected_interactions` and
+  `unpenalized_events_per_parameter` (`selection_dict()` omits them).
 - Diagnostic evidence families (`multi_model.diagnostic_families`) and
   matched-batch evidence are opt-in and do not drive selection.
+- Outer-fold confirmation (`modifier_confirmation`), the CATE variance
+  decomposition (`cate_variance_decomposition`), and the unmeasured-confounding
+  sensitivity (`unmeasured_confounding_sensitivity`) in
+  `heterogeneity_diagnostics.json` are computed from frozen artifacts after
+  every fold finishes; no selection, estimation, or other fold reads them. The
+  sensitivity benchmarks are the only part that refits models: per fold, after
+  the final estimation, on outer-training rows only, with their own checkpoints
+  in `estimation/sensitivity_benchmarks/`.
 
 ## Scientific invariants
 
 - Never use oracle columns (`true_*`, `oracle_*`, `ground_truth*`) during
   discovery, extraction, fitting, selection, or handoff construction. Join them
   only after predictions are frozen and hashed.
-- Hash frozen Stage 1 artifacts before loading oracle data for evaluation.
+- In dated-notes mode, notes dated after the index date (and, unless
+  `include_index_date` is set, on it) never enter the analysis text; note
+  headers state relative days, so calendar dates never enter prompts through
+  them. Only the configured note columns are read from the notes table, and the
+  per-patient audit is never read by any modeling or LLM step.
+- Hash frozen Stage 1 artifacts before loading oracle data for evaluation; the
+  attribution and ablation reports and the benchmark aggregate likewise hash
+  every Stage 2 artifact they read first, and write only under
+  `OUT/evaluation/` or outside the run.
+- Tune benchmark settings only on the development seeds of
+  `benchmarks/seeds.json`; confirmatory seeds are used once per commit and
+  scenario (`docs/benchmarks.md`).
 - Keep outer held-out rows unavailable to inner-fold discovery, review,
   selection, and definition search.
 - LLM prompts never contain dataset paths or names, synthetic-generation
@@ -167,9 +263,12 @@ Configuration rules:
 - Preserve exact row, split, component, architecture, and configuration
   provenance in sidecars.
 - Fail closed when text capacity would truncate semantic content.
-- Keep causal-forest nuisance models and the final Stage 2 nuisance models
-  elastic-net-only, and keep the fitted-clone audit records of the selected
-  regularization and optimizer iteration limits.
+- The causal forest's internal nuisances and the selection-stage role models
+  are elastic nets. Final Stage 2 nuisances (shared with the modifier tests) use
+  the configured `stage2.nuisance_learner`: the super learner by default
+  (elastic net, histogram gradient boosting, random forest), or `elastic_net`.
+  Keep the fitted audit records: stack weights, per-learner and stack CV loss,
+  and the elastic-net selected regularization and iteration limits.
 - Estimand-informed definition search uses outcome information to choose
   definitions; keep it opt-in and training-only.
 
@@ -215,6 +314,17 @@ PRESET=h100x8 ./run_synthetic.sh five_conf_five_mod /path/to/output
 
 # Evaluate frozen Stage 1 outputs against oracle columns
 oci-evaluate-stage1 --run-dir OUT --architectures all
+
+# Credit Stage 2 variables to Stage 1 architectures; leave-one-architecture-out reruns
+oci-evaluate-attribution --run-dir OUT --oracle
+python scripts/ablate_stage1_architectures.py prepare --run-dir OUT --out ABL --stage2-config ENDPOINTS.json
+python scripts/ablate_stage1_architectures.py compare --run-dir OUT --ablation-dir ABL --oracle
+
+# Benchmark scenarios: cohorts per cell, run configurations (printed, not launched), aggregate
+python scripts/benchmark.py materialize --scenarios S0,S1 --source SOURCE_DIR --out BENCH
+python scripts/benchmark.py configs --base CONFIG.json --out BENCH
+python scripts/benchmark.py aggregate --out BENCH
+./run_benchmark.sh rtxpro6000x8 BENCH --scenarios S0 --sizes 1000 --seeds 101   # all steps, resumable
 
 # Standalone explicit-feature workflow
 oci run --config example_configs/agentic_explicit_feature_forest_config.json

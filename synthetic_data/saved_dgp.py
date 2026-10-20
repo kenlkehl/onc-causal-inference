@@ -146,6 +146,31 @@ def _patient(base, config, client, output, identity):
     return row
 
 
+def _reject_unsupported_sources(config, source):
+    """Fail closed on expansions this writer cannot reproduce.
+
+    Documentation control and post-treatment notes change how the text is
+    written, which only a newly designed generation does. A re-equation output
+    has unmeasured confounders and Python-drawn equations over another
+    corpus's text; expand the original corpus and re-equate the expansion.
+    """
+    if config.documentation_enabled() or config.post_treatment_enabled():
+        raise ValueError(
+            "Saved-DGP expansion does not support documentation control or post-treatment "
+            "notes; generate such a cohort without --dgp-metadata"
+        )
+    if source.get("scenario") is not None or source.get("unmeasured_confounders"):
+        raise ValueError(
+            "Saved-DGP expansion of a re-equation output is not supported; expand the source "
+            "corpus, then re-equate the expanded cohort"
+        )
+    if source.get("documentation") or source.get("post_treatment"):
+        raise ValueError(
+            "The saved DGP used documentation control or post-treatment notes, which "
+            "saved-DGP expansion does not reproduce"
+        )
+
+
 def generate_from_saved_dgp(config, metadata_path, num_workers=4, show_progress=True):
     """Keep saved equations/distributions, sample fresh patients, then generate text.
 
@@ -167,11 +192,17 @@ def generate_from_saved_dgp(config, metadata_path, num_workers=4, show_progress=
 def _generate_locked(config, metadata_path, num_workers, output):
     features, treatment_eq, outcome_eq, statistics, source_config = g._load_dgp_metadata(str(metadata_path))
     source = json.loads(metadata_path.read_text())
+    _reject_unsupported_sources(config, source)
     public_config = asdict(config)
     public_config["llm"]["api_key"] = ""
     # Source configs saved before continuous_covariate_distribution existed
-    # were generated with Normal draws, so an absent value means "normal".
-    source_config = {"continuous_covariate_distribution": "normal", **source_config}
+    # were generated with Normal draws, so an absent value means "normal"; a
+    # source without a DGP factor field used that field's default.
+    source_config = {
+        "continuous_covariate_distribution": "normal",
+        **json.loads(json.dumps(g.dgp_factor_defaults())),
+        **source_config,
+    }
     # These are the intended changes when expanding a saved dataset.
     for field, value in source_config.items():
         if field not in {"dataset_size", "output_dir", "llm", "seed"} and public_config.get(field) != value:
@@ -180,7 +211,8 @@ def _generate_locked(config, metadata_path, num_workers, output):
     scientific_config["llm"] = {key: value for key, value in public_config["llm"].items()
                                  if key not in {"api_key", "api_base_url", "api_base_urls", "timeout", "reject_incomplete"}}
     source_hashes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                     for name in ("saved_dgp.py", "generator.py", "prompts.py", "structured_data.py", "llm_client.py")}
+                     for name in ("saved_dgp.py", "generator.py", "prompts.py", "structured_data.py", "llm_client.py",
+                                  "dgp_terms.py", "generation_factors.py")}
     identity = _digest({"config": scientific_config, "source": source, "code": source_hashes})
     manifest_path = output / "generation_manifest.json"
     if manifest_path.exists() and json.loads(manifest_path.read_text())["identity"] != identity:
@@ -212,8 +244,11 @@ def _generate_locked(config, metadata_path, num_workers, output):
     metadata = {"config": public_config, "features": features,
                 "confounders": g._filter_features_by_role(features, "confounder"),
                 "effect_modifiers": g._filter_features_by_role(features, "effect_modifier"),
+                **g._extended_role_metadata(features),
                 "treatment_equation": treatment_eq, "outcome_equation": outcome_eq,
                 "summary_statistics": statistics,
+                "unmeasured_confounders": [], "scenario": None,
+                "documentation": None, "post_treatment": None,
                 "dgp_source": {"path": str(metadata_path.resolve()), "sha256": hashlib.sha256(metadata_path.read_bytes()).hexdigest()},
                 "generation_status": "running"}
     _write_json(output / "metadata.json", metadata)

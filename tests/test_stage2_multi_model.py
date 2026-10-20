@@ -21,6 +21,7 @@ from oci.inference.stage2_multi_model_config import (
     SCHEMA_VERSION as MULTI_MODEL_SCHEMA_VERSION,
     EvidenceStabilityConfig,
     MatchedBatchConfig,
+    ModifierSelectionConfig,
     Stage2MultiModelConfig,
 )
 from oci.inference.stage2_multi_model_selection import (
@@ -100,9 +101,11 @@ def test_real_models_are_honest_cover_candidates_and_resume_without_refitting(
     tmp_path, monkeypatch, binary, matched
 ):
     arguments = sample_inputs()
-    # Exercise every family, including the opt-in prediction diagnostics.
+    # Exercise every family, including the opt-in prediction diagnostics; the
+    # effect families run under the balanced_evidence rule.
     arguments["policy"] = replace(arguments["policy"], multi_model=replace(
-        arguments["policy"].multi_model, diagnostic_families=("penalized_main", "predictive_forest")))
+        arguments["policy"].multi_model, diagnostic_families=("penalized_main", "predictive_forest"),
+        modifier_selection=ModifierSelectionConfig(rule="balanced_evidence")))
     if matched:
         cfg = MatchedBatchConfig(enabled=True, batch_size=4, bins_per_nuisance=1, min_reference_arm=2,
             max_smd=100, min_delta=0, z_threshold=0, train_passes=3, validation_passes=3)
@@ -183,7 +186,8 @@ def test_all_modifier_evidence_uses_overlap_while_associations_keep_all_rows(mon
         arguments["policy"],
         min_propensity=0.1,
         max_propensity=0.9,
-        multi_model=replace(arguments["policy"].multi_model, repeats=1),
+        multi_model=replace(arguments["policy"].multi_model, repeats=1,
+                            modifier_selection=ModifierSelectionConfig(rule="balanced_evidence")),
     )
     arguments["policy"] = replace(arguments["policy"], multi_model=replace(arguments["policy"].multi_model,
         matched_batch=MatchedBatchConfig(enabled=True, batch_size=4, bins_per_nuisance=1,
@@ -482,12 +486,31 @@ def test_new_example_uses_predictive_nuisances_and_freezes_resume_policy(tmp_pat
         json.dumps({"selection_authority": "multi_model"})
     )
     validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
+    # Under the example's orthogonal_tests rule the trees affect final estimation only.
     changed_trees = replace(config.stage2, estimation_trees=config.stage2.estimation_trees * 2)
-    with pytest.raises(RuntimeError, match="modifier-count estimation_trees changed"):
-        validate_selection_resume(SimpleNamespace(stage2=changed_trees, output_dir=tmp_path))
-    assert _stage2_reselection_policy_fingerprint(config) != _stage2_reselection_policy_fingerprint(
+    validate_selection_resume(SimpleNamespace(stage2=changed_trees, output_dir=tmp_path))
+    assert _stage2_reselection_policy_fingerprint(config) == _stage2_reselection_policy_fingerprint(
         replace(config, stage2=changed_trees)
     )
+    # balanced_evidence scores forests of that size during its count search.
+    balanced_selection = replace(
+        config.stage2.statistical_selection,
+        multi_model=replace(
+            config.stage2.statistical_selection.multi_model,
+            modifier_selection=ModifierSelectionConfig(rule="balanced_evidence"),
+        ),
+    )
+    balanced = replace(config.stage2, statistical_selection=balanced_selection)
+    (root / "config.json").write_text(json.dumps(
+        {**saved, "statistical_selection": balanced_selection.public_dict()}))
+    validate_selection_resume(SimpleNamespace(stage2=balanced, output_dir=tmp_path))
+    balanced_trees = replace(balanced, estimation_trees=balanced.estimation_trees * 2)
+    with pytest.raises(RuntimeError, match="modifier-count estimation_trees changed"):
+        validate_selection_resume(SimpleNamespace(stage2=balanced_trees, output_dir=tmp_path))
+    assert _stage2_reselection_policy_fingerprint(
+        replace(config, stage2=balanced)
+    ) != _stage2_reselection_policy_fingerprint(replace(config, stage2=balanced_trees))
+    (root / "config.json").write_text(json.dumps(saved))
     changed = replace(
         config.stage2,
         statistical_selection=replace(

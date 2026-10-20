@@ -16,6 +16,11 @@ The module also provides:
   ``run_config.json`` so that a later Stage 2-only run can reuse them;
 * the optional Stage 1 architecture selector, which is recorded in
   ``stage1_architectures/manifest.json`` and cannot change on resume;
+* the optional dated-notes input (``notes``), which builds the analysis text
+  from notes dated before each patient's index date into
+  ``input/analysis_cohort.parquet`` once per output directory
+  (``pretreatment_notes.py``); every step then reads that file instead of
+  ``dataset``;
 * guarded Stage 2 reselection (``--stage2-reselect``).  It archives a completed
   Stage 2 selection and everything downstream of it under
   ``stage2/reselection_archives`` and reruns selection from the frozen feature
@@ -54,6 +59,14 @@ from .plain_handoff_stage2_analysis import (
     frozen_measurement_definition_identity,
     frozen_preselection_review_policy,
 )
+from .pretreatment_notes import (
+    PretreatmentNotesConfig,
+    analysis_cohort_path,
+    check_output_directory as check_notes_output_directory,
+    notes_config_from_mapping,
+    prepare_analysis_cohort,
+    read_table,
+)
 from .stage2_elastic_net_selection import TEMPORAL_SCOPE as STAGE2_INPUT_TEMPORAL_SCOPE
 from .stage2_sequential_consolidation import (
     SELECTION_SCHEMA_VERSION as STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
@@ -74,6 +87,17 @@ from .stage1_architectures import (
     resolve_support_services,
     selected_components,
     unavailable_explicit_architectures,
+)
+from .stage1_timing import (
+    COMPONENT_TIMING_FILE,
+    CONTEXT_TIMING_FILE,
+    EMBEDDING_CACHE_CONSUMERS,
+    SHARED_ATTRIBUTION,
+    SectionTimer,
+    read_timing_record,
+    unknown_timing_record,
+    write_component_timing,
+    write_timing_record,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -349,12 +373,33 @@ class ResearchStage1Config:
     stage1_overrides: Mapping[str, Any]
     neural_query_overrides: Mapping[str, Any]
     log_level: str = "INFO"
+    notes: PretreatmentNotesConfig | None = None
+    # Runtime scheduling only; never enters the applied scientific config or
+    # the per-context checkpoint identity.
+    contexts_per_gpu: int = 1
+
+    @property
+    def analysis_dataset(self) -> Path:
+        """The cohort file that every workflow step analyzes.
+
+        This is ``dataset`` itself, or with dated notes the derived
+        ``OUTPUT_DIR/input/analysis_cohort.parquet``.
+        """
+
+        if self.notes is None:
+            return self.dataset
+        return analysis_cohort_path(self.output_dir)
 
     def as_dict(self) -> dict[str, Any]:
         values = asdict(self)
         # Keep legacy run_config.json stable when the new selector was omitted.
         if self.stage1_architectures is None:
             values.pop("stage1_architectures", None)
+        # Likewise for runs on one text column; dated notes keep their file form.
+        if self.notes is None:
+            values.pop("notes", None)
+        else:
+            values["notes"] = self.notes.as_dict()
         return values
 
 
@@ -396,7 +441,7 @@ def compile_config(
         and raw.get("stage1_architectures") is not None
     ):
         science["stage1_architectures"] = raw["stage1_architectures"]
-    for key in ("devices", "workers", "components", "mode", "log_level"):
+    for key in ("devices", "workers", "contexts_per_gpu", "components", "mode", "log_level"):
         if key not in run and raw.get(key) is not None:
             run[key] = raw[key]
     if "htr" not in models and raw.get("htr_model") is not None:
@@ -418,6 +463,13 @@ def compile_config(
         raw_devices = [part.strip() for part in raw_devices.split(",") if part.strip()]
     if not raw_devices:
         raise ValueError("run.devices must contain at least one device")
+    contexts_per_gpu = run.get("contexts_per_gpu", 1)
+    if (
+        isinstance(contexts_per_gpu, bool)
+        or not isinstance(contexts_per_gpu, int)
+        or contexts_per_gpu < 1
+    ):
+        raise ValueError("run.contexts_per_gpu must be a positive integer")
     raw_components = run.get("components", list(STAGE1_COMPONENT_ORDER))
     if isinstance(raw_components, str):
         raw_components = [part.strip() for part in raw_components.split(",") if part.strip()]
@@ -449,10 +501,17 @@ def compile_config(
 
     stage1_template = raw.get("stage1_template", DEFAULT_STAGE1_TEMPLATE)
     neural_template = raw.get("neural_query_template", DEFAULT_NEURAL_QUERY_TEMPLATE)
+    unit_id_column = str(columns.get("unit_id", "patient_id"))
+    # run_config.json stores the notes block in the configuration-file form.
+    notes = notes_config_from_mapping(
+        raw.get("notes"),
+        config_dir=config_dir,
+        default_unit_id_column=unit_id_column,
+    )
     return ResearchStage1Config(
         dataset=Path(_resolve_relative_path(dataset_value, base=config_dir)),
         output_dir=Path(_resolve_relative_path(output_value, base=config_dir)),
-        unit_id_column=str(columns.get("unit_id", "patient_id")),
+        unit_id_column=unit_id_column,
         text_column=str(columns.get("text", "clinical_text")),
         treatment_column=str(columns.get("treatment", "treatment_indicator")),
         outcome_column=str(columns.get("outcome", "outcome_indicator")),
@@ -468,6 +527,7 @@ def compile_config(
         seed=int(science.get("seed", 42)),
         devices=tuple(str(value) for value in raw_devices),
         workers=max(1, int(run.get("workers", 1))),
+        contexts_per_gpu=contexts_per_gpu,
         components=selected_components,
         stage1_architectures=architecture_selection,
         mode=mode,
@@ -486,6 +546,7 @@ def compile_config(
         stage1_overrides=copy.deepcopy(dict(science.get("stage1") or {})),
         neural_query_overrides=copy.deepcopy(dict(science.get("neural_queries") or {})),
         log_level=str(run.get("log_level", "INFO")).upper(),
+        notes=notes,
     )
 
 
@@ -500,7 +561,7 @@ def _load_stage1_template(config: ResearchStage1Config) -> dict[str, Any]:
     applied = _deep_merge(applied, config.stage1_overrides)
     applied.update(
         {
-            "dataset_path": str(config.dataset),
+            "dataset_path": str(config.analysis_dataset),
             "text_column": config.text_column,
             "treatment_column": config.treatment_column,
             "outcome_column": config.outcome_column,
@@ -526,9 +587,6 @@ def _load_stage1_template(config: ResearchStage1Config) -> dict[str, Any]:
         multi_model["htr_evidence_disable_reason"] = (
             "disabled by research workflow option"
         )
-        # Matched-pair HTR is a separate neural HTR path and must follow the
-        # same top-level switch. Its BoW counterpart remains available.
-        multi_model["matched_pair_htr_enabled"] = False
     override_architecture = config.stage1_overrides.get("architecture")
     override_multi_model = (
         override_architecture.get("multi_model_forest")
@@ -562,6 +620,8 @@ def _apply_explicit_architecture_selection(
     * embedding lanes residualize against text-model nuisance predictions, so
       an embedding-only selection runs the BoW nuisance models (HTR only when
       BoW is disabled in the template);
+    * ``matched_pair_uplift`` matches on the BoW nuisance propensities and
+      fits BoW pair features, so it runs the BoW views;
     * ``neural_query_moments`` reads the embedding cache, which the
       ``embedding_cache`` component prepares regardless of whether the
       embedding evidence lanes are enabled.
@@ -582,16 +642,11 @@ def _apply_explicit_architecture_selection(
     matched_selected = MATCHED_PAIR_UPLIFT in selected_set
     bow_available = bool(multi_model.get("bow_discovery_enabled", True))
     htr_available = bool(multi_model.get("htr_evidence_enabled", True))
-    matched_bow_available = bool(multi_model.get("matched_pair_bow_enabled", True))
-    matched_htr_available = bool(multi_model.get("matched_pair_htr_enabled", True))
     bow_needed = bool(
         selected_set.intersection({BOW_NUISANCE, BOW_R_LOSS})
-        or matched_selected and bow_available and matched_bow_available
+        or matched_selected and bow_available
     )
-    htr_needed = bool(
-        HTR_NEURAL in selected_set
-        or matched_selected and htr_available and matched_htr_available
-    )
+    htr_needed = HTR_NEURAL in selected_set
     embedding_needed = bool(
         selected_set.intersection(
             {
@@ -616,12 +671,6 @@ def _apply_explicit_architecture_selection(
     multi_model["bow_discovery_enabled"] = bow_needed
     multi_model["htr_evidence_enabled"] = htr_needed
     multi_model["matched_pair_uplift_enabled"] = matched_selected
-    multi_model["matched_pair_bow_enabled"] = bool(
-        matched_selected and bow_available and matched_bow_available
-    )
-    multi_model["matched_pair_htr_enabled"] = bool(
-        matched_selected and htr_available and matched_htr_available
-    )
     methods: list[str] = []
     if bow_needed:
         methods.append("bow")
@@ -693,14 +742,23 @@ def _context_execution_lanes(
     *,
     devices: Sequence[str],
     workers: int,
+    contexts_per_gpu: int = 1,
 ) -> list[tuple[str, list[Mapping[str, Any]]]]:
     """Assign whole discovery contexts to fixed device lanes.
 
-    A CUDA lane owns one GPU for the duration of its job.  This avoids two
-    process-pool workers landing on the same GPU when contexts take different
-    amounts of time.  CPU-only runs use ``workers`` identical CPU lanes.
+    Each CUDA lane owns a separate process pinned to one GPU. A GPU may host
+    up to ``contexts_per_gpu`` lanes, with each lane running its contexts
+    serially so Torch random state and model state stay process-local. The CPU
+    budget caps extra lanes, while retaining at least one lane per GPU when
+    there is enough work. CPU-only runs use ``workers`` identical CPU lanes.
     """
 
+    if (
+        isinstance(contexts_per_gpu, bool)
+        or not isinstance(contexts_per_gpu, int)
+        or contexts_per_gpu < 1
+    ):
+        raise ValueError("contexts_per_gpu must be a positive integer")
     if not pending:
         return []
     normalized = tuple(dict.fromkeys(str(device).strip() for device in devices))
@@ -709,7 +767,11 @@ def _context_execution_lanes(
     cuda_devices = tuple(device for device in normalized if device.startswith("cuda:"))
     execution_devices = cuda_devices or normalized
     if cuda_devices:
-        parallelism = min(len(cuda_devices), len(pending))
+        parallelism = min(
+            len(cuda_devices) * contexts_per_gpu,
+            max(len(cuda_devices), int(workers)),
+            len(pending),
+        )
     else:
         parallelism = min(max(1, int(workers)), len(pending))
 
@@ -772,14 +834,24 @@ def _embedding_cache_component(
 ) -> Mapping[str, Any]:
     from .embedding_contrast_discovery import EmbeddingContrastEvidenceGenerator
 
+    timer = SectionTimer()
     generator = EmbeddingContrastEvidenceGenerator(
         config=context.applied_config,
         output_dir=component_dir,
         precompute_devices=context.config.devices,
     )
     generator.prepare(context.dataset)
+    timer.lap(
+        "embedding_cache",
+        attribution=SHARED_ATTRIBUTION,
+        consumers=EMBEDDING_CACHE_CONSUMERS,
+    )
+    record = timer.record(component="embedding_cache")
+    record["cache_reused"] = bool(getattr(generator, "_chunk_cache_reused", False))
+    write_timing_record(component_dir / CONTEXT_TIMING_FILE, record)
+    write_component_timing(component_dir / COMPONENT_TIMING_FILE, [record])
     return {
-        "artifacts": [str(component_dir / "cache")],
+        "artifacts": [str(component_dir / "cache"), str(component_dir / COMPONENT_TIMING_FILE)],
         "rows": len(context.dataset),
     }
 
@@ -792,7 +864,8 @@ def _text_models_component(
 
     completed: list[dict[str, Any]] = []
     pending: list[dict[str, Any]] = []
-    for spec in _stage1_context_specs(context):
+    specs = _stage1_context_specs(context)
+    for spec in specs:
         context_dir = component_dir / str(spec["scope_id"])
         evidence_path = context_dir / "evidence.json"
         if (context_dir / "complete.json").is_file():
@@ -805,6 +878,7 @@ def _text_models_component(
         pending,
         devices=context.config.devices,
         workers=context.config.workers,
+        contexts_per_gpu=context.config.contexts_per_gpu,
     )
     lane_cpu_workers = _lane_cpu_worker_budgets(len(lanes), context.config.workers)
     if pending:
@@ -826,6 +900,14 @@ def _text_models_component(
             backend="loky" if len(lanes) > 1 else "sequential",
             batch_size=1,
             pre_dispatch="all",
+            **(
+                {
+                    "initializer": _configure_logging,
+                    "initargs": (context.config.output_dir, context.config.log_level),
+                }
+                if len(lanes) > 1
+                else {}
+            ),
         )(
             delayed(_run_text_model_context_lane)(
                 dataset=context.dataset,
@@ -848,10 +930,32 @@ def _text_models_component(
     )
     evidence_path = component_dir / "evidence.jsonl"
     _write_jsonl(evidence_path, rows)
+    _write_component_context_timing(component_dir, "text_models", specs)
     return {
-        "artifacts": [str(evidence_path)],
+        "artifacts": [str(evidence_path), str(component_dir / COMPONENT_TIMING_FILE)],
         "contexts": len(rows),
     }
+
+
+def _write_component_context_timing(
+    component_dir: Path,
+    component: str,
+    specs: Sequence[Mapping[str, Any]],
+) -> None:
+    """Collect every context's reporting-only timing record in canonical order.
+
+    A context without a readable record (restored from a checkpoint written
+    before timing existed) is listed with status ``unknown``.
+    """
+
+    write_component_timing(
+        component_dir / COMPONENT_TIMING_FILE,
+        [
+            read_timing_record(component_dir / str(spec["scope_id"]) / CONTEXT_TIMING_FILE)
+            or unknown_timing_record(component=component, context=spec)
+            for spec in specs
+        ],
+    )
 
 
 def _run_text_model_context_lane(
@@ -969,9 +1073,18 @@ def _run_one_text_model_context(
         },
         base_seed=int(getattr(applied_config, "seed", 0) or 0),
     )
+    timing_path = context_dir / CONTEXT_TIMING_FILE
     with checkpoint_store.context_lock():
+        timer = SectionTimer(checkpoint_store=checkpoint_store)
+        handoff_unit = "assembly/handoff_context"
+
         def compute_handoff_rows() -> list[dict[str, Any]]:
-            return [
+            # This computation rewrites worker_artifacts/ and the timing record
+            # beside the checkpoints. A --rerun keeps the unit checkpoints of
+            # earlier settings, so retire them first: none may later be
+            # restored beside files that it did not write.
+            checkpoint_store.retire(handoff_unit)
+            rows = [
                 run_multi_model_forest_handoff_context(
                     dataset=dataset,
                     config=applied_config,
@@ -980,8 +1093,16 @@ def _run_one_text_model_context(
                     device=device,
                     num_workers=max(1, int(cpu_workers)),
                     checkpoint_store=checkpoint_store,
+                    timer=timer,
                 )
             ]
+            # Reporting only: written before the context checkpoint publishes,
+            # so a context later restored from that checkpoint keeps it.
+            write_timing_record(
+                timing_path,
+                timer.record(component="text_models", context=spec),
+            )
+            return rows
 
         def validate_handoff_rows(value: Any) -> None:
             if not isinstance(value, list) or len(value) != 1:
@@ -990,18 +1111,27 @@ def _run_one_text_model_context(
                     f"text model context {spec['scope_id']} returned {count} rows"
                 )
 
-        rows = checkpoint_store.run(
-            "assembly/handoff_context",
+        handoff_result = checkpoint_store.run(
+            handoff_unit,
             compute_handoff_rows,
             parameters={
                 "scope": str(spec["scope"]),
                 "fold_key": int(spec["fold_key"]),
                 "outer_fold": int(spec["outer_fold"]),
                 "inner_fold": spec.get("inner_fold"),
+                # The context also writes worker_artifacts/**/predictions.parquet;
+                # version 2 scores the handed-off embedding directions.
+                "prediction_artifact_version": 2,
             },
             rows=context_rows,
             validator=validate_handoff_rows,
-        ).value
+        )
+        rows = handoff_result.value
+        if handoff_result.reused and read_timing_record(timing_path) is None:
+            write_timing_record(
+                timing_path,
+                unknown_timing_record(component="text_models", context=spec),
+            )
         nonfinite_paths: list[str] = []
         row = _normalize_evidence_json(
             dict(rows[0]),
@@ -1024,7 +1154,12 @@ def _run_one_text_model_context(
             {
                 "status": "complete",
                 "completed_at": _now(),
-                "artifacts": ["evidence.json", "worker_artifacts/", "checkpoints/v1/"],
+                "artifacts": [
+                    "evidence.json",
+                    "worker_artifacts/",
+                    "checkpoints/v1/",
+                    CONTEXT_TIMING_FILE,
+                ],
                 "checkpoint_schema": "stage1_context_checkpoint_v1",
             },
         )
@@ -1129,21 +1264,35 @@ def _neural_queries_component(
 ) -> Mapping[str, Any]:
     from joblib import Parallel, delayed
 
+    from .neural_query_evidence_contract import NEURAL_QUERY_CONTEXT_SCHEMA_VERSION
+
     completed: list[dict[str, Any]] = []
     pending: list[dict[str, Any]] = []
-    for spec in _stage1_context_specs(context):
+    specs = _stage1_context_specs(context)
+    for spec in specs:
         fold_dir = component_dir / str(spec["scope_id"])
         evidence_path = fold_dir / "evidence.json"
-        if (fold_dir / "complete.json").is_file():
+        complete_path = fold_dir / "complete.json"
+        if complete_path.is_file() and (
+            _read_mapping(complete_path).get("schema_version")
+            == NEURAL_QUERY_CONTEXT_SCHEMA_VERSION
+        ):
             LOGGER.info("skip neural_queries context=%s", spec["scope_id"])
             completed.append(json.loads(evidence_path.read_text(encoding="utf-8")))
         else:
+            if complete_path.is_file():
+                LOGGER.info(
+                    "refit neural_queries context=%s: its artifacts predate %s",
+                    spec["scope_id"],
+                    NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
+                )
             pending.append(spec)
 
     lanes = _context_execution_lanes(
         pending,
         devices=context.config.devices,
         workers=context.config.workers,
+        contexts_per_gpu=context.config.contexts_per_gpu,
     )
     lane_cpu_workers = _lane_cpu_worker_budgets(len(lanes), context.config.workers)
     if pending:
@@ -1161,6 +1310,14 @@ def _neural_queries_component(
             backend="loky" if len(lanes) > 1 else "sequential",
             batch_size=1,
             pre_dispatch="all",
+            **(
+                {
+                    "initializer": _configure_logging,
+                    "initargs": (context.config.output_dir, context.config.log_level),
+                }
+                if len(lanes) > 1
+                else {}
+            ),
         )(
             delayed(_run_neural_query_context_lane)(
                 dataset=context.dataset,
@@ -1184,7 +1341,11 @@ def _neural_queries_component(
         )
     )
     _write_jsonl(aggregate_path, completed)
-    return {"artifacts": [str(aggregate_path)], "contexts": len(completed)}
+    _write_component_context_timing(component_dir, "neural_queries", specs)
+    return {
+        "artifacts": [str(aggregate_path), str(component_dir / COMPONENT_TIMING_FILE)],
+        "contexts": len(completed),
+    }
 
 
 def _run_neural_query_context_lane(
@@ -1245,7 +1406,13 @@ def _run_one_neural_query_context(
     from .neural_cohort_witness import soft_retrieval_activations
     from .neural_query_agentic_forest import build_query_evidence
     from .neural_query_discovery_runtime import fit_context_query_discovery
+    from .neural_query_evidence_contract import (
+        NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
+        NEURAL_QUERY_RANKING_RULE,
+        NEURAL_QUERY_RANKING_VERSION,
+    )
 
+    timer = SectionTimer()
     outer_fold = int(spec["outer_fold"])
     inner_fold = spec.get("inner_fold")
     fit_rows = tuple(int(value) for value in spec["train_idx"])
@@ -1267,6 +1434,11 @@ def _run_one_neural_query_context(
     all_chunk_texts: list[Sequence[str]] = [()] * len(dataset)
     for row_id, chunk_texts in zip(fit_rows, fit_chunk_texts):
         all_chunk_texts[row_id] = chunk_texts
+    timer.lap(
+        "embedding_cache_read",
+        attribution=SHARED_ATTRIBUTION,
+        consumers=(NEURAL_QUERY_MOMENTS,),
+    )
 
     mm_config = applied_config.architecture.multi_model_forest
     discovery = fit_context_query_discovery(
@@ -1284,8 +1456,11 @@ def _run_one_neural_query_context(
         seed=config.seed + 10_000 * int(spec["fold_key"]),
         cpu_workers=cpu_workers,
     )
+    # Includes this architecture's private nuisance stacks and inner folds.
+    timer.lap("neural_query_discovery", attribution=NEURAL_QUERY_MOMENTS)
 
     evidence_rows: list[dict[str, Any]] = []
+    query_ranking: dict[str, Any] = {}
     arrays: dict[str, np.ndarray] = {
         "fit_row_ids": np.asarray(fit_rows, dtype=np.int64)
     }
@@ -1323,6 +1498,9 @@ def _run_one_neural_query_context(
             fit_score_frame[column] = train_activations[:, query_index]
             heldout_score_frame[column] = heldout_activations[:, query_index]
         query_records[bank] = copy.deepcopy(bank_result["records"])
+        query_ranking[bank] = copy.deepcopy(
+            (bank_result.get("consensus") or {}).get("ranking") or {}
+        )
         evidence_rows.extend(
             build_query_evidence(
                 bank=bank,
@@ -1347,26 +1525,48 @@ def _run_one_neural_query_context(
     scores["scope"] = str(spec["scope"])
     scores["architecture"] = NEURAL_QUERY_MOMENTS
     scores.to_parquet(fold_dir / "scores.parquet", index=False)
-    _write_json(fold_dir / "query_records.json", query_records)
+    ranking = {
+        "version": NEURAL_QUERY_RANKING_VERSION,
+        "rule": NEURAL_QUERY_RANKING_RULE,
+        "validation_rows": "inner_partitions_of_the_context_fit_rows",
+        "banks": query_ranking,
+    }
+    _write_json(
+        fold_dir / "query_records.json",
+        {
+            "schema_version": NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
+            "ranking": ranking,
+            "banks": query_records,
+        },
+    )
     evidence = {
+        "schema_version": NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
         "outer_fold": outer_fold,
         "inner_fold": inner_fold,
         "scope": str(spec["scope"]),
         "fit_row_ids": list(fit_rows),
         "heldout_row_ids": list(heldout_rows),
+        "query_ranking": ranking,
         "evidence": evidence_rows,
     }
     _write_json(fold_dir / "evidence.json", evidence)
+    timer.lap("neural_query_evidence", attribution=NEURAL_QUERY_MOMENTS)
+    write_timing_record(
+        fold_dir / CONTEXT_TIMING_FILE,
+        timer.record(component="neural_queries", context=spec),
+    )
     _write_json(
         fold_dir / "complete.json",
         {
             "status": "complete",
+            "schema_version": NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
             "completed_at": _now(),
             "artifacts": [
                 "evidence.json",
                 "query_records.json",
                 "queries.npz",
                 "scores.parquet",
+                CONTEXT_TIMING_FILE,
             ],
         },
     )
@@ -1466,7 +1666,7 @@ def _handoff_component(
         evidence_path.unlink(missing_ok=True)
         raise RuntimeError("handoff has no completed Stage 1 evidence rows")
     index = {
-        "dataset": str(context.config.dataset),
+        "dataset": str(context.config.analysis_dataset),
         "columns": {
             "unit_id": context.config.unit_id_column,
             "text": context.config.text_column,
@@ -1575,6 +1775,44 @@ def _has_completed_pipeline_work(output_dir: Path) -> bool:
     return any(root.is_dir() and next(root.rglob("complete.json"), None) for root in roots)
 
 
+def _load_analysis_dataset(
+    config: ResearchStage1Config,
+    *,
+    materialize: bool = False,
+) -> pd.DataFrame:
+    """Read the cohort that every workflow step analyzes and check its columns.
+
+    Without ``notes`` this reads ``config.dataset``. With ``notes`` it returns
+    the derived ``input/analysis_cohort.parquet``: ``materialize`` (the Stage 1
+    context) builds it when the directory has no dated-notes manifest yet, and
+    every call with a manifest verifies the sources, settings, and derived file
+    against it and reuses the file without rewriting it.
+    """
+
+    if config.notes is None:
+        check_notes_output_directory(config.output_dir, None)
+        dataset = read_table(config.dataset)
+    else:
+        dataset = prepare_analysis_cohort(
+            cohort_path=config.dataset,
+            notes=config.notes,
+            output_dir=config.output_dir,
+            unit_id_column=config.unit_id_column,
+            text_column=config.text_column,
+            materialize=materialize,
+        )
+    required = {
+        config.unit_id_column,
+        config.text_column,
+        config.treatment_column,
+        config.outcome_column,
+    }
+    missing = sorted(required - set(dataset.columns))
+    if missing:
+        raise ValueError(f"dataset is missing configured columns: {missing}")
+    return dataset.reset_index(drop=True)
+
+
 class ResearchAllEvidenceWorkflow:
     """Run and resume the plain-directory all-evidence workflow."""
 
@@ -1584,6 +1822,7 @@ class ResearchAllEvidenceWorkflow:
         *,
         component_runners: Mapping[str, ComponentRunner] | None = None,
     ) -> None:
+        check_notes_output_directory(config.output_dir, config.notes)
         saved_selection = _saved_architecture_selection(config.output_dir)
         if (
             config.stage1_architectures is not None
@@ -1715,21 +1954,7 @@ class ResearchAllEvidenceWorkflow:
 
             neural_config = NeuralQueryAgenticForestConfig(**neural_mapping)
             neural_config.validate()
-        if self.config.dataset.suffix.lower() in {".parquet", ".pq"}:
-            dataset = pd.read_parquet(self.config.dataset)
-        elif self.config.dataset.suffix.lower() == ".csv":
-            dataset = pd.read_csv(self.config.dataset)
-        else:
-            raise ValueError("dataset must be Parquet or CSV")
-        required = {
-            self.config.unit_id_column,
-            self.config.text_column,
-            self.config.treatment_column,
-            self.config.outcome_column,
-        }
-        missing = sorted(required - set(dataset.columns))
-        if missing:
-            raise ValueError(f"dataset is missing configured columns: {missing}")
+        dataset = _load_analysis_dataset(self.config, materialize=True)
         if self.config.stage1_architectures is not None:
             manifest_path = (
                 self.config.output_dir / "stage1_architectures" / "manifest.json"
@@ -1748,7 +1973,7 @@ class ResearchAllEvidenceWorkflow:
                 )
         return Stage1RunContext(
             config=self.config,
-            dataset=dataset.reset_index(drop=True),
+            dataset=dataset,
             applied_config=experiment.applied_inference,
             neural_query_config=neural_config,
             selected_architectures=tuple(selected),
@@ -1777,28 +2002,14 @@ class ResearchAllEvidenceWorkflow:
                 "applied_inference": applied_mapping,
             }
         )
-        if self.config.dataset.suffix.lower() in {".parquet", ".pq"}:
-            dataset = pd.read_parquet(self.config.dataset)
-        elif self.config.dataset.suffix.lower() == ".csv":
-            dataset = pd.read_csv(self.config.dataset)
-        else:
-            raise ValueError("dataset must be Parquet or CSV")
-        required = {
-            self.config.unit_id_column,
-            self.config.text_column,
-            self.config.treatment_column,
-            self.config.outcome_column,
-        }
-        missing = sorted(required - set(dataset.columns))
-        if missing:
-            raise ValueError(f"dataset is missing configured columns: {missing}")
+        dataset = _load_analysis_dataset(self.config)
         selected = self.config.stage1_architectures or legacy_enabled_stage1_architectures(
             experiment.applied_inference,
             outcome_type=self.config.outcome_type,
         )
         return Stage1RunContext(
             config=self.config,
-            dataset=dataset.reset_index(drop=True),
+            dataset=dataset,
             applied_config=experiment.applied_inference,
             neural_query_config=None,
             selected_architectures=tuple(selected),
@@ -1941,8 +2152,19 @@ def _stage2_reselection_policy_fingerprint(config: ResearchStage1Config) -> str:
             "role_selection_schema_version": STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
             "input_temporal_scope": STAGE2_INPUT_TEMPORAL_SCOPE,
             "selection_consolidation": (config.stage2.selection_consolidation.scientific_dict()),
-            "statistical_selection": (config.stage2.statistical_selection.public_dict()),
-            "modifier_count_estimation_trees": config.stage2.estimation_trees,
+            # Final-estimation-only keys never require reselection.
+            "statistical_selection": (config.stage2.statistical_selection.selection_dict()),
+            # orthogonal_tests selection depends on the AIPW clip; the
+            # balanced_evidence count search scores forests of estimation_trees.
+            **(
+                {
+                    "modifier_test_propensity_clip": config.stage2.propensity_clip,
+                    "modifier_test_nuisance_learner": config.stage2.nuisance_learner_spec(),
+                }
+                if config.stage2.statistical_selection.multi_model.modifier_selection.rule
+                == "orthogonal_tests"
+                else {"modifier_count_estimation_trees": config.stage2.estimation_trees}
+            ),
             "review_policy": frozen_preselection_review_policy(config.stage2),
             **({"estimand_ontology": config.stage2.estimand_ontology.public_dict()}
                if config.stage2.estimand_ontology.enabled else {}),
@@ -1958,23 +2180,7 @@ def _stage2_reselection_policy_fingerprint(config: ResearchStage1Config) -> str:
 
 
 def _load_reselection_dataset(config: ResearchStage1Config) -> pd.DataFrame:
-    suffix = config.dataset.suffix.lower()
-    if suffix in {".parquet", ".pq"}:
-        dataset = pd.read_parquet(config.dataset)
-    elif suffix == ".csv":
-        dataset = pd.read_csv(config.dataset)
-    else:
-        raise ValueError("dataset must be Parquet or CSV")
-    required = {
-        config.unit_id_column,
-        config.text_column,
-        config.treatment_column,
-        config.outcome_column,
-    }
-    missing = sorted(required - set(dataset.columns))
-    if missing:
-        raise ValueError(f"dataset is missing configured columns: {missing}")
-    return dataset.reset_index(drop=True)
+    return _load_analysis_dataset(config)
 
 
 def _heldout_measurement_cache_snapshot(
@@ -2697,6 +2903,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--contexts-per-gpu",
+        type=int,
+        help=(
+            "maximum concurrent Stage 1 text-model and neural-query discovery "
+            "contexts per GPU, in separate processes (default: 1); runtime-only, "
+            "safe to change on resume"
+        ),
+    )
+    parser.add_argument(
         "--architectures",
         help=(
             "comma-separated Stage 1 architecture names, or 'all' for all ten. "
@@ -2709,14 +2924,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--htr-model",
-        help="encoder for the HTR Stage 1 lanes (default: prajjwal1/bert-tiny)",
+        help="encoder for the HTR Stage 1 lane (default: prajjwal1/bert-tiny)",
     )
     parser.add_argument(
         "--disable-htr",
         action="store_true",
         help=(
-            "disable all HTR nuisance/effect and matched-pair modeling while "
-            "retaining the other configured evidence families"
+            "disable all HTR nuisance and effect modeling (the htr_neural "
+            "lane) while retaining the other configured evidence families"
         ),
     )
     parser.add_argument(
@@ -2871,7 +3086,7 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
     if args.architectures is not None:
         science["stage1_architectures"] = args.architectures
     run = raw.setdefault("run", {})
-    for key in ("devices", "workers"):
+    for key in ("devices", "workers", "contexts_per_gpu"):
         value = getattr(args, key)
         if value is not None:
             run[key] = value
@@ -2943,20 +3158,35 @@ def _invalidate_component_for_rerun(
     workflow: ResearchAllEvidenceWorkflow,
     name: str,
 ) -> None:
-    """Invalidate resumable markers, including TF-IDF context-level seals."""
+    """Remove the completion state that lets a component be skipped.
+
+    Outputs stay in place, and so do checkpoints that verify their own
+    identity when loaded, so the rerun reuses exactly those that still match.
+    Every component loses its ``complete.json``. In addition:
+
+    - ``text_models`` and ``neural_queries`` lose each context's
+      ``complete.json``, which records no identity, so every context is
+      entered again. A text-model context then restores each unit under its
+      ``checkpoints/`` whose identity still matches and refits the others; a
+      neural-query context has no finer checkpoints and is refit.
+    - ``tfidf`` loses every context's ``complete.json`` and
+      ``context_metadata.json``, so every context is refit.
+
+    ``embedding_cache`` revalidates its chunk cache and ``stage2`` revalidates
+    each step's checkpoint when the component runs again.
+    """
 
     component_dir = workflow._component_dir(name)
     if not component_dir.is_dir():
         return
-    markers = (
-        [component_dir / "complete.json"]
-        if name == "handoff"
-        else list(component_dir.rglob("complete.json"))
-    )
-    if name == "tfidf":
+    markers = [component_dir / "complete.json"]
+    if name in {"text_models", "neural_queries"}:
+        markers.extend(component_dir.glob("*/complete.json"))
+    elif name == "tfidf":
         # Exact TF-IDF contexts are independently resumable by their metadata,
         # not complete.json.  Removing only the component markers would rerun
         # orchestration while silently reusing every fitted context.
+        markers.extend(component_dir.rglob("complete.json"))
         markers.extend(component_dir.rglob("context_metadata.json"))
     for marker in dict.fromkeys(markers):
         marker.unlink(missing_ok=True)

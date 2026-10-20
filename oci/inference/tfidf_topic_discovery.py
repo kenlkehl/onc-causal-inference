@@ -1396,6 +1396,7 @@ def fit_tfidf_topic_context(
     artifact_dir: Path,
     scope_id: str,
     score_orphan_ngrams: bool = False,
+    timer: Any = None,
 ) -> Tuple[Dict[str, Any], Dict[str, CrossFittedStack]]:
     """Fit one exact context and predict its externally held-out row set.
 
@@ -1403,7 +1404,12 @@ def fit_tfidf_topic_context(
     stacks.  Held-out labels are read only when ``score_orphan_ngrams`` is
     true, in which case ``heldout_df`` must be a nested calibration partition
     of the registered fit rows rather than a registered held-out set.
+    ``timer`` (reporting only) receives one lap per section.
     """
+    from .stage1_architectures import TFIDF_ORPHAN_NGRAMS, TFIDF_TOPICS
+    from .stage1_timing import SHARED_ATTRIBUTION, TFIDF_ARCHITECTURES, NullTimer
+
+    timer = timer or NullTimer()
     artifact_dir = Path(artifact_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     fit_texts = _normalize_texts(fit_df[text_column].fillna(""))
@@ -1441,6 +1447,11 @@ def fit_tfidf_topic_context(
             joint_nuisance["mu0"]["fitted"].predict(heldout_texts)[0],
             joint_nuisance["mu1"]["fitted"].predict(heldout_texts)[0],
         )
+    timer.lap(
+        "tfidf_nuisance_stacks",
+        attribution=SHARED_ATTRIBUTION,
+        consumers=TFIDF_ARCHITECTURES,
+    )
 
     vectorizer = _common_vectorizer(config)
     common_fit = vectorizer.fit_transform(fit_texts)
@@ -1593,6 +1604,7 @@ def fit_tfidf_topic_context(
             }
         )
 
+    timer.lap("tfidf_topic_screens_and_banks", attribution=TFIDF_TOPICS)
     orphan_branch: Optional[Dict[str, Any]] = None
     orphan_scores_path: Optional[Path] = None
     if bool(score_orphan_ngrams) and bool(config.orphan_ngram_enabled):
@@ -1624,6 +1636,7 @@ def fit_tfidf_topic_context(
             ),
             encoding="utf-8",
         )
+        timer.lap("tfidf_orphan_ngram_clusters", attribution=TFIDF_ORPHAN_NGRAMS)
 
     fit_row_ids = fit_df["_oci_row_id"].astype(int).tolist()
     heldout_row_ids = heldout_df["_oci_row_id"].astype(int).tolist()

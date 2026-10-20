@@ -28,30 +28,20 @@ Each variable must be tagged with one or both causal roles:
 Requirements:
 1. Include {feature_count_instruction}
 2. Mix of categorical (3-5 categories each) and continuous variables
-3. Common variables might include: age, sex (if applicable to the cancer type), performance status, comorbidities, prior treatments, biomarkers, disease stage, etc.
+3. Choose variables whose values are known before treatment begins
 4. Be specific to the clinical context of the question
-5. Some variables may have both roles; assign roles based on clinical plausibility
+5. Assign roles based on clinical plausibility, using both roles only when the requested counts permit overlap
 6. A variable tagged with both roles counts toward both requested role totals
+7. Use unique variable names and verify the total, confounder, and effect_modifier counts before responding
 
-Respond with a JSON object in this exact format:
-{{
-  "features": [
-    {{
-      "name": "age",
-      "type": "continuous",
-      "description": "Patient age in years",
-      "roles": ["confounder"]
-    }},
-    {{
-      "name": "ecog_performance_status",
-      "type": "categorical",
-      "categories": ["0", "1", "2", "3"],
-      "description": "ECOG performance status score",
-      "roles": ["confounder", "effect_modifier"]
-    }},
-    ...
-  ]
-}}"""
+Respond with a JSON object containing a "features" array. Each feature must contain:
+- "name": a unique snake_case variable name
+- "type": either "continuous" or "categorical"
+- "description": a brief description of the variable
+- "roles": a non-empty JSON array containing "confounder", "effect_modifier", or both, consistent with the requested role allocation
+- "categories": a non-empty array of distinct category labels, required for categorical variables; the first category is the reference
+
+Return the complete requested feature list with no commentary."""
 
 
 # =============================================================================
@@ -432,19 +422,79 @@ STRUCTURED_DATA_EXAMPLES = """
 """
 
 
+# =============================================================================
+# Documentation control (generation_factors): the note writer receives only the
+# documented characteristics and is told not to state any other.
+# =============================================================================
+
+# Appended to the patient's characteristics in the event timeline prompt.
+DOCUMENTATION_TIMELINE_INSTRUCTION = (
+    "\n\nOnly the characteristics listed above are documented for this patient. Do not "
+    "state, estimate, or imply a value for any patient characteristic that you were not "
+    "given above; leave it out of the history."
+)
+
+_TIMELINE_AGE_RULE = "2. Events should reference the patient's age at each timepoint"
+_DOCUMENTATION_TIMELINE_AGE_RULE = (
+    "2. Events should reference the patient's age at each timepoint if the patient's age is "
+    "listed above; otherwise, reference the time since diagnosis (for example, \"At 3 months "
+    "after diagnosis\")"
+)
+_NOTE_BIOMARKER_GUIDELINE = (
+    "If you do not have information about key biomarkers explicitly provided, you should "
+    "imagine what they might be based on cancer type, history, and prior treatments. However, "
+    "these must be consistent with realistic biological patterns"
+)
+_DOCUMENTATION_NOTE_BIOMARKER_GUIDELINE = (
+    "Report only biomarker results that the list of events gives; they must be consistent "
+    "with realistic biological patterns"
+)
+_NOTE_LAST_RULE = "8. Do not include any disclaimers or notes about the fact that the document is synthetic"
+_DOCUMENTATION_NOTE_RULE = (
+    "\n9. CRITICAL: Do not state, estimate, or imply a value for any patient characteristic "
+    "that the list of events does not give; leave it out of the document"
+)
+
+
+def _replace_once(template: str, old: str, new: str) -> str:
+    if template.count(old) != 1:
+        raise ValueError(f"prompt template does not contain exactly one {old[:40]!r}")
+    return template.replace(old, new)
+
+
+def build_note_expansion_prompt(documentation_control: bool = False) -> str:
+    """The note expansion prompt; with documentation control, no invented characteristics."""
+    if not documentation_control:
+        return NOTE_EXPANSION_PROMPT
+    prompt = _replace_once(
+        NOTE_EXPANSION_PROMPT, _NOTE_BIOMARKER_GUIDELINE, _DOCUMENTATION_NOTE_BIOMARKER_GUIDELINE
+    )
+    return _replace_once(prompt, _NOTE_LAST_RULE, _NOTE_LAST_RULE + _DOCUMENTATION_NOTE_RULE)
+
+
 def build_event_timeline_prompt(
     structured_data_config=None,
+    documentation_control: bool = False,
 ) -> str:
     """Build the event timeline prompt, optionally including structured data event types.
 
     Args:
         structured_data_config: StructuredDataConfig instance, or None to use base prompt
+        documentation_control: Whether some characteristics are withheld from the
+            writer; the age rule then allows histories without a stated age
 
     Returns:
         The complete prompt template string (with format placeholders)
     """
+    if documentation_control:
+        base = _replace_once(EVENT_TIMELINE_PROMPT, _TIMELINE_AGE_RULE, _DOCUMENTATION_TIMELINE_AGE_RULE)
+        return _build_event_timeline_prompt(structured_data_config, base)
+    return _build_event_timeline_prompt(structured_data_config, EVENT_TIMELINE_PROMPT)
+
+
+def _build_event_timeline_prompt(structured_data_config, base_prompt: str) -> str:
     if structured_data_config is None or not structured_data_config.enabled:
-        return EVENT_TIMELINE_PROMPT
+        return base_prompt
 
     # Build list of enabled structured event types
     enabled_types = []
@@ -458,7 +508,7 @@ def build_event_timeline_prompt(
         enabled_types.append("pro_assessment")
 
     if not enabled_types:
-        return EVENT_TIMELINE_PROMPT
+        return base_prompt
 
     # Filter structured data event types to only enabled ones
     type_lines = STRUCTURED_DATA_EVENT_TYPES.strip().split("\n")
@@ -490,7 +540,7 @@ def build_event_timeline_prompt(
     structured_examples_section = "\n".join(filtered_examples)
 
     # Insert into the base prompt
-    prompt = EVENT_TIMELINE_PROMPT
+    prompt = base_prompt
 
     # Add structured event types to the types list
     prompt = prompt.replace(
@@ -522,10 +572,16 @@ def build_event_timeline_prompt(
 
 
 def format_confounder_list(confounders: list) -> str:
-    """Format role-tagged features into a readable list for prompts."""
+    """Format role-tagged features into a readable list for prompts.
+
+    Only the two roles the design LLM tags (confounder, effect_modifier) are
+    shown; Python-assigned roles and proxies are listed without roles.
+    """
     lines = []
     for c in confounders:
-        roles = ", ".join(c.get("roles", []))
+        roles = ", ".join(
+            role for role in c.get("roles", []) if role in ("confounder", "effect_modifier")
+        )
         role_text = f" Roles: [{roles}]." if roles else ""
         if c["type"] == "categorical":
             cats = ", ".join(c["categories"])
@@ -565,3 +621,110 @@ def format_patient_characteristics(characteristics: dict, confounders: list) -> 
             lines.append(f"- {desc}: \"{natural_value}\" (express this concept naturally in clinical language - do NOT use underscores or the literal category code)")
 
     return "\n".join(lines)
+
+
+# =============================================================================
+# Near-duplicate proxies (generation_factors): related measurements of chosen
+# confounder-role variables. Python draws their values; the LLM only names them.
+# =============================================================================
+
+PROXY_VARIABLE_PROMPT = """Name related patient measurements for a comparative effectiveness study of:
+
+"{clinical_question}"
+
+For EACH of these patient-level variables:
+{source_list}
+
+propose one distinct but clinically related patient measurement that a clinician would record separately in the chart and that is strongly and positively related to it (larger values or later categories of one go with larger values or later categories of the other). The related measurement must not be a restatement, a unit conversion, or a recoding of the original variable, and its name must differ from every name in this list: {all_names}
+
+For a categorical measurement, give 2-5 categories ordered from the lowest to the highest level.
+
+Respond with a JSON object in this exact format:
+{{
+  "proxies": [
+    {{
+      "source": "<name of the variable above>",
+      "name": "<snake_case name of the related measurement>",
+      "type": "continuous",
+      "description": "<what is measured, with units for a continuous measurement>"
+    }},
+    {{
+      "source": "<name of another variable above>",
+      "name": "<snake_case name>",
+      "type": "categorical",
+      "description": "<what is measured>",
+      "categories": ["<lowest>", "<higher>", "<highest>"]
+    }}
+  ]
+}}"""
+
+
+# =============================================================================
+# Post-treatment dated notes (generation_factors): progress notes written after
+# the index date that describe Python-drawn, treatment-caused events.
+# =============================================================================
+
+POST_TREATMENT_NOTE_PROMPT = """You are a brilliant synthetic clinical document generation bot with encyclopedic knowledge about cancer and its treatment.
+
+Below is a chronological list of events from a patient's clinical history up to a treatment decision for this comparison: {clinical_question}
+After that decision the patient started {treatment_arm}.
+
+Generate a detailed, realistic oncologist progress note from a follow-up visit {days_after_index} days after the patient started that treatment.
+
+The note must reflect these facts:
+{event_facts}
+
+Rules:
+1. The document is a clinical progress note: interval history, review of systems, physical exam, pertinent results, and assessment/plan
+2. {regimen_rule}
+3. Stay consistent with the history below and do not contradict it
+4. CRITICAL: Ignore your knowledge of today's date. Do not add dates to the synthetic document
+5. Do not include any disclaimers or notes about the fact that the document is synthetic{documentation_rule}
+
+Here is the list of events before the treatment decision:
+{event_timeline}
+
+Now, generate the follow-up progress note."""
+
+_POST_TREATMENT_ARMS = {
+    1: "the first treatment named in that comparison",
+    0: "the second treatment named in that comparison",
+}
+_REGIMEN_RULES = {
+    True: "Name the regimen the patient is receiving",
+    False: (
+        "Refer to the treatment only as the current regimen or current therapy; do not name "
+        "the drugs"
+    ),
+}
+_POST_TREATMENT_DOCUMENTATION_RULE = (
+    "\n6. Do not state, estimate, or imply a value for any patient characteristic that the "
+    "list of events does not give"
+)
+
+
+def post_treatment_prompt_parts(
+    *,
+    clinical_question: str,
+    treatment: int,
+    days_after_index: int,
+    mention_regimen: bool,
+    events,
+    event_status,
+    event_timeline: str,
+    documentation_control: bool,
+) -> dict:
+    """Format arguments of ``POST_TREATMENT_NOTE_PROMPT`` for one note."""
+    facts = "\n".join(
+        f"- {event['present'] if event_status[event['name']] else event['absent']}"
+        for event in events
+    )
+    return {
+        "clinical_question": clinical_question,
+        "treatment_arm": _POST_TREATMENT_ARMS[int(treatment)],
+        "days_after_index": int(days_after_index),
+        "event_facts": facts,
+        "regimen_rule": _REGIMEN_RULES[bool(mention_regimen)],
+        "documentation_rule": _POST_TREATMENT_DOCUMENTATION_RULE if documentation_control else "",
+        "event_timeline": event_timeline,
+    }
