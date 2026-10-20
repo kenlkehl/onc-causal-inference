@@ -15,7 +15,7 @@ def _object(path: Path) -> dict[str, Any]:
 
 def validate_selection_resume(config: workflow.ResearchStage1Config) -> None:
     """Do not let the workflow's completion shortcut hide a policy change."""
-    if config.stage2 is None:
+    if config.stage2 is None or config.stage2.feature_source == "tabular":
         return
     root = config.output_dir / "stage2"
     state_path = root / "reselection_state.json"
@@ -102,6 +102,8 @@ def preflight_stage2(
     """Validate without writes, model fitting, or network calls; reuse saved folds."""
     if config.components != ("stage2",) or config.stage2 is None:
         raise ValueError("preflight requires Stage 2-only mode and enabled Stage 2")
+    if config.tabular_only:
+        return _preflight_tabular(config, reselect=reselect)
     if config.explicit_only:
         return _preflight_explicit(config, reselect=reselect)
     root = config.output_dir
@@ -260,6 +262,42 @@ def preflight_stage2(
         reselect=reselect,
         stage1_action="reuse frozen handoff, splits and components; no Stage 1 execution",
     )
+
+
+def _preflight_tabular(config: workflow.ResearchStage1Config, *, reselect: bool):
+    from .stage2_tabular import INPUT_FILE, prepare_tabular_inputs
+
+    if reselect:
+        raise ValueError(
+            "tabular roles are fixed; rerun the tabular command to revalidate estimation"
+        )
+    workflow.ResearchAllEvidenceWorkflow(config)
+    data = workflow._load_analysis_dataset(config)
+    _, manifest = prepare_tabular_inputs(config, data, persist=False)
+    saved = (config.output_dir / "stage2" / INPUT_FILE).is_file()
+    return {
+        "status": "validated",
+        "read_only": True,
+        "mode": "tabular",
+        "dataset": str(config.dataset),
+        "output_dir": str(config.output_dir),
+        "rows": len(data),
+        "features": config.tabular.as_dict()["features"],
+        "dataset_identity": manifest["inputs"]["dataset_fingerprint"],
+        "outer_folds": config.outer_folds,
+        "inner_folds": config.inner_folds,
+        "seed": config.seed,
+        "stage1": "skipped",
+        "llm_required": False,
+        "live_endpoints_checked": False,
+        "stage2_action": (
+            "reuse saved splits; revalidate estimation checkpoints"
+            if saved
+            else "freeze nested splits and estimate supplied covariates"
+        ),
+        "estimator": config.stage2.statistical_selection.multi_model.modifier_selection.resolved_estimator_policy,
+        "nuisance_learner": config.stage2.nuisance_learner_spec(),
+    }
 
 
 def _preflight_explicit(config: workflow.ResearchStage1Config, *, reselect: bool):

@@ -1,0 +1,55 @@
+{
+  "dataset": "../data/cohort.csv",
+  "output_dir": "../artifacts/research_tabular",
+  "columns": {
+    "unit_id": "patient_id",
+    "treatment": "treated",
+    "outcome": "outcome"
+  },
+  "science": {
+    "clinical_question": "Estimate treatment effects using prespecified measured pretreatment covariates.",
+    "outcome_type": "binary",
+    "outer_folds": 5,
+    "inner_folds": 5,
+    "seed": 42
+  },
+  "run": {
+    "mode": "tabular"
+  },
+  "tabular": {
+    "features": [
+      {
+        "column": "age",
+        "description": "Age in years at the treatment decision.",
+        "value_type": "continuous",
+        "roles": ["confounder"]
+      },
+      {
+        "column": "ecog",
+        "description": "Measured pretreatment ECOG performance status.",
+        "value_type": "ordinal",
+        "categories": [0, 1, 2, 3, 4],
+        "roles": ["confounder", "effect_modifier"]
+      },
+      {
+        "column": "biomarker_positive",
+        "description": "Pretreatment binary biomarker result.",
+        "value_type": "binary",
+        "categories": [0, 1],
+        "roles": ["effect_modifier"]
+      }
+    ]
+  },
+  "stage2": {
+    "workers": 2,
+    "modeling_workers": 4,
+    "nuisance_learner": "super_learner",
+    "statistical_selection": {
+      "multi_model": {
+        "modifier_selection": {
+          "estimator_policy": "ensemble"
+        }
+      }
+    }
+  }
+}

@@ -7,6 +7,10 @@ characteristics in the notes, turns them into explicit patient-level
 measurements, and uses those measurements to estimate per-patient treatment
 effects and an overall treatment effect.
 
+You can also supply the variables yourself: use [explicit-only extraction](#extract-supplied-variables-without-stage-1)
+for variables still in text, or [tabular mode](#analyze-pre-structured-tabular-data-without-an-llm)
+for columns that are already measured.
+
 The motivating question is: **for a patient with these documented
 characteristics, which of two treatments is expected to produce the better
 outcome, and by how much?**
@@ -72,7 +76,7 @@ cd onc-causal-inference
 uv sync --frozen
 ```
 
-Stage 1 is designed for NVIDIA CUDA GPUs. Stage 2 talks to OpenAI-compatible LLM
+Stage 1 is designed for NVIDIA CUDA GPUs. Text-based Stage 2 talks to OpenAI-compatible LLM
 servers, which can be servers you already run or vLLM pools that OCI starts and
 stops. For OCI-managed vLLM servers, install the `local-llm` extra and configure
 the CUDA libraries:
@@ -85,6 +89,8 @@ uv sync --frozen --extra local-llm
 The host must provide a compatible NVIDIA driver. `pip install -e .` (with extras
 from [pyproject.toml](pyproject.toml)) also works. See [Serving](docs/serving.md)
 for hardware setup, model caching, ports, and troubleshooting.
+Tabular mode runs the numerical learners on CPUs and needs no LLM server or
+`local-llm` extra.
 
 ## Run your own cohort
 
@@ -228,7 +234,18 @@ text are generator options: correlated covariates, MCAR or MNAR documentation,
 post-treatment dated notes, and near-duplicate proxies. See
 [Synthetic data](docs/synthetic_data.md#re-equation).
 
-## Extract supplied variables without Stage 1
+## Choose where to enter the workflow
+
+| Mode | What you supply | What OCI runs |
+|---|---|---|
+| Full all-evidence | Pretreatment text, treatment, outcome | Stage 1 discovery, LLM definition/extraction, variable selection, estimation |
+| `explicit_only` / `--explicit-only` | Text plus variables, extraction ontologies, and causal roles | LLM extraction of the supplied variables, downstream estimation and diagnostics |
+| `tabular` / `--tabular-only` | Measured covariate columns, types, and causal roles | Nuisance learning, the effect-estimator ensemble, and diagnostics |
+
+Both supplied-variable paths create their own nested folds and fix the declared
+roles. Use a separate output directory for each analysis.
+
+### Extract supplied variables without Stage 1
 
 Use `--explicit-only` (or `"run": {"mode": "explicit_only"}`) to extract
 investigator-specified variables and run the existing Stage 2 estimation and
@@ -243,6 +260,29 @@ Set the cohort and model endpoints, and supply complete ontologies in
 The first run saves nested folds and the input identity; subsequent runs reuse
 them. See [explicit-only configuration](docs/configuration.md#explicit-only-workflow)
 for preflight, resume, and the example schema.
+
+### Analyze pre-structured tabular data without an LLM
+
+Use `--tabular-only` (or `"run": {"mode": "tabular"}`) with a CSV or Parquet
+table containing patient ID, binary treatment, outcome, and measured
+pretreatment covariates:
+
+```bash
+uv run python scripts/run_all_evidence.py --config example_configs/research_tabular.json
+```
+
+Edit the example's dataset path, column names, and `tabular.features`. Each
+feature declares its column, value type, categories when applicable, and
+`confounder` and/or `effect_modifier` roles. No text column, extraction
+ontology, model endpoint, or LLM is needed.
+
+This path skips discovery, extraction, and variable selection. It retains
+inner cross-fitted nuisance learning (Super Learner by default), outer held-out
+effect predictions, the final estimator ensemble, ATE/ATO estimation, and
+the existing diagnostics. Rerunning validates the frozen inputs and reuses
+compatible fits; changing numerical model settings refits affected estimates.
+See [tabular configuration](docs/configuration.md#tabular-workflow) for the
+schema, missing values, preflight, and outputs.
 
 ## Resume, inspect, or rerun selection
 
@@ -260,6 +300,10 @@ uv run python scripts/run_all_evidence.py --config /path/to/output/run_config.js
 # Recompute selection and estimation after a completed Stage 2, reusing extractions
 uv run python scripts/run_all_evidence.py --config /path/to/output/run_config.json --stage2-only --stage2-reselect
 ```
+
+For tabular runs, use the first two commands. Roles are fixed, so
+`--stage2-reselect` is not applicable; an ordinary rerun checks estimation
+checkpoints even after completion.
 
 Reselection archives the previous selection and estimates under
 `stage2/reselection_archives/` and reuses the frozen definitions and extracted
@@ -280,6 +324,8 @@ use a separate output directory for a different study. Details are in
 |---|---|
 | `input/pretreatment_notes_manifest.json`, `input/pretreatment_notes_audit.csv` | With dated notes: notes kept and dropped by reason, overall and per patient |
 | `handoff/evidence.jsonl` | Frozen Stage 1 evidence passed to Stage 2 |
+| `stage2/explicit_inputs.json` or `stage2/tabular_inputs.json` | Supplied-variable modes: frozen input identity and nested splits |
+| `stage2/measurements.csv` | Tabular mode: normalized supplied covariate values |
 | `stage2/outer_NNN/final_definitions.json` | Each outer fold's retained variables, roles, definitions, each modifier's test evidence, and the final estimator |
 | `stage2/outer_NNN/selection/modifier_tests.json` | Every candidate's modifier tests, combined p- and q-values, selection, and labels |
 | `stage2/outer_NNN/selection/modifier_count/selection.json` | Summary of the modifier selection and the estimator policy |
@@ -499,6 +545,8 @@ See [Benchmarks](docs/benchmarks.md).
 | [Stage 1 architectures](docs/stage1_architectures.md) | The ten evidence architectures, selection rules, Stage 1 evaluation, and attribution and ablation of Stage 2 results |
 | [Stage 2 selection](docs/stage2_selection.md) | Evidence, ranking, model choice, nuisances, DINA, diagnostics, and limitations |
 | [Configuration](docs/configuration.md) | Configuration keys, command-line flags, launcher, outputs, resume, and reselection |
+| [Explicit-only extraction](docs/configuration.md#explicit-only-workflow) | Supply variables and ontologies, extract them with an LLM, and run Stage 2 without discovery |
+| [Tabular analysis](docs/configuration.md#tabular-workflow) | Supply measured columns and run the ensemble and diagnostics without an LLM |
 | [Serving](docs/serving.md) | LLM endpoints, managed vLLM pools, and hardware presets |
 | [Optional extensions](docs/optional_extensions.md) | Optional Stage 2 steps and the standalone `oci run` workflows |
 | [Synthetic data](docs/synthetic_data.md) | The synthetic cohort generator, causal roles, generation-time factors, re-equation, bundled cohorts, and oracle columns |

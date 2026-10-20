@@ -35,7 +35,6 @@ def prepare_explicit_inputs(
     Missing provenance after Stage 2 has started is an error, including when a
     caller removes the coarse completion marker to request a rerun.
     """
-    from .plain_handoff_stage2 import _value_fingerprint
     from .plain_handoff_stage2_analysis import _frame_fingerprint
 
     columns = [unit_id_column, text_column, treatment_column, outcome_column]
@@ -69,23 +68,51 @@ def prepare_explicit_inputs(
         "seed": seed,
         "explicit_features": [feature.as_definition() for feature in config.explicit_features],
     }
-    path = Path(output_dir) / INPUT_FILE
+    return freeze_nested_splits(
+        dataset=data,
+        output_dir=output_dir,
+        identity=identity,
+        treatment_column=treatment_column,
+        outcome_column=outcome_column,
+        filename=INPUT_FILE,
+        mode="explicit-only",
+        persist=persist,
+    )
+
+
+def freeze_nested_splits(
+    *,
+    dataset: pd.DataFrame,
+    output_dir: Path,
+    identity: dict[str, Any],
+    treatment_column: str,
+    outcome_column: str,
+    filename: str,
+    mode: str,
+    persist: bool,
+) -> dict[str, Any]:
+    """Share the split lifecycle between extraction and supplied-table analyses."""
+    from .plain_handoff_stage2 import _value_fingerprint
+
+    outer_folds, inner_folds = identity["outer_folds"], identity["inner_folds"]
+    outcome_type, seed = identity["outcome_type"], identity["seed"]
+    path = Path(output_dir) / filename
     if path.exists():
         manifest = json.loads(path.read_text(encoding="utf-8"))
         if manifest.get("inputs") != identity:
             raise RuntimeError(
-                "explicit-only inputs changed (cohort, columns, question, folds, seed, "
-                "or supplied ontologies); use a fresh output directory"
+                f"{mode} inputs changed (cohort, columns, question, folds, seed, "
+                "or feature definitions); use a fresh output directory"
             )
         if manifest.get("fingerprint") != _value_fingerprint(
             {"inputs": identity, "splits": manifest.get("splits")}
         ):
-            raise RuntimeError("explicit-only split provenance fingerprint mismatch")
+            raise RuntimeError(f"{mode} split provenance fingerprint mismatch")
     else:
         if Path(output_dir).exists() and any(Path(output_dir).iterdir()):
             raise RuntimeError(
-                "explicit-only split provenance is missing from an existing Stage 2 run; "
-                "restore explicit_inputs.json or use a fresh output directory"
+                f"{mode} split provenance is missing from an existing Stage 2 run; "
+                f"restore {filename} or use a fresh output directory"
             )
         from .tfidf_topic_stage1 import make_joint_treatment_outcome_splits
 
@@ -99,10 +126,10 @@ def prepare_explicit_inputs(
                 seed=split_seed,
             )
 
-        outer, outer_metadata = split(data, outer_folds, seed)
+        outer, outer_metadata = split(dataset, outer_folds, seed)
         splits = []
         for fold, (fit, heldout) in enumerate(outer, 1):
-            inner, inner_metadata = split(data.iloc[fit], inner_folds, seed + 51_000 + fold)
+            inner, inner_metadata = split(dataset.iloc[fit], inner_folds, seed + 51_000 + fold)
             splits.append(
                 {
                     "outer_fold": fold,
@@ -123,7 +150,7 @@ def prepare_explicit_inputs(
         manifest = {"inputs": identity, "splits": splits}
         manifest["fingerprint"] = _value_fingerprint(manifest)
 
-    _validate_splits(manifest["splits"], len(data), outer_folds, inner_folds)
+    _validate_splits(manifest["splits"], len(dataset), outer_folds, inner_folds)
     if persist and not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -135,7 +162,7 @@ def prepare_explicit_inputs(
 def _validate_splits(splits: list[dict[str, Any]], rows: int, outer: int, inner: int) -> None:
     def partition(folds, universe, count, key):
         if len(folds) != count or [fold[key] for fold in folds] != list(range(1, count + 1)):
-            raise RuntimeError("explicit-only split provenance has incorrect fold IDs")
+            raise RuntimeError("split provenance has incorrect fold IDs")
         all_heldout = []
         for fold in folds:
             fit, heldout = fold["fit_row_ids"], fold["heldout_row_ids"]
@@ -147,10 +174,12 @@ def _validate_splits(splits: list[dict[str, Any]], rows: int, outer: int, inner:
                 or set(fit) & set(heldout)
                 or set(fit) | set(heldout) != universe
             ):
-                raise RuntimeError("explicit-only splits do not partition their parent rows")
+                raise RuntimeError("split provenance does not partition parent rows")
             all_heldout.extend(heldout)
         if sorted(all_heldout) != sorted(universe):
-            raise RuntimeError("explicit-only held-out rows must cover their parent exactly once")
+            raise RuntimeError(
+                "split provenance held-out rows must cover their parent exactly once"
+            )
 
     partition(splits, set(range(rows)), outer, "outer_fold")
     for fold in splits:

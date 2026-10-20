@@ -2777,6 +2777,8 @@ def load_fold_artifacts(fold_dir: Path) -> FoldArtifacts:
         )
 
     heldout_retained = fold_dir / "extraction" / "heldout" / "harmonized.csv"
+    if not heldout_retained.exists() and (fold_dir / "measurements" / "heldout.csv").exists():
+        heldout_retained = fold_dir / "measurements" / "heldout.csv"
     if isinstance(retained, str):
         clan: MeasurementInput | str = retained
     elif not heldout_retained.is_file():

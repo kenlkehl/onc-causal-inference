@@ -7,6 +7,15 @@ diagnostics. It starts where [How OCI works](how_it_works.md) step 6 ends: each
 outer fold has a frozen catalog of candidate variables, each measured on every
 outer-training patient. Terms are defined in the [glossary](glossary.md).
 
+[Explicit-only extraction](configuration.md#explicit-only-workflow) supplies
+that catalog through investigator-defined ontologies; the supplied roles
+stay fixed rather than being chosen by the tests below.
+[Tabular mode](configuration.md#tabular-workflow) supplies measured columns
+directly and bypasses selection entirely. It starts at
+[nuisance construction](#nuisance-construction) and the
+[estimator ensemble](#estimator-ensemble), with the same held-out estimation
+and diagnostics.
+
 Everything on this page runs separately inside each outer fold and uses only
 that fold's outer-training patients, except the final held-out predictions, the
 outer-fold confirmation, and the pooled diagnostics. No step on this page sends a request to an LLM, except

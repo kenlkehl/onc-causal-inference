@@ -73,6 +73,7 @@ from .stage2_elastic_net_selection import TEMPORAL_SCOPE as STAGE2_INPUT_TEMPORA
 from .stage2_sequential_consolidation import (
     SELECTION_SCHEMA_VERSION as STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
 )
+from .stage2_tabular import TabularConfig, tabular_config_from_mapping
 from .stage1_architectures import (
     BOW_NUISANCE,
     BOW_R_LOSS,
@@ -379,10 +380,15 @@ class ResearchStage1Config:
     # Runtime scheduling only; never enters the applied scientific config or
     # the per-context checkpoint identity.
     contexts_per_gpu: int = 1
+    tabular: TabularConfig | None = None
 
     @property
     def explicit_only(self) -> bool:
         return self.stage2 is not None and self.stage2.feature_source == "explicit_only"
+
+    @property
+    def tabular_only(self) -> bool:
+        return self.stage2 is not None and self.stage2.feature_source == "tabular"
 
     @property
     def analysis_dataset(self) -> Path:
@@ -398,6 +404,8 @@ class ResearchStage1Config:
 
     def as_dict(self) -> dict[str, Any]:
         values = asdict(self)
+        if self.tabular is None:
+            values.pop("tabular", None)
         # Keep legacy run_config.json stable when the new selector was omitted.
         if self.stage1_architectures is None:
             values.pop("stage1_architectures", None)
@@ -486,15 +494,19 @@ def compile_config(
     stage2_mapping = dict(raw.get("stage2") or {})
     if str(run.get("mode", "")).lower() == "explicit_only":
         stage2_mapping["feature_source"] = "explicit_only"
+    elif str(run.get("mode", "")).lower() == "tabular":
+        stage2_mapping["feature_source"] = "tabular"
     stage2 = plain_stage2_config_from_mapping(
         stage2_mapping,
         default_workers=max(1, int(run.get("workers", 1))),
     )
     mode = str(run.get("mode") or ("full" if stage2 is not None else "stage1")).lower()
-    if mode not in {"full", "stage1", "stage2", "explicit_only"}:
-        raise ValueError("run.mode must be 'full', 'stage1', 'stage2', or 'explicit_only'")
+    if mode not in {"full", "stage1", "stage2", "explicit_only", "tabular"}:
+        raise ValueError("run.mode must be full, stage1, stage2, explicit_only, or tabular")
     if mode in {"full", "stage2", "explicit_only"} and stage2 is None:
         raise ValueError(f"run.mode={mode!r} requires stage2.endpoint or stage2.vllm")
+    if mode == "tabular" and stage2 is None:
+        raise ValueError("tabular mode requires an enabled stage2 configuration")
     if stage2 is not None and stage2.feature_source == "explicit_only":
         if mode == "stage1":
             raise ValueError("explicit-only Stage 2 cannot be combined with Stage 1-only mode")
@@ -503,20 +515,31 @@ def compile_config(
             raise ValueError("explicit-only Stage 2 requires stage2.extraction_llm")
         if int(science.get("outer_folds", 5)) < 2 or int(science.get("inner_folds", 5)) < 2:
             raise ValueError("explicit-only requires outer_folds and inner_folds >= 2")
+    tabular = tabular_config_from_mapping(raw.get("tabular"))
+    if stage2 is not None and stage2.feature_source == "tabular":
+        if mode == "stage1":
+            raise ValueError("tabular mode cannot be combined with Stage 1-only mode")
+        mode = "tabular"
+        if tabular is None:
+            raise ValueError("tabular mode requires tabular.features")
+        if raw.get("notes") is not None:
+            raise ValueError("tabular mode reads covariate columns and does not accept notes")
+    elif tabular is not None:
+        raise ValueError("tabular.features requires run.mode=tabular or --tabular-only")
     selected_components = tuple(str(value) for value in raw_components if value != "stage2")
     if mode == "full":
         if "handoff" not in selected_components:
             selected_components = (*selected_components, "handoff")
         selected_components = (*selected_components, "stage2")
-    elif mode in {"stage2", "explicit_only"}:
+    elif mode in {"stage2", "explicit_only", "tabular"}:
         selected_components = ("stage2",)
 
     architecture_selection = canonicalize_stage1_architectures(
         science.get("stage1_architectures"),
         allow_none=True,
     )
-    if mode == "explicit_only" and architecture_selection is not None:
-        raise ValueError("explicit-only mode cannot select Stage 1 architectures")
+    if mode in {"explicit_only", "tabular"} and architecture_selection is not None:
+        raise ValueError(f"{mode} mode cannot select Stage 1 architectures")
 
     stage1_template = raw.get("stage1_template", DEFAULT_STAGE1_TEMPLATE)
     neural_template = raw.get("neural_query_template", DEFAULT_NEURAL_QUERY_TEMPLATE)
@@ -538,7 +561,11 @@ def compile_config(
         clinical_question=str(
             science.get(
                 "clinical_question",
-                "Identify text-derived confounders and treatment-effect modifiers.",
+                (
+                    "Estimate treatment effects using prespecified measured pretreatment covariates."
+                    if mode == "tabular"
+                    else "Identify text-derived confounders and treatment-effect modifiers."
+                ),
             )
         ),
         outer_folds=int(science.get("outer_folds", 5)),
@@ -566,6 +593,7 @@ def compile_config(
         neural_query_overrides=copy.deepcopy(dict(science.get("neural_queries") or {})),
         log_level=str(run.get("log_level", "INFO")).upper(),
         notes=notes,
+        tabular=tabular,
     )
 
 
@@ -1724,6 +1752,10 @@ def _stage2_component(
 ) -> Mapping[str, Any]:
     """Extract, review, and estimate from the plain fold-scoped handoff."""
 
+    if context.config.tabular_only:
+        from .stage2_tabular import run_tabular_stage2
+
+        return run_tabular_stage2(context.config, context.dataset)
     if context.config.explicit_only:
         return run_plain_handoff_stage2(
             handoff_path=None,
@@ -1838,10 +1870,13 @@ def _load_analysis_dataset(
         )
     required = {
         config.unit_id_column,
-        config.text_column,
         config.treatment_column,
         config.outcome_column,
     }
+    if config.tabular_only:
+        required.update(feature.column for feature in config.tabular.features)
+    else:
+        required.add(config.text_column)
     missing = sorted(required - set(dataset.columns))
     if missing:
         raise ValueError(f"dataset is missing configured columns: {missing}")
@@ -1877,21 +1912,22 @@ class ResearchAllEvidenceWorkflow:
     ) -> None:
         check_notes_output_directory(config.output_dir, config.notes)
         from .stage2_explicit_inputs import INPUT_FILE
+        from .stage2_tabular import INPUT_FILE as TABULAR_INPUT_FILE
 
-        if not config.explicit_only and (config.output_dir / "stage2" / INPUT_FILE).exists():
-            raise ValueError("cannot switch between explicit-only and all-evidence runs "
-                             "in the same output directory")
+        source = config.stage2.feature_source if config.stage2 else "all_evidence"
+        for filename, expected in ((INPUT_FILE, "explicit_only"), (TABULAR_INPUT_FILE, "tabular")):
+            if source != expected and (config.output_dir / "stage2" / filename).exists():
+                raise ValueError("cannot switch workflow input modes in the same output directory")
         saved_path = config.output_dir / "run_config.json"
         if saved_path.is_file():
             saved = _read_mapping(saved_path)
-            saved_explicit = (saved.get("stage2") or {}).get("feature_source") == "explicit_only"
-            if saved_explicit != config.explicit_only:
-                raise ValueError("cannot switch between explicit-only and all-evidence runs "
-                                 "in the same output directory")
-        if config.explicit_only and any(
+            saved_source = (saved.get("stage2") or {}).get("feature_source", "all_evidence")
+            if saved_source != source:
+                raise ValueError("cannot switch workflow input modes in the same output directory")
+        if (config.explicit_only or config.tabular_only) and any(
             (config.output_dir / name).exists() for name in ("components", "handoff")
         ):
-            raise ValueError("explicit-only mode requires an output directory without Stage 1 artifacts")
+            raise ValueError("supplied-feature modes require an output directory without Stage 1 artifacts")
         saved_selection = _saved_architecture_selection(config.output_dir)
         if (
             config.stage1_architectures is not None
@@ -2052,9 +2088,14 @@ class ResearchAllEvidenceWorkflow:
     def _stage2_only_context(self) -> Stage1RunContext:
         """Build the lightweight context needed to invoke an existing handoff."""
 
-        if self.config.explicit_only:
+        if self.config.explicit_only or self.config.tabular_only:
             dataset = _load_analysis_dataset(self.config, materialize=True)
-            _prepare_explicit_workflow_inputs(self.config, dataset)
+            if self.config.tabular_only:
+                from .stage2_tabular import prepare_tabular_inputs
+
+                prepare_tabular_inputs(self.config, dataset, persist=True)
+            else:
+                _prepare_explicit_workflow_inputs(self.config, dataset)
             _write_json(
                 self.config.output_dir / "run_config.json",
                 _redact_credentials(self.config.as_dict()),
@@ -2135,7 +2176,7 @@ class ResearchAllEvidenceWorkflow:
             for name in self.components:
                 component_dir = self._component_dir(name)
                 complete_path = component_dir / "complete.json"
-                if complete_path.is_file():
+                if complete_path.is_file() and not self.config.tabular_only:
                     LOGGER.info("component already complete: %s", name)
                     progress["components"][name] = {
                         "status": "already_complete",
@@ -2438,6 +2479,8 @@ def prepare_stage2_reselection(
     checks without writing snapshots or moving results.
     """
 
+    if config.tabular_only:
+        raise ValueError("tabular roles are fixed; rerun the tabular command to revalidate estimation")
     if config.components != ("stage2",):
         raise ValueError(
             "--stage2-reselect requires Stage 2-only mode (--stage2-only or "
@@ -3044,6 +3087,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="extract stage2.explicit_features and run Stage 2 without Stage 1 discovery",
     )
+    mode.add_argument(
+        "--tabular-only",
+        action="store_true",
+        help="run Stage 2 estimation directly on tabular.features without any LLM",
+    )
     parser.add_argument(
         "--stage2-reselect",
         action="store_true",
@@ -3057,7 +3105,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--preflight-only",
         action="store_true",
         help=(
-            "with --stage2-only or --explicit-only, validate inputs and the Stage 2 "
+            "with --stage2-only, --explicit-only, or --tabular-only, validate inputs and the Stage 2 "
             "reuse plan without writing files or running models, then print a "
             "JSON report"
         ),
@@ -3191,6 +3239,9 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
     elif args.explicit_only:
         run["mode"] = "explicit_only"
         run["components"] = []
+    elif args.tabular_only:
+        run["mode"] = "tabular"
+        run["components"] = []
     if raw.get("stage2") is not None and not isinstance(raw["stage2"], MutableMapping):
         raise ValueError("stage2 must be a configuration object or null")
     if (
@@ -3304,6 +3355,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.stage2_reselect and args.rerun:
         parser.error("--stage2-reselect cannot be combined with --rerun")
+    if args.stage2_reselect and config.tabular_only:
+        parser.error("tabular roles are fixed; rerun the tabular command to revalidate estimation")
     if args.stage2_reselect and config.components != ("stage2",):
         parser.error(
             "--stage2-reselect requires Stage 2-only mode (--stage2-only or "

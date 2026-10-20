@@ -42,6 +42,17 @@ configures both stages. `example_configs/research_all_evidence.json` leaves
 `stage2.endpoint` and `stage2.model` empty, so it runs Stage 1 only until an
 interpretation LLM is configured.
 
+For supplied variables, choose one of two fresh-run entry points:
+
+| Input | Mode and example | Entry point |
+|---|---|---|
+| Pretreatment text plus complete extraction ontologies and roles | [`explicit_only`](#explicit-only-workflow), [`research_explicit_only.json`](../example_configs/research_explicit_only.json) | LLM extraction, then downstream Stage 2 |
+| Pretreatment covariates already in table columns, with types and roles | [`tabular`](#tabular-workflow), [`research_tabular.json`](../example_configs/research_tabular.json) | Numerical learners and diagnostics; no LLM |
+
+Both skip Stage 1 and freeze the supplied definitions and roles.
+`--stage2-only` by itself resumes the selected input mode from a saved
+configuration; a fresh all-evidence Stage 2 run still needs a handoff.
+
 ## Configuration file reference
 
 A configuration file has these top-level blocks:
@@ -65,6 +76,7 @@ A configuration file has these top-level blocks:
 | `dataset` | required | Parquet or CSV file with one row per patient |
 | `output_dir` | required | Run directory; it holds all results and is the resume checkpoint |
 | `notes` | omitted | Dated-notes input: build the patient text from a table of dated notes (see [`notes`](#notes)) |
+| `tabular` | omitted | Declared measured covariates for [tabular mode](#tabular-workflow) |
 | `stage1_template` | `example_configs/all_evidence_stage1_model.json` | Stage 1 text-model template (see [Stage 1 template settings](#stage-1-template-settings)) |
 | `neural_query_template` | `example_configs/all_evidence_neural_query_model.json` | Template for the `neural_query_moments` architecture |
 
@@ -73,7 +85,7 @@ A configuration file has these top-level blocks:
 | Key | Default | Meaning |
 |---|---|---|
 | `unit_id` | `patient_id` | Unique, nonmissing patient identifier |
-| `text` | `clinical_text` | Pretreatment clinical text. With [`notes`](#notes), the name of the text column that OCI derives; `dataset` must not contain it |
+| `text` | `clinical_text` | Pretreatment clinical text; unused and not required in tabular mode. With [`notes`](#notes), the name of the text column that OCI derives; `dataset` must not contain it |
 | `treatment` | `treatment_indicator` | Binary treatment, 0 or 1 |
 | `outcome` | `outcome_indicator` | Outcome, binary or continuous as declared by `science.outcome_type` |
 
@@ -225,14 +237,16 @@ change it.
 | `workers` | 1 | Stage 1 CPU budget; also the default for `stage2.workers` (capped at 4) |
 | `contexts_per_gpu` | 1 | Maximum concurrent text-model/HTR and neural-query discovery contexts per GPU, each in a separate process. Extra lanes are capped by `workers`, and the CPU budget is divided across lanes. Safe to change on resume |
 | `components` | all five Stage 1 components | Subset of `embedding_cache`, `tfidf`, `text_models`, `neural_queries`, `handoff`. With an architecture selection, components the selection does not need are skipped |
-| `mode` | `full` when Stage 2 is configured, otherwise `stage1` | `full`, `stage1`, `stage2`, or `explicit_only` (the flags `--stage1-only`, `--stage2-only`, and `--explicit-only` set the corresponding mode) |
+| `mode` | `full` when Stage 2 is configured, otherwise `stage1` | `full`, `stage1`, `stage2`, `explicit_only`, or `tabular` (set by the corresponding `--stage1-only`, `--stage2-only`, `--explicit-only`, or `--tabular-only` flag) |
 | `log_level` | `INFO` | Logging level for `logs/workflow.log` |
 
 ### `stage2`
 
-Stage 2 is enabled when `stage2.endpoint`, `stage2.model`, or `stage2.vllm` is
-set, and it also requires `stage2.extraction_llm`. The tables below group the
-keys; an omitted key takes the default shown.
+For text workflows, Stage 2 is enabled when `stage2.endpoint`, `stage2.model`,
+or `stage2.vllm` is set, and it also requires `stage2.extraction_llm`.
+`run.mode=tabular` enables the numerical part of Stage 2 without any of those
+LLM settings. The tables below group the keys; an omitted key takes the default
+shown.
 
 **Interpretation LLM and transport**
 
@@ -243,7 +257,7 @@ keys; an omitted key takes the default shown.
 | `api_key` | `EMPTY` | API key; when absent from the configuration, `OCI_STAGE2_API_KEY` is used |
 | `vllm` | none | Managed vLLM pool for the interpretation LLM ([Serving](serving.md#managed-vllm-pools)) |
 | `vllm_rapid_switch_seconds` | 900 | Managed pools only: when two managed models switch again within this interval, both stay resident on their configured GPUs for the rest of the run; 0 always alternates |
-| `workers` | `min(4, run.workers)` | Maximum concurrent interpretation requests across all outer folds |
+| `workers` | `min(4, run.workers)` | Maximum concurrent interpretation requests across all outer folds; in tabular mode, concurrent outer folds |
 | `frozen_feature_definition_model` | empty | Reuse completed feature definitions produced by this model ID while `model` serves the remaining requests. Definitions that are missing are not regenerated |
 | `extraction_llm` | none | Extraction LLM settings (next table) |
 
@@ -300,7 +314,7 @@ Configure exactly one of `endpoint`, `endpoints`, or `vllm`.
 | `max_ontology_refinement_rounds` | 2 | Refinement rounds per review round; 0 disables refinement |
 | `required_architectures`, `included_architectures` | the eight default architectures; all | Architectures whose evidence must be present, and architectures whose evidence is compiled. The workflow sets both from the frozen Stage 1 selection; they matter only for `scripts/run_stage2_from_artifacts.py`. Accept a list, a comma-separated string, or `all` |
 | `explicit_features` | `[]` | Investigator-specified variables (see [Explicit features](#explicit-features)) |
-| `feature_source` | `all_evidence` | `all_evidence` adds supplied features to discovery. `explicit_only` skips Stage 1 and discovery; set automatically by `--explicit-only` or `run.mode=explicit_only` |
+| `feature_source` | `all_evidence` | `all_evidence` adds supplied features to discovery. `explicit_only` starts at extraction; `tabular` starts at numerical modeling. Set automatically by the corresponding run mode or flag |
 
 `stage2.consolidation_policy`:
 
@@ -550,6 +564,121 @@ The output uses the same `stage2/outer_*`, `cross_fitted_predictions.csv`,
 `causal_estimate.json`, and diagnostic artifacts as the all-evidence workflow.
 The run also saves `run_config.json`, `progress.json`, and workflow logs.
 
+### Tabular workflow
+
+`--tabular-only` or `run.mode=tabular` runs the shared Stage 2 numerical
+pipeline directly on measured covariates. It needs no Stage 1 artifacts,
+text column, LLM, model downloads, or extraction ontology. Start from
+[`example_configs/research_tabular.json`](../example_configs/research_tabular.json)
+and edit the dataset path and column declarations.
+
+The cohort must be a CSV or Parquet table with one row per patient, unique
+nonmissing IDs, a complete 0/1 treatment with both arms present, and a complete
+finite outcome. Set `science.outcome_type` to `binary` (0/1) or `continuous`.
+Covariates must describe the pretreatment state; this mode does not derive
+covariates or screen their measurement dates.
+
+Declare the measured columns in a top-level `tabular` block:
+
+```json
+{
+  "dataset": "cohort.csv",
+  "output_dir": "results/tabular",
+  "columns": {"unit_id": "patient_id", "treatment": "treated", "outcome": "outcome"},
+  "science": {"outcome_type": "binary", "outer_folds": 5, "inner_folds": 5, "seed": 42},
+  "run": {"mode": "tabular"},
+  "tabular": {
+    "features": [
+      {"column": "age", "value_type": "continuous", "roles": ["confounder"]},
+      {"column": "ecog", "value_type": "ordinal", "categories": [0, 1, 2, 3, 4],
+       "roles": ["confounder", "effect_modifier"]},
+      {"column": "biomarker_positive", "value_type": "binary", "roles": ["effect_modifier"]}
+    ]
+  }
+}
+```
+
+| Feature field | Requirement |
+|---|---|
+| `column` | Exact source column name. It must differ from the ID, treatment, outcome, and other covariates. Output names are normalized to lowercase snake case and must remain distinct |
+| `value_type` | `continuous`, `binary`, `categorical`, or `ordinal` |
+| `roles` | Nonempty list containing `confounder`, `effect_modifier`, or both. A single string and the alias `both` are also accepted |
+| `categories` | Exactly two for binary (defaults to `[0, 1]`); at least two for categorical/ordinal; omitted for continuous |
+| `description` | Optional human-readable description |
+
+Only declared covariates enter modeling. Oracle-prefixed columns (`true_`,
+`oracle_`, `ground_truth`) cannot be declared as covariates; other unlisted
+columns are ignored by the learners. An oracle ITE column may still be used
+by the existing post hoc evaluation.
+
+**Encoding and missingness.** Continuous covariates must contain numbers or
+missing values; nonnumeric values and infinities are errors. Numeric category
+codes are normalized consistently (`1` and numeric `1.0` both become `"1"`),
+and surrounding whitespace in string labels is stripped. Every observed
+nonmissing category must be declared in advance. Binary, categorical, and
+ordinal covariates use category indicators; ordinal codes are not implicitly
+treated as a linear score. Declare a numeric variable `continuous` to request
+that representation. Missing covariates are allowed: continuous medians and
+scales are fitted on training rows, with a missingness indicator; categorical
+variables have a missing level. Use null/NaN for missingness. The internal
+labels `__missing__` and `documented_unknown` cannot be declared as categories.
+There are no extraction-failure states in this mode.
+
+**What runs.** Roles stay fixed in every outer fold. OCI runs no candidate
+discovery, statistical variable selection, semantic consolidation, or ontology
+revision. The complete declared covariate catalog feeds the shared treatment
+and outcome nuisance learners, including variables declared only as effect
+modifiers. Confounder roles define adjustment terms in the effect models;
+modifier roles define the effect features. The default nuisance learner is
+the existing Super Learner. The default final estimator is an equal-weight
+mean of fitted component CATE predictions: causal forest and interaction
+model, plus DINA for binary outcomes. A component that cannot be estimated
+is recorded in the fold diagnostics and omitted from the mean.
+
+Outer held-out predictions, inner cross-fitting, AIPW ATE/ATO, overlap,
+heterogeneity diagnostics, and sensitivity reporting use the same code as
+the text workflow. Both fold counts must be at least two. Shared numerical
+settings remain under `stage2`: for example `nuisance_learner`,
+`super_learner`, `modeling_workers`, `estimation_trees`, propensity
+bounds, and the interaction-model settings. To request a single final
+estimator, set
+`stage2.statistical_selection.multi_model.modifier_selection.estimator_policy`
+to `causal_forest`, `linear_interactions`, or `dina` (binary only), instead of
+the default `ensemble`. Keep `modifier_selection.rule=orthogonal_tests`;
+in this mode it supplies the final estimator policy and penalty conventions
+but runs no selection tests. `balanced_evidence` is not supported because it
+selects modifiers and a model. LLM settings, `stage2.explicit_features`,
+`notes`, and Stage 1 architecture selections are rejected.
+
+```bash
+# Fresh analysis or resume; the mode can also be set in the config
+uv run python scripts/run_all_evidence.py --config study.json --tabular-only
+
+# Read-only input validation and split preview; no servers are contacted
+uv run python scripts/run_all_evidence.py --config study.json --tabular-only --preflight-only
+
+# Resume from the saved resolved configuration
+uv run python scripts/run_all_evidence.py --config OUTPUT_DIR/run_config.json --stage2-only
+```
+
+**Resume and outputs.** The first run saves the ordered cohort and feature
+identity plus nested splits in `stage2/tabular_inputs.json`. Every subsequent
+run validates that file, including completed runs. Changing measured values,
+row order, selected columns, types, categories, roles, question, folds, or seed
+requires a fresh output directory. Different input modes cannot share a run
+directory. Compatible estimation checkpoints are reused; changing numerical
+model settings refits affected estimates without resampling. There is no
+`--stage2-reselect` operation for fixed tabular roles: rerun normally.
+
+`stage2/measurements.csv` records normalized supplied values.
+`stage2/outer_NNN/final_definitions.json` maps model names back to source
+columns and records fixed roles; `measurements/fit.csv` and
+`measurements/heldout.csv` record each fold's inputs. The shared outputs are
+`stage2/cross_fitted_predictions.csv`, `causal_estimate.json`,
+`heterogeneity_diagnostics.json`, and per-fold `estimation/` artifacts.
+`run_config.json`, `progress.json`, and workflow logs are also written.
+No handoff, extraction cache, or variable-selection directory is created.
+
 ### Stage 1 template settings
 
 Stage 1 model settings live in the template file and are overridden through
@@ -631,15 +760,16 @@ file; `--set` can change any other value.
 | `--disable-htr` | `science.htr_enabled=false` | Disable all HTR modeling, keeping the other evidence families |
 | `--embedding-model ID` | `models.embeddings` | Embedding model for the embedding and neural-query architectures |
 
-**Run mode** (`--stage1-only`, `--stage2-only`, and `--explicit-only` are mutually exclusive)
+**Run mode** (`--stage1-only`, `--stage2-only`, `--explicit-only`, and `--tabular-only` are mutually exclusive)
 
 | Flag | Meaning |
 |---|---|
 | `--stage1-only` | Run or resume Stage 1 through the handoff, then stop |
 | `--stage2-only` | Skip Stage 1 and run or resume Stage 2 from the saved handoff, usually with `--config OUTPUT_DIR/run_config.json` |
 | `--explicit-only` | Extract `stage2.explicit_features` and run downstream analysis without Stage 1; creates and persists its own nested splits |
+| `--tabular-only` | Read `tabular.features` from measured table columns and run the numerical pipeline without Stage 1 or any LLM |
 | `--stage2-reselect` | With Stage 2-only or explicit-only mode: archive a completed Stage 2 selection and everything after it, then rerun selection from the frozen definitions and outer-training extractions ([Guarded reselection](#guarded-reselection)) |
-| `--preflight-only` | With Stage 2-only or explicit-only mode: validate inputs and the Stage 2 reuse plan without writing files, starting servers, or fitting models; prints a JSON report |
+| `--preflight-only` | With Stage 2-only, explicit-only, or tabular mode: validate inputs and the Stage 2 reuse plan without writing files, starting servers, or fitting models; prints a JSON report |
 | `--rerun COMPONENT` | Remove a component's completion markers (not its outputs or identity-checked checkpoints) so it runs again ([details](#checkpoints-and-resuming)); repeatable. One of `embedding_cache`, `tfidf`, `text_models`, `neural_queries`, `handoff`, `stage2` |
 | `--status` | Print `progress.json` and exit |
 
@@ -1108,7 +1238,7 @@ interrupted component re-enters at its first incomplete step.
   the previous `stage2/` directory aside before running Stage 2 again; Stage 2
   rejects feature definitions whose evidence fingerprint does not match the handoff.
 
-Stage 2 checks its saved state on every start:
+Text-based Stage 2 checks its saved state on every start:
 
 | Change on a saved run | Result |
 |---|---|
@@ -1122,6 +1252,11 @@ Stage 2 checks its saved state on every start:
 | `estimation_trees` under `orthogonal_tests` | Allowed; selection and its stored nuisance models are reused and only the final estimation is refitted |
 | `modifier_selection.unpenalized_selected_interactions` or `unpenalized_events_per_parameter` | Allowed; selection and its stored nuisance models are reused and only the final estimation is refitted |
 
+For [tabular mode](#tabular-workflow), ordinary reruns revalidate the
+estimation checkpoints even after completion. Numerical model changes refit
+affected estimates directly; input, feature-schema, or split changes require
+a fresh output directory. There is no selection checkpoint to archive.
+
 `run_config.json` stores every API key as `<redacted>`. When relaunching from it
 against servers that require a key, set the `OCI_STAGE2_*_API_KEY` environment
 variables (the placeholder counts as no key) or pass the keys, for example
@@ -1129,6 +1264,10 @@ variables (the placeholder counts as no key) or pass the keys, for example
 two workflow processes against the same output directory.
 
 ## Stage 2-only launches
+
+For fresh runs without a handoff, use [explicit-only extraction](#explicit-only-workflow)
+or [tabular mode](#tabular-workflow). Their saved configurations preserve the
+input mode when resumed with `--stage2-only`.
 
 To run Stage 2 against a saved run's frozen Stage 1 handoff, without rerunning
 Stage 1:

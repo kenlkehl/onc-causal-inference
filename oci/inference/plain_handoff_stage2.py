@@ -944,8 +944,16 @@ class PlainHandoffStage2Config:
         require_model: bool = True,
         require_endpoint: bool = True,
     ) -> None:
-        if self.feature_source not in {"all_evidence", "explicit_only"}:
-            raise ValueError("stage2.feature_source must be all_evidence or explicit_only")
+        if self.feature_source not in {"all_evidence", "explicit_only", "tabular"}:
+            raise ValueError("stage2.feature_source must be all_evidence, explicit_only, or tabular")
+        if self.feature_source == "tabular":
+            require_model = require_endpoint = False
+            if self.endpoint or self.model or self.vllm or self.extraction_llm or self.explicit_features:
+                raise ValueError("tabular mode does not accept LLM settings or stage2.explicit_features")
+            if self.selection_consolidation.enabled or self.estimand_ontology.enabled:
+                raise ValueError("tabular mode does not run ontology search or semantic consolidation")
+            if self.statistical_selection.multi_model.modifier_selection.rule != "orthogonal_tests":
+                raise ValueError("tabular mode uses fixed roles and cannot run balanced_evidence selection")
         if self.feature_source == "explicit_only":
             if not self.explicit_features:
                 raise ValueError("explicit-only Stage 2 requires nonempty stage2.explicit_features")
@@ -1371,13 +1379,14 @@ def plain_stage2_config_from_mapping(
     model = str(raw.get("model") or "").strip()
     managed_vllm = managed_vllm_config_from_mapping(raw.get("vllm"), model=model)
     explicit_features = _stage2_explicit_features_from_value(raw.get("explicit_features"))
-    if not endpoint and not model and managed_vllm is None:
+    tabular = raw.get("feature_source") == "tabular"
+    if not endpoint and not model and managed_vllm is None and not tabular:
         return None
     if endpoint and managed_vllm is not None:
         raise ValueError("configure either stage2.endpoint or stage2.vllm, not both")
     if managed_vllm is not None and not model:
         raise ValueError("stage2.model is required when stage2.vllm is configured")
-    if not endpoint and managed_vllm is None:
+    if not endpoint and managed_vllm is None and not tabular:
         raise ValueError("stage2.endpoint is required when stage2.model is specified")
     # A saved run_config.json stores "<redacted>"; it counts as unset so the
     # environment variable supplies the key on a relaunch.
@@ -5038,6 +5047,8 @@ class PlainHandoffStage2:
         extraction_completion: CompletionFunction | None = None,
         extraction_tokenizer: Any | None = None,
     ) -> None:
+        if config.feature_source == "tabular":
+            raise ValueError("use the tabular workflow for supplied covariate columns")
         config = _resolve_stage2_model(config)
         config = _resolve_extraction_llm_model(config)
         config.validate()
@@ -6741,221 +6752,230 @@ class PlainHandoffStage2:
                         raise
                     LOGGER.info("Stage 2 completed outer_fold=%s", outer_fold)
         fold_results = [fold_results_by_id[outer_fold] for outer_fold in outer_fold_ids]
-        _write_jsonl(output_dir / "features_by_outer_fold.jsonl", fold_results)
-        name_counts: Counter[str] = Counter()
-        for result in fold_results:
-            names_in_fold = {
-                re.sub(r"[^a-z0-9]+", "_", str(feature["name"]).lower()).strip("_")
-                for feature in result["features"]
-            }
-            name_counts.update(names_in_fold)
-        summary = {
-            "outer_folds": len(fold_results),
-            "candidate_discovery_source": (
-                "explicit_features" if explicit_only else "all_semantic_evidence_cards"
-            ),
-            "evidence_packets": len(discovery_packets),
-            "candidate_discovery_packets": len(discovery_packets),
-            "compiled_evidence_packets": len(compiled_packets),
-            "evidence_compiler": EVIDENCE_COMPILER_VERSION,
-            "evidence_compilation_path": (
-                None if explicit_only else str(output_dir / "evidence_compilation")
-            ),
-            **({"split_provenance_path": str(output_dir / INPUT_FILE)} if explicit_only else {}),
-            "evidence_compilation": compilation_summary,
-            "features_by_fold": {
-                str(result["outer_fold"]): len(result["features"]) for result in fold_results
+        return summarize_stage2_results(
+            config=self.config, dataset=dataset, fold_results=fold_results,
+            output_dir=output_dir, outcome_type=outcome_type, seed=seed,
+            source_summary={
+                "candidate_discovery_source": (
+                    "explicit_features" if explicit_only else "all_semantic_evidence_cards"
+                ),
+                "evidence_packets": len(discovery_packets),
+                "candidate_discovery_packets": len(discovery_packets),
+                "compiled_evidence_packets": len(compiled_packets),
+                "evidence_compiler": EVIDENCE_COMPILER_VERSION,
+                "evidence_compilation_path": (
+                    None if explicit_only else str(output_dir / "evidence_compilation")
+                ),
+                **({"split_provenance_path": str(output_dir / INPUT_FILE)} if explicit_only else {}),
+                "evidence_compilation": compilation_summary,
             },
-            "feature_name_fold_counts": dict(sorted(name_counts.items())),
-            "features_path": str(output_dir / "features_by_outer_fold.jsonl"),
+        )
+
+
+def summarize_stage2_results(
+    *,
+    config: PlainHandoffStage2Config,
+    dataset: pd.DataFrame | None,
+    fold_results: Sequence[Mapping[str, Any]],
+    output_dir: Path,
+    outcome_type: str,
+    seed: int,
+    source_summary: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Pool fold predictions and write the shared causal estimates and diagnostics."""
+    _write_jsonl(output_dir / "features_by_outer_fold.jsonl", fold_results)
+    name_counts: Counter[str] = Counter()
+    for result in fold_results:
+        names_in_fold = {
+            re.sub(r"[^a-z0-9]+", "_", str(feature["name"]).lower()).strip("_")
+            for feature in result["features"]
         }
-        convergence_results = [
-            result for result in fold_results if "review_converged" in result
-        ]
-        if convergence_results:
-            summary["review_convergence_by_fold"] = {
-                str(result["outer_fold"]): result.get("review_convergence")
-                for result in convergence_results
-            }
-            summary["nonconverged_outer_folds"] = [
-                int(result["outer_fold"])
-                for result in convergence_results
-                if result.get("review_converged") is False
-            ]
-        summary["harmonization_validation_fallbacks_by_fold"] = {
-            str(result["outer_fold"]): list(
-                result.get("harmonization_validation_fallbacks") or []
-            )
-            for result in fold_results
+        name_counts.update(names_in_fold)
+    summary = {
+        "outer_folds": len(fold_results),
+        **source_summary,
+        "features_by_fold": {
+            str(result["outer_fold"]): len(result["features"]) for result in fold_results
+        },
+        "feature_name_fold_counts": dict(sorted(name_counts.items())),
+        "features_path": str(output_dir / "features_by_outer_fold.jsonl"),
+    }
+    convergence_results = [result for result in fold_results if "review_converged" in result]
+    if convergence_results:
+        summary["review_convergence_by_fold"] = {
+            str(result["outer_fold"]): result.get("review_convergence")
+            for result in convergence_results
         }
-        summary["outer_folds_with_harmonization_validation_fallbacks"] = [
+        summary["nonconverged_outer_folds"] = [
             int(result["outer_fold"])
-            for result in fold_results
-            if result.get("harmonization_validation_fallbacks")
+            for result in convergence_results
+            if result.get("review_converged") is False
         ]
-        artifacts = [
-            str(output_dir / "features_by_outer_fold.jsonl"),
-            str(output_dir / "summary.json"),
-        ]
-        if dataset is not None:
-            prediction_frames = []
-            for result in fold_results:
-                outer_fold = int(result["outer_fold"])
-                frame = pd.read_csv(
-                    output_dir / f"outer_{outer_fold:03d}" / "estimation" / "predictions.csv"
-                )
-                frame.insert(1, "outer_fold", outer_fold)
-                prediction_frames.append(frame)
-            predictions = pd.concat(prediction_frames, ignore_index=True)
-            row_ids = predictions["_oci_row_id"].astype(int).tolist()
-            if len(row_ids) != len(dataset) or set(row_ids) != set(range(len(dataset))):
-                raise ValueError(
-                    "outer heldout predictions must cover every dataset row exactly once"
-                )
-            if len(set(row_ids)) != len(row_ids):
-                raise ValueError("a dataset row appears in more than one outer heldout fold")
-            predictions = predictions.sort_values("_oci_row_id").reset_index(drop=True)
-            from .stage2_diagnostics import (
-                co_primary_estimands,
-                outside_overlap_flags,
-                overlap_flag_summary,
+    summary["harmonization_validation_fallbacks_by_fold"] = {
+        str(result["outer_fold"]): list(result.get("harmonization_validation_fallbacks") or [])
+        for result in fold_results
+    }
+    summary["outer_folds_with_harmonization_validation_fallbacks"] = [
+        int(result["outer_fold"])
+        for result in fold_results
+        if result.get("harmonization_validation_fallbacks")
+    ]
+    artifacts = [
+        str(output_dir / "features_by_outer_fold.jsonl"),
+        str(output_dir / "summary.json"),
+    ]
+    if dataset is not None:
+        prediction_frames = []
+        for result in fold_results:
+            outer_fold = int(result["outer_fold"])
+            frame = pd.read_csv(
+                output_dir / f"outer_{outer_fold:03d}" / "estimation" / "predictions.csv"
             )
+            frame.insert(1, "outer_fold", outer_fold)
+            prediction_frames.append(frame)
+        predictions = pd.concat(prediction_frames, ignore_index=True)
+        row_ids = predictions["_oci_row_id"].astype(int).tolist()
+        if len(row_ids) != len(dataset) or set(row_ids) != set(range(len(dataset))):
+            raise ValueError("outer heldout predictions must cover every dataset row exactly once")
+        if len(set(row_ids)) != len(row_ids):
+            raise ValueError("a dataset row appears in more than one outer heldout fold")
+        predictions = predictions.sort_values("_oci_row_id").reset_index(drop=True)
+        from .stage2_diagnostics import (
+            co_primary_estimands,
+            outside_overlap_flags,
+            overlap_flag_summary,
+        )
 
-            # Reporting only: never used to drop patients or change estimates.
-            predictions["outside_overlap"] = outside_overlap_flags(
-                predictions["propensity"], self.config.overlap_flag_bounds
-            )
-            predictions_path = output_dir / "cross_fitted_predictions.csv"
-            temporary = predictions_path.with_name(f".{predictions_path.name}.{os.getpid()}.tmp")
-            predictions.to_csv(temporary, index=False)
-            os.replace(temporary, predictions_path)
-            oracle_ite_evaluation = _evaluate_stage2_oracle_ite(
-                prediction_path=predictions_path,
-                dataset=dataset,
-                output_dir=output_dir,
-                outcome_type=outcome_type,
-            )
-            oracle_overall = dict(oracle_ite_evaluation.get("overall") or {})
-            if "effect_eligible" in predictions:
-                eligible = predictions["effect_eligible"].to_numpy(dtype=bool)
-                if predictions.loc[~eligible, ["aipw_score", "estimated_cate"]].notna().any().any():
-                    raise ValueError("propensity-excluded patients have effect estimates")
-                if predictions.loc[eligible, "aipw_score"].isna().any():
-                    raise ValueError("eligible patients have missing AIPW scores")
-            elif self.config.min_propensity is not None or self.config.max_propensity is not None:
-                raise ValueError("bounded effect estimation requires patient eligibility flags")
-            scores = predictions["aipw_score"].to_numpy(dtype=float)
-            scores = scores[np.isfinite(scores)]
-            if not len(scores):
-                raise ValueError("cross-fitted Stage 2 estimation produced no finite AIPW scores")
-            ate = float(np.mean(scores))
-            standard_error = (
-                float(np.std(scores, ddof=1) / math.sqrt(len(scores))) if len(scores) > 1 else None
-            )
-            # Oracle-free BLP/GATES/CLAN/RATE, overlap and balance diagnostics
-            # from the frozen predictions and per-fold artifacts. Never raises.
-            from .stage2_diagnostics import write_heterogeneity_diagnostics
+        # Reporting only: never used to drop patients or change estimates.
+        predictions["outside_overlap"] = outside_overlap_flags(
+            predictions["propensity"], config.overlap_flag_bounds
+        )
+        predictions_path = output_dir / "cross_fitted_predictions.csv"
+        temporary = predictions_path.with_name(f".{predictions_path.name}.{os.getpid()}.tmp")
+        predictions.to_csv(temporary, index=False)
+        os.replace(temporary, predictions_path)
+        oracle_ite_evaluation = _evaluate_stage2_oracle_ite(
+            prediction_path=predictions_path,
+            dataset=dataset,
+            output_dir=output_dir,
+            outcome_type=outcome_type,
+        )
+        oracle_overall = dict(oracle_ite_evaluation.get("overall") or {})
+        if "effect_eligible" in predictions:
+            eligible = predictions["effect_eligible"].to_numpy(dtype=bool)
+            if predictions.loc[~eligible, ["aipw_score", "estimated_cate"]].notna().any().any():
+                raise ValueError("propensity-excluded patients have effect estimates")
+            if predictions.loc[eligible, "aipw_score"].isna().any():
+                raise ValueError("eligible patients have missing AIPW scores")
+        elif config.min_propensity is not None or config.max_propensity is not None:
+            raise ValueError("bounded effect estimation requires patient eligibility flags")
+        scores = predictions["aipw_score"].to_numpy(dtype=float)
+        scores = scores[np.isfinite(scores)]
+        if not len(scores):
+            raise ValueError("cross-fitted Stage 2 estimation produced no finite AIPW scores")
+        ate = float(np.mean(scores))
+        standard_error = (
+            float(np.std(scores, ddof=1) / math.sqrt(len(scores))) if len(scores) > 1 else None
+        )
+        # Oracle-free BLP/GATES/CLAN/RATE, overlap and balance diagnostics
+        # from the frozen predictions and per-fold artifacts. Never raises.
+        from .stage2_diagnostics import write_heterogeneity_diagnostics
 
-            modifier_selection = self.config.statistical_selection.multi_model.modifier_selection
-            heterogeneity_path, heterogeneity_summary = write_heterogeneity_diagnostics(
-                output_dir=output_dir,
-                predictions=predictions,
-                propensity_clip=float(self.config.propensity_clip),
-                seed=seed,
-                overlap_flag_bounds=self.config.overlap_flag_bounds,
-                outcome_type=outcome_type,
-                # Reporting only: held-out confirmation of each fold's selected
-                # modifiers, computed after every prediction is frozen.
-                modifier_confirmation_policy={
-                    "outcome_type": outcome_type,
-                    "q": modifier_selection.q,
-                    "weights": modifier_selection.weights,
-                    "min_count": self.config.statistical_selection.categorical_min_count,
-                },
-            )
-            co_primary = co_primary_estimands(
-                predictions,
-                propensity_clip=float(self.config.propensity_clip),
-                lead_estimand=self.config.lead_estimand,
-            )
-            causal_estimate = {
-                "co_primary_estimands": co_primary,
-                # Reporting only: E-values, omitted-variable-bias robustness values
-                # and the strongest benchmark (heterogeneity_diagnostics.json has
-                # the full analysis).
-                "unmeasured_confounding_sensitivity": heterogeneity_summary.get(
-                    "unmeasured_confounding_sensitivity"
+        modifier_selection = config.statistical_selection.multi_model.modifier_selection
+        heterogeneity_path, heterogeneity_summary = write_heterogeneity_diagnostics(
+            output_dir=output_dir,
+            predictions=predictions,
+            propensity_clip=float(config.propensity_clip),
+            seed=seed,
+            overlap_flag_bounds=config.overlap_flag_bounds,
+            outcome_type=outcome_type,
+            # Reporting only: held-out confirmation of each fold's selected
+            # modifiers, computed after every prediction is frozen.
+            modifier_confirmation_policy={
+                "outcome_type": outcome_type,
+                "q": modifier_selection.q,
+                "weights": modifier_selection.weights,
+                "min_count": config.statistical_selection.categorical_min_count,
+            },
+        )
+        co_primary = co_primary_estimands(
+            predictions,
+            propensity_clip=float(config.propensity_clip),
+            lead_estimand=config.lead_estimand,
+        )
+        causal_estimate = {
+            "co_primary_estimands": co_primary,
+            # Reporting only: E-values, omitted-variable-bias robustness values
+            # and the strongest benchmark (heterogeneity_diagnostics.json has
+            # the full analysis).
+            "unmeasured_confounding_sensitivity": heterogeneity_summary.get(
+                "unmeasured_confounding_sensitivity"
+            ),
+            "overlap_flags": overlap_flag_summary(predictions, config.overlap_flag_bounds),
+            "estimator": "cross-fitted_aipw_with_fold_trained_nuisance_models",
+            "estimand": (
+                "average_treatment_effect_in_propensity_eligible_population"
+                if config.min_propensity is not None or config.max_propensity is not None
+                else "average_treatment_effect"
+            ),
+            "effect_estimation_rows": len(scores),
+            "excluded_rows": len(predictions) - len(scores),
+            "propensity_overlap": overlap_diagnostics(
+                predictions["propensity"],
+                config.min_propensity,
+                config.max_propensity,
+            ),
+            "nuisance_calibration": {
+                "treatment": calibration_diagnostics(
+                    predictions["treatment"], predictions["propensity"], binary=True
                 ),
-                "overlap_flags": overlap_flag_summary(
-                    predictions, self.config.overlap_flag_bounds
+                "outcome_factual": calibration_diagnostics(
+                    predictions["outcome"],
+                    np.where(predictions["treatment"] == 1, predictions["mu1"], predictions["mu0"]),
+                    binary=outcome_type == "binary",
                 ),
-                "estimator": "cross-fitted_aipw_with_fold_trained_nuisance_models",
-                "estimand": (
-                    "average_treatment_effect_in_propensity_eligible_population"
-                    if self.config.min_propensity is not None
-                    or self.config.max_propensity is not None
-                    else "average_treatment_effect"
-                ),
-                "effect_estimation_rows": len(scores),
-                "excluded_rows": len(predictions) - len(scores),
-                "propensity_overlap": overlap_diagnostics(
-                    predictions["propensity"],
-                    self.config.min_propensity,
-                    self.config.max_propensity,
-                ),
-                "nuisance_calibration": {
-                    "treatment": calibration_diagnostics(
-                        predictions["treatment"], predictions["propensity"], binary=True
-                    ),
-                    "outcome_factual": calibration_diagnostics(
-                        predictions["outcome"],
-                        np.where(
-                            predictions["treatment"] == 1, predictions["mu1"], predictions["mu0"]
-                        ),
-                        binary=outcome_type == "binary",
-                    ),
-                },
-                "rows": len(predictions),
-                "ate": ate,
-                "standard_error": standard_error,
-                "confidence_interval_95": (
-                    [ate - 1.96 * standard_error, ate + 1.96 * standard_error]
-                    if standard_error is not None
-                    else None
-                ),
-                "mean_estimated_cate": float(predictions["estimated_cate"].mean()),
-                "oracle_ite_pearson_correlation": oracle_overall.get("pearson_correlation"),
-                "oracle_ite_spearman_correlation": oracle_overall.get("spearman_correlation"),
-                "oracle_ite_evaluation": oracle_ite_evaluation,
-                "predictions_path": str(predictions_path),
-                "heterogeneity_diagnostics": heterogeneity_summary,
-            }
-            causal_path = output_dir / "causal_estimate.json"
-            _write_json(causal_path, causal_estimate)
-            summary.update(
-                {
-                    "phase": "causal_estimation",
-                    "causal_estimate": causal_estimate,
-                    "cross_fitted_predictions_path": str(predictions_path),
-                }
-            )
-            artifacts.extend(
-                [
-                    str(predictions_path),
-                    str(causal_path),
-                    str(heterogeneity_path),
-                    str(output_dir / "posthoc_oracle_ite_metrics.json"),
-                ]
-            )
-            if oracle_ite_evaluation.get("available"):
-                artifacts.append(str(output_dir / "posthoc_predictions_with_oracle_ite.csv"))
-        else:
-            summary["phase"] = "feature_definitions"
-        _write_json(output_dir / "summary.json", summary)
-        return {
-            "artifacts": artifacts,
-            **summary,
+            },
+            "rows": len(predictions),
+            "ate": ate,
+            "standard_error": standard_error,
+            "confidence_interval_95": (
+                [ate - 1.96 * standard_error, ate + 1.96 * standard_error]
+                if standard_error is not None
+                else None
+            ),
+            "mean_estimated_cate": float(predictions["estimated_cate"].mean()),
+            "oracle_ite_pearson_correlation": oracle_overall.get("pearson_correlation"),
+            "oracle_ite_spearman_correlation": oracle_overall.get("spearman_correlation"),
+            "oracle_ite_evaluation": oracle_ite_evaluation,
+            "predictions_path": str(predictions_path),
+            "heterogeneity_diagnostics": heterogeneity_summary,
         }
+        causal_path = output_dir / "causal_estimate.json"
+        _write_json(causal_path, causal_estimate)
+        summary.update(
+            {
+                "phase": "causal_estimation",
+                "causal_estimate": causal_estimate,
+                "cross_fitted_predictions_path": str(predictions_path),
+            }
+        )
+        artifacts.extend(
+            [
+                str(predictions_path),
+                str(causal_path),
+                str(heterogeneity_path),
+                str(output_dir / "posthoc_oracle_ite_metrics.json"),
+            ]
+        )
+        if oracle_ite_evaluation.get("available"):
+            artifacts.append(str(output_dir / "posthoc_predictions_with_oracle_ite.csv"))
+    else:
+        summary["phase"] = "feature_definitions"
+    _write_json(output_dir / "summary.json", summary)
+    return {
+        "artifacts": artifacts,
+        **summary,
+    }
 
 
 def _all_gpu_managed_vllm_config(

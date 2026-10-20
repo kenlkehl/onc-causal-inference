@@ -21,6 +21,15 @@ the [glossary](glossary.md). The statistical details of Stage 2 selection are in
 [Stage 2 selection](stage2_selection.md), and each Stage 1 model is described in
 [Stage 1 architectures](stage1_architectures.md).
 
+Two alternative entry points reuse the same estimation machinery.
+[Explicit-only mode](configuration.md#explicit-only-workflow) takes
+investigator-specified variables, extraction ontologies, and roles, skips
+Stage 1 discovery, and extracts values from text with an LLM.
+[Tabular mode](configuration.md#tabular-workflow) takes already measured
+columns with declared types and roles, skips discovery, extraction, and
+selection, and starts at nuisance learning and effect estimation. Both
+create nested folds and hold the declared definitions and roles fixed.
+
 > **Settings this description assumes**
 >
 > - A binary treatment and a binary outcome. Differences for continuous
