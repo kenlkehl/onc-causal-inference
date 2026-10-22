@@ -679,8 +679,9 @@ class Stage2ExtractionLLMConfig:
     api_key: str = "EMPTY"
     workers: int = 4
     vllm: ManagedVLLMConfig | None = None
-    # External servers already started by the user. All serve the same model.
+    # External servers already started by the user. Variants require explicit opt-in.
     endpoints: tuple[ExtractionEndpoint, ...] = ()
+    allow_model_variants: bool = False
     # Populated only while an extractor pool owned by this pipeline is alive.
     runtime_endpoints: tuple[str, ...] = ()
     # Optional continuation route for extracting cache misses with an explicitly
@@ -692,6 +693,10 @@ class Stage2ExtractionLLMConfig:
     runtime_api_key: str = "EMPTY"
 
     def validate(self, *, require_model: bool = True) -> None:
+        if type(self.allow_model_variants) is not bool:
+            raise ValueError("stage2.extraction_llm.allow_model_variants must be a boolean")
+        if self.allow_model_variants and not self.endpoints:
+            raise ValueError("stage2.extraction_llm.allow_model_variants requires endpoints")
         if self.endpoints:
             if self.endpoint or self.vllm is not None or self.runtime_endpoints or self.runtime_endpoint:
                 raise ValueError(
@@ -702,6 +707,8 @@ class Stage2ExtractionLLMConfig:
                 if not isinstance(server, ExtractionEndpoint):
                     raise ValueError("stage2.extraction_llm.endpoints requires ExtractionEndpoint objects")
                 server.validate()
+                if server.model and server.model != self.model and not self.allow_model_variants:
+                    raise ValueError("per-endpoint model overrides require allow_model_variants")
             if len({server.endpoint for server in self.endpoints}) != len(self.endpoints):
                 raise ValueError("stage2.extraction_llm.endpoints contains duplicate URLs")
         if self.endpoint and self.vllm is not None and not self.runtime_endpoints:
@@ -765,6 +772,8 @@ class Stage2ExtractionLLMConfig:
         }
         if self.endpoints:
             values["endpoints"] = [server.public_dict() for server in self.endpoints]
+        if self.allow_model_variants:
+            values["allow_model_variants"] = True
         return values
 
 
@@ -1467,6 +1476,7 @@ def plain_stage2_config_from_mapping(
             workers=extraction_workers,
             vllm=extraction_vllm,
             endpoints=external_endpoints,
+            allow_model_variants=raw_extraction_llm.get("allow_model_variants", False),
             runtime_endpoint=str(
                 raw_extraction_llm.get("runtime_endpoint") or ""
             ).strip().rstrip("/"),
@@ -1755,7 +1765,7 @@ def _resolve_extraction_llm_model(
     transport_config = replace(
         config,
         endpoint=extraction.endpoints[0].endpoint if extraction.endpoints else extraction.endpoint,
-        model="",
+        model=extraction.endpoints[0].model if extraction.endpoints else "",
         api_key=extraction.api_key,
         workers=extraction.workers,
         extraction_llm=None,
@@ -1797,6 +1807,8 @@ def _endpoint_model_identity(
     endpoints: Sequence[str],
     role: str,
     verify_live_endpoint: bool,
+    endpoint_models: Mapping[str, str] | None = None,
+    allow_model_variants: bool = False,
 ) -> dict[str, Any]:
     """Record the selected model and, for live transports, verify every replica."""
 
@@ -1809,24 +1821,25 @@ def _endpoint_model_identity(
         dict.fromkeys(str(endpoint).strip().rstrip("/") for endpoint in endpoints)
     )
     for endpoint in normalized_endpoints:
+        served_model = (endpoint_models or {}).get(endpoint) or selected_model
         if verify_live_endpoint:
-            advertised = _served_model_ids(replace(config, endpoint=endpoint))
-            if selected_model not in advertised:
+            advertised = _served_model_ids(replace(config, endpoint=endpoint, model=served_model))
+            if served_model not in advertised:
                 raise RuntimeError(
                     f"Stage 2 {role} endpoint {endpoint}/models advertises {advertised}, "
-                    f"not the selected model {selected_model!r}. Refusing to run because "
+                    f"not the selected model {served_model!r}. Refusing to run because "
                     "the actual served model does not match the configured/resolved identity."
                 )
             advertised_records = [
                 dict(record)
                 for record in getattr(advertised, "records", ())
-                if str(record.get("id") or "") == selected_model
+                if str(record.get("id") or "") == served_model
             ]
             selected_record = (
                 advertised_records[0]
                 if advertised_records
                 else {
-                    "id": selected_model,
+                    "id": served_model,
                     "root": None,
                     "parent": None,
                     "revision": None,
@@ -1840,8 +1853,8 @@ def _endpoint_model_identity(
         if selected_record is not None:
             actual_identities.append(
                 {
-                    "served_id": selected_model,
-                    "root": str(selected_record.get("root") or selected_model),
+                    "served_id": served_model,
+                    "root": str(selected_record.get("root") or served_model),
                     "parent": selected_record.get("parent"),
                     "revision": selected_record.get("revision"),
                 }
@@ -1851,7 +1864,7 @@ def _endpoint_model_identity(
                 "endpoint": endpoint,
                 "advertised_model_ids": list(advertised),
                 "selected_model_advertised": (
-                    selected_model in advertised if verify_live_endpoint else None
+                    served_model in advertised if verify_live_endpoint else None
                 ),
                 "selected_model_record": selected_record,
             }
@@ -1860,11 +1873,15 @@ def _endpoint_model_identity(
         json.dumps(identity, sort_keys=True, separators=(",", ":"))
         for identity in actual_identities
     }
-    if len(distinct_actual) > 1:
+    if len(distinct_actual) > 1 and not allow_model_variants:
         raise RuntimeError(
             f"Stage 2 {role} replicas advertise inconsistent backing model "
             f"identities: {actual_identities}"
         )
+    if allow_model_variants and actual_identities:
+        families = {_stage2_model_family(item["root"]) for item in actual_identities}
+        if len(families) != 1 or families == {"other"}:
+            raise RuntimeError("explicit model variants must share one recognized model family")
     family_source = (
         str(actual_identities[0].get("root") or selected_model)
         if actual_identities
@@ -1875,7 +1892,12 @@ def _endpoint_model_identity(
         "selected_model": selected_model,
         "model_family": _stage2_model_family(family_source),
         "sampling_model": family_source,
-        "actual_model_identity": actual_identities[0] if actual_identities else None,
+        "actual_model_identity": (actual_identities[0] if actual_identities and
+                                  len(distinct_actual) == 1 else None),
+        **({"actual_model_identities": actual_identities,
+            "served_model_ids": sorted({(endpoint_models or {}).get(url) or selected_model
+                                        for url in normalized_endpoints}),
+            "allow_model_variants": True} if allow_model_variants else {}),
         "live_endpoint_verified": bool(verify_live_endpoint),
         "endpoint_observations": observations,
     }
@@ -1895,6 +1917,8 @@ def _scientific_model_identity(value: Mapping[str, Any]) -> dict[str, Any]:
             "selected_model": selected,
             "model_family": str(raw.get("model_family") or _stage2_model_family(selected)),
         }
+        if raw.get("allow_model_variants"):
+            identity["served_model_ids"] = list(raw["served_model_ids"])
         actual = raw.get("actual_model_identity")
         if isinstance(actual, Mapping):
             identity["actual_model_identity"] = {
@@ -1927,6 +1951,10 @@ def _model_identities_compatible(
         if not isinstance(old, Mapping) or not isinstance(new, Mapping):
             return False
         if str(old.get("selected_model") or "") != str(new.get("selected_model") or ""):
+            return False
+        if sorted(old.get("served_model_ids", [old.get("selected_model") or ""])) != sorted(
+            new.get("served_model_ids", [new.get("selected_model") or ""])
+        ):
             return False
     return True
 
@@ -2830,9 +2858,11 @@ class _LoadAwareOpenAICompletion:
         started = time.monotonic()
         succeeded, transport_failed = False, False
         try:
-            request_audit.update(endpoint=server.endpoint)
+            request_audit.update(endpoint=server.endpoint, model=server.model or config.model)
             request_audit.event("endpoint_selected", **self.pool.snapshot()[index])
-            response = _openai_completion(messages, replace(config, endpoint=server.endpoint))
+            response = _openai_completion(
+                messages, replace(config, endpoint=server.endpoint, model=server.model or config.model)
+            )
             succeeded = True
             return response
         except Exception as error:
@@ -5170,6 +5200,8 @@ class PlainHandoffStage2:
                     else "extraction"
                 ),
                 verify_live_endpoint=_uses_default_openai_transport(routed_extraction),
+                endpoint_models={server.endpoint: server.model for server in extraction.endpoints},
+                allow_model_variants=extraction.allow_model_variants,
             )
             if continuation_route:
                 extraction_identity = {
@@ -5189,6 +5221,9 @@ class PlainHandoffStage2:
                 extraction_request_config,
                 runtime_model_family=str(live_extraction_identity["model_family"]),
                 runtime_sampling_model=str(live_extraction_identity.get("sampling_model") or ""),
+                runtime_context_window_tokens=_primary_context_window_tokens(
+                    extraction_request_config, live_extraction_identity,
+                ),
             )
             if routed_extraction is None:
                 routed_extraction = (
@@ -5291,6 +5326,8 @@ class PlainHandoffStage2:
                 ):
                     continue
                 if isinstance(current_role.get("actual_model_identity"), Mapping):
+                    continue
+                if current_role.get("actual_model_identities"):
                     continue
                 prior_actual = previous_role.get("actual_model_identity")
                 if not isinstance(prior_actual, Mapping):

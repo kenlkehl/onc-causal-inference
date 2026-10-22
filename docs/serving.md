@@ -41,8 +41,9 @@ listing works, for example a vLLM server started with `vllm serve MODEL`.
 **Model resolution.** At startup Stage 2 queries each endpoint's `/models`
 list. An empty `model` is resolved only when the server advertises exactly one
 model ID; otherwise set it explicitly. An explicit `model` must be among the
-advertised IDs, matched exactly. Every replica in a pool must report the same
-backing model. The resolved identities are written to
+advertised IDs, matched exactly. Replicas must report the same backing model
+unless an external extraction pool explicitly enables model variants below.
+The resolved identities are written to
 `stage2/model_identity.json` and checked whenever the run resumes (see
 [Checkpoints and resuming](configuration.md#checkpoints-and-resuming)).
 
@@ -75,8 +76,14 @@ To spread extraction across several equivalent servers, list them in
 }
 ```
 
-- All servers must serve the same model; Stage 2 verifies each one. The model
-  can be omitted when the first server advertises exactly one model.
+- By default all servers must serve the same model; Stage 2 verifies each one.
+  The model can be omitted when the first server advertises exactly one model.
+  To deliberately mix variants, set `stage2.extraction_llm.allow_model_variants`
+  to `true` and provide each endpoint's `model` when served IDs differ. Variants
+  must share a recognized model family and compatible tokenization. The first
+  server supplies the tokenizer; all backing identities are recorded, and the
+  request context limit uses the smallest advertised capacity. Changing the
+  pool's served-ID set after extraction-dependent checkpoints exist is rejected.
 - `max_concurrency` caps active requests to one server; `workers` caps the
   whole pool and defaults to the sum of the caps. The effective ceiling is the
   smaller of the two, and it includes repair and retry calls.

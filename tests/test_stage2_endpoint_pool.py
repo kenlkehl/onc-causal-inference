@@ -81,6 +81,105 @@ def test_external_pool_rejects_mismatched_model_before_any_extraction(monkeypatc
         workflow.PlainHandoffStage2(config=config(), clinical_question="test")
 
 
+def variant_config(*, allow=True):
+    return config(extraction_llm={
+        "model": "gemma4-26b-a4b", "allow_model_variants": allow,
+        "endpoints": [
+            {"endpoint": "http://a.test/v1", "max_concurrency": 8,
+             "model": "gemma4-26b-a4b"},
+            {"endpoint": "http://b.test/v1", "max_concurrency": 2,
+             "model": "gemma4-fp8"},
+        ],
+    })
+
+
+def variant_models(cfg):
+    records = {
+        "http://review.test/v1": {"id": "review", "root": "review"},
+        "http://a.test/v1": {"id": "gemma4-26b-a4b", "root": "nvidia/Gemma-4-26B-A4B-NVFP4",
+                             "max_model_len": 250000},
+        "http://b.test/v1": {"id": "gemma4-fp8", "root": "example/Gemma-4-26B-A4B-FP8",
+                             "max_model_len": 131072},
+    }
+    record = records[cfg.endpoint]
+    return workflow._ServedModelIds([record["id"]], records=[record])
+
+
+def test_explicit_variants_record_models_route_actual_alias_and_limit_context(monkeypatch, tmp_path):
+    monkeypatch.setattr(workflow, "_served_model_ids", variant_models)
+    result = workflow.PlainHandoffStage2(
+        config=variant_config(), clinical_question="test", extraction_tokenizer=lambda _: {})
+    identity = result.model_identity["extraction"]
+    assert identity["live_endpoint_verified"]
+    assert identity["actual_model_identity"] is None
+    assert {entry["served_id"] for entry in identity["actual_model_identities"]} == {
+        "gemma4-26b-a4b", "gemma4-fp8"}
+    assert result.extraction_request_config.runtime_context_window_tokens == 131072
+    routed = result.extraction_completion.completion
+    routed.pool._metrics_reader = None
+    # Occupy the larger server, then verify that the other server receives its own alias.
+    reserved = [routed.pool.reserve() for _ in range(routed.pool.capacity)]
+    for index in reserved:
+        if index == 1:
+            routed.pool.release(index, duration_seconds=1)
+    seen = []
+    monkeypatch.setattr(workflow, "_openai_completion",
+                        lambda messages, cfg: seen.append((cfg.endpoint, cfg.model)) or "ok")
+    audit_path = tmp_path / "requests.jsonl"
+    with workflow.request_audit.context(request_id="variant-test", _audit_path=str(audit_path)):
+        assert routed([], result.extraction_request_config) == "ok"
+    assert seen == [("http://b.test/v1", "gemma4-fp8")]
+    audit = json.loads(audit_path.read_text().splitlines()[0])
+    assert (audit["endpoint"], audit["model"]) == seen[0]
+    for index in reserved:
+        if index == 0:
+            routed.pool.release(index, duration_seconds=1)
+    parsed = workflow.plain_stage2_config_from_mapping(
+        result.config.public_dict(), default_workers=4)
+    assert parsed.extraction_llm == result.config.extraction_llm
+    scientific = workflow._scientific_model_identity(result.model_identity)
+    changed = json.loads(json.dumps(scientific))
+    changed["extraction"]["served_model_ids"] = ["gemma4-26b-a4b"]
+    assert not workflow._model_identities_compatible(scientific, changed)
+    # Before extraction, replacing one server by an explicit variant pool must
+    # not mislabel the whole pool with that earlier server's backing identity.
+    previous = json.loads(json.dumps(result.model_identity))
+    previous["extraction"].pop("allow_model_variants")
+    previous["extraction"].pop("served_model_ids")
+    previous["extraction"]["actual_model_identity"] = previous["extraction"].pop(
+        "actual_model_identities")[0]
+    (tmp_path / "model_identity.json").write_text(json.dumps(previous))
+    result._check_and_record_model_identity(tmp_path)
+    recorded = json.loads((tmp_path / "model_identity.json").read_text())["extraction"]
+    assert recorded["actual_model_identity"] is None
+    assert len(recorded["actual_model_identities"]) == 2
+
+
+def test_variant_aliases_require_explicit_opt_in():
+    with pytest.raises(ValueError, match="allow_model_variants"):
+        variant_config(allow=False)
+
+
+def test_mixed_backing_models_still_rejected_without_opt_in(monkeypatch):
+    def models(cfg):
+        root = "nvidia/Gemma-4-26B-A4B-NVFP4" if cfg.endpoint.endswith("a.test/v1") else "google/gemma-4-26b-a4b"
+        return workflow._ServedModelIds([cfg.model], records=[{"id": cfg.model, "root": root}])
+    monkeypatch.setattr(workflow, "_served_model_ids", models)
+    with pytest.raises(RuntimeError, match="inconsistent backing"):
+        workflow.PlainHandoffStage2(config=config(), clinical_question="test")
+
+
+def test_variant_pool_rejects_cross_family_servers(monkeypatch):
+    def models(cfg):
+        records = variant_models(cfg)
+        if cfg.endpoint == "http://b.test/v1":
+            records.records[0]["root"] = "Qwen/Qwen3-32B"
+        return records
+    monkeypatch.setattr(workflow, "_served_model_ids", models)
+    with pytest.raises(RuntimeError, match="recognized model family"):
+        workflow.PlainHandoffStage2(config=variant_config(), clinical_question="test")
+
+
 def test_global_and_per_server_caps_hold_under_concurrent_logical_requests(monkeypatch):
     result = runner(monkeypatch, extraction_workers=10)
     lock, saturated, release = threading.Lock(), threading.Event(), threading.Event()

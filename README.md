@@ -115,7 +115,10 @@ Edit the dataset and output paths, column names, `science.clinical_question`,
 `science.outcome_type`, and `run.devices`. Point `stage2.endpoint` (interpretation
 LLM) and `stage2.extraction_llm.endpoint` (extraction LLM) at your servers,
 including the `/v1` suffix; both may be the same server. Leave the model IDs empty
-to use the single model a server advertises. Then run:
+to use the single model a server advertises. Multiple extraction servers can
+use capacity-weighted routing; explicitly selected model variants are supported
+with `stage2.extraction_llm.allow_model_variants` and per-server model IDs
+([Serving](docs/serving.md#several-extraction-servers)). Then run:
 
 ```bash
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \

@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 class ExtractionEndpoint:
     endpoint: str
     max_concurrency: int
+    model: str = ""
 
     def __post_init__(self) -> None:
         if isinstance(self.endpoint, str):
@@ -32,9 +33,12 @@ class ExtractionEndpoint:
             raise ValueError("extraction endpoint has an invalid port") from error
         if type(self.max_concurrency) is not int or self.max_concurrency < 1:
             raise ValueError("extraction endpoint max_concurrency must be a positive integer")
+        if not isinstance(self.model, str) or self.model != self.model.strip():
+            raise ValueError("extraction endpoint model must be a trimmed string")
 
     def public_dict(self) -> dict[str, Any]:
-        return {"endpoint": self.endpoint, "max_concurrency": self.max_concurrency}
+        return {"endpoint": self.endpoint, "max_concurrency": self.max_concurrency,
+                **({"model": self.model} if self.model else {})}
 
 
 def endpoints_from_mapping(value: Any, *, default_concurrency: int) -> tuple[ExtractionEndpoint, ...]:
@@ -46,20 +50,22 @@ def endpoints_from_mapping(value: Any, *, default_concurrency: int) -> tuple[Ext
         raise ValueError("stage2.extraction_llm.endpoints must be a list")
     endpoints = []
     for index, entry in enumerate(value):
+        model = ""
         if isinstance(entry, str):
             endpoint, concurrency = entry, default_concurrency
         elif isinstance(entry, Mapping):
-            unknown = set(entry) - {"endpoint", "max_concurrency"}
+            unknown = set(entry) - {"endpoint", "max_concurrency", "model"}
             if unknown or "endpoint" not in entry or "max_concurrency" not in entry:
                 raise ValueError(
                     f"stage2.extraction_llm.endpoints[{index}] requires endpoint and max_concurrency"
                 )
             endpoint, concurrency = entry["endpoint"], entry["max_concurrency"]
+            model = entry.get("model", "")
         else:
             raise ValueError(f"stage2.extraction_llm.endpoints[{index}] must be a URL or object")
         if not isinstance(endpoint, str):
             raise ValueError(f"stage2.extraction_llm.endpoints[{index}].endpoint must be a URL")
-        item = ExtractionEndpoint(endpoint, concurrency)
+        item = ExtractionEndpoint(endpoint, concurrency, model=model)
         item.validate()
         endpoints.append(item)
     urls = [item.endpoint for item in endpoints]

@@ -228,6 +228,10 @@ Configuration rules:
   `unpenalized_events_per_parameter` (`selection_dict()` omits them).
 - Diagnostic evidence families (`multi_model.diagnostic_families`) and
   matched-batch evidence are opt-in and do not drive selection.
+- External extraction pools can explicitly enable `extraction_llm.allow_model_variants`
+  and select per-endpoint `model` IDs. All servers must share a recognized model
+  family and compatible tokenization; actual identities are audited and the
+  served-ID set is checked on resume. Identical backing models remain the default.
 - Outer-fold confirmation (`modifier_confirmation`), the CATE variance
   decomposition (`cate_variance_decomposition`), and the unmeasured-confounding
   sensitivity (`unmeasured_confounding_sensitivity`) in

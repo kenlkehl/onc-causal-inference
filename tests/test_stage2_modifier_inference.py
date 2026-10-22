@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -18,6 +19,21 @@ def _feature(name, *, value_type="continuous", categories=("unitless",), descrip
     return {"feature_id": fid or name, "name": name, "value_type": value_type,
             "categories_or_unit": list(categories), "description": description,
             "measurement_definition": definition, "roles": ["effect_modifier"]}
+
+
+def test_training_scales_from_wide_csv_with_mixed_type_modifier(tmp_path):
+    path = tmp_path / "nuisance_candidate_fit.csv"
+    # A late mixed-type column crosses the C parser's internal chunk boundary.
+    # Selecting it from a wide CSV used to crash pandas while building a warning.
+    with path.open("w", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow([f"unused_{i}" for i in range(1480)] + ["modifier"])
+        for row in range(800):
+            writer.writerow([0] * 1480 + [row if row < 799 else "<5"])
+
+    scales = diagnostics._training_scales([_feature("modifier")], [path])
+
+    assert scales == {"modifier": pytest.approx(np.std(np.arange(799), ddof=1))}
 
 
 def _heldout_tests(z, feature, rng, *, n, slope=0.5, categorical_effects=None):

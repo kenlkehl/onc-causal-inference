@@ -2849,7 +2849,8 @@ def _training_scales(
         if not wanted or not Path(path).is_file():
             continue
         try:
-            frame = pd.read_csv(path, usecols=lambda column: column in wanted)
+            # Avoid pandas' mixed-type chunk warning bug with wide CSVs and usecols.
+            frame = pd.read_csv(path, usecols=lambda column: column in wanted, low_memory=False)
         except (OSError, ValueError):
             continue
         for name in list(wanted):

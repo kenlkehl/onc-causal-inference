@@ -268,7 +268,8 @@ Configure exactly one of `endpoint`, `endpoints`, or `vllm`.
 | Key | Default | Meaning |
 |---|---|---|
 | `endpoint` | empty | OpenAI-compatible base URL of the extraction LLM |
-| `endpoints` | none | List of equivalent prestarted servers, each `{"endpoint": URL, "max_concurrency": N}`, used with load-aware routing |
+| `endpoints` | none | List of prestarted servers, each `{"endpoint": URL, "max_concurrency": N}`, used with load-aware routing; optional `model` selects that server's served model ID |
+| `allow_model_variants` | `false` | Explicitly allow different backing models and served IDs in an external extraction pool. They must share a recognized model family and compatible tokenization; every actual model is audited. The served-ID set must stay unchanged once extraction-dependent checkpoints exist |
 | `vllm` | none | Managed vLLM pool for the extraction LLM ([Serving](serving.md#managed-vllm-pools)) |
 | `model` | empty | Served model ID; may be omitted for an external server that advertises exactly one model. Required with `vllm` |
 | `api_key` | `EMPTY` | API key; when absent, `OCI_STAGE2_EXTRACTION_API_KEY` is used |
