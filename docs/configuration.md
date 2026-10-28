@@ -815,8 +815,8 @@ Every other Stage 2 setting is passed with `--set`, for example
 `--status` still needs the run's identity, so pass the saved configuration:
 `python scripts/run_all_evidence.py --config OUTPUT_DIR/run_config.json --status`.
 
-The standalone joint HTR script (`scripts/run_standalone_joint_htr.py`) has its
-own flags and settings; see [Standalone joint HTR](standalone_joint_htr.md#settings).
+The standalone HTR script (`scripts/run_standalone_htr.py`) has its own flags
+and settings; see [Standalone HTR](standalone_htr.md#settings).
 
 ## The synthetic launcher (`run_synthetic.sh`)
 

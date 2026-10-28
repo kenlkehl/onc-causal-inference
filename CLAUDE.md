@@ -34,7 +34,7 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 | `python scripts/ablate_stage1_architectures.py` | `oci/evaluation/ablation.py` | `prepare`: leave-one-architecture-out handoffs and `run_stage2_from_artifacts.py` configs (never launches LLM jobs); `compare`: finished ablations versus the full run |
 | `python scripts/benchmark.py` | `oci/evaluation/benchmark.py`, `oci/evaluation/benchmark_ceiling.py`, `benchmarks/{scenarios,seeds}.json` | `materialize`: one cohort per scenario, size, and seed (re-equation through `synthetic_data.reequation`, or the generator commands for S5/S6); `configs`: one workflow configuration per cell (never launches runs; confirmatory seeds need `--confirmatory` and are logged in `benchmarks/confirmatory_ledger.jsonl`); `aggregate`: finished runs versus oracle truth, with an oracle-covariate ceiling through Stage 2's `estimate_outer_fold` |
 | `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only; for a dated-notes run, `dataset` is its `input/analysis_cohort.parquet`) |
-| `python scripts/run_standalone_joint_htr.py` | `oci/inference/standalone_joint_htr.py` | `run`: one HTR per outer fold with propensity, outcome, and tau heads (tau by the pseudo-outcome objective on the network's own detached nuisances), cross-fitted held-out predictions and an oracle-free summary (no LLM, handoff, or Stage 2; resumable per fold; `--devices` runs folds in parallel); `evaluate`: oracle comparison after the prediction hash verifies |
+| `python scripts/run_standalone_htr.py` | `oci/inference/standalone_htr.py` | `run`: HTR-only treatment effects per outer fold (no LLM, handoff, or Stage 2); `two_stage` (default) runs Stage 1's `MultiModelForestStage1HTRProvider` unchanged (cross-fitted HTR nuisance networks, then HTR effect networks; DINA for binary outcomes) with one Stage 1 checkpoint unit per inner network, `joint` one network with e, m, and tau heads (tau by the pseudo-outcome on its own detached nuisances); cross-fitted held-out predictions and an oracle-free summary; resumable; `--devices` and `--jobs-per-device` run outer folds in parallel; `evaluate`: oracle comparison after the prediction hash verifies |
 | `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
 | `python -m synthetic_data.cli` | `synthetic_data/` (`generator.py`, `generation_factors.py`, `dgp_terms.py`) | Synthetic cohort generator: confounder, effect-modifier, instrument, and prognostic roles; generation-time factors (covariate correlation, MCAR/MNAR documentation, post-treatment dated notes, proxies) |
 | `python -m synthetic_data.cli reequation` | `synthetic_data/reequation.py` (`reequation_cohort`) | Recompute treatment and outcome over an existing synthetic cohort's true characteristics for a scenario (no LLM; text copied unchanged; refuses cohorts with post-treatment notes) |
@@ -114,7 +114,7 @@ oci/
     │                                 # Sampling profiles, extraction routing, live limits, managed vLLM
     ├── stage2_preflight.py           # Read-only Stage 2-only validation
     ├── stage2_prompt_catalog.py, stage2_clinical_prompts.py, stage2_request_audit.py, ...
-    ├── standalone_joint_htr.py       # scripts/run_standalone_joint_htr.py: joint e/m/tau HTR outside the workflow
+    ├── standalone_htr.py             # scripts/run_standalone_htr.py: HTR-only effects (Stage 1 two-stage or joint)
     │ # `oci run`
     └── applied.py, applied_explicit_feature_forest.py, agentic_explicit_feature_forest.py,
         agentic_attention_variable_forest.py, multi_model_agentic_forest.py
@@ -342,8 +342,8 @@ python scripts/benchmark.py configs --base CONFIG.json --out BENCH
 python scripts/benchmark.py aggregate --out BENCH
 ./run_benchmark.sh rtxpro6000x8 BENCH --scenarios S0 --sizes 1000 --seeds 101   # all steps, resumable
 
-# Standalone joint HTR (propensity, outcome, and tau in one network) and its oracle comparison
-python scripts/run_standalone_joint_htr.py run --dataset DATA.parquet --out OUT --seed 101 --devices cuda:0,cuda:1 --evaluate
+# HTR-only effects (Stage 1's cross-fitted HTR ensembles, five outer folds at once) and their oracle comparison
+python scripts/run_standalone_htr.py run --dataset DATA.parquet --out OUT --seed 101 --devices cuda:0,cuda:1 --jobs-per-device 3 --evaluate
 
 # Standalone explicit-feature workflow
 oci run --config example_configs/agentic_explicit_feature_forest_config.json

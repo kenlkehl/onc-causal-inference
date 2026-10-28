@@ -287,21 +287,22 @@ compatible fits; changing numerical model settings refits affected estimates.
 See [tabular configuration](docs/configuration.md#tabular-workflow) for the
 schema, missing values, preflight, and outputs.
 
-### Fit one joint HTR without the workflow
+### Estimate effects with HTR models alone
 
-`scripts/run_standalone_joint_htr.py` trains, per outer fold, one hierarchical
-transformer with propensity, outcome, and treatment-effect heads; the effect
-head uses the pseudo-outcome objective with the network's own detached
-nuisances. It has no LLM, handoff, or Stage 2, and writes cross-fitted
-held-out predictions, an oracle-free summary, and (with `--evaluate`, on
-synthetic data) an oracle comparison:
+`scripts/run_standalone_htr.py` fits HTR models per outer fold, without an LLM,
+handoff, or Stage 2, and writes cross-fitted held-out `tau`, `e`, and `m`, an
+oracle-free summary, and (with `--evaluate`, on synthetic data) an oracle
+comparison. The default method, `two_stage`, runs Stage 1's `htr_neural`
+training unchanged: cross-fitted HTR nuisance networks, then HTR effect
+networks (DINA for a binary outcome). `--method joint` instead trains one
+network with propensity, outcome, and effect heads:
 
 ```bash
-uv run python scripts/run_standalone_joint_htr.py run --dataset DATA.parquet --out OUT \
-  --seed 101 --devices cuda:0,cuda:1 --evaluate
+uv run python scripts/run_standalone_htr.py run --dataset DATA.parquet --out OUT \
+  --seed 101 --devices cuda:0,cuda:1 --jobs-per-device 3 --evaluate
 ```
 
-See [Standalone joint HTR](docs/standalone_joint_htr.md).
+See [Standalone HTR](docs/standalone_htr.md).
 
 ## Resume, inspect, or rerun selection
 
@@ -571,7 +572,7 @@ See [Benchmarks](docs/benchmarks.md).
 | [Configuration](docs/configuration.md) | Configuration keys, command-line flags, launcher, outputs, resume, and reselection |
 | [Explicit-only extraction](docs/configuration.md#explicit-only-workflow) | Supply variables and ontologies, extract them with an LLM, and run Stage 2 without discovery |
 | [Tabular analysis](docs/configuration.md#tabular-workflow) | Supply measured columns and run the ensemble and diagnostics without an LLM |
-| [Standalone joint HTR](docs/standalone_joint_htr.md) | One text model per fold for the propensity, outcome, and treatment effect, without the workflow |
+| [Standalone HTR](docs/standalone_htr.md) | Treatment effects from HTR models alone, per outer fold: Stage 1's cross-fitted HTR ensembles, or one joint network |
 | [Serving](docs/serving.md) | LLM endpoints, managed vLLM pools, and hardware presets |
 | [Optional extensions](docs/optional_extensions.md) | Optional Stage 2 steps and the standalone `oci run` workflows |
 | [Synthetic data](docs/synthetic_data.md) | The synthetic cohort generator, causal roles, generation-time factors, re-equation, bundled cohorts, and oracle columns |

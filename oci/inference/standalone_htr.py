@@ -1,22 +1,26 @@
-"""Standalone joint HTR: one network for the propensity, the outcome, and tau.
+"""Standalone HTR treatment-effect estimators, outside the two-stage workflow.
 
-Per outer fold, one hierarchical transformer (the Stage 1 HTR extractor) is
-trained with three heads on its text representation:
+Per outer fold, on the outer training rows only, one of two methods fits HTRs
+(the Stage 1 hierarchical transformer) and predicts the outer held-out rows:
 
-* propensity ``e(x) = P(T=1 | x)``, binary cross-entropy;
-* outcome ``m(x) = E[Y | x]``, binary cross-entropy or squared error;
-* effect ``tau(x)``, the pseudo-outcome objective of the Stage 1 effect models
-  (``pseudo_outcome_mse``): squared error against ``(Y - m(x)) / (T - e(x))``.
+* ``two_stage`` (default) runs the Stage 1 ``htr_neural`` lane's training
+  unchanged, through ``MultiModelForestStage1HTRProvider``: ``nuisance_folds``
+  cross-fitted HTR nuisance networks (propensity and outcome), then
+  ``effect_folds`` HTR effect networks with the Stage 1 effect objective
+  (``dina`` for a binary outcome, ``pseudo_outcome_mse`` by default for a
+  continuous one). A DINA effect network is fitted against the sparse
+  bag-of-words nuisances that Stage 1 cross-fits inside each effect fold
+  (``stage1_dina.prepare_neural_nuisance``), and its ``tau = mu1 - mu0`` uses
+  them; the HTR nuisance networks set effect-row eligibility
+  (``r_stage_*_propensity``) and give the held-out ``e`` and ``m``. Held-out
+  ``tau`` is the mean of the effect networks' predictions, and held-out ``e``
+  and ``m`` are the means of the calibrated nuisance networks' predictions.
+  Every inner network is a Stage 1 checkpoint unit, so an interrupted fold
+  resumes at its next network.
+* ``joint`` trains one network with propensity, outcome, and effect heads. The
+  effect head fits the pseudo-outcome ``(Y - m) / (T - e)`` built from the
+  network's own detached, in-sample nuisances (see :class:`JointHTRConfig`).
 
-The pseudo-outcome uses the network's own current ``e`` and ``m`` on each
-batch, detached, with ``e`` clipped to ``[e_clip, 1 - e_clip]``. The effect
-loss therefore never moves the nuisance heads directly, but it does train the
-shared extractor. The effect loss is off for the first
-``effect_warmup_epochs`` epochs. An optional validation subset of the outer
-training rows selects the epoch and calibrates the held-out propensity and
-outcome probabilities; the outer held-out fold is used only for prediction.
-
-This path runs outside the two-stage workflow: no LLM, handoff, or Stage 2.
 Fitting reads only the text, treatment, and outcome columns of the dataset.
 Oracle columns are read by :func:`evaluate_against_oracle`, which first
 verifies the SHA-256 of the frozen predictions.
@@ -39,24 +43,51 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from ..config import AppliedInferenceConfig, ModelArchitectureConfig, TrainingConfig
+from ..config import (
+    AgenticAttentionVariableForestConfig,
+    AppliedInferenceConfig,
+    ModelArchitectureConfig,
+    TrainingConfig,
+    resolve_effect_objective,
+)
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "oci_standalone_joint_htr_v1"
+SCHEMA_VERSION = "oci_standalone_htr_v1"
 ROW_ID = "_oci_row_id"
 ORACLE_NAME_PREFIXES = ("true_", "oracle_", "ground_truth")
 DEFAULT_TEMPLATE = (
     Path(__file__).resolve().parents[2] / "example_configs" / "all_evidence_stage1_model.json"
 )
 DEFAULT_HTR_MODEL = "prajjwal1/bert-tiny"
+METHODS = ("two_stage", "joint")
 SELECTION_RULES = ("validation_loss", "last_epoch")
 CALIBRATION_METHODS = ("none", "temperature", "isotonic", "temperature_isotonic")
 
 
 @dataclass
+class StandaloneHTRConfig:
+    """Run settings shared by both methods."""
+
+    method: str = "two_stage"
+    outer_folds: int = 5
+    seed: int = 42
+    # Propensity clip in the AIPW scores (Stage 2's propensity_clip).
+    aipw_clip: float = 0.02
+
+    def __post_init__(self) -> None:
+        self.method = str(self.method).strip().lower()
+        if self.method not in METHODS:
+            raise ValueError(f"run.method must be one of {list(METHODS)}")
+        if int(self.outer_folds) < 2:
+            raise ValueError("run.outer_folds must be >= 2")
+        if not 0.0 < float(self.aipw_clip) < 0.5:
+            raise ValueError("run.aipw_clip must be in (0, 0.5)")
+
+
+@dataclass
 class JointHTRConfig:
-    """Settings of the joint model that the shared HTR configuration lacks.
+    """Settings of the ``joint`` method that the shared HTR configuration lacks.
 
     Optimization (learning rate, schedule, batch size, weight decay, gradient
     clipping, data-loader workers) and the propensity loss weight
@@ -64,8 +95,6 @@ class JointHTRConfig:
     replaces ``training.epochs``.
     """
 
-    outer_folds: int = 5
-    seed: int = 42
     epochs: int = 30
     # Weight of the pseudo-outcome loss relative to the outcome loss.
     effect_loss_weight: float = 1.0
@@ -87,12 +116,8 @@ class JointHTRConfig:
     # step-function (and 0/1) probabilities isotonic regression gives on a few
     # hundred rows.
     nuisance_calibration: str = "temperature"
-    # Propensity clip in the AIPW scores (Stage 2's propensity_clip).
-    aipw_clip: float = 0.02
 
     def __post_init__(self) -> None:
-        if int(self.outer_folds) < 2:
-            raise ValueError("joint.outer_folds must be >= 2")
         if int(self.epochs) < 1:
             raise ValueError("joint.epochs must be >= 1")
         if not 0 <= int(self.effect_warmup_epochs) < int(self.epochs):
@@ -101,8 +126,6 @@ class JointHTRConfig:
             raise ValueError("joint.effect_loss_weight must be positive")
         if not 0.0 < float(self.e_clip) < 0.5:
             raise ValueError("joint.e_clip must be in (0, 0.5)")
-        if not 0.0 < float(self.aipw_clip) < 0.5:
-            raise ValueError("joint.aipw_clip must be in (0, 0.5)")
         if not 0.0 <= float(self.label_smoothing) < 1.0:
             raise ValueError("joint.label_smoothing must be in [0, 1)")
         if not 0.0 <= float(self.validation_fraction) < 0.5:
@@ -595,7 +618,7 @@ def infer_outcome_type(dataset_path: Path, outcome_column: str) -> str:
 def outer_splits(
     frame: pd.DataFrame,
     config: AppliedInferenceConfig,
-    joint: JointHTRConfig,
+    settings: StandaloneHTRConfig,
     splits_path: Optional[Path] = None,
 ) -> Tuple[List[Tuple[int, np.ndarray, np.ndarray]], Dict[str, Any]]:
     """The workflow's stratified outer folds, or the folds of a split-provenance file."""
@@ -609,8 +632,8 @@ def outer_splits(
             treatment_column=config.treatment_column,
             outcome_column=config.outcome_column,
             outcome_type=config.outcome_type,
-            n_splits=int(joint.outer_folds),
-            seed=int(joint.seed),
+            n_splits=int(settings.outer_folds),
+            seed=int(settings.seed),
         )
         folds = [(fold, fit, test) for fold, (fit, test) in enumerate(splits, start=1)]
     else:
@@ -650,6 +673,8 @@ def validation_split(
     config: AppliedInferenceConfig,
     joint: JointHTRConfig,
     fold: int,
+    *,
+    seed: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Stratified (treatment x binary outcome) validation subset of an outer training fold."""
 
@@ -664,7 +689,7 @@ def validation_split(
         if config.outcome_type == "binary"
         else t
     )
-    seed = int(joint.seed) + 7_919 * int(fold)
+    seed = int(seed) + 7_919 * int(fold)
     try:
         train, validation = train_test_split(
             fit_idx, test_size=float(joint.validation_fraction), random_state=seed, stratify=strata
@@ -676,9 +701,11 @@ def validation_split(
     return np.sort(train), np.sort(validation)
 
 
-def _config_record(config: AppliedInferenceConfig, joint: JointHTRConfig) -> Dict[str, Any]:
+def _config_record(
+    config: AppliedInferenceConfig, settings: StandaloneHTRConfig, joint: JointHTRConfig
+) -> Dict[str, Any]:
     architecture = asdict(config.architecture)
-    return {
+    record: Dict[str, Any] = {
         "outcome_type": config.outcome_type,
         "text_column": config.text_column,
         "treatment_column": config.treatment_column,
@@ -689,39 +716,48 @@ def _config_record(config: AppliedInferenceConfig, joint: JointHTRConfig) -> Dic
             if key.startswith("htr_") or key == "feature_extractor_type"
         },
         "training": asdict(config.training),
-        "joint": asdict(joint),
+        "run": asdict(settings),
     }
+    if settings.method == "two_stage":
+        stage1_htr = config.architecture.agentic_attention_variable_forest
+        record["stage1_htr"] = asdict(stage1_htr)
+        record["effect_objective"] = resolve_effect_objective(
+            stage1_htr.effect_objective, outcome_type=config.outcome_type
+        )
+    else:
+        record["joint"] = asdict(joint)
+    return record
 
 
 # ---------------------------------------------------------------------------
 # Folds
 
 
-def run_fold(
+def _fit_joint_fold(
     *,
     frame: pd.DataFrame,
     config: AppliedInferenceConfig,
+    settings: StandaloneHTRConfig,
     joint: JointHTRConfig,
     fold: int,
     fit_idx: np.ndarray,
-    test_idx: np.ndarray,
+    test_df: pd.DataFrame,
     device: str,
     fold_dir: Path,
-    identity: Mapping[str, Any],
-) -> None:
-    """Train one joint network on an outer training fold and freeze its held-out predictions."""
+):
+    """One joint network: calibrated held-out e and m, and tau from its effect head."""
 
     from ..utils.calibration import BinaryProbabilityCalibrator
     from .stage1_checkpointing import seed_everything
-    from .stage2_diagnostics import dr_scores
 
-    seed_everything(int(joint.seed) + 1_000 * int(fold))
-    train_idx, validation_idx = validation_split(frame, fit_idx, config, joint, fold)
+    seed_everything(int(settings.seed) + 1_000 * int(fold))
+    train_idx, validation_idx = validation_split(
+        frame, fit_idx, config, joint, fold, seed=int(settings.seed)
+    )
     trainer = _trainer_class()(config=config, joint=joint, device=device)
     model = trainer.create_model()
     try:
         result = trainer.train_joint(model, frame, train_idx, validation_idx, fold=fold)
-        test_df = frame.iloc[test_idx]
         e_raw, m_raw, tau = trainer.predict(model, test_df)
         calibration: Dict[str, Any] = {"method": joint.nuisance_calibration}
         e_hat, m_hat = e_raw, m_raw
@@ -745,46 +781,195 @@ def run_fold(
                 calibration.update(outcome_calibrator.metadata("outcome"))
     finally:
         trainer._cleanup_model(model)
+    _write_json(fold_dir / "history.json", result["history"])
+    record = {
+        "selected_epoch": result["selected_epoch"],
+        "rows": {
+            "train": len(train_idx),
+            "validation": len(validation_idx),
+            "heldout": len(test_df),
+        },
+        "calibration": calibration,
+    }
+    return e_hat, m_hat, tau, {"propensity_raw": e_raw, "m_hat_raw": m_raw}, record
+
+
+def _stage1_htr_provider(config: AppliedInferenceConfig, device: str, store: Any):
+    """Stage 1's HTR provider, without the attention evidence that only Stage 2 reads."""
+
+    from .htr_trainer import HTRTrainer
+    from .multi_model_forest_stage1 import MultiModelForestStage1HTRProvider
+
+    class _Trainer(HTRTrainer):
+        def _attention_evidence(self, *args, **kwargs):
+            # Attention records feed Stage 2 interpretation; they never change a fit.
+            return []
+
+    class _Provider(MultiModelForestStage1HTRProvider):
+        def _ensure_runner(self, discovery_df):
+            del discovery_df
+            if self._runner is None:
+                self._runner = _Trainer(
+                    config=self.config, device=self.device, num_workers=self.num_workers
+                )
+            return self._runner
+
+    # The trainer reserves one CPU and gives the rest to data-loader workers.
+    return _Provider(
+        config=config,
+        device=device,
+        checkpoint_store=store,
+        num_workers=1 + int(config.training.dataloader_workers),
+    )
+
+
+def _fit_two_stage_fold(
+    *,
+    frame: pd.DataFrame,
+    config: AppliedInferenceConfig,
+    settings: StandaloneHTRConfig,
+    fold: int,
+    fit_idx: np.ndarray,
+    test_df: pd.DataFrame,
+    device: str,
+    fold_dir: Path,
+    identity: Mapping[str, Any],
+):
+    """Stage 1's cross-fitted HTR nuisance and effect ensembles on one outer training fold."""
+
+    from .multi_model_forest_stage1 import _bounded_fold_count
+    from .stage1_checkpointing import Stage1CheckpointStore, row_id_identity
+
+    train_df = frame.iloc[fit_idx].reset_index(drop=True)
+    test_df = test_df.reset_index(drop=True)
+    stage1_htr = config.architecture.agentic_attention_variable_forest
+    effect_objective = resolve_effect_objective(
+        stage1_htr.effect_objective, outcome_type=config.outcome_type
+    )
+    store = Stage1CheckpointStore(
+        fold_dir / "stage1_checkpoints",
+        context_identity={"standalone_htr_fold_sha256": _sha256_json(identity)},
+        base_seed=int(settings.seed),
+    )
+    provider = _stage1_htr_provider(config, device, store)
+    nuisance_folds = _bounded_fold_count(stage1_htr.nuisance_folds, len(train_df))
+    with store.context_lock():
+        nuisance = provider.fit_nuisance_inner_ensemble_predict(train_df, test_df, int(fold))
+        # Effect units depend on this unit, so changed nuisance networks refit the effects.
+        nuisance_train = store.run(
+            "assembly/nuisance_ensemble",
+            lambda: nuisance["train"]["predictions"],
+            parameters={"outer_fold": int(fold), "sources": ["htr"]},
+            dependencies=tuple(
+                f"htr/nuisance/fold_{inner:03d}" for inner in range(1, nuisance_folds + 1)
+            ),
+            rows={
+                "train": row_id_identity(train_df[ROW_ID].to_numpy()),
+                "heldout": row_id_identity(test_df[ROW_ID].to_numpy()),
+            },
+        ).value
+        effect = provider.fit_effect_variant_inner_ensemble_predict(
+            train_df, test_df, nuisance_train, int(fold), effect_objective=effect_objective
+        )
+        store.mark_context_complete()
+    test_nuisance = nuisance["test_predictions"]
+    test_effect = effect["test_predictions"]
+    for name, part in (("nuisance", test_nuisance), ("effect", test_effect)):
+        if not np.array_equal(part[ROW_ID].to_numpy(), test_df[ROW_ID].to_numpy()):
+            raise RuntimeError(f"Stage 1 HTR {name} predictions are not aligned to the fold")
+    # Outer-training rows' inner out-of-fold nuisances and effects, for diagnostics.
+    effect["train"]["predictions"].to_parquet(fold_dir / "inner_oof.parquet", index=False)
+    record = {
+        "effect_objective": effect_objective,
+        "inner_folds": {
+            "nuisance": int(nuisance_folds),
+            "effect": int(_bounded_fold_count(stage1_htr.effect_folds, len(train_df))),
+        },
+        "rows": {"train": len(train_df), "heldout": len(test_df)},
+        "reused_checkpoint_units": list(store.reused_units),
+    }
+    return (
+        test_nuisance["e_hat"].to_numpy(dtype=float),
+        test_nuisance["m_hat"].to_numpy(dtype=float),
+        test_effect["tau_hat_r_stage"].to_numpy(dtype=float),
+        {},
+        record,
+    )
+
+
+def _method_e_clip(
+    config: AppliedInferenceConfig, settings: StandaloneHTRConfig, joint: JointHTRConfig
+) -> float:
+    if settings.method == "two_stage":
+        return float(config.architecture.agentic_attention_variable_forest.e_clip)
+    return float(joint.e_clip)
+
+
+def run_fold(
+    *,
+    frame: pd.DataFrame,
+    config: AppliedInferenceConfig,
+    settings: StandaloneHTRConfig,
+    joint: JointHTRConfig,
+    fold: int,
+    fit_idx: np.ndarray,
+    test_idx: np.ndarray,
+    device: str,
+    fold_dir: Path,
+    identity: Mapping[str, Any],
+) -> None:
+    """Fit one outer training fold with the configured method and freeze its held-out rows."""
+
+    from .stage2_diagnostics import dr_scores
+
+    fold_dir.mkdir(parents=True, exist_ok=True)
+    test_df = frame.iloc[test_idx]
+    common = dict(
+        frame=frame,
+        config=config,
+        settings=settings,
+        fold=fold,
+        fit_idx=fit_idx,
+        test_df=test_df,
+        device=device,
+        fold_dir=fold_dir,
+    )
+    if settings.method == "two_stage":
+        e_hat, m_hat, tau, extra, record = _fit_two_stage_fold(**common, identity=identity)
+    else:
+        e_hat, m_hat, tau, extra, record = _fit_joint_fold(**common, joint=joint)
     t = test_df[config.treatment_column].to_numpy(dtype=float)
     y = test_df[config.outcome_column].to_numpy(dtype=float)
-    # tau is the effect head; mu0/mu1 follow from m = e * mu1 + (1 - e) * mu0.
+    # mu0 and mu1 follow from m = e * mu1 + (1 - e) * mu0 and tau = mu1 - mu0.
     mu0 = m_hat - e_hat * tau
     mu1 = m_hat + (1.0 - e_hat) * tau
-    e_clipped = np.clip(e_hat, joint.e_clip, 1.0 - joint.e_clip)
+    e_clip = _method_e_clip(config, settings, joint)
     predictions = pd.DataFrame(
         {
             ROW_ID: test_df[ROW_ID].to_numpy(dtype=int),
             "outer_fold": int(fold),
             "treatment": t,
             "outcome": y,
-            "propensity_raw": e_raw,
             "propensity": e_hat,
-            "m_hat_raw": m_raw,
             "m_hat": m_hat,
             "estimated_cate": tau,
             "mu0": mu0,
             "mu1": mu1,
             "y_residual": y - m_hat,
-            "t_residual": t - e_clipped,
-            "aipw_score": dr_scores(y, t, e_hat, mu0, mu1, clip=float(joint.aipw_clip)),
+            "t_residual": t - np.clip(e_hat, e_clip, 1.0 - e_clip),
+            "aipw_score": dr_scores(y, t, e_hat, mu0, mu1, clip=float(settings.aipw_clip)),
+            **extra,
         }
     )
-    fold_dir.mkdir(parents=True, exist_ok=True)
     predictions.to_parquet(fold_dir / "predictions.parquet", index=False)
-    _write_json(fold_dir / "history.json", result["history"])
     _write_json(
         fold_dir / "fold.json",
         {
             "schema_version": SCHEMA_VERSION,
+            "method": settings.method,
             "identity": dict(identity),
             "identity_sha256": _sha256_json(identity),
-            "selected_epoch": result["selected_epoch"],
-            "rows": {
-                "train": len(train_idx),
-                "validation": len(validation_idx),
-                "heldout": len(test_idx),
-            },
-            "calibration": calibration,
+            **record,
             "predictions_sha256": _sha256_file(fold_dir / "predictions.parquet"),
             "device": str(device),
         },
@@ -834,19 +1019,21 @@ def _configure_logging(log_path: Optional[Path] = None, level: str = "INFO") -> 
 
 
 def _device_worker(payload: Mapping[str, Any]) -> None:
-    """Spawned per device: run its folds serially."""
+    """Spawned per worker slot: run its folds serially on its device."""
 
     output_dir = Path(payload["output_dir"])
     device = str(payload["device"])
-    _configure_logging(output_dir / "logs" / f"worker_{device.replace(':', '_')}.log")
+    _configure_logging(
+        output_dir / "logs" / f"worker_{int(payload['slot']):02d}_{device.replace(':', '_')}.log"
+    )
     config = payload["config"]
-    joint = payload["joint"]
     frame = load_training_frame(Path(payload["dataset"]), config)
     for fold, fit_idx, test_idx, identity in payload["folds"]:
         run_fold(
             frame=frame,
             config=config,
-            joint=joint,
+            settings=payload["settings"],
+            joint=payload["joint"],
             fold=fold,
             fit_idx=fit_idx,
             test_idx=test_idx,
@@ -860,27 +1047,33 @@ def _device_worker(payload: Mapping[str, Any]) -> None:
 # Run
 
 
-def run_standalone_joint_htr(
+def run_standalone_htr(
     *,
     dataset_path: Path,
     output_dir: Path,
     config: AppliedInferenceConfig,
-    joint: JointHTRConfig,
+    settings: StandaloneHTRConfig,
+    joint: Optional[JointHTRConfig] = None,
     devices: Sequence[str] = ("cpu",),
     splits_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Fit every outer fold (reusing finished ones), freeze predictions, and summarize."""
+    """Fit every outer fold (reusing finished ones), freeze predictions, and summarize.
 
+    ``devices`` lists one worker slot per entry; repeat a device to run several
+    folds on it at once. Folds are assigned to slots in turn.
+    """
+
+    joint = joint or JointHTRConfig()
     dataset_path = Path(dataset_path).resolve()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     frame = load_training_frame(dataset_path, config)
-    folds, split_metadata = outer_splits(frame, config, joint, splits_path)
+    folds, split_metadata = outer_splits(frame, config, settings, splits_path)
     run_identity = {
         "schema_version": SCHEMA_VERSION,
         "dataset_sha256": _sha256_file(dataset_path),
         "rows": len(frame),
-        "config": _config_record(config, joint),
+        "config": _config_record(config, settings, joint),
         "splits": {
             "metadata": split_metadata,
             "folds": {
@@ -919,6 +1112,7 @@ def run_standalone_joint_htr(
             run_fold(
                 frame=frame,
                 config=config,
+                settings=settings,
                 joint=joint,
                 fold=fold,
                 fit_idx=fit_idx,
@@ -930,8 +1124,8 @@ def run_standalone_joint_htr(
     else:
         context = multiprocessing.get_context("spawn")
         workers = []
-        for offset, device in enumerate(devices):
-            assigned = pending[offset :: len(devices)]
+        for slot, device in enumerate(devices):
+            assigned = pending[slot :: len(devices)]
             if not assigned:
                 continue
             process = context.Process(
@@ -940,24 +1134,31 @@ def run_standalone_joint_htr(
                     {
                         "dataset": str(dataset_path),
                         "output_dir": str(output_dir),
+                        "slot": slot,
                         "device": device,
                         "config": config,
+                        "settings": settings,
                         "joint": joint,
                         "folds": assigned,
                     },
                 ),
             )
             process.start()
-            logger.info("Started %s for folds %s", device, [item[0] for item in assigned])
-            workers.append((device, process))
+            logger.info(
+                "Started worker %s on %s for folds %s",
+                slot,
+                device,
+                [item[0] for item in assigned],
+            )
+            workers.append((slot, device, process))
         failed = []
-        for device, process in workers:
+        for slot, device, process in workers:
             process.join()
             if process.exitcode != 0:
-                failed.append(device)
+                failed.append(f"{slot} ({device})")
         if failed:
             raise RuntimeError(
-                f"fold workers on {failed} failed; see {output_dir / 'logs'} and rerun to resume"
+                f"fold workers {failed} failed; see {output_dir / 'logs'} and rerun to resume"
             )
     parts = []
     for fold, fit_idx, test_idx in folds:
@@ -977,7 +1178,7 @@ def run_standalone_joint_htr(
             "rows": len(predictions),
         },
     )
-    summary = summarize_predictions(predictions, output_dir, config, joint)
+    summary = summarize_predictions(predictions, output_dir, config, settings, joint)
     _write_json(output_dir / "results.json", summary)
     return summary
 
@@ -1000,6 +1201,7 @@ def summarize_predictions(
     predictions: pd.DataFrame,
     output_dir: Path,
     config: AppliedInferenceConfig,
+    settings: StandaloneHTRConfig,
     joint: JointHTRConfig,
 ) -> Dict[str, Any]:
     """Oracle-free held-out summary: ATE, BLP heterogeneity test, losses, nuisance fit."""
@@ -1021,18 +1223,28 @@ def summarize_predictions(
             part["treatment"].to_numpy(dtype=float),
             part["outcome"].to_numpy(dtype=float),
             outcome_type=str(config.outcome_type),
-            e_clip=float(joint.e_clip),
+            e_clip=_method_e_clip(config, settings, joint),
             alpha_propensity=float(config.training.alpha_propensity),
             effect_loss_weight=float(joint.effect_loss_weight),
         )
         metrics.pop("selection_loss")
-        record = json.loads((output_dir / "folds" / f"fold_{int(fold):02d}" / "fold.json").read_text())
-        per_fold[str(fold)] = {"selected_epoch": record["selected_epoch"], **metrics}
+        record = json.loads(
+            (output_dir / "folds" / f"fold_{int(fold):02d}" / "fold.json").read_text()
+        )
+        per_fold[str(fold)] = {
+            **{
+                key: record[key]
+                for key in ("selected_epoch", "effect_objective", "inner_folds")
+                if key in record
+            },
+            **metrics,
+        }
     y_residual = predictions["y_residual"].to_numpy(dtype=float)
     t_residual = predictions["t_residual"].to_numpy(dtype=float)
     ate = aipw["estimate"]
     return {
         "schema_version": SCHEMA_VERSION,
+        "method": settings.method,
         "rows": int(len(predictions)),
         "outcome_type": config.outcome_type,
         "ate": {"aipw": aipw, "plug_in_mean_tau": float(np.mean(tau))},
@@ -1156,6 +1368,14 @@ def _parse_override(raw: str) -> Tuple[str, Any]:
     return key.strip(), value
 
 
+def _load_template(template_path: Path) -> Dict[str, Any]:
+    return json.loads(Path(template_path).read_text())["config"]
+
+
+def _is_htr_architecture_key(key: str) -> bool:
+    return key.startswith("htr_") or key == "feature_extractor_type"
+
+
 def build_configs(
     *,
     template_path: Path = DEFAULT_TEMPLATE,
@@ -1165,22 +1385,25 @@ def build_configs(
     treatment_column: Optional[str] = None,
     outcome_column: Optional[str] = None,
     overrides: Sequence[str] = (),
-) -> Tuple[AppliedInferenceConfig, JointHTRConfig]:
-    """HTR and optimizer settings from the Stage 1 template, then ``--set`` overrides.
+) -> Tuple[AppliedInferenceConfig, StandaloneHTRConfig, JointHTRConfig]:
+    """Settings from the Stage 1 template, then ``--set`` overrides.
 
-    Keys are ``architecture.<htr field>``, ``training.<field>``, or ``joint.<field>``.
+    Keys are ``run.<field>``, ``architecture.<htr field>``, ``training.<field>``,
+    ``stage1_htr.<field>`` (the template's
+    ``architecture.agentic_attention_variable_forest``), or ``joint.<field>``.
     """
 
-    template = json.loads(Path(template_path).read_text())["config"]
+    template = _load_template(template_path)
+    template_architecture = template.get("architecture", {})
     architecture = {
-        key: value
-        for key, value in template.get("architecture", {}).items()
-        if key.startswith("htr_") or key == "feature_extractor_type"
+        key: value for key, value in template_architecture.items() if _is_htr_architecture_key(key)
     }
     architecture["htr_sentence_model"] = htr_model
     sections: Dict[str, Dict[str, Any]] = {
+        "run": {},
         "architecture": architecture,
         "training": dict(template.get("training", {})),
+        "stage1_htr": dict(template_architecture.get("agentic_attention_variable_forest", {})),
         "joint": {},
     }
     for raw in overrides:
@@ -1188,44 +1411,60 @@ def build_configs(
         section, _, name = key.partition(".")
         if section not in sections or not name or "." in name:
             raise ValueError(
-                f"--set key {key!r} must be architecture.<field>, training.<field>, "
-                "or joint.<field>"
+                f"--set key {key!r} must be run.<field>, architecture.<field>, "
+                "training.<field>, stage1_htr.<field>, or joint.<field>"
             )
         sections[section][name] = value
+
+    def names(cls) -> set:
+        return {field.name for field in dataclasses.fields(cls)}
+
     known = {
-        "architecture": {field.name for field in dataclasses.fields(ModelArchitectureConfig)},
-        "training": {field.name for field in dataclasses.fields(TrainingConfig)},
-        "joint": {field.name for field in dataclasses.fields(JointHTRConfig)},
+        "run": names(StandaloneHTRConfig),
+        "architecture": {
+            name for name in names(ModelArchitectureConfig) if _is_htr_architecture_key(name)
+        },
+        "training": names(TrainingConfig),
+        "stage1_htr": names(AgenticAttentionVariableForestConfig),
+        "joint": names(JointHTRConfig),
     }
     for section, values in sections.items():
         unknown = sorted(set(values) - known[section])
         if unknown:
             raise ValueError(f"unknown {section} settings: {unknown}")
+    settings = StandaloneHTRConfig(**sections["run"])
     config = AppliedInferenceConfig(
-        seed=int(sections["joint"].get("seed", JointHTRConfig.seed)),
+        seed=int(settings.seed),
         outcome_type=outcome_type,
         text_column=text_column or template.get("text_column", "clinical_text"),
         treatment_column=treatment_column
         or template.get("treatment_column", "treatment_indicator"),
         outcome_column=outcome_column or template.get("outcome_column", "outcome_indicator"),
-        architecture=ModelArchitectureConfig(**sections["architecture"]),
+        architecture=ModelArchitectureConfig(
+            **sections["architecture"],
+            agentic_attention_variable_forest=AgenticAttentionVariableForestConfig(
+                **sections["stage1_htr"]
+            ),
+        ),
         training=TrainingConfig(**sections["training"]),
     )
-    return config, JointHTRConfig(**sections["joint"])
+    return config, settings, JointHTRConfig(**sections["joint"])
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Standalone joint HTR: one network per outer fold for the propensity, the "
-            "outcome, and tau (pseudo-outcome objective), with cross-fitted held-out "
-            "predictions and an optional oracle evaluation."
+            "Standalone HTR treatment-effect estimation per outer fold, with cross-fitted "
+            "held-out predictions and an optional oracle evaluation. two_stage (default): "
+            "Stage 1's cross-fitted HTR nuisance and effect ensembles; joint: one network "
+            "with propensity, outcome, and tau heads."
         )
     )
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="fit, freeze predictions, and summarize (resumable)")
     run.add_argument("--dataset", required=True, type=Path, help="cohort parquet file")
     run.add_argument("--out", required=True, type=Path, help="output directory")
+    run.add_argument("--method", choices=METHODS, help="shorthand for --set run.method=NAME")
     run.add_argument(
         "--outcome-type",
         choices=("auto", "binary", "continuous"),
@@ -1235,9 +1474,15 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--devices",
         help=(
-            "comma-separated torch devices; folds run in parallel, one process per device "
+            "comma-separated torch devices, one worker process each "
             "(default: cuda:0 when CUDA is available, else cpu)"
         ),
+    )
+    run.add_argument(
+        "--jobs-per-device",
+        type=int,
+        default=1,
+        help="worker processes per device; outer folds run in parallel across all workers",
     )
     run.add_argument("--htr-model", default=DEFAULT_HTR_MODEL, help="HTR sentence encoder")
     run.add_argument(
@@ -1248,9 +1493,20 @@ def build_parser() -> argparse.ArgumentParser:
             "(default: the workflow's stratified folds for --seed)"
         ),
     )
-    run.add_argument("--seed", type=int, help="shorthand for --set joint.seed=N")
-    run.add_argument("--folds", type=int, help="shorthand for --set joint.outer_folds=K")
-    run.add_argument("--epochs", type=int, help="shorthand for --set joint.epochs=N")
+    run.add_argument("--seed", type=int, help="shorthand for --set run.seed=N")
+    run.add_argument("--folds", type=int, help="shorthand for --set run.outer_folds=K")
+    run.add_argument(
+        "--inner-folds",
+        type=int,
+        help="two_stage: shorthand for stage1_htr.nuisance_folds and effect_folds",
+    )
+    run.add_argument(
+        "--epochs",
+        type=int,
+        help=(
+            "two_stage: stage1_htr.nuisance_epochs and effect_epochs; joint: joint.epochs"
+        ),
+    )
     run.add_argument("--template", type=Path, default=DEFAULT_TEMPLATE, help="Stage 1 template")
     run.add_argument("--text-column")
     run.add_argument("--treatment-column")
@@ -1261,7 +1517,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="architecture.<field>, training.<field>, or joint.<field> (JSON values)",
+        help=(
+            "run.<field>, architecture.<field>, training.<field>, stage1_htr.<field>, "
+            "or joint.<field> (JSON values)"
+        ),
     )
     run.add_argument(
         "--evaluate",
@@ -1284,31 +1543,51 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     _configure_logging(args.out / "logs" / "run.log", args.log_level)
     overrides = list(args.overrides)
-    for flag, key in (("seed", "seed"), ("folds", "outer_folds"), ("epochs", "epochs")):
+    if args.method is not None:
+        overrides.append(f"run.method={args.method}")
+    method = StandaloneHTRConfig.method
+    for raw in overrides:
+        key, value = _parse_override(raw)
+        if key == "run.method":
+            method = str(value)
+    for flag, key in (("seed", "run.seed"), ("folds", "run.outer_folds")):
         if getattr(args, flag) is not None:
-            overrides.append(f"joint.{key}={getattr(args, flag)}")
-    settings = dict(
+            overrides.append(f"{key}={getattr(args, flag)}")
+    if args.inner_folds is not None:
+        overrides += [f"stage1_htr.{key}={args.inner_folds}" for key in ("nuisance_folds", "effect_folds")]
+    if args.epochs is not None:
+        keys = ("joint.epochs",) if method == "joint" else (
+            "stage1_htr.nuisance_epochs",
+            "stage1_htr.effect_epochs",
+        )
+        overrides += [f"{key}={args.epochs}" for key in keys]
+    outcome_type = args.outcome_type
+    if outcome_type == "auto":
+        outcome_column = args.outcome_column or _load_template(args.template).get(
+            "outcome_column", "outcome_indicator"
+        )
+        outcome_type = infer_outcome_type(args.dataset, outcome_column)
+    config, settings, joint = build_configs(
         template_path=args.template,
+        outcome_type=outcome_type,
         htr_model=args.htr_model,
         text_column=args.text_column,
         treatment_column=args.treatment_column,
         outcome_column=args.outcome_column,
         overrides=overrides,
     )
-    outcome_type = args.outcome_type
-    if outcome_type == "auto":
-        outcome_column = build_configs(outcome_type="binary", **settings)[0].outcome_column
-        outcome_type = infer_outcome_type(args.dataset, outcome_column)
-    config, joint = build_configs(outcome_type=outcome_type, **settings)
     devices = args.devices
     if devices is None:
         devices = "cuda:0" if _torch().cuda.is_available() else "cpu"
-    summary = run_standalone_joint_htr(
+    devices = [device.strip() for device in str(devices).split(",") if device.strip()]
+    slots = [device for _ in range(max(1, int(args.jobs_per_device))) for device in devices]
+    summary = run_standalone_htr(
         dataset_path=args.dataset,
         output_dir=args.out,
         config=config,
+        settings=settings,
         joint=joint,
-        devices=[device.strip() for device in str(devices).split(",") if device.strip()],
+        devices=slots,
         splits_path=args.splits,
     )
     print(json.dumps(summary["ate"], indent=2, default=str))
@@ -1321,6 +1600,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 __all__ = [
     "JointHTRConfig",
+    "StandaloneHTRConfig",
     "build_configs",
     "build_joint_net",
     "evaluate_against_oracle",
@@ -1328,6 +1608,6 @@ __all__ = [
     "load_training_frame",
     "main",
     "outer_splits",
-    "run_standalone_joint_htr",
+    "run_standalone_htr",
     "summarize_predictions",
 ]
