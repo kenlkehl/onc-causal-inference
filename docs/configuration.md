@@ -1264,6 +1264,45 @@ variables (the placeholder counts as no key) or pass the keys, for example
 `--set stage2.api_key=KEY --set stage2.extraction_llm.api_key=KEY`. Do not run
 two workflow processes against the same output directory.
 
+### Checkpoint relocation
+
+Stage 1 text-model checkpoints normally include the resolved dataset path,
+size, modification time, and embedding-cache directory. To keep those exact
+identities and deterministic seeds after a verified copy, a migration helper
+can place `stage1_checkpoint_relocation.json` in the new output directory:
+
+```json
+{
+  "schema_version": "stage1_checkpoint_relocation_v1",
+  "dataset_path": "/new/location/dataset.parquet",
+  "dataset_sha256": "<SHA-256 of the verified original dataset>",
+  "original_dataset_identity": {
+    "path": "/original/location/dataset.parquet",
+    "size": 12345,
+    "mtime_ns": 1700000000123456789
+  },
+  "original_output_dir": "/original/location/output",
+  "original_applied_config_fingerprint": "<from the original context checkpoint>"
+}
+```
+
+Copy the full run, retain its split provenance and checkpoint payloads, and set
+`dataset` and `output_dir` in its launch configuration to the new physical paths.
+The workflow verifies the copied dataset's checksum and all normalized Stage 1
+settings before restoring original paths **only in checkpoint identity metadata**.
+It hashes the dataset once per worker and again if filesystem metadata changes;
+ordinary runs without this manifest retain their existing metadata-only checks.
+A mismatch stops the context. The original directories need not exist, and the
+new filesystem need not preserve nanosecond timestamps. Row and checkpoint
+version checks remain in force.
+
+This manifest covers text-model checkpoints. The embedding chunk cache has a
+separate path-derived key: a migration helper must validate its settings and
+re-key its copied directory and metadata for the new dataset path without
+changing the numerical payloads. It does not relocate dated-notes manifests or
+Stage 2 checkpoints. Do not use relocation to adopt changed data or scientific
+settings; those require a fresh run.
+
 ## Stage 2-only launches
 
 For fresh runs without a handoff, use [explicit-only extraction](#explicit-only-workflow)

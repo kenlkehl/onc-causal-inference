@@ -271,12 +271,21 @@ precise measurement may matter even when it belongs to no broad topic.
 Neural queries are trainable vectors that search the chunk-embedding space for
 recurring patterns. Separate banks (five queries each by default) are optimized
 for treatment, outcome, and effect objectives, with penalties that encourage
-useful activation and diversity among queries. Each patient is scored by the
-maximum cosine similarity between any of the patient's chunks and a query; the
-highest-scoring patients' best-matching chunks (one per patient per query by
-default) are saved as witnesses, together with phrases that distinguish those
-chunks from background text. Queries can learn several distinct detectors for
-the same objective, which a single mean-difference direction cannot.
+useful activation and diversity among queries. A patient's activation for a
+query is a smooth maximum of the cosine similarities `s_j` between the
+patient's `n` chunks and the query: the log-mean-exp
+`τ · (log Σ_j exp(s_j / τ) − log n)`, with temperature `τ` (`temperature`,
+0.05 by default). It equals the common similarity when every chunk matches
+equally and approaches the best chunk's similarity minus `τ · log n` when one
+chunk dominates, so a passage found in only a few chunks activates a long
+record less than a short one, although a long record also has more chances to
+contain a closely matching chunk. The objectives and held-out statistics use
+this activation. Witnesses are chosen by the single best chunk instead: the
+patients whose best-matching chunk has the highest cosine (ten by default)
+contribute that chunk (one per patient per query by default), together with
+phrases that distinguish those chunks from the other training patients'
+best-matching chunks. Queries can learn several distinct detectors for the
+same objective, which a single mean-difference direction cannot.
 
 Each bank is fitted in two steps within a training context:
 

@@ -293,6 +293,11 @@ The output directory is the checkpoint. **Rerunning the same command resumes an
 interrupted run**; completed work is reused. The directory holds the resolved
 settings (`run_config.json`), `progress.json`, and `logs/workflow.log`.
 
+A verified relocation manifest can preserve Stage 1 text-model checkpoint
+identities and seeds when a working copy moves to another filesystem. See
+[checkpoint relocation](docs/configuration.md#checkpoint-relocation); ordinary
+path changes alone do not preserve those identities.
+
 ```bash
 # Relaunch Stage 2 from the run's resolved settings
 uv run python scripts/run_all_evidence.py --config /path/to/output/run_config.json --stage2-only
