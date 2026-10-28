@@ -265,6 +265,10 @@ def _auroc(score: np.ndarray, target: np.ndarray) -> Optional[float]:
     return float(roc_auc_score(target, score))
 
 
+def _format_metric(value: Optional[float]) -> str:
+    return "n/a" if value is None else f"{value:.3f}"
+
+
 def nuisance_and_effect_metrics(
     e_raw: np.ndarray,
     m_hat: np.ndarray,
@@ -506,7 +510,12 @@ def _trainer_class():
                         f" | validation selection_loss={validation['selection_loss']:.4f}"
                         f" r_loss={validation['r_loss']:.4f}"
                         f" (zero tau {validation['r_loss_at_zero_tau']:.4f})"
-                        f" e_auroc={validation['propensity_auroc']}"
+                        f" e_auroc={_format_metric(validation['propensity_auroc'])}"
+                        + (
+                            f" m_auroc={_format_metric(validation['outcome_auroc'])}"
+                            if self.config.outcome_type == "binary"
+                            else f" m_mse={validation['outcome_loss']:.4f}"
+                        )
                         if validation
                         else ""
                     ),
