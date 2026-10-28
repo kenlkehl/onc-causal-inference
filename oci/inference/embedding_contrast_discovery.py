@@ -27,6 +27,7 @@ from ..models.concept_embedding_cache import (
     clear_sentence_transformer_cache,
     load_sentence_transformer,
 )
+from ..models.concept_embedding_utils import informative_chunk_text
 from .all_evidence_fusion import _embedding_family
 from .stage1_architectures import (
     EMBEDDING_CLUSTERED,
@@ -1741,7 +1742,7 @@ class EmbeddingContrastEvidenceGenerator:
                 if not np.isfinite(score):
                     continue
                 text = chunks[chunk_idx] if chunk_idx < len(chunks) else ""
-                if not _informative_chunk_text(text):
+                if not informative_chunk_text(text):
                     continue
                 candidates.append((float(score), int(position), int(chunk_idx), text))
 
@@ -1919,12 +1920,6 @@ def redact_embedding_contrast_evidence(evidence: Any) -> Any:
         return value
 
     return redact(copy.deepcopy(evidence))
-
-
-def _informative_chunk_text(text: str) -> bool:
-    """Return True when a retrieved chunk has enough clinical text to show."""
-    compact = "".join(ch for ch in str(text or "") if ch.isalnum())
-    return len(compact) >= 12
 
 
 def _named_pseudo_targets(

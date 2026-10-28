@@ -1458,7 +1458,10 @@ def _run_one_neural_query_context(
     """Fit and immediately publish one independently resumable context."""
 
     from .neural_cohort_witness import soft_retrieval_activations
-    from .neural_query_agentic_forest import build_query_evidence
+    from .neural_query_agentic_forest import (
+        build_query_evidence,
+        informative_chunk_matrices,
+    )
     from .neural_query_discovery_runtime import fit_context_query_discovery
     from .neural_query_evidence_contract import (
         NEURAL_QUERY_CONTEXT_SCHEMA_VERSION,
@@ -1480,8 +1483,15 @@ def _run_one_neural_query_context(
     treatment = fit_frame[config.treatment_column].to_numpy(dtype=float)
     outcome = fit_frame[config.outcome_column].to_numpy(dtype=float)
     chunks = generator.chunk_matrices(fit_rows)
-    heldout_chunks = generator.chunk_matrices(heldout_rows)
     fit_chunk_texts = generator.chunk_texts(fit_rows)
+    # Queries are fitted and scored on informative chunks only (the embedding
+    # lane's retrieval rule); build_query_evidence applies the same rule to
+    # the full matrices so witnesses keep their cache chunk indices.
+    query_chunks = informative_chunk_matrices(chunks, fit_chunk_texts)
+    heldout_query_chunks = informative_chunk_matrices(
+        generator.chunk_matrices(heldout_rows),
+        generator.chunk_texts(heldout_rows),
+    )
     # build_query_evidence indexes text by the original dataset row number.
     # Populate only the fit rows instead of copying the entire text cache for
     # every context in every worker process.
@@ -1497,7 +1507,7 @@ def _run_one_neural_query_context(
     mm_config = applied_config.architecture.multi_model_forest
     discovery = fit_context_query_discovery(
         row_ids=fit_rows,
-        chunks=chunks,
+        chunks=query_chunks,
         texts=texts,
         treatment=treatment,
         outcome=outcome,
@@ -1538,7 +1548,7 @@ def _run_one_neural_query_context(
             dtype=np.float32,
         )
         heldout_activations = soft_retrieval_activations(
-            heldout_chunks,
+            heldout_query_chunks,
             queries,
             temperature=float(neural_query_config.temperature),
             device=device,

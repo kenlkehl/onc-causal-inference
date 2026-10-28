@@ -10,6 +10,22 @@ from .lossless_tokenization import SemanticTruncationError
 
 _WORD_RE = re.compile(r"\S+")
 
+# Chunks with fewer letters and digits than this carry no readable clinical
+# text: a short tail already contained in the previous chunk's overlap, an
+# empty record, or a run of symbols such as soft hyphens.
+MIN_INFORMATIVE_CHUNK_ALNUM_CHARS = 12
+
+
+def informative_chunk_text(text: str) -> bool:
+    """Return True when a chunk has enough letters and digits to be evidence."""
+    count = 0
+    for character in str(text or ""):
+        if character.isalnum():
+            count += 1
+            if count >= MIN_INFORMATIVE_CHUNK_ALNUM_CHARS:
+                return True
+    return False
+
 
 def chunk_text_words(
     text: str,

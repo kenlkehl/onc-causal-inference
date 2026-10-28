@@ -155,7 +155,11 @@ Keep the omitted-selector path's behavior unchanged.
 Neural-query consensus groups are ordered by the median absolute held-out z of
 their members (scored on inner partitions of the context's training rows,
 never its held-out rows), then by the training score; the order sets query IDs
-and never gates queries. For evaluation only, each text-model context writes
+and never gates queries. Queries are fitted, scored, and retrieved only on
+chunks with at least 12 letters or digits (`informative_chunk_text` in
+`oci/models/concept_embedding_utils.py`, shared with embedding retrieval), and
+each query keeps its 30 highest-contrast phrases (`evidence_ngram_top_k`).
+For evaluation only, each text-model context writes
 its held-out rows' scores on the exact handed-off embedding directions
 (`EMBEDDING_DIRECTION_SCORE_SOURCES` in `stage1_architecture_artifacts.py`).
 Every Stage 1 component writes reporting-only wall time per architecture

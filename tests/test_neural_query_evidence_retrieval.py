@@ -10,7 +10,11 @@ from oci.inference.neural_query_agentic_forest import (
     NeuralQueryEvidenceCapacityOverflowError,
     build_query_evidence,
 )
-from oci.inference.neural_query_evidence_contract import query_retrieval_policy, query_term_normalization
+from oci.inference.neural_query_evidence_contract import (
+    query_retrieval_policy,
+    query_term_normalization,
+    query_term_selection,
+)
 from oci.inference.plain_handoff_stage2_evidence import (
     compile_stage2_handoff_evidence,
     extract_stage1_architecture_occurrences,
@@ -124,3 +128,33 @@ def test_canonical_handoff_preserves_policy_and_cannot_bypass_legacy_rejection(t
     canonical[0]["evidence"]["occurrence"]["details"].pop("retrieval_policy")
     with pytest.raises(ValueError, match="legacy all-history"):
         compile_stage2_handoff_evidence(canonical, **options)
+
+
+def test_term_selection_keeps_the_highest_contrast_terms_and_records_the_positive_count():
+    config, kwargs = fixture()
+    complete = build_query_evidence(config=replace(config, evidence_ngram_top_k=None), **kwargs)[0]
+    selected = build_query_evidence(config=replace(config, evidence_ngram_top_k=1), **kwargs)[0]
+    positive = len(complete["top_contrastive_ngrams"])
+    assert positive > 1
+    assert selected["top_contrastive_ngrams"] == complete["top_contrastive_ngrams"][:1]
+    assert selected["top_contrastive_ngrams"][0]["term"] == "complete"
+    assert selected["term_selection"] == query_term_selection(1, positive)
+    assert complete["term_selection"] == query_term_selection(None, positive)
+
+
+def test_term_ceiling_applies_to_the_selected_terms():
+    config, kwargs = fixture()
+    build_query_evidence(
+        config=replace(config, evidence_ngram_top_k=1, evidence_top_ngrams=1), **kwargs
+    )
+    with pytest.raises(NeuralQueryEvidenceCapacityOverflowError, match="evidence_top_ngrams"):
+        build_query_evidence(
+            config=replace(config, evidence_ngram_top_k=None, evidence_top_ngrams=1), **kwargs
+        )
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "3"])
+def test_ngram_top_k_is_null_or_a_positive_integer(value):
+    replace(NeuralQueryAgenticForestConfig(), evidence_ngram_top_k=None).validate()
+    with pytest.raises(ValueError, match="evidence_ngram_top_k"):
+        replace(NeuralQueryAgenticForestConfig(), evidence_ngram_top_k=value).validate()

@@ -317,7 +317,7 @@ def test_contexts_written_before_heldout_ranking_are_refit(tmp_path, monkeypatch
         lambda **_: lambda tasks: [fn(*args, **kwargs) for fn, args, kwargs in tasks],
     )
     context = SimpleNamespace(
-        config=SimpleNamespace(devices=("cpu",), workers=1),
+        config=SimpleNamespace(devices=("cpu",), workers=1, contexts_per_gpu=1),
         dataset=None,
         applied_config=None,
         neural_query_config=None,

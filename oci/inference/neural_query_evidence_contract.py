@@ -14,7 +14,7 @@ NEURAL_QUERY_RANKING_RULE = (
     "then medoid_candidate_id; groups without validation statistics last"
 )
 # Per-context artifacts (evidence.json, query_records.json, complete.json).
-NEURAL_QUERY_CONTEXT_SCHEMA_VERSION = "neural_query_context_v2_heldout_ranking"
+NEURAL_QUERY_CONTEXT_SCHEMA_VERSION = "neural_query_context_v3_informative_chunks"
 
 
 def query_term_normalization(config: Any = None) -> dict[str, Any]:
@@ -40,6 +40,25 @@ def query_retrieval_policy(chunks_per_patient: int) -> dict[str, Any]:
         "chunk_selection": "highest_cosine_per_patient",
         "chunks_per_patient": chunks_per_patient,
         "contrastive_terms_source": "selected_foreground_and_background_chunks",
+    }
+
+
+def query_chunk_eligibility(min_alphanumeric_characters: int) -> dict[str, Any]:
+    """Record which chunks the queries were fitted, scored, and retrieved on."""
+    return {
+        "rule": "min_alphanumeric_characters",
+        "min_alphanumeric_characters": int(min_alphanumeric_characters),
+        "applies_to": ["query_fitting", "heldout_scoring", "witness_selection"],
+        "patients_without_eligible_chunks": "mean_activation_never_witness",
+    }
+
+
+def query_term_selection(top_k: int | None, positive_terms: int) -> dict[str, Any]:
+    """Record how the reported terms were chosen from every positive-contrast term."""
+    return {
+        "rule": "highest_positive_tfidf_contrast_then_term",
+        "top_k": None if top_k is None else int(top_k),
+        "positive_terms": int(positive_terms),
     }
 
 

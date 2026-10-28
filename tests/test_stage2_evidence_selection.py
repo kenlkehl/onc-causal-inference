@@ -120,7 +120,8 @@ def test_source_ngrams_recover_original_sentences_and_negation(phrase, source, m
     # Generate the term with the real producer before exercising the matcher.
     from oci.inference.neural_query_agentic_forest import NeuralQueryAgenticForestConfig, _contrastive_ngrams
     config = NeuralQueryAgenticForestConfig()
-    assert phrase in {item["term"] for item in _contrastive_ngrams([source], [], limit=None, config=config)}
+    terms, _positive_terms = _contrastive_ngrams([source], [], limit=None, config=config)
+    assert phrase in {item["term"] for item in terms}
     phrase_member = member(phrase, 0.9)
     wrong_query = member(source, 1, query=2, kind="clinical_text")
     wrong_fold = member(source, 1, inner=2, kind="clinical_text")

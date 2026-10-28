@@ -20,7 +20,10 @@ def test_workflow_divides_neural_query_cpu_budget(
 
     specs = [{"scope_id": f"outer_{i:03d}_full", "outer_fold": i} for i in range(1, 4)]
     context = SimpleNamespace(
-        config=SimpleNamespace(devices=devices, workers=30),
+        config=SimpleNamespace(
+            devices=devices, workers=30, contexts_per_gpu=1,
+            output_dir=tmp_path, log_level="INFO",
+        ),
         dataset=None,
         applied_config=None,
         neural_query_config=None,

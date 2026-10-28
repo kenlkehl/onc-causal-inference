@@ -191,11 +191,14 @@ training context, the architecture computes directions in embedding space:
 | Effect score | Upper versus lower quantile (20%) of a per-patient effect score: the DINA score for binary outcomes, with and without Fisher-information weights; the R pseudo-outcome `(Y − m̂)/(T − ê)` weighted by `(T − ê)²` and the unweighted orthogonal score `(Y − m̂)(T − ê)` for continuous outcomes |
 
 For each direction, the chunks most and least aligned with it are retrieved (up
-to 12 per side, at most 2 per patient). Both tails are evidence: a scalar or
-monotone characteristic often appears as an opposition between the two tails
-rather than as a cluster of similar positive excerpts. The retrieved chunks are
-what make a numerical direction interpretable; they let a reader judge whether
-the direction reflects a coherent patient characteristic.
+to 12 per side, at most 2 per patient). Retrieval skips chunks with fewer than
+12 letters or digits: the empty chunk of an empty record, a short tail that the
+previous chunk's overlap already contains, or a run of symbols such as soft
+hyphens. The directions themselves use every chunk. Both tails are evidence: a
+scalar or monotone characteristic often appears as an opposition between the
+two tails rather than as a cluster of similar positive excerpts. The retrieved
+chunks are what make a numerical direction interpretable; they let a reader
+judge whether the direction reflects a coherent patient characteristic.
 
 ### 6. Cluster-based embedding contrasts (`embedding_clustered`)
 
@@ -271,21 +274,29 @@ precise measurement may matter even when it belongs to no broad topic.
 Neural queries are trainable vectors that search the chunk-embedding space for
 recurring patterns. Separate banks (five queries each by default) are optimized
 for treatment, outcome, and effect objectives, with penalties that encourage
-useful activation and diversity among queries. A patient's activation for a
-query is a smooth maximum of the cosine similarities `s_j` between the
-patient's `n` chunks and the query: the log-mean-exp
-`τ · (log Σ_j exp(s_j / τ) − log n)`, with temperature `τ` (`temperature`,
-0.05 by default). It equals the common similarity when every chunk matches
-equally and approaches the best chunk's similarity minus `τ · log n` when one
-chunk dominates, so a passage found in only a few chunks activates a long
-record less than a short one, although a long record also has more chances to
-contain a closely matching chunk. The objectives and held-out statistics use
-this activation. Witnesses are chosen by the single best chunk instead: the
-patients whose best-matching chunk has the highest cosine (ten by default)
-contribute that chunk (one per patient per query by default), together with
-phrases that distinguish those chunks from the other training patients'
-best-matching chunks. Queries can learn several distinct detectors for the
-same objective, which a single mean-difference direction cannot.
+useful activation and diversity among queries. Queries see only chunks with at
+least 12 letters or digits, the rule embedding retrieval uses. A record without
+such a chunk, for example an empty record, takes the mean activation of the
+other patients scored with it: a neutral value that no query can be fitted
+toward and that adds nothing to the moment statistics. It never contributes
+witnesses or background chunks. A patient's activation for a query is a smooth
+maximum of the cosine similarities `s_j` between the patient's `n` remaining
+chunks and the query: the log-mean-exp `τ · (log Σ_j exp(s_j / τ) − log n)`,
+with temperature `τ` (`temperature`, 0.05 by default). It equals the common
+similarity when every chunk matches equally and approaches the best chunk's
+similarity minus `τ · log n` when one chunk dominates, so a passage found in
+only a few chunks activates a long record less than a short one, although a
+long record also has more chances to contain a closely matching chunk. The
+objectives and held-out statistics use this activation.
+
+Witnesses are chosen by the single best chunk instead: the patients whose
+best-matching chunk has the highest cosine (ten by default) contribute that
+chunk (one per patient per query by default). The query's phrases are the 30
+terms (`evidence_ngram_top_k`) with the largest positive TF-IDF contrast
+between those chunks and the other training patients' best-matching chunks;
+`term_selection` in each query's evidence records how many terms had a
+positive contrast. Queries can learn several distinct detectors for the same
+objective, which a single mean-difference direction cannot.
 
 Each bank is fitted in two steps within a training context:
 

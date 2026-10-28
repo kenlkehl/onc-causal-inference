@@ -16,12 +16,18 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from ..models.concept_embedding_utils import (
+    MIN_INFORMATIVE_CHUNK_ALNUM_CHARS,
+    informative_chunk_text,
+)
 from .neural_cohort_witness import pad_chunk_embeddings
 from .neural_query_evidence_contract import (
     NEURAL_QUERY_RANKING_RULE,
     NEURAL_QUERY_RANKING_VERSION,
+    query_chunk_eligibility,
     query_retrieval_policy,
     query_term_normalization,
+    query_term_selection,
 )
 
 
@@ -73,11 +79,14 @@ class NeuralQueryAgenticForestConfig:
     # Preserve the complete text of each selected chunk, not every chunk of a
     # patient whose best chunk matched. Both contrastive arms use this rule.
     evidence_retrieval_top_k: int = 1
+    # Scientific term selection: the highest-contrast positive terms per
+    # query. ``None`` keeps every positive-contrast term.
+    evidence_ngram_top_k: Optional[int] = 30
     # ``None`` is an explicit lossless allocation: retain every remaining
-    # patient/positive term. A finite value is an acceptance ceiling and is
+    # patient/selected term. A finite value is an acceptance ceiling and is
     # never permission for silent selection.
     evidence_background_patients: Optional[int] = 40
-    evidence_top_ngrams: Optional[int] = 20
+    evidence_top_ngrams: Optional[int] = None
     evidence_excerpt_chars: Optional[int] = None
     evidence_chunks_per_patient_per_query: Optional[int] = None
     evidence_ngram_analyzer: str = "word"
@@ -197,6 +206,11 @@ class NeuralQueryAgenticForestConfig:
             raise ValueError(
                 "evidence_background_patients must be null or nonnegative"
             )
+        top_k = self.evidence_ngram_top_k
+        if top_k is not None and (
+            isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 1
+        ):
+            raise ValueError("evidence_ngram_top_k must be null or a positive integer")
         if (
             self.evidence_top_ngrams is not None
             and int(self.evidence_top_ngrams) < 1
@@ -310,6 +324,41 @@ def mechanical_role_for_bank(bank: str) -> str:
     raise ValueError(f"unknown query bank: {bank!r}")
 
 
+def informative_chunk_mask(chunk_texts: Sequence[str]) -> np.ndarray:
+    """Return which of one patient's chunks have enough text to be evidence."""
+
+    return np.fromiter(
+        (informative_chunk_text(text) for text in chunk_texts),
+        dtype=bool,
+        count=len(chunk_texts),
+    )
+
+
+def informative_chunk_matrices(
+    chunk_matrices: Sequence[np.ndarray],
+    chunk_texts: Sequence[Sequence[str]],
+) -> List[np.ndarray]:
+    """Keep each patient's informative chunks for query fitting and scoring.
+
+    A patient without one keeps an empty matrix and then takes the mean
+    activation of the other patients scored with it, so no query can be
+    fitted toward it.
+    """
+
+    if len(chunk_matrices) != len(chunk_texts):
+        raise ValueError("chunk_matrices and chunk_texts must have equal lengths")
+    output: List[np.ndarray] = []
+    for matrix, texts in zip(chunk_matrices, chunk_texts):
+        if np.ndim(matrix) != 2 or len(texts) != np.shape(matrix)[0]:
+            raise ValueError(
+                "neural-query embedding/text cache chunk counts are inconsistent"
+            )
+        keep = informative_chunk_mask(texts)
+        # Most records have no ineligible chunk; reuse their matrix unchanged.
+        output.append(matrix if keep.all() else np.asarray(matrix)[keep])
+    return output
+
+
 def query_patient_top_chunks(
     chunk_matrices: Sequence[np.ndarray],
     queries: np.ndarray,
@@ -317,8 +366,13 @@ def query_patient_top_chunks(
     top_k: int,
     device: str,
     patient_batch_size: int,
+    eligible: Optional[Sequence[np.ndarray]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Return each query's highest-cosine chunk indices and similarities."""
+    """Return each query's highest-cosine chunk indices and similarities.
+
+    With ``eligible`` (one boolean array per patient), only eligible chunks
+    are ranked; a patient's ranks beyond its eligible chunks score ``-inf``.
+    """
 
     import torch
 
@@ -331,6 +385,16 @@ def query_patient_top_chunks(
     ):
         raise ValueError("patient_batch_size must be a positive integer")
     padded, mask = pad_chunk_embeddings(chunk_matrices)
+    if eligible is not None:
+        if len(eligible) != len(chunk_matrices):
+            raise ValueError("one eligibility mask is required per patient")
+        allowed = np.zeros_like(mask)
+        for index, (matrix, values) in enumerate(zip(chunk_matrices, eligible)):
+            values = np.asarray(values, dtype=bool).reshape(-1)
+            if len(values) != np.shape(matrix)[0]:
+                raise ValueError("an eligibility mask must cover every chunk")
+            allowed[index, : len(values)] = values
+        mask &= allowed
     query_array = np.asarray(queries, dtype=np.float32)
     if query_array.ndim != 2 or query_array.shape[1] != padded.shape[2]:
         raise ValueError("queries must have shape (queries, embedding_dim)")
@@ -377,10 +441,12 @@ def _contrastive_ngrams(
     *,
     limit: Optional[int],
     config: NeuralQueryAgenticForestConfig,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Return the selected positive-contrast terms and how many were positive."""
+
     documents = [str(value) for value in foreground] + [str(value) for value in background]
     if not foreground or not documents:
-        return []
+        return [], 0
     try:
         vectorizer = TfidfVectorizer(
             analyzer=str(config.evidence_ngram_analyzer),
@@ -413,7 +479,7 @@ def _contrastive_ngrams(
     except ValueError as exc:
         message = str(exc).lower()
         if "empty vocabulary" in message or "after pruning, no terms remain" in message:
-            return []
+            return [], 0
         raise
     foreground_mean = np.asarray(matrix[: len(foreground)].mean(axis=0)).ravel()
     background_mean = (
@@ -430,18 +496,23 @@ def _contrastive_ngrams(
             f"{len(names)} terms, exceeding configured acceptance ceiling "
             f"{int(vocabulary_cap)}; no terms were silently discarded"
         )
+    positive = sorted(
+        np.flatnonzero(contrast > 0.0),
+        key=lambda index: (-float(contrast[index]), str(names[index])),
+    )
+    top_k = config.evidence_ngram_top_k
+    selected = positive if top_k is None else positive[: int(top_k)]
     ranked = [
         {"term": str(names[int(index)]), "tfidf_contrast": float(contrast[int(index)])}
-        for index in np.argsort(contrast)[::-1]
-        if float(contrast[int(index)]) > 0.0
+        for index in selected
     ]
     if limit is not None and len(ranked) > int(limit):
         raise NeuralQueryEvidenceCapacityOverflowError(
-            "complete positive neural-query contrastive evidence contains "
+            "selected positive neural-query contrastive evidence contains "
             f"{len(ranked)} terms, exceeding configured evidence_top_ngrams "
             f"allocation {int(limit)}; no terms were silently discarded"
         )
-    return ranked
+    return ranked, len(positive)
 
 
 def _query_ranking_payload(record: Mapping[str, Any]) -> Dict[str, Any]:
@@ -486,7 +557,12 @@ def build_query_evidence(
     device: str,
     seed: int,
 ) -> List[Dict[str, Any]]:
-    """Build training-only retrieved evidence for every final query."""
+    """Build training-only retrieved evidence for every final query.
+
+    Witnesses and background chunks are chosen among informative chunks only,
+    the same chunks the queries were fitted on; a patient without one is
+    neither a witness nor background.
+    """
 
     config.validate()
     if len(queries) != len(query_records):
@@ -506,6 +582,8 @@ def build_query_evidence(
         raise ValueError(
             "neural-query embedding/text cache chunk counts are inconsistent"
         )
+    eligible = [informative_chunk_mask(texts) for texts in chunk_texts_by_position]
+    eligible_counts = [int(values.sum()) for values in eligible]
     maximum_chunks = max(max(chunk_counts), 1)
     retrieval_chunks = min(int(config.evidence_retrieval_top_k), maximum_chunks)
     configured_chunks = config.evidence_chunks_per_patient_per_query
@@ -522,11 +600,19 @@ def build_query_evidence(
         top_k=retrieval_chunks,
         device=device,
         patient_batch_size=int(config.evidence_patient_batch_size),
+        eligible=eligible,
     )
     rng = np.random.default_rng(int(seed))
     output: List[Dict[str, Any]] = []
     for query_index, record in enumerate(query_records):
-        order = np.argsort(scores[:, query_index, 0])[::-1]
+        order = np.asarray(
+            [
+                position
+                for position in np.argsort(scores[:, query_index, 0])[::-1]
+                if eligible_counts[int(position)]
+            ],
+            dtype=int,
+        )
         selected_positions = order[: int(config.evidence_top_patients)]
         remaining = order[int(config.evidence_top_patients) :]
         if config.evidence_background_patients is None:
@@ -568,7 +654,7 @@ def build_query_evidence(
             return [
                 item(int(position), rank)
                 for rank in range(
-                    min(int(chunk_counts[int(position)]), int(scores.shape[2]))
+                    min(int(eligible_counts[int(position)]), int(scores.shape[2]))
                 )
             ]
 
@@ -582,6 +668,12 @@ def build_query_evidence(
             for position in background_positions
             for item in patient_items(int(position))
         ]
+        terms, positive_terms = _contrastive_ngrams(
+            [item["text"] for item in foreground_items],
+            [item["text"] for item in background_items],
+            limit=config.evidence_top_ngrams,
+            config=config,
+        )
         output.append(
             {
                 "query_id": str(record["query_id"]),
@@ -595,14 +687,15 @@ def build_query_evidence(
                 "member_subfolds": list(record.get("member_subfolds") or []),
                 "fit_standardized_score": record.get("fit_standardized_score"),
                 **_query_ranking_payload(record),
+                "chunk_eligibility": query_chunk_eligibility(
+                    MIN_INFORMATIVE_CHUNK_ALNUM_CHARS
+                ),
                 "top_chunks": foreground_items,
                 "term_normalization": query_term_normalization(config),
-                "top_contrastive_ngrams": _contrastive_ngrams(
-                    [item["text"] for item in foreground_items],
-                    [item["text"] for item in background_items],
-                    limit=config.evidence_top_ngrams,
-                    config=config,
+                "term_selection": query_term_selection(
+                    config.evidence_ngram_top_k, positive_terms
                 ),
+                "top_contrastive_ngrams": terms,
             }
         )
     return output

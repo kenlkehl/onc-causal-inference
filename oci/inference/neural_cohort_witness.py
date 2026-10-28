@@ -268,7 +268,12 @@ def pad_chunk_embeddings(
     *,
     dtype: np.dtype = np.float32,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Pad variable-length, normalized chunk embeddings for batched retrieval."""
+    """Pad variable-length, normalized chunk embeddings for batched retrieval.
+
+    A patient without chunks is padded with one zero vector, whose similarity
+    to every query is 0; the activation functions then replace that patient's
+    activation with the mean of the others (``_impute_chunkless``).
+    """
 
     if not chunk_matrices:
         raise ValueError("At least one patient's chunk embeddings are required")
@@ -277,6 +282,13 @@ def pad_chunk_embeddings(
         for matrix in chunk_matrices
         if np.asarray(matrix).ndim == 2 and np.asarray(matrix).shape[0] > 0
     }
+    if not dimensions:
+        # Every patient lacks chunks; empty (0, d) matrices still carry d.
+        dimensions = {
+            int(np.asarray(matrix).shape[1])
+            for matrix in chunk_matrices
+            if np.asarray(matrix).ndim == 2 and np.asarray(matrix).shape[1] > 0
+        }
     if len(dimensions) != 1:
         raise ValueError("Chunk matrices must share one non-empty embedding dimension")
     dimension = dimensions.pop()
@@ -305,7 +317,11 @@ def soft_retrieval_activations(
     device: str,
     patient_batch_size: int,
 ) -> np.ndarray:
-    """Compute log-mean-exp patient activations for fixed semantic queries."""
+    """Compute log-mean-exp patient activations for fixed semantic queries.
+
+    A patient without chunks takes the mean activation of the other patients
+    scored in the same call.
+    """
 
     import torch
 
@@ -334,7 +350,11 @@ def soft_retrieval_activations(
                 temperature=float(temperature),
             )
             outputs.append(activations.detach().cpu().numpy().astype(np.float32))
-    return np.vstack(outputs)
+    values = np.vstack(outputs)
+    has_chunks = _has_chunks(chunk_matrices)
+    if has_chunks.any() and not has_chunks.all():
+        values[~has_chunks] = values[has_chunks].mean(axis=0)
+    return values
 
 
 def standardized_cohort_moments(
@@ -440,6 +460,19 @@ def fit_soft_contrast_queries(
 
     chunks = torch.as_tensor(padded, device=device)
     chunk_mask = torch.as_tensor(mask, device=device)
+    has_chunks = torch.as_tensor(_has_chunks(chunk_matrices), device=device)
+
+    def activations_for(query_tensor):
+        return _impute_chunkless(
+            _torch_soft_activations(
+                chunks,
+                chunk_mask,
+                query_tensor,
+                temperature=float(config.temperature),
+            ),
+            has_chunks,
+        )
+
     contribution_tensor = torch.as_tensor(row_contribution, device=device)
     weight_tensor = torch.as_tensor(weights, device=device)
     weight_denominator = torch.clamp(
@@ -450,6 +483,11 @@ def fit_soft_contrast_queries(
     selected_indices: List[int] = []
     if initial_queries is None:
         flat_chunks = chunks[chunk_mask]
+        # A patient without chunks is padded with one zero vector, which has
+        # no direction and cannot seed or join the initialization pool.
+        flat_chunks = flat_chunks[torch.linalg.vector_norm(flat_chunks, dim=1) > 0]
+        if not len(flat_chunks):
+            raise ValueError("query initialization requires at least one nonzero chunk")
         pool = _torch_spherical_kmeans(
             flat_chunks,
             n_clusters=min(int(config.initial_pool_size), len(flat_chunks)),
@@ -458,12 +496,7 @@ def fit_soft_contrast_queries(
             seed=int(seed),
         )
         with torch.no_grad():
-            pool_activations = _torch_soft_activations(
-                chunks,
-                chunk_mask,
-                pool,
-                temperature=float(config.temperature),
-            )
+            pool_activations = activations_for(pool)
             pool_z = _torch_standardized_moments(
                 pool_activations,
                 contribution_tensor,
@@ -500,12 +533,7 @@ def fit_soft_contrast_queries(
     for _epoch in range(int(config.epochs)):
         optimizer.zero_grad(set_to_none=True)
         normalized_queries = functional.normalize(queries, dim=1)
-        activations = _torch_soft_activations(
-            chunks,
-            chunk_mask,
-            normalized_queries,
-            temperature=float(config.temperature),
-        )
+        activations = activations_for(normalized_queries)
         z_scores = _torch_standardized_moments(
             activations,
             contribution_tensor,
@@ -570,12 +598,7 @@ def fit_soft_contrast_queries(
 
     with torch.no_grad():
         final_queries = functional.normalize(queries, dim=1)
-        final_activations = _torch_soft_activations(
-            chunks,
-            chunk_mask,
-            final_queries,
-            temperature=float(config.temperature),
-        )
+        final_activations = activations_for(final_queries)
         train_z = _torch_standardized_moments(
             final_activations,
             contribution_tensor,
@@ -825,6 +848,26 @@ def _consensus_group_rank_key(
         -float(group["median_abs_train_score"]),
         str(candidates[int(group["medoid_index"])].get("candidate_id", "")),
     )
+
+
+def _has_chunks(chunk_matrices: Sequence[np.ndarray]) -> np.ndarray:
+    return np.asarray([np.shape(matrix)[0] > 0 for matrix in chunk_matrices], dtype=bool)
+
+
+def _impute_chunkless(activations, has_chunks):
+    """Give patients without chunks the mean activation of the others.
+
+    A record with no usable text carries no information about any query. The
+    mean is neutral in every moment statistic, whereas the padded zero vector's
+    activation of 0 would be an extreme outlier that inflates every query's
+    standard error.
+    """
+    import torch
+
+    if bool(has_chunks.all()) or not bool(has_chunks.any()):
+        return activations
+    mean = activations[has_chunks].mean(dim=0, keepdim=True)
+    return torch.where(has_chunks[:, None], activations, mean)
 
 
 def _torch_soft_activations(chunks, mask, queries, *, temperature: float):
