@@ -675,11 +675,10 @@ class HTRTrainer:
         )
         dina_fields = {}
         if str(self.config.outcome_type).lower() == "binary":
-            from .stage1_dina import prepare_neural_nuisance
             from ..models import dina
 
-            dina_fields = prepare_neural_nuisance(
-                self, model, df, positions, seed=70_000 + 100 * int(outer_fold) + int(fold)
+            dina_fields = self._dina_effect_nuisance(
+                model, df, positions, seed=70_000 + 100 * int(outer_fold) + int(fold)
             )
         train_loader = self._make_text_loader(
             model,
@@ -791,6 +790,28 @@ class HTRTrainer:
                 current_lr(optimizer),
                 self._cuda_memory_summary(),
             )
+
+    def _dina_effect_nuisance(
+        self, model: EffectNet, df: pd.DataFrame, positions, *, seed: int
+    ) -> Dict[str, np.ndarray]:
+        """DINA ``a``/``nu`` fields for one effect fold's training rows.
+
+        Stage 1 cross-fits sparse bag-of-words nuisances inside the effect fold
+        and keeps them on the model for :meth:`_dina_effect_predictions`.
+        """
+
+        from .stage1_dina import prepare_neural_nuisance
+
+        return prepare_neural_nuisance(self, model, df, positions, seed=seed)
+
+    def _dina_effect_predictions(
+        self, model: EffectNet, df: pd.DataFrame, delta: np.ndarray
+    ) -> Dict[str, np.ndarray]:
+        """DINA counterfactuals and ``tau`` for ``df`` from a fitted effect network's ``delta``."""
+
+        from .stage1_dina import neural_predictions
+
+        return neural_predictions(self, model, df, delta)
 
     def _clip_and_step(self, model: nn.Module, optimizer, scheduler=None) -> None:
         clip_norm = getattr(self.config.training, "gradient_clip_norm", 0.0)

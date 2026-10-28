@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 import torch
 
-from oci.inference import standalone_htr
+from oci.inference import stage1_dina, standalone_htr
 from oci.inference.htr_trainer import HTRTrainer
 
 TINY_HTR = [
@@ -135,6 +135,10 @@ def test_settings_are_validated():
         standalone_htr.JointHTRConfig(epochs=3, effect_warmup_epochs=3)
     with pytest.raises(ValueError, match="run.method"):
         standalone_htr.StandaloneHTRConfig(method="three_stage")
+    with pytest.raises(ValueError, match="run.dina_nuisances"):
+        standalone_htr.StandaloneHTRConfig(dina_nuisances="tfidf")
+    with pytest.raises(ValueError, match="run.dina_nuisance_clip"):
+        standalone_htr.StandaloneHTRConfig(dina_nuisance_clip=0.5)
     with pytest.raises(ValueError, match="unknown joint settings"):
         _configs("joint.not_a_setting=1")
     with pytest.raises(ValueError, match="unknown stage1_htr settings"):
@@ -157,12 +161,29 @@ def test_stage1_template_settings_are_the_two_stage_defaults():
     assert config.architecture.htr_sentence_pooling == "token_attention"
 
 
-def test_two_stage_runs_stage1_htr_ensembles_without_reading_oracle_columns(
+def _checkpoint_units(out, fold=1):
+    progress = json.loads(
+        (out / "folds" / f"fold_{fold:02d}" / "stage1_checkpoints" / "checkpoint_progress.json")
+        .read_text()
+    )
+    return set(progress["units"])
+
+
+def _forbid(monkeypatch, owner, *names):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("called a function this path must not use")
+
+    for name in names:
+        monkeypatch.setattr(owner, name, forbidden)
+
+
+def test_two_stage_dina_uses_htr_arm_nuisances_without_reading_oracle_columns(
     tmp_path, monkeypatch
 ):
     dataset = _cohort(tmp_path)
     out = tmp_path / "run"
     read_columns = _record_dataset_reads(monkeypatch, dataset)
+    _forbid(monkeypatch, stage1_dina, "prepare_neural_nuisance", "neural_predictions")
     summary = _run(dataset, out)
     _assert_no_oracle_reads(read_columns)
     _assert_cross_fitted_predictions(out)
@@ -170,21 +191,48 @@ def test_two_stage_runs_stage1_htr_ensembles_without_reading_oracle_columns(
     assert {record["effect_objective"] for record in summary["per_fold"].values()} == {"dina"}
     record = json.loads((out / "folds" / "fold_01" / "fold.json").read_text())
     assert record["inner_folds"] == {"nuisance": 2, "effect": 2}
-    inner = pd.read_parquet(out / "folds" / "fold_01" / "inner_oof.parquet")
-    assert np.isfinite(inner["tau_hat_r_stage"]).all()
-    assert np.isfinite(inner["e_hat"]).all()
-    progress = json.loads(
-        (out / "folds" / "fold_01" / "stage1_checkpoints" / "checkpoint_progress.json").read_text()
-    )
+    assert record["dina_nuisances"] == "htr"
     assert {
-        "htr/nuisance/fold_001",
-        "htr/nuisance/fold_002",
+        "htr/arm_nuisance/fold_001",
+        "htr/arm_nuisance/fold_002",
         "assembly/nuisance_ensemble",
         "htr/effect/dina/fold_001",
         "htr/effect/dina/fold_002",
-    } <= set(progress["units"])
+    } <= _checkpoint_units(out)
+    assert not any(unit.startswith("htr/nuisance/") for unit in _checkpoint_units(out))
+    inner = pd.read_parquet(out / "folds" / "fold_01" / "inner_oof.parquet")
+    for column in ("e_hat", "mu0_hat", "mu1_hat", "m_hat", "tau_hat_r_stage"):
+        assert np.isfinite(inner[column]).all(), column
+    assert np.allclose(
+        inner["m_hat"], inner["e_hat"] * inner["mu1_hat"] + (1 - inner["e_hat"]) * inner["mu0_hat"]
+    )
+    run = json.loads((out / "run.json").read_text())
+    assert run["identity"]["config"]["run"]["dina_nuisances"] == "htr"
+    assert run["identity"]["config"]["run"]["dina_nuisance_clip"] == 0.01
     report = standalone_htr.evaluate_against_oracle(out)
     assert report["cate"]["rows"] == 48
+
+
+def test_two_stage_bow_dina_nuisances_run_stage1_unchanged(tmp_path, monkeypatch):
+    dataset = _cohort(tmp_path)
+    out = tmp_path / "run"
+    calls = []
+    original = stage1_dina.prepare_neural_nuisance
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(stage1_dina, "prepare_neural_nuisance", counting)
+    _run(dataset, out, "run.dina_nuisances=bow")
+    _assert_cross_fitted_predictions(out)
+    assert len(calls) == 4  # one bag-of-words nuisance fit per effect fold
+    assert {"htr/nuisance/fold_001", "htr/nuisance/fold_002"} <= _checkpoint_units(out)
+    record = json.loads((out / "folds" / "fold_01" / "fold.json").read_text())
+    assert record["dina_nuisances"] == "bow"
+    # Stage 1's value is left out of the identity, as before the setting existed.
+    run = json.loads((out / "run.json").read_text())
+    assert not {"dina_nuisances", "dina_nuisance_clip"} & set(run["identity"]["config"]["run"])
 
 
 def test_two_stage_fold_resumes_from_inner_network_checkpoints(tmp_path, monkeypatch):
@@ -195,17 +243,15 @@ def test_two_stage_fold_resumes_from_inner_network_checkpoints(tmp_path, monkeyp
     # Drop the finished-fold markers but keep the Stage 1 checkpoints.
     for fold_dir in (out / "folds").iterdir():
         (fold_dir / "fold.json").unlink()
-
-    def no_training(*args, **kwargs):
-        raise AssertionError("a checkpointed inner network was retrained")
-
-    monkeypatch.setattr(HTRTrainer, "_train_nuisance_model", no_training)
-    monkeypatch.setattr(HTRTrainer, "_train_effect_model", no_training)
+    _forbid(monkeypatch, standalone_htr, "build_arm_nuisance_net")
+    _forbid(monkeypatch, HTRTrainer, "_train_nuisance_model", "_train_effect_model")
     _run(dataset, out)
     resumed = pd.read_parquet(out / "predictions.parquet")
     pd.testing.assert_frame_equal(first, resumed)
     record = json.loads((out / "folds" / "fold_01" / "fold.json").read_text())
-    assert "htr/effect/dina/fold_002" in record["reused_checkpoint_units"]
+    assert {"htr/arm_nuisance/fold_002", "htr/effect/dina/fold_002"} <= set(
+        record["reused_checkpoint_units"]
+    )
 
 
 def test_joint_cross_fits_every_row_without_reading_oracle_columns(tmp_path, monkeypatch):

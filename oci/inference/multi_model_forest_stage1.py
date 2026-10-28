@@ -604,11 +604,10 @@ class MultiModelForestStage1HTRProvider(HTREvidenceProvider):
                     raw_effect = runner._predict_effect_model(model, heldout)
                     raw_test = runner._predict_effect_model(model, test_df)
                     if effect_objective == "dina":
-                        from .stage1_dina import neural_predictions
                         from ..models import dina
 
-                        dp = neural_predictions(runner, model, heldout, raw_effect)
-                        dt = neural_predictions(runner, model, test_df, raw_test)
+                        dp = runner._dina_effect_predictions(model, heldout, raw_effect)
+                        dt = runner._dina_effect_predictions(model, test_df, raw_test)
                         tau_hat, test_tau, tau_logit_modifier = dp["tau"], dt["tau"], dp["delta"]
                         heldout_effect_loss = dina.loss(
                             y[heldout_pos], t[heldout_pos], dp["a"], dp["nu"], dp["delta"]

@@ -8,37 +8,57 @@ own `tau(x)` predictions recover the treatment effect?
 
 Two methods are available (`--method`, default `two_stage`).
 
-## `two_stage`: Stage 1's cross-fitted HTR ensembles
+## `two_stage`: cross-fitted HTR nuisance and effect ensembles
 
 On each outer training fold, the Stage 1 `htr_neural` lane's training runs
-unchanged (`MultiModelForestStage1HTRProvider`), with the Stage 1 template's
+through `MultiModelForestStage1HTRProvider`, with the Stage 1 template's
 `architecture.agentic_attention_variable_forest` settings:
 
-1. **Nuisances.** `nuisance_folds` HTR nuisance networks, each with a
-   propensity and an outcome head, are fitted on inner folds. Each network's
-   out-of-fold predictions are calibrated out of fold
-   (`nuisance_calibration`).
+1. **Nuisances.** `nuisance_folds` HTR nuisance networks are fitted on Stage
+   1's inner nuisance folds. Each network's out-of-fold predictions are
+   calibrated out of fold (`nuisance_calibration`).
 2. **Effects.** `effect_folds` HTR effect networks are fitted on inner folds
    with the Stage 1 effect objective: `dina` for a binary outcome (required),
    `pseudo_outcome_mse` by default for a continuous one (`squared_r_loss` also
-   available).
-   - A DINA network learns the treatment's log-odds-ratio modifier `delta(x)`.
-     Its loss uses sparse bag-of-words logistic nuisances that Stage 1
-     cross-fits inside each effect fold (`stage1_dina.prepare_neural_nuisance`),
-     and its `tau = mu1 - mu0` (risk difference) uses the same nuisances. The
-     HTR nuisance networks only set which rows train the effect
-     (`r_stage_min_propensity`, `r_stage_max_propensity`; every row by
-     default).
-   - A continuous-outcome effect network fits the pseudo-outcome
-     `(Y - m) / (T - e)` (or the R-loss) from the HTR nuisance networks'
-     out-of-fold predictions.
+   available). A continuous-outcome effect network fits the pseudo-outcome
+   `(Y - m) / (T - e)` (or the R-loss) from the nuisance networks'
+   out-of-fold predictions.
 3. **Held-out predictions.** For the outer held-out rows, `tau` is the mean of
    the effect networks' predictions, and `e` and `m` are the means of the
    calibrated nuisance networks' predictions.
 
+### DINA nuisances
+
+A DINA effect network learns the treatment's log-odds-ratio modifier
+`delta(x)`. Its loss and its `tau = mu1 - mu0` (risk difference) need the
+nuisances `a(x)` and `nu(x)`, which are built from `e`, `mu0`, and `mu1`.
+`run.dina_nuisances` (`--dina-nuisances`) chooses where they come from:
+
+- **`htr` (default).** The nuisance networks have a propensity head and one
+  outcome head per arm; each row trains only the outcome head of the arm it
+  received. The propensity is calibrated out of fold on every row, `mu0` on
+  control rows, and `mu1` on treated rows, and `m = e mu1 + (1 - e) mu0`. The
+  effect networks train on the outer training rows' out-of-fold `e`, `mu0`,
+  and `mu1`, and the held-out `tau` uses the nuisance ensemble's held-out
+  means. These probabilities are clipped to
+  `[dina_nuisance_clip, 1 - dina_nuisance_clip]` (default 0.01) before `a` and
+  `nu` are formed, because `nu` is a logit and isotonic calibration returns
+  exact 0 and 1 in pure tail blocks. The nuisances are cross-fitted once, on
+  the nuisance folds: an outer training row's nuisances never come from a
+  network that trained on it, but they may come from one that trained on rows
+  of its own effect fold. Outer held-out rows enter no network.
+- **`bow`.** Stage 1 unchanged: sparse bag-of-words logistic nuisances
+  cross-fitted inside each effect fold (`stage1_dina.prepare_neural_nuisance`)
+  set the loss and `tau`. The nuisance networks are Stage 1's (propensity and
+  marginal outcome heads) and only set which rows train the effect
+  (`r_stage_min_propensity`, `r_stage_max_propensity`; every row by default)
+  and the held-out `e` and `m`.
+
 Attention evidence, which only Stage 2 reads, is not computed. Every inner
 network is a Stage 1 checkpoint unit under
-`folds/fold_KK/stage1_checkpoints/`, so an interrupted fold resumes at its next
+`folds/fold_KK/stage1_checkpoints/` (`htr/arm_nuisance/fold_NNN` or
+`htr/nuisance/fold_NNN`, `assembly/nuisance_ensemble`, and
+`htr/effect/<objective>/fold_NNN`), so an interrupted fold resumes at its next
 network. With K inner folds, each outer fold trains 2K networks.
 
 ## `joint`: one network with three heads
@@ -90,12 +110,17 @@ once, by models that did not train on it. From the held-out `e`, `m`, and `tau`:
 ```bash
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 
-# Benchmark cell S0/n5000/seed101 with Stage 1's HTR ensembles (5 inner folds):
-# five outer folds at once, three workers on cuda:0 and two on cuda:1
+# Benchmark cell S0/n5000/seed101 with cross-fitted HTR ensembles (5 inner folds,
+# DINA on HTR nuisances): five outer folds at once, three workers on cuda:0 and
+# two on cuda:1
 python scripts/run_standalone_htr.py run \
   --dataset BENCH/S0/n5000/seed101/data/dataset.parquet \
   --out OUT --seed 101 --inner-folds 5 \
   --devices cuda:0,cuda:1 --jobs-per-device 3 --evaluate
+
+# Stage 1's DINA nuisances (bag-of-words) instead
+python scripts/run_standalone_htr.py run --dataset DATA.parquet --out OUT --seed 101 \
+  --dina-nuisances bow
 
 # The joint network on the same folds as a finished workflow run
 python scripts/run_standalone_htr.py run --method joint --dataset DATA.parquet --out OUT \
@@ -126,7 +151,7 @@ section, and its `training` section. `--htr-model` sets `htr_sentence_model`
 
 | Prefix | Settings |
 |---|---|
-| `run.` | `method` (`--method`), `outer_folds` (`--folds`, default 5), `seed` (`--seed`, default 42), `aipw_clip` (default 0.02) |
+| `run.` | `method` (`--method`), `outer_folds` (`--folds`, default 5), `seed` (`--seed`, default 42), `aipw_clip` (default 0.02), `dina_nuisances` (`--dina-nuisances`: `htr`, the default, or `bow`), `dina_nuisance_clip` (default 0.01) |
 | `architecture.` | The `htr_*` fields and `feature_extractor_type` |
 | `training.` | Learning rate, schedule, batch sizes, weight decay, gradient clipping, data-loader workers, `alpha_propensity` |
 | `stage1_htr.` | `two_stage`: the `agentic_attention_variable_forest` fields, including `nuisance_folds` and `effect_folds` (`--inner-folds`, template 5), `nuisance_epochs` and `effect_epochs` (`--epochs`, template 30), `nuisance_calibration`, `nuisance_label_smoothing`, `nuisance_weight_decay`, `e_clip`, `effect_objective`, and `r_stage_*_propensity` |
@@ -149,8 +174,8 @@ section, and its `training` section. `--htr-model` sets `htr_sentence_model`
 |---|---|
 | `run.json` | Dataset path and SHA-256, method, resolved settings, and the split fingerprints |
 | `folds/fold_KK/predictions.parquet` | The fold's held-out predictions |
-| `folds/fold_KK/fold.json` | Fold identity and prediction hash, row counts; `two_stage`: effect objective, inner fold counts, reused checkpoint units; `joint`: selected epoch and calibration |
-| `folds/fold_KK/inner_oof.parquet` | `two_stage`: the outer training rows' inner out-of-fold `e_hat`, `m_hat`, residuals, and `tau_hat_r_stage` (with `tau_logit_modifier` for DINA) |
+| `folds/fold_KK/fold.json` | Fold identity and prediction hash, row counts; `two_stage`: effect objective, DINA nuisance source, inner fold counts, reused checkpoint units; `joint`: selected epoch and calibration |
+| `folds/fold_KK/inner_oof.parquet` | `two_stage`: the outer training rows' inner out-of-fold `e_hat`, `m_hat` (and, with HTR DINA nuisances, `mu0_hat`, `mu1_hat`, and the raw predictions), residuals, and `tau_hat_r_stage` (with `tau_logit_modifier` for DINA) |
 | `folds/fold_KK/stage1_checkpoints/` | `two_stage`: one Stage 1 checkpoint unit per inner network, and `checkpoint_progress.json` |
 | `folds/fold_KK/history.json` | `joint`: per-epoch training means and validation metrics |
 | `predictions.parquet` | Every row's held-out `propensity`, `m_hat`, `estimated_cate`, `mu0`, `mu1`, `y_residual`, `t_residual`, and `aipw_score` (`joint` adds `propensity_raw` and `m_hat_raw`) |

@@ -74,6 +74,12 @@ class _FakeHTRRunner:
         row_ids = frame["_oci_row_id"].to_numpy(dtype=float)
         return 0.2 + (row_ids % 5) / 10.0, 0.3 + (row_ids % 4) / 10.0
 
+    def _dina_effect_predictions(self, model, frame, delta):
+        # HTRTrainer's default hook, so tests can patch stage1_dina.neural_predictions.
+        from oci.inference import stage1_dina
+
+        return stage1_dina.neural_predictions(self, model, frame, delta)
+
     def _train_effect_model(self, _model, _df, _fit_pos, *_args, fold, **_kwargs):
         self.effect_calls.append(int(fold))
         if self.interrupt_stage == "effect" and int(fold) == self.interrupt_fold:
