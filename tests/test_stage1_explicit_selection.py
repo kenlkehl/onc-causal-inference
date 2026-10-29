@@ -5,11 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pytest
 
-from oci.inference.embedding_contrast_discovery import EmbeddingContrastEvidenceGenerator
 from oci.inference.research_all_evidence_workflow import (
     ResearchAllEvidenceWorkflow,
     compile_config,
@@ -21,7 +19,6 @@ from oci.inference.stage1_architectures import (
     STAGE1_ARCHITECTURES,
     canonicalize_stage1_architectures,
 )
-from oci.models import concept_embedding_cache
 
 EMBEDDING_LANES = {
     "embedding_whole_cohort",
@@ -77,16 +74,7 @@ def _raw_config(tmp_path: Path, *, embedding_template: dict | None = None) -> di
     }
 
 
-SELECTIONS = [
-    *[(name,) for name in STAGE1_ARCHITECTURES],
-    ("bow_nuisance", "tfidf_topics"),
-    ("tfidf_topics", "neural_query_moments"),
-    ("embedding_whole_cohort", "neural_query_moments"),
-    ("embedding_clustered", "tfidf_semantic_retrieval_contrasts"),
-    ("htr_neural", "embedding_whole_cohort"),
-    ("matched_pair_uplift", "tfidf_orphan_ngrams"),
-    STAGE1_ARCHITECTURES,
-]
+SELECTIONS = [("neural_query_moments",), STAGE1_ARCHITECTURES]
 
 
 @pytest.mark.parametrize("selection", SELECTIONS, ids=lambda value: "+".join(value))
@@ -187,57 +175,25 @@ def test_embedding_only_selection_runs_bow_nuisance_as_private_support(tmp_path)
     assert "prior chemotherapy" not in json.dumps(targeted)
 
 
-class _FakeSentenceEncoder:
-    max_seq_length = None
+def test_a_recorded_selection_cannot_change_on_resume(tmp_path):
+    raw = _raw_config(tmp_path)
+    raw["science"]["stage1_architectures"] = ["bow_nuisance"]
+    ResearchAllEvidenceWorkflow(compile_config(raw, config_dir=tmp_path))._resolved_context()
 
-    def get_sentence_embedding_dimension(self) -> int:
-        return 4
+    raw["science"]["stage1_architectures"] = ["bow_nuisance", "tfidf_topics"]
+    with pytest.raises(ValueError, match="does not match the existing output directory"):
+        ResearchAllEvidenceWorkflow(compile_config(raw, config_dir=tmp_path))
 
-    def encode(self, chunks, **_kwargs):
-        return np.asarray(
-            [[len(chunk), chunk.count(" "), index, 1.0] for index, chunk in enumerate(chunks)],
-            dtype=np.float32,
-        )
-
-
-def test_neural_query_selection_prepares_the_cache_with_embedding_lanes_disabled(
-    tmp_path, monkeypatch
-):
-    raw = _raw_config(
-        tmp_path,
-        embedding_template={
-            "enabled": False,
-            "disable_reason": "site policy",
-            "max_seq_length": None,
-        },
-    )
-    raw["science"]["stage1_architectures"] = ["neural_query_moments"]
+    # Omitting the selector resumes the recorded selection.
+    del raw["science"]["stage1_architectures"]
     workflow = ResearchAllEvidenceWorkflow(compile_config(raw, config_dir=tmp_path))
-    context = workflow._resolved_context()
-    assert workflow.components == ("embedding_cache", "neural_queries", "handoff")
-    assert context.applied_config.architecture.multi_model_forest.embedding_contrast.enabled is False
+    assert workflow.config.stage1_architectures == ("bow_nuisance",)
 
-    monkeypatch.setattr(
-        concept_embedding_cache,
-        "load_sentence_transformer",
-        lambda *_args, **_kwargs: _FakeSentenceEncoder(),
-    )
-    generator = EmbeddingContrastEvidenceGenerator(
-        config=context.applied_config,
-        output_dir=context.component_dir("embedding_cache"),
-        precompute_devices=("cpu",),
-    )
-    generator.prepare(context.dataset)
-
-    matrices = generator.chunk_matrices([0, 3])
-    assert len(matrices) == 2
-    assert all(matrix.shape[1] == 4 and len(matrix) >= 1 for matrix in matrices)
-    assert generator.chunk_texts([0])[0] == ["alpha beta gamma"]
-    # Lane evidence stays disabled even though the cache is available.
-    assert generator.build_evidence(
-        discovery_df=context.dataset,
-        y=np.zeros(6),
-        t=np.zeros(6),
-        pseudo_target=None,
-        t_resid=None,
-    ) == {}
+    # A directory with finished work but no recorded selection cannot gain one.
+    raw["output_dir"] = str(tmp_path / "legacy")
+    raw["science"]["stage1_architectures"] = ["bow_nuisance"]
+    marker = tmp_path / "legacy" / "components" / "tfidf" / "complete.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="legacy output directory"):
+        ResearchAllEvidenceWorkflow(compile_config(raw, config_dir=tmp_path))

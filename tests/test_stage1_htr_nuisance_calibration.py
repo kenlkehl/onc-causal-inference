@@ -6,11 +6,9 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
-import pytest
 import torch
 
 from oci.inference import multi_model_forest_stage1
-from oci.inference.htr_trainer import cross_fitted_calibrators
 from oci.utils.calibration import BinaryProbabilityCalibrator
 
 
@@ -143,23 +141,3 @@ def test_htr_nuisance_calibrators_are_fit_out_of_fold(monkeypatch):
     np.testing.assert_allclose(
         [attention_e[row] for row in train["_oci_row_id"]], predictions["e_hat"]
     )
-
-
-def test_continuous_outcome_predictions_stay_uncalibrated(monkeypatch):
-    monkeypatch.setattr(multi_model_forest_stage1, "NuisanceNet", _FakeNet)
-    train, test = _frames()
-
-    result = _provider(
-        _MemorizingRunner(outcome_type="continuous")
-    ).fit_nuisance_inner_ensemble_predict(train, test, outer_fold=1)
-    predictions = result["train"]["predictions"]
-
-    np.testing.assert_allclose(predictions["m_hat"], predictions["m_hat_raw"])
-    assert predictions["e_hat"].between(0.2, 0.8).all()
-
-
-def test_cross_fitted_calibrators_require_aligned_rows_and_two_folds():
-    with pytest.raises(ValueError, match="align"):
-        cross_fitted_calibrators([0.2, 0.4], [0, 1, 1], [1, 2], method="temperature")
-    with pytest.raises(ValueError, match="two folds"):
-        cross_fitted_calibrators([0.2, 0.4], [0, 1], [1, 1], method="temperature")

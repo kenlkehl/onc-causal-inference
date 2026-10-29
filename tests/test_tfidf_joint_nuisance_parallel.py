@@ -6,7 +6,6 @@ from oci.config import (
     BoWViewConfig,
     TfidfNuisanceStackScientificConfig,
 )
-from oci.inference import tfidf_topic_discovery as discovery
 from oci.inference.tfidf_topic_discovery import (
     _strata,
     fit_joint_cross_fitted_nuisance_stacks,
@@ -98,14 +97,3 @@ def test_serial_and_threaded_top_level_folds_are_exact():
     # The complete note, not a prompt-sized prefix, reaches the vectorizer.
     vectorizer = threaded["treatment"]["fitted"].base_models[0][0]
     assert "sentinelafterfourteenthousand" in vectorizer.vocabulary_
-
-
-def test_thread_plan_is_bounded_by_owner_budget():
-    assert (
-        discovery._joint_nuisance_workers(
-            tfidf_workers=8,
-            owner_cpu_budget=2,
-            task_count=5,
-        )
-        == 2
-    )

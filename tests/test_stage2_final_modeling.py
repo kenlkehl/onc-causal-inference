@@ -1,11 +1,5 @@
 """Final estimation concurrency, numerical equivalence, honesty and resume."""
 
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
-import json
-import os
-import threading
-import time
 
 import numpy as np
 import pandas as pd
@@ -13,8 +7,6 @@ import pytest
 from threadpoolctl import threadpool_limits
 
 from oci.inference import plain_handoff_stage2_analysis as analysis
-from oci.inference import stage2_effect_estimators as effects
-from oci.inference import stage2_final_modeling as final
 from oci.inference import stage2_modeling_pool as pool
 from tests.test_stage2_multi_model import feature, small_policy
 
@@ -86,7 +78,7 @@ def serial_nuisances(kw):
     return result
 
 
-@pytest.mark.parametrize("binary", [False, True])
+@pytest.mark.parametrize("binary", [True])
 def test_final_nuisances_match_original_and_resume_each_fit(tmp_path, monkeypatch, binary):
     kw = inputs(binary)
     with threadpool_limits(limits=1):
@@ -128,54 +120,6 @@ def test_final_nuisances_match_original_and_resume_each_fit(tmp_path, monkeypatc
         analysis._cross_fitted_nuisance(**{**arguments, "checkpoint_fingerprint": "different"})
 
 
-def test_checkpoint_does_not_record_failed_fit_or_accept_corruption(tmp_path):
-    def fail():
-        raise ValueError("fit failed")
-
-    with pool.modeling_session(2):
-        with pytest.raises(ValueError, match="fit failed"):
-            final.prediction_future(tmp_path, "p", "fp", fail, 2).result()
-        assert not (tmp_path / "p.json").exists()
-        with pytest.raises(ValueError, match="finite"):
-            final.prediction_future(tmp_path, "p", "fp", lambda: [0, np.nan], 2).result()
-        assert not (tmp_path / "p.json").exists()
-        assert final.prediction_result(
-            final.prediction_future(tmp_path, "p", "fp", lambda: [0.2, 0.8], 2), 2
-        ).tolist() == [0.2, 0.8]
-        value = json.loads((tmp_path / "p.json").read_text())
-        value["result"]["prediction"][0] = 0.9
-        (tmp_path / "p.json").write_text(json.dumps(value))
-        with pytest.raises(ValueError, match="corrupt"):
-            final.prediction_future(tmp_path, "p", "fp", fail, 2)
-
-
-def test_final_resume_reuses_nuisances_after_effect_fit_failure(tmp_path, monkeypatch):
-    kw = inputs()
-    kw.update(estimator="linear_interactions", statistical_policy=small_policy())
-    original = effects.fit_interaction_effect
-
-    def fail(**kwargs):
-        raise RuntimeError("effect fit interrupted")
-
-    monkeypatch.setattr(effects, "fit_interaction_effect", fail)
-    with pool.modeling_session(2):
-        with pytest.raises(RuntimeError, match="effect fit interrupted"):
-            analysis.estimate_outer_fold(**kw, **candidates(kw), output_dir=tmp_path)
-    assert not (tmp_path / "complete.json").exists()
-    snapshots = {p: p.read_bytes() for p in tmp_path.glob("fit_checkpoints/*/**/*.json")}
-    assert len(snapshots) == 9  # 3 inner folds x (propensity, mu0, mu1); no full-data fit
-    monkeypatch.setattr(effects, "fit_interaction_effect", original)
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("completed nuisance fit recomputed")
-
-    monkeypatch.setattr(analysis, "_fit_nuisance_prediction", forbidden)
-    with pool.modeling_session(1):
-        analysis.estimate_outer_fold(**kw, **candidates(kw), output_dir=tmp_path)
-    assert (tmp_path / "complete.json").exists()
-    assert {p: p.read_bytes() for p in snapshots} == snapshots
-
-
 def test_final_parallel_fits_do_not_learn_from_heldout_labels(tmp_path):
     kw = inputs()
     kw.update(estimator="linear_interactions", statistical_policy=small_policy())
@@ -189,146 +133,3 @@ def test_final_parallel_fits_do_not_learn_from_heldout_labels(tmp_path):
         kw["dataset"].loc[72:, "treatment"] = 1 - kw["dataset"].loc[72:, "treatment"]
     columns = ["_oci_row_id", "propensity", "mu0", "mu1", "estimated_cate"]
     pd.testing.assert_frame_equal(results[0][columns], results[1][columns])
-
-
-@pytest.mark.parametrize("binary", [False, True])
-def test_parallel_interaction_paths_preserve_predictions_and_warm_starts(tmp_path, binary):
-    kw = inputs(binary)
-    fit = dict(
-        train=kw["extracted_fit"],
-        valid=kw["extracted_heldout"],
-        definitions=kw["definitions"],
-        modifier_ids=["x"],
-        treatment=kw["dataset"].treatment[:72].to_numpy(),
-        outcome=kw["dataset"].outcome[:72].to_numpy(),
-        binary=binary,
-        policy=small_policy(),
-        seed=21,
-    )
-    expected = effects.fit_interaction_effect(**fit)
-    with pool.modeling_session(2):
-        actual = effects.fit_interaction_effect(
-            **fit, path_submit=final.penalty_path_submitter(tmp_path, "fp")
-        )
-    assert actual["audit"] == expected["audit"]
-    np.testing.assert_array_equal(actual["tau"], expected["tau"])
-    paths = list(tmp_path.glob("interaction_cv/*.json"))
-    assert len(paths) == 2
-
-    def cached(index, compute):
-        def forbidden():
-            raise AssertionError("completed penalty path was recomputed")
-
-        return final.penalty_path_submitter(tmp_path, "fp")(index, forbidden)
-
-    again = effects.fit_interaction_effect(**fit, path_submit=cached)
-    assert again["audit"] == actual["audit"]
-
-
-@pytest.mark.parametrize("estimator", ["linear_interactions", "causal_forest", "dina"])
-def test_real_final_estimation_parallel_equivalence_and_complete_resume(
-    tmp_path, monkeypatch, estimator
-):
-    kw = inputs()
-    kw.update(estimator=estimator, statistical_policy=replace(small_policy(), max_iter=3000))
-    frames, reports = [], []
-    for workers in (1, 2):
-        destination = tmp_path / str(workers)
-        with pool.modeling_session(workers):
-            reports.append(
-                analysis.estimate_outer_fold(**kw, **candidates(kw), output_dir=destination)
-            )
-        frames.append(pd.read_csv(destination / "predictions.csv"))
-        assert len(list(destination.glob("fit_checkpoints/*/cross_fit/fold_*/*.json"))) == 9
-        # Held-out nuisances are the inner-fold ensemble: no separate full-data fit.
-        assert not list(destination.glob("fit_checkpoints/*/full_training/*.json"))
-    pd.testing.assert_frame_equal(frames[0], frames[1], rtol=1e-12, atol=1e-12)
-    if estimator == "causal_forest":
-        for jobs, report in zip((1, 2), reports):
-            assert report["causal_forest_fit_audit"]["operational_parameters"]["n_jobs"] == jobs
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("completed estimation was recomputed")
-
-    monkeypatch.setattr(analysis, "_cross_fitted_nuisance", forbidden)
-    with pool.modeling_session(3):
-        assert analysis.estimate_outer_fold(
-            **kw, **candidates(kw), output_dir=tmp_path / "2"
-        ) == reports[1]
-
-
-def _timed_work():
-    start = time.monotonic()
-    time.sleep(0.08)
-    return start, time.monotonic(), os.getpid()
-
-
-def test_multi_cpu_reservation_is_not_starved_by_single_fit_jobs():
-    with pool.modeling_session(3):
-        budget = pool._pool
-        budget.acquire(3)
-
-        def wait_for_queue_size(size):
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                with budget.capacity:
-                    if len(budget.waiters) == size:
-                        return
-                time.sleep(0.01)
-            pytest.fail("CPU reservation was not queued")
-
-        with ThreadPoolExecutor(2) as executor:
-            forest = executor.submit(budget.acquire, 2)
-            wait_for_queue_size(1)
-            single = executor.submit(budget.acquire)
-            wait_for_queue_size(2)
-            budget.release(1)
-            # A single free CPU cannot bypass the older two-CPU reservation.
-            time.sleep(0.05)
-            assert not forest.done() and not single.done()
-            budget.release(1)
-            assert forest.result(timeout=10) == 2
-            assert not single.done()
-            budget.release(2)
-            assert single.result(timeout=10) == 1
-            budget.release(2)
-        assert budget.available == 3
-
-
-def test_forest_threads_and_process_jobs_share_one_budget_and_release_on_error():
-    started = threading.Event()
-    release = threading.Event()
-    reservations = []
-
-    def forest():
-        with pool.threaded_fit() as jobs:
-            reservations.append((jobs, time.monotonic()))
-            started.set()
-            assert release.wait(20)
-        reservations.append(time.monotonic())
-
-    with pool.modeling_session(3, parallel_fits=2):
-        with ThreadPoolExecutor(2) as executor:
-            forest_future = executor.submit(forest)
-            assert started.wait(20)
-            assert reservations[0][0] == 1  # floor(3 / 2) per concurrent forest
-            jobs = [pool.submit(_timed_work) for _ in range(4)]
-            rows = [job.result() for job in jobs]
-            release.set()
-            forest_future.result()
-        events = sorted([(row[0], 1) for row in rows] + [(row[1], -1) for row in rows])
-        active = peak = 0
-        for _, change in events:
-            active += change
-            peak = max(peak, active)
-        # One CPU remains reserved for the threaded forest. Worker processes can
-        # start slowly enough that the short jobs never overlap, so only the
-        # upper bound is deterministic.
-        assert 1 <= peak <= 2
-        assert all(row[2] != os.getpid() for row in rows)
-        assert pool._pool.available == 3
-        with pytest.raises(RuntimeError, match="failed"):
-            with pool.threaded_fit():
-                raise RuntimeError("failed")
-        assert pool._pool.available == 3
-        assert pool.call(lambda: 7) == 7

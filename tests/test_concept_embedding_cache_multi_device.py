@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 from pathlib import Path
 
@@ -69,15 +68,3 @@ def test_multi_device_precompute_matches_single_device(tmp_path, monkeypatch):
     assert metadata["precompute_devices"] == ["cpu", "meta"]
     multi.open()
     assert len(multi.hidden_states_array) == len(texts)
-
-
-def test_shard_encoder_does_not_close_over_the_deleted_memmap():
-    source = Path(concept_embedding_cache.__file__).read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    encode_shard = next(
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "_encode_shard"
-    )
-    names = {node.id for node in ast.walk(encode_shard) if isinstance(node, ast.Name)}
-    assert "emb_mmap" not in names

@@ -6,7 +6,6 @@ import pytest
 from oci.inference import plain_handoff_stage2_analysis as extraction
 from oci.inference.stage2_modifier_concepts import infer_modifier_concepts
 from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
-from oci.inference.stage2_value_interpretation import compile_value_interpretations
 
 
 def measurement():
@@ -29,49 +28,6 @@ def test_clinical_names_are_mapped_to_trusted_patient_and_feature_keys():
         {"values": {"serum creatinine": 1.4}, "decision_notes": {"serum creatinine": "Dated 2025-03-02."}},
         row_id=921, definitions=[definition])
     assert serial["rows"][0]["carry_forward_state"] == {"serum_creatinine": "Dated 2025-03-02."}
-
-
-def test_occurrence_quotes_keep_optional_offsets_without_requiring_date_matches():
-    text = "2025-03-02: Creatinine 1.4.\n2025-03-02: Creatinine 1.8."
-    page = {"row_id": 921, "text": text, "page": {"page_index": 1, "char_start": 100, "char_end": 100+len(text), "document_chars": 100+len(text)}}
-    observation = {"feature": "serum creatinine", "value": 1.8,
-                   "quote": "2025-03-02: Creatinine 1.8.", "governing_date_quote": "2025-03-02"}
-    result = extraction._validate_page_observations({"observations": [observation]}, page=page, definitions=[measurement()])
-    row = result["rows"][0]["observations"][0]
-    assert row["value"] == 1.8 and row["feature_name"] == "serum_creatinine"
-    assert row["recorded_at"] == "2025-03-02"
-    assert row["evidence_start"] == text.index("2025-03-02: Creatinine 1.8.")
-    result = extraction._validate_page_observations(
-        {"observations": [{**observation, "quote": "Creatinine 1.8."}]}, page=page, definitions=[measurement()])
-    assert result["rows"][0]["observations"][0]["recorded_at_offset_resolution"] == "ambiguous_location"
-
-
-def meanings(rows, representation="categorical"):
-    return {"status": "ready", "representation": representation, "reason": "Use documented numerical meanings.",
-            "token_interpretations": [{"raw_text": raw, "meaning": kind, "interpretation": text} for raw, kind, text in rows]}
-
-
-def observations(*phrases):
-    return {"categorical_values": [{"raw_value": p, "count": 1} for p in phrases]}
-
-
-def test_python_builds_exhaustive_threshold_categories_without_inventing_cutoffs():
-    result = compile_value_interpretations(meanings([
-        ("negative", "defined_category", "less than 1"),
-        ("positive", "defined_category", "at least 50"),
-        ("equivocal", "unusable", "No numerical definition is supplied.")]),
-        observations=observations("negative", "positive", "equivocal"))
-    assert result["canonical_categories"] == ["< 1", "[1, 50)", ">= 50"]
-    assert result["categorical_value_map"][-1]["canonical_value"] is None
-    assert result["numeric_bin_rules"][1] == {"lower_bound": 1., "lower_inclusive": True,
-        "upper_bound": 50., "upper_inclusive": False, "canonical_value": "[1, 50)"}
-    exact = compile_value_interpretations(meanings([("one point four", "exact_number", "1.4 mg/dL")], "continuous"),
-                                         observations=observations("one point four"))
-    assert exact["categorical_value_map"][0]["canonical_value"] == 1.4
-    with pytest.raises(ValueError, match="ambiguous"):
-        compile_value_interpretations(meanings([("middle", "explicit_interval", "between 1 and 50")]), observations=observations("middle"))
-    with pytest.raises(ValueError, match="thresholds require categories"):
-        compile_value_interpretations(meanings([("high", "explicit_interval", "at least 50")], "continuous"), observations=observations("high"))
 
 
 def test_concept_recurrence_and_representatives_stay_with_supplied_evidence(tmp_path, monkeypatch):

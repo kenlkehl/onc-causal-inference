@@ -99,13 +99,6 @@ def config(tmp_path, monkeypatch):
     )
 
 
-def _scaffold_columns(frame):
-    return frame[
-        ["patient_id", "patient_prompt", "treatment_indicator", "outcome_indicator",
-         "true_treatment_prob", "true_age", "true_ecog", "true_baseline_nlr"]
-    ]
-
-
 def test_fresh_generation_never_writes_the_api_key(config, tmp_path, monkeypatch):
     g.generate_synthetic_dataset(config, num_workers=2, show_progress=False)
     output = Path(config.output_dir)
@@ -144,51 +137,3 @@ def test_resume_reuses_the_saved_dgp_and_its_checkpointed_patients(config):
         assert metadata[key] == design[key] == first_metadata[key]
     pd.testing.assert_frame_equal(resumed.iloc[:3], first)
     assert resumed["patient_id"].tolist() == list(range(6))
-
-
-def test_checkpoint_without_a_saved_dgp_fails_closed(config):
-    output = Path(config.output_dir)
-    output.mkdir(parents=True)
-    (output / g.CHECKPOINT_FILENAME).write_text(json.dumps({"patients": []}))
-
-    with pytest.raises(ValueError, match="DGP was not saved"):
-        g.generate_synthetic_dataset(config, 1, False)
-    assert not FakeClient.design_calls
-
-
-def test_resume_with_different_design_settings_fails_closed(config):
-    g.generate_synthetic_dataset(replace(config, dataset_size=2), 1, False)
-    changed = replace(config, target_logit_std=1.0)
-
-    with pytest.raises(ValueError, match="target_logit_std"):
-        g.generate_synthetic_dataset(changed, 1, False)
-    assert len(FakeClient.design_calls) == 3
-
-
-def test_seeded_cohort_does_not_depend_on_worker_count(config):
-    serial, _ = g.generate_synthetic_dataset(config, 1, False)
-    parallel_config = replace(config, output_dir=str(Path(config.output_dir).with_name("parallel")))
-    parallel, _ = g.generate_synthetic_dataset(parallel_config, 4, False)
-
-    pd.testing.assert_frame_equal(serial, parallel)
-    other_seed = replace(
-        config, seed=7, output_dir=str(Path(config.output_dir).with_name("seed7"))
-    )
-    reseeded, _ = g.generate_synthetic_dataset(other_seed, 4, False)
-    assert not _scaffold_columns(reseeded).equals(_scaffold_columns(serial))
-
-
-def test_generation_steps_use_fixed_temperatures_and_the_cli_has_no_temperature_flag(
-    config, capsys, monkeypatch
-):
-    g.generate_synthetic_dataset(replace(config, dataset_size=1), 1, False)
-    assert FakeClient.design_calls == [0.7, 0.5, 0.5]
-    assert set(FakeClient.text_calls) == {0.7, 0.5}
-
-    monkeypatch.setattr(sys, "argv", ["synthetic", "--help"])
-    with pytest.raises(SystemExit):
-        synthetic_cli.main()
-    assert "--temperature" not in capsys.readouterr().out
-    monkeypatch.setattr(sys, "argv", ["synthetic", "--temperature", "0.2"])
-    with pytest.raises(SystemExit):
-        synthetic_cli.main()

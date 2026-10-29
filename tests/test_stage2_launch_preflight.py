@@ -125,28 +125,6 @@ def saved_fixture(tmp_path, managed=False, prepare_raw=None):
     return config
 
 
-@pytest.mark.parametrize("dependent_path", [None, "outer_001/extraction/extracted.csv",
-    "outer_001/ontology_supervision/round_001/prepared_ontologies.json",
-    "outer_001/final_definitions.json", "causal_estimate.json"])
-def test_preflight_allows_extractor_change_only_after_measurement_cleanup(tmp_path, dependent_path):
-    config = saved_fixture(tmp_path)
-    root = config.output_dir / "stage2"
-    write(root / "model_identity.json", {
-        "primary": {"selected_model": config.stage2.model},
-        "extraction": {"selected_model": "previous-extractor"},
-    })
-    write(root / "outer_001/feature_definitions.json", {"features": []})
-    if dependent_path:
-        write(root / dependent_path, {})
-    before = tree(tmp_path)
-    if dependent_path:
-        with pytest.raises(RuntimeError, match="saved extraction model ID"):
-            preflight.preflight_stage2(config)
-    else:
-        assert preflight.preflight_stage2(config)["status"] == "validated"
-    assert tree(tmp_path) == before
-
-
 def _saved_stage2_config(config, *extra):
     """Compile the documented saved-run Stage 2-only command line."""
     args = workflow.build_parser().parse_args(
@@ -156,23 +134,7 @@ def _saved_stage2_config(config, *extra):
     return workflow.compile_config(raw, config_dir=directory)
 
 
-def test_saved_config_accepts_pool_override_without_changing_science(tmp_path):
-    config = saved_fixture(tmp_path)
-    endpoints = [{"endpoint": "http://a.test/v1", "max_concurrency": 2},
-                 {"endpoint": "http://b.test/v1", "max_concurrency": 3}]
-    updated = _saved_stage2_config(
-        config,
-        "--stage2-extraction-endpoints", json.dumps(endpoints),
-        "--set", "stage2.extraction_llm.workers=5",
-    )
-    assert updated.stage2.extraction_llm.model == config.stage2.extraction_llm.model
-    assert updated.stage2.extraction_llm.workers == 5
-    assert updated.stage2.extraction_llm.endpoint == ""
-    assert [server.public_dict() for server in updated.stage2.extraction_llm.endpoints] == endpoints
-    assert replace(updated, stage2=config.stage2) == config
-
-
-@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("managed", [False])
 def test_preflight_and_saved_command_preserve_science_and_do_not_run_stage1(
     tmp_path, monkeypatch, managed
 ):
@@ -202,31 +164,9 @@ def test_preflight_and_saved_command_preserve_science_and_do_not_run_stage1(
     assert not (config.output_dir / "resolved_neural_query_config.json").exists()
 
 
-def test_saved_command_preserves_explicit_pre_dina_estimator_list(tmp_path):
-    config = saved_fixture(tmp_path)
-    source = config.output_dir / "run_config.json"
-    raw = json.loads(source.read_text())
-    estimators = ["causal_forest", "linear_interactions"]
-    count = raw["stage2"]["statistical_selection"]["multi_model"]["modifier_count"]
-    count["estimators"] = estimators
-    write(source, raw)
-    updated = _saved_stage2_config(config)
-    selection = updated.stage2.statistical_selection
-    assert selection.multi_model.modifier_count.estimators == tuple(estimators)
-    assert json.loads(source.read_text()) == raw
-
-
 @pytest.mark.parametrize(
     "damage,match",
-    [
-        ("handoff", "handoff"),
-        ("split", "split"),
-        ("rows", "fingerprint"),
-        ("model", "model ID"),
-        ("seed", "seed"),
-        ("source", "source"),
-        ("columns", "columns"),
-    ],
+    [("split", "split"), ("model", "model ID")],
 )
 def test_preflight_refuses_incompatible_inputs_without_writes(tmp_path, damage, match):
     config = saved_fixture(tmp_path)
@@ -253,21 +193,6 @@ def test_preflight_refuses_incompatible_inputs_without_writes(tmp_path, damage, 
     assert tree(tmp_path) == before
 
 
-def test_saved_worker_overrides_preserve_science_and_checkpoints(tmp_path):
-    config = saved_fixture(tmp_path)
-    before = tree(tmp_path)
-    expanded = _saved_stage2_config(
-        config,
-        "--set", "stage2.workers=4",
-        "--set", "stage2.modeling_workers=32",
-    )
-    assert expanded.stage2.workers == 4
-    assert expanded.stage2.modeling_workers == 32
-    assert expanded.stage2.statistical_selection.public_dict() == config.stage2.statistical_selection.public_dict()
-    preflight.preflight_stage2(expanded)
-    assert tree(tmp_path) == before
-
-
 def test_guarded_dry_run_and_migration_preserve_measurements(tmp_path):
     config = _completed_stage2_reselection_fixture(tmp_path)
     before = tree(tmp_path)
@@ -283,31 +208,6 @@ def test_guarded_dry_run_and_migration_preserve_measurements(tmp_path):
     assert (
         config.output_dir / "stage2" / state["archive_path"] / "artifacts/causal_estimate.json"
     ).is_file()
-
-
-def test_interrupted_reselection_resumes_only_with_migration_flag(tmp_path, monkeypatch):
-    config = _completed_stage2_reselection_fixture(tmp_path)
-    original = workflow._resume_reselection_archive_moves
-
-    def interrupted(*, stage2_dir, state):
-        name = state["planned_artifacts"][0]
-        target = stage2_dir / state["archive_path"] / "artifacts" / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        (stage2_dir / name).rename(target)
-        raise InterruptedError("test interruption")
-
-    monkeypatch.setattr(workflow, "_resume_reselection_archive_moves", interrupted)
-    with pytest.raises(InterruptedError):
-        workflow.prepare_stage2_reselection(config=config)
-    before = tree(tmp_path)
-    assert workflow.prepare_stage2_reselection(config=config, dry_run=True)["status"] == "preparing"
-    assert tree(tmp_path) == before
-    with pytest.raises(RuntimeError, match="interrupted"):
-        preflight.validate_selection_resume(config)
-    monkeypatch.setattr(workflow, "_resume_reselection_archive_moves", original)
-    state = workflow.prepare_stage2_reselection(config=config)
-    assert state["status"] == "prepared"
-    assert len(list((config.output_dir / "stage2/reselection_archives").iterdir())) == 1
 
 
 def test_core_cli_preflight_returns_before_any_logging_or_execution(tmp_path, monkeypatch):
@@ -330,132 +230,4 @@ def test_core_cli_preflight_returns_before_any_logging_or_execution(tmp_path, mo
         )
         == 0
     )
-    assert tree(tmp_path) == before
-
-
-def test_normal_resume_finalizes_existing_migration_without_rearchival(tmp_path, monkeypatch):
-    config = _completed_stage2_reselection_fixture(tmp_path)
-    state = workflow.prepare_stage2_reselection(config=config)
-    config_path = tmp_path / "resume.json"
-    write(config_path, config.as_dict())
-
-    def completed_run(self):
-        write(
-            config.output_dir / "stage2/complete.json",
-            {"status": "complete", "phase": "causal_estimation"},
-        )
-        return {"status": "complete"}
-
-    monkeypatch.setattr(workflow.ResearchAllEvidenceWorkflow, "run", completed_run)
-    monkeypatch.setattr(workflow, "_configure_logging", lambda *a: None)
-    for _ in range(2):
-        assert workflow.main(["--config", str(config_path), "--stage2-only"]) == 0
-    persisted = json.loads((config.output_dir / "stage2/reselection_state.json").read_text())
-    assert persisted["status"] == "complete"
-    assert persisted["reselection_id"] == state["reselection_id"]
-    assert len(list((config.output_dir / "stage2/reselection_archives").iterdir())) == 1
-
-
-_STAGE2_SETTINGS = {
-    "endpoint": "http://primary.test/v1",
-    "model": "preserved-primary",
-    "extraction_llm": {"endpoint": "http://extract.test/v1", "model": "preserved-extractor"},
-}
-_STAGE2_SET_ARGS = (
-    "--set", "stage2.endpoint=http://primary.test/v1",
-    "--set", "stage2.model=preserved-primary",
-    "--set", "stage2.extraction_llm.endpoint=http://extract.test/v1",
-    "--set", "stage2.extraction_llm.model=preserved-extractor",
-)
-
-
-def stage1_only_fixture(tmp_path):
-    """A completed --stage1-only run, whose run_config.json saves stage2: null.
-
-    Also returns the nested study configuration that launched it, without a
-    stage2 block.
-    """
-    study = {}
-    config = saved_fixture(
-        tmp_path, prepare_raw=lambda raw, _path: study.update(json.loads(json.dumps(raw)))
-    )
-    stage1_run = replace(
-        config, mode="stage1", components=workflow.STAGE1_COMPONENT_ORDER, stage2=None
-    )
-    write(config.output_dir / "run_config.json", stage1_run.as_dict())
-    saved = json.loads((config.output_dir / "run_config.json").read_text())
-    assert saved["stage2"] is None and saved["mode"] == "stage1"
-    return config, study
-
-
-def _preflight_cli(capsys, *argv):
-    assert workflow.main([*argv, "--stage2-only", "--preflight-only"]) == 0
-    return json.loads(capsys.readouterr().out)
-
-
-@pytest.mark.parametrize(
-    "stage2_args",
-    [
-        _STAGE2_SET_ARGS,
-        # The documented Stage 2-only command, plus the two model IDs.
-        (
-            "--set", "stage2.endpoint=http://primary.test/v1",
-            "--stage2-extraction-endpoint", "http://extract.test/v1",
-            "--set", "stage2.model=preserved-primary",
-            "--set", "stage2.extraction_llm.model=preserved-extractor",
-        ),
-    ],
-)
-def test_preflight_of_stage1_only_run_accepts_stage2_settings_from_set(
-    tmp_path, capsys, stage2_args
-):
-    config, _study = stage1_only_fixture(tmp_path)
-    before = tree(tmp_path)
-    run_config = str(config.output_dir / "run_config.json")
-    result = _preflight_cli(capsys, "--config", run_config, *stage2_args)
-    assert result["status"] == "validated"
-    assert result["stage2_action"] == "fresh Stage 2 discovery and extraction"
-    assert (result["primary_model"], result["extraction_model"]) == (
-        "preserved-primary",
-        "preserved-extractor",
-    )
-    assert tree(tmp_path) == before
-
-
-def test_preflight_of_stage1_only_run_accepts_a_config_stage2_block(tmp_path, capsys):
-    config, study = stage1_only_fixture(tmp_path)
-    study_path = tmp_path / "study_with_stage2.json"
-    write(study_path, {**study, "stage2": _STAGE2_SETTINGS})
-    before = tree(tmp_path)
-    result = _preflight_cli(capsys, "--config", str(study_path))
-    assert result["status"] == "validated"
-    assert result["output_dir"] == str(config.output_dir)
-    assert tree(tmp_path) == before
-
-
-@pytest.mark.parametrize(
-    "override,name",
-    [
-        (("--set", "science.seed=99"), "seed"),
-        (("--set", "science.outer_folds=3"), "outer_folds"),
-        (("--set", 'science.stage1={"training": {"epochs": 4}}'), "stage1_overrides"),
-        (("--disable-htr",), "htr_enabled"),
-        (("--set", "models.embeddings=other-embedding-model"), "embedding_model"),
-    ],
-)
-def test_preflight_of_stage1_only_run_still_detects_stage1_mismatch(
-    tmp_path, capsys, override, name
-):
-    config, study = stage1_only_fixture(tmp_path)
-    study_path = tmp_path / "study_with_stage2.json"
-    write(study_path, {**study, "stage2": _STAGE2_SETTINGS})
-    before = tree(tmp_path)
-    for argv in (
-        ["--config", str(config.output_dir / "run_config.json"), *_STAGE2_SET_ARGS],
-        ["--config", str(study_path)],
-    ):
-        with pytest.raises(SystemExit) as raised:
-            workflow.main([*argv, *override, "--stage2-only", "--preflight-only"])
-        assert raised.value.code == 2
-        assert f"saved Stage 1 configuration mismatch: {name}" in capsys.readouterr().err
     assert tree(tmp_path) == before

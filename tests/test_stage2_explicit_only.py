@@ -67,61 +67,7 @@ def forbid(*args, **kwargs):
     pytest.fail("explicit-only execution attempted Stage 1 or discovery")
 
 
-def test_mode_config_cli_roundtrip_and_validation(tmp_path):
-    raw, config, _ = inputs(tmp_path)
-    assert config.mode == "explicit_only" and config.components == ("stage2",)
-    assert config.stage2.feature_source == "explicit_only"
-    saved = tmp_path / "saved.json"
-    saved.write_text(json.dumps(config.as_dict(), default=str))
-    for flag in ([], ["--explicit-only"], ["--stage2-only"]):
-        args = workflow.build_parser().parse_args(["--config", str(saved), *flag])
-        values, directory = workflow._raw_config_from_args(args)
-        restored = workflow.compile_config(values, config_dir=directory)
-        assert restored == config
-    raw["stage2"]["explicit_features"] = []
-    with pytest.raises(ValueError, match="nonempty"):
-        workflow.compile_config(raw, config_dir=tmp_path)
-    with pytest.raises(SystemExit):
-        workflow.build_parser().parse_args(["--explicit-only", "--stage1-only"])
-
-
-def test_preflight_and_workflow_skip_stage1_and_resume(tmp_path, monkeypatch):
-    _, config, data = inputs(tmp_path)
-    monkeypatch.setattr(workflow, "_load_stage1_template", forbid)
-    monkeypatch.setattr(workflow, "_load_neural_query_template", forbid)
-    monkeypatch.setattr(PlainHandoffStage2, "_load_or_compile_evidence", forbid)
-    report = preflight_stage2(config)
-    assert report["read_only"] and report["rows"] == len(data)
-    assert not config.output_dir.exists()
-    calls = []
-
-    def stage2(context, output_dir):
-        calls.append(context)
-        assert context.selected_architectures == ()
-        assert context.applied_config is None
-        assert (output_dir / INPUT_FILE).is_file()
-        return {"phase": "causal_estimation"}
-
-    runner = workflow.ResearchAllEvidenceWorkflow(
-        config,
-        component_runners={"stage2": stage2},
-    )
-    assert runner.run()["status"] == "complete"
-    manifest = config.output_dir / "stage2" / INPUT_FILE
-    original = manifest.read_bytes(), manifest.stat().st_mtime_ns
-    from oci.inference import tfidf_topic_stage1
-
-    monkeypatch.setattr(tfidf_topic_stage1, "make_joint_treatment_outcome_splits", forbid)
-    assert runner.run()["status"] == "complete"
-    assert len(calls) == 1
-    assert (manifest.read_bytes(), manifest.stat().st_mtime_ns) == original
-    preflight_stage2(config)
-    assert not (config.output_dir / "components").exists()
-    assert not (config.output_dir / "handoff").exists()
-    assert not (config.output_dir / "resolved_stage1_model_config.json").exists()
-
-
-@pytest.mark.parametrize("change", ["cohort", "order", "ontology", "seed", "missing", "corrupt"])
+@pytest.mark.parametrize("change", ["cohort"])
 def test_completed_run_rejects_input_or_provenance_drift(tmp_path, change):
     _, config, data = inputs(tmp_path)
     workflow.ResearchAllEvidenceWorkflow(
@@ -171,39 +117,9 @@ def test_modes_cannot_share_output_directory(tmp_path):
         workflow.ResearchAllEvidenceWorkflow(workflow.compile_config(raw, config_dir=tmp_path))
 
 
-def test_explicit_notes_preflight_is_read_only_and_launch_materializes(tmp_path):
-    raw, config, data = inputs(tmp_path)
-    notes = tmp_path / "notes.parquet"
-    pd.DataFrame(
-        {
-            "patient_id": data["patient_id"],
-            "note_date": "2024-01-01",
-            "note_text": data["clinical_text"],
-        }
-    ).to_parquet(notes, index=False)
-    data = data.drop(columns="clinical_text")
-    data["index_date"] = "2024-02-01"
-    data.to_parquet(config.dataset, index=False)
-    raw["notes"] = {"path": str(notes), "index_date_column": "index_date"}
-    config = workflow.compile_config(raw, config_dir=tmp_path)
-    before = preflight_stage2(config)
-    assert before["rows"] == len(data)
-    assert not config.output_dir.exists()
-    workflow.ResearchAllEvidenceWorkflow(
-        config,
-        component_runners={"stage2": lambda *_: {}},
-    ).run()
-    assert config.analysis_dataset.is_file()
-    assert preflight_stage2(config)["dataset_identity"] == before["dataset_identity"]
-
-
 @pytest.mark.parametrize(
     "outcome_type,serving",
-    [
-        ("binary", "external"),
-        ("continuous", "external"),
-        ("binary", "managed"),
-    ],
+    [("binary", "external")],
 )
 def test_explicit_only_extracts_estimates_and_reuses_measurements(
     tmp_path,

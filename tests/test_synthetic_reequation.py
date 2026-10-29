@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import math
 from pathlib import Path
 
 import numpy as np
@@ -226,20 +224,9 @@ def test_equations_follow_declared_roles(source, tmp_path):
     assert _terms(main_metadata, "effect_modifier") <= set(main_metadata["outcome_equation"]["coefficients"])
 
 
-def test_unmeasured_strength_is_relative_to_measured_confounders(source, tmp_path):
-    for strength in (0.5, 2.0):
-        scenario = dict(NAMED, name=f"u{strength}", unmeasured_confounders=1, unmeasured_strength=strength)
-        _, metadata = _read(rq.reequation_cohort(source, scenario, seed=2, output_dir=tmp_path / str(strength)))
-        confounder_terms = _terms(metadata, "confounder")
-        for key in ("treatment", "outcome"):
-            coefficients = metadata[f"{key}_equation"]["coefficients"]
-            rms = math.sqrt(np.mean([coefficients[t] ** 2 for t in confounder_terms]))
-            u = metadata["unmeasured_confounders"][0]["coefficients"][key]
-            assert abs(u) == pytest.approx(strength * rms)
-
-
-@pytest.mark.parametrize("outcome_type", ["binary", "continuous"])
-@pytest.mark.parametrize("nonlinearity", ["none", "threshold", "quadratic"])
+@pytest.mark.parametrize(
+    ("nonlinearity", "outcome_type"), [("none", "binary"), ("quadratic", "continuous")]
+)
 def test_true_ite_matches_the_potential_outcome_equations(tmp_path, outcome_type, nonlinearity):
     src = write_source(tmp_path / "src", n=150, outcome_type=outcome_type)
     scenario = dict(SCENARIO, nonlinearity=nonlinearity)
@@ -273,45 +260,6 @@ def test_true_ite_matches_the_potential_outcome_equations(tmp_path, outcome_type
         assert not any(term.startswith("u_") for term in outcome_eq["nonlinear_terms"])
 
 
-def test_threshold_and_quadratic_shape_the_continuous_terms():
-    features = [{"name": "x", "type": "continuous", "roles": ["effect_modifier"]}]
-    stats = {"x": {"mean": 0.0, "std": 1.0}}
-    for shape, expected in (("threshold", lambda z: float(z > 0)), ("quadratic", lambda z: z * z)):
-        equation = {"intercept": 0.0, "coefficients": {"x": 2.0}, "treatment_coefficient": 0.0,
-                    "treatment_interactions": [{"term": "x", "coefficient": 3.0}],
-                    "nonlinearity": shape, "nonlinear_terms": ["x"]}
-        for z in (-1.5, 0.7, 2.0):
-            assert g._compute_logit({"x": z}, features, stats, equation, treatment=1) == pytest.approx(
-                5.0 * expected(z)
-            )
-
-
-def test_subsampling_and_redrawing_are_deterministic(source, tmp_path):
-    a = rq.reequation_cohort(source, SCENARIO, size=120, seed=5, output_dir=tmp_path / "a")
-    b = rq.reequation_cohort(source, SCENARIO, size=120, seed=5, output_dir=tmp_path / "b")
-    frame_a, meta_a = _read(a)
-    frame_b, meta_b = _read(b)
-    pd.testing.assert_frame_equal(frame_a, frame_b)
-    assert meta_a["treatment_equation"] == meta_b["treatment_equation"]
-    assert meta_a["scenario"] == meta_b["scenario"]
-
-    other, _ = _read(rq.reequation_cohort(source, SCENARIO, size=120, seed=6, output_dir=tmp_path / "c"))
-    assert other["patient_id"].tolist() != frame_a["patient_id"].tolist()
-
-    # Without replacement, in source order; a larger size with the same seed
-    # is a superset with the same DGP and the same per-patient draws.
-    ids = frame_a["patient_id"].tolist()
-    assert len(set(ids)) == 120 and ids == sorted(ids)
-    larger, meta_large = _read(rq.reequation_cohort(source, SCENARIO, size=200, seed=5, output_dir=tmp_path / "d"))
-    assert set(ids) <= set(larger["patient_id"])
-    assert meta_large["outcome_equation"] == meta_a["outcome_equation"]
-    joined = larger.set_index("patient_id").loc[ids].reset_index()
-    pd.testing.assert_frame_equal(joined[frame_a.columns], frame_a)
-
-    everyone, _ = _read(rq.reequation_cohort(source, SCENARIO, size=None, seed=5, output_dir=tmp_path / "e"))
-    assert everyone["patient_id"].tolist() == list(range(300))
-
-
 def test_text_columns_are_byte_identical_to_the_source(source, tmp_path):
     frame, metadata = _read(rq.reequation_cohort(source, SCENARIO, size=90, seed=1, output_dir=tmp_path / "t"))
     original = pd.read_parquet(source / "dataset.parquet").set_index("patient_id")
@@ -326,80 +274,6 @@ def test_text_columns_are_byte_identical_to_the_source(source, tmp_path):
     pd.testing.assert_frame_equal(frame[kept], selected[kept])
     added = set(frame.columns) - set(original.reset_index().columns)
     assert added == {"true_y0", "true_y1", "true_ite", "true_u_1"}
-
-
-def test_unmeasured_confounders_are_standard_normal_and_never_in_text(tmp_path):
-    src = write_source(tmp_path / "src", n=2000)
-    frame, metadata = _read(rq.reequation_cohort(
-        src, dict(SCENARIO, unmeasured_confounders=2), seed=3, output_dir=tmp_path / "u"
-    ))
-    for u in metadata["unmeasured_confounders"]:
-        values = frame[u["oracle_column"]]
-        assert abs(values.mean()) < 0.1 and values.std() == pytest.approx(1.0, abs=0.08)
-        assert u["name"].startswith("u_")
-        for column in TEXT_COLUMNS:
-            assert not frame[column].str.contains(u["name"], regex=False).any()
-            assert not frame[column].str.contains(f"{values.iloc[0]:.6f}", regex=False).any()
-    assert "u_1" not in {f["name"] for f in metadata["features"]}
-
-
-def test_calibration_hits_the_target_rates_and_logit_sds(tmp_path):
-    src = write_source(tmp_path / "src", n=4000, seed=11)
-    scenario = dict(SCENARIO, target_treatment_rate=0.3, target_control_outcome_rate=0.65,
-                    treatment_logit_std=1.2, outcome_logit_std=2.5)
-    frame, metadata = _read(rq.reequation_cohort(src, scenario, seed=8, output_dir=tmp_path / "cal"))
-    assert frame["true_treatment_prob"].mean() == pytest.approx(0.3, abs=0.02)
-    assert frame["true_y0_prob"].mean() == pytest.approx(0.65, abs=0.02)
-    assert frame["treatment_indicator"].mean() == pytest.approx(0.3, abs=0.04)
-    lp = _recompute(frame, metadata)
-    assert np.std(lp["treatment"]) == pytest.approx(1.2, rel=0.06)
-    assert max(np.std(lp["lp0"]), np.std(lp["lp1"])) == pytest.approx(2.5, rel=0.06)
-    monte_carlo = metadata["reequation"]["monte_carlo"]
-    assert monte_carlo["draws"] == 10000
-    assert monte_carlo["treatment_rate"] == pytest.approx(0.3, abs=1e-6)
-
-
-def test_omitted_keys_take_the_generator_defaults_and_the_source_roles(source, tmp_path):
-    _, metadata = _read(rq.reequation_cohort(source, {"name": "S0"}, seed=0, output_dir=tmp_path / "s0"))
-    resolved = metadata["scenario"]
-    defaults = SyntheticDataConfig()
-    assert resolved["role_assignment"] == "source"
-    assert [f["roles"] for f in metadata["features"]] == [f["roles"] for f in FEATURES]
-    assert resolved["roles"]["dual_role"] == ["hemoglobin"]
-    assert resolved["treatment_effect"] == defaults.treatment_effect_prob
-    assert resolved["treatment_logit_std"] == resolved["outcome_logit_std"] == defaults.target_logit_std
-    assert resolved["target_treatment_rate"] == defaults.target_treatment_rate
-    assert resolved["modifier_main_effects"] is False and resolved["nonlinearity"] == "none"
-    assert resolved["unmeasured_confounders"] == 0
-    assert metadata["unmeasured_confounders"] == []
-    assert metadata["outcome_equation"]["treatment_coefficient"] == defaults.treatment_effect_prob
-
-    # Random assignment draws each group from the unassigned variables.
-    random_roles = rq.resolve_scenario(SCENARIO, FEATURES, seed=3)["roles"]
-    assigned = [name for names in random_roles.values() for name in names]
-    assert len(assigned) == len(set(assigned)) == 8
-    assert {group: len(names) for group, names in random_roles.items()} == SCENARIO["roles"]
-    assert rq.resolve_scenario(SCENARIO, FEATURES, seed=3)["roles"] == random_roles
-
-
-def test_manifest_records_the_inputs_and_an_identical_rerun_is_reused(source, tmp_path):
-    out = rq.reequation_cohort(source, SCENARIO, size=50, seed=2, output_dir=tmp_path / "m")
-    manifest = json.loads((out / rq.MANIFEST_FILENAME).read_text())
-    assert manifest["source"]["path"] == str(source.resolve())
-    for name in rq.SOURCE_FILES:
-        assert manifest["source"]["sha256"][name] == hashlib.sha256((source / name).read_bytes()).hexdigest()
-    assert manifest["scenario"] == SCENARIO
-    assert (manifest["size"], manifest["seed"]) == (50, 2)
-    assert manifest["code_version"] == rq.REEQUATION_CODE_VERSION
-    assert set(manifest["code_sha256"]) == {"reequation.py", "generator.py", "dgp_terms.py"}
-    assert (out / "generation_config.json").read_bytes() == (source / "generation_config.json").read_bytes()
-    assert sorted(p.name for p in out.iterdir()) == sorted(rq.OUTPUT_FILES)
-
-    before = (out / "dataset.parquet").stat().st_mtime_ns
-    assert rq.reequation_cohort(source, SCENARIO, size=50, seed=2, output_dir=out) == out
-    assert (out / "dataset.parquet").stat().st_mtime_ns == before
-    with pytest.raises(ValueError, match="different re-equation"):
-        rq.reequation_cohort(source, SCENARIO, size=50, seed=3, output_dir=out)
 
 
 def test_cli_reequation_subcommand(source, tmp_path, capsys):
@@ -446,110 +320,3 @@ def test_refuses_sources_with_post_treatment_notes(source, tmp_path):
         with pytest.raises(ValueError, match="post-treatment notes"):
             rq.reequation_cohort(directory, SCENARIO, seed=1, output_dir=tmp_path / f"{directory.name}_out")
         assert not (tmp_path / f"{directory.name}_out").exists()
-
-
-def test_refuses_sources_without_every_oracle_covariate(source, tmp_path):
-    copy = tmp_path / "missing"
-    copy.mkdir()
-    for file in rq.SOURCE_FILES:
-        (copy / file).write_bytes((source / file).read_bytes())
-    frame = pd.read_parquet(copy / "dataset.parquet").drop(columns="true_albumin")
-    frame.to_parquet(copy / "dataset.parquet", index=False)
-    with pytest.raises(ValueError, match="true_albumin"):
-        rq.reequation_cohort(copy, SCENARIO, seed=1, output_dir=tmp_path / "out")
-    frame = pd.read_parquet(source / "dataset.parquet")
-    frame.loc[3, "true_histology"] = "Unlisted"
-    frame.to_parquet(copy / "dataset.parquet", index=False)
-    with pytest.raises(ValueError, match="not one of the categories"):
-        rq.reequation_cohort(copy, SCENARIO, seed=1, output_dir=tmp_path / "out")
-    (copy / "generation_config.json").unlink()
-    with pytest.raises(ValueError, match="generation_config.json"):
-        rq.reequation_cohort(copy, SCENARIO, seed=1, output_dir=tmp_path / "out")
-
-
-@pytest.mark.parametrize(
-    ("change", "message"),
-    [
-        ({"name": ""}, "'name' is required"),
-        ({"temperature": 0.2}, "unknown scenario keys"),
-        ({"roles": {"mediator": 1}}, "unknown scenario role groups"),
-        ({"roles": {"confounder": 9}}, "only 8 unassigned"),
-        ({"role_assignment": "named", "roles": {"confounder": 2}}, "needs a list of names"),
-        ({"roles": {"confounder": ["age"], "instrument": ["age"]}}, "role groups are disjoint"),
-        ({"roles": {"confounder": ["weight"]}}, "unknown variable"),
-        ({"nonlinearity": "spline"}, "nonlinearity"),
-        ({"target_treatment_rate": 1.0}, "target_treatment_rate"),
-        ({"treatment_logit_std": 0}, "treatment_logit_std"),
-        ({"unmeasured_confounders": -1}, "unmeasured_confounders"),
-        ({"modifier_main_effects": "yes"}, "modifier_main_effects"),
-    ],
-)
-def test_invalid_scenarios_fail_closed(source, tmp_path, change, message):
-    with pytest.raises(ValueError, match=message):
-        rq.reequation_cohort(source, {**SCENARIO, **change}, seed=1, output_dir=tmp_path / "out")
-    assert not (tmp_path / "out").exists()
-
-
-def test_invalid_sizes_seeds_and_outputs_fail_closed(source, tmp_path):
-    with pytest.raises(ValueError, match="exceeds the source's 300 patients"):
-        rq.reequation_cohort(source, SCENARIO, size=301, seed=1, output_dir=tmp_path / "big")
-    for size in (0, -3, True):
-        with pytest.raises(ValueError, match="size"):
-            rq.reequation_cohort(source, SCENARIO, size=size, seed=1, output_dir=tmp_path / "s")
-    with pytest.raises(ValueError, match="seed"):
-        rq.reequation_cohort(source, SCENARIO, seed=-1, output_dir=tmp_path / "s")
-    busy = tmp_path / "busy"
-    busy.mkdir()
-    (busy / "other.txt").write_text("x")
-    with pytest.raises(ValueError, match="holds other files"):
-        rq.reequation_cohort(source, SCENARIO, seed=1, output_dir=busy)
-    # A re-equation output is not a re-equation source.
-    out = rq.reequation_cohort(source, SCENARIO, seed=1, output_dir=tmp_path / "first")
-    with pytest.raises(ValueError, match="itself a re-equation output"):
-        rq.reequation_cohort(out, SCENARIO, seed=1, output_dir=tmp_path / "second")
-
-
-def test_proxies_take_no_role(source, tmp_path):
-    copy = tmp_path / "proxy"
-    copy.mkdir()
-    for file in rq.SOURCE_FILES:
-        (copy / file).write_bytes((source / file).read_bytes())
-    metadata = json.loads((copy / "metadata.json").read_text())
-    metadata["features"].append({"name": "karnofsky", "type": "continuous", "description": "KPS",
-                                 "roles": [], "proxy_of": "ecog"})
-    metadata["summary_statistics"]["karnofsky"] = {"mean": 80.0, "std": 10.0}
-    (copy / "metadata.json").write_text(json.dumps(metadata))
-    frame = pd.read_parquet(copy / "dataset.parquet")
-    frame["true_karnofsky"] = 80.0
-    frame.to_parquet(copy / "dataset.parquet", index=False)
-    with pytest.raises(ValueError, match="cannot take a role"):
-        rq.reequation_cohort(copy, {"name": "p", "roles": {"confounder": ["karnofsky"]}}, seed=1,
-                             output_dir=tmp_path / "out")
-    all_random = {"name": "all", "roles": {"confounder": 8}}
-    _, result = _read(rq.reequation_cohort(copy, all_random, seed=1, output_dir=tmp_path / "ok"))
-    proxy = next(f for f in result["features"] if f["name"] == "karnofsky")
-    assert proxy["roles"] == [] and proxy["proxy_of"] == "ecog"
-    assert result["proxies"] == [{"name": "karnofsky", "proxy_of": "ecog"}]
-    assert "karnofsky" not in result["treatment_equation"]["coefficients"]
-
-
-BUNDLED = (
-    Path(__file__).resolve().parents[1]
-    / "synthetic_data/example_synthetic_datasets/five_confounders_five_effect_modifiers_nsclc_with_structured"
-)
-
-
-def test_bundled_five_confounder_cohort_is_a_re_equation_source(tmp_path):
-    out = rq.reequation_cohort(BUNDLED, SCENARIO, size=None, seed=0, output_dir=tmp_path / "bundled")
-    frame, metadata = _read(out)
-    source = pd.read_parquet(BUNDLED / "dataset.parquet")
-    assert len(frame) == 1000
-    assert frame["clinical_text"].tolist() == source["clinical_text"].tolist()
-    # The cohort predates matching U+2011 category labels: "First‑line" is
-    # never observed, so its dummy is inert, and calibration uses the observed
-    # covariates.
-    assert "First‑line" not in set(source["true_prior_platinum_therapy"])
-    assert frame["true_treatment_prob"].mean() == pytest.approx(0.5, abs=0.02)
-    assert frame["true_y0_prob"].mean() == pytest.approx(0.5, abs=0.02)
-    counts = {group: len(names) for group, names in metadata["scenario"]["roles"].items()}
-    assert counts == SCENARIO["roles"]

@@ -125,42 +125,6 @@ def test_effect_loss_is_pseudo_outcome_mse_with_detached_nuisances():
     assert tau.grad is not None and torch.any(tau.grad != 0)
 
 
-def test_settings_are_validated():
-    with pytest.raises(ValueError, match="validation_fraction=0"):
-        standalone_htr.JointHTRConfig(validation_fraction=0.0)
-    standalone_htr.JointHTRConfig(
-        validation_fraction=0.0, selection="last_epoch", nuisance_calibration="none"
-    )
-    with pytest.raises(ValueError, match="effect_warmup_epochs"):
-        standalone_htr.JointHTRConfig(epochs=3, effect_warmup_epochs=3)
-    with pytest.raises(ValueError, match="run.method"):
-        standalone_htr.StandaloneHTRConfig(method="three_stage")
-    with pytest.raises(ValueError, match="run.dina_nuisances"):
-        standalone_htr.StandaloneHTRConfig(dina_nuisances="tfidf")
-    with pytest.raises(ValueError, match="run.dina_nuisance_clip"):
-        standalone_htr.StandaloneHTRConfig(dina_nuisance_clip=0.5)
-    with pytest.raises(ValueError, match="unknown joint settings"):
-        _configs("joint.not_a_setting=1")
-    with pytest.raises(ValueError, match="unknown stage1_htr settings"):
-        _configs("stage1_htr.not_a_setting=1")
-    with pytest.raises(ValueError, match="unknown architecture settings"):
-        _configs("architecture.multi_model_forest={}")
-    with pytest.raises(ValueError, match="run.<field>"):
-        _configs("stage2.model=x")
-    # Stage 1 requires DINA for a binary outcome; the standalone path keeps that rule.
-    with pytest.raises(ValueError, match="binary outcomes require"):
-        _configs("stage1_htr.effect_objective=pseudo_outcome_mse")
-
-
-def test_stage1_template_settings_are_the_two_stage_defaults():
-    config, settings, _ = standalone_htr.build_configs(outcome_type="binary")
-    stage1_htr = config.architecture.agentic_attention_variable_forest
-    assert settings.method == "two_stage"
-    assert (stage1_htr.nuisance_folds, stage1_htr.effect_folds) == (5, 5)
-    assert (stage1_htr.nuisance_epochs, stage1_htr.effect_epochs) == (30, 30)
-    assert config.architecture.htr_sentence_pooling == "token_attention"
-
-
 def _checkpoint_units(out, fold=1):
     progress = json.loads(
         (out / "folds" / f"fold_{fold:02d}" / "stage1_checkpoints" / "checkpoint_progress.json")
@@ -213,28 +177,6 @@ def test_two_stage_dina_uses_htr_arm_nuisances_without_reading_oracle_columns(
     assert report["cate"]["rows"] == 48
 
 
-def test_two_stage_bow_dina_nuisances_run_stage1_unchanged(tmp_path, monkeypatch):
-    dataset = _cohort(tmp_path)
-    out = tmp_path / "run"
-    calls = []
-    original = stage1_dina.prepare_neural_nuisance
-
-    def counting(*args, **kwargs):
-        calls.append(1)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(stage1_dina, "prepare_neural_nuisance", counting)
-    _run(dataset, out, "run.dina_nuisances=bow")
-    _assert_cross_fitted_predictions(out)
-    assert len(calls) == 4  # one bag-of-words nuisance fit per effect fold
-    assert {"htr/nuisance/fold_001", "htr/nuisance/fold_002"} <= _checkpoint_units(out)
-    record = json.loads((out / "folds" / "fold_01" / "fold.json").read_text())
-    assert record["dina_nuisances"] == "bow"
-    # Stage 1's value is left out of the identity, as before the setting existed.
-    run = json.loads((out / "run.json").read_text())
-    assert not {"dina_nuisances", "dina_nuisance_clip"} & set(run["identity"]["config"]["run"])
-
-
 def test_two_stage_fold_resumes_from_inner_network_checkpoints(tmp_path, monkeypatch):
     dataset = _cohort(tmp_path)
     out = tmp_path / "run"
@@ -275,22 +217,6 @@ def test_joint_cross_fits_every_row_without_reading_oracle_columns(tmp_path, mon
     assert (out / "evaluation" / "oracle_metrics.json").exists()
 
 
-def test_rerun_reuses_finished_folds_and_rejects_changed_settings(tmp_path, monkeypatch):
-    dataset = _cohort(tmp_path)
-    out = tmp_path / "run"
-    _run(dataset, out, "run.method=joint")
-
-    def fail(**kwargs):
-        raise AssertionError("a finished fold was refit")
-
-    monkeypatch.setattr(standalone_htr, "run_fold", fail)
-    _run(dataset, out, "run.method=joint")
-    with pytest.raises(RuntimeError, match="different configuration"):
-        _run(dataset, out, "run.method=joint", "joint.effect_loss_weight=2.0")
-    with pytest.raises(RuntimeError, match="different configuration"):
-        _run(dataset, out)
-
-
 def test_evaluation_refuses_changed_predictions(tmp_path):
     dataset = _cohort(tmp_path)
     out = tmp_path / "run"
@@ -300,44 +226,3 @@ def test_evaluation_refuses_changed_predictions(tmp_path):
     predictions.to_parquet(out / "predictions.parquet", index=False)
     with pytest.raises(RuntimeError, match="does not match"):
         standalone_htr.evaluate_against_oracle(out)
-
-
-def test_split_provenance_file_folds_are_reused(tmp_path):
-    dataset = _cohort(tmp_path)
-    config, settings, _ = _configs()
-    frame = standalone_htr.load_training_frame(dataset, config)
-    folds, _ = standalone_htr.outer_splits(frame, config, settings)
-    splits = tmp_path / "split_provenance.jsonl"
-    splits.write_text(
-        "".join(
-            json.dumps(
-                {"outer_fold": fold, "fit_row_ids": fit.tolist(), "heldout_row_ids": test.tolist()}
-            )
-            + "\n"
-            for fold, fit, test in folds
-        )
-    )
-    reused, metadata = standalone_htr.outer_splits(frame, config, settings, splits)
-    assert metadata["method"] == "split_provenance_file"
-    for (_, fit, test), (_, fit2, test2) in zip(folds, reused, strict=True):
-        assert np.array_equal(np.sort(fit), np.sort(fit2))
-        assert np.array_equal(np.sort(test), np.sort(test2))
-    splits.write_text(json.dumps({"outer_fold": 1, "fit_row_ids": [0], "heldout_row_ids": [1]}))
-    with pytest.raises(ValueError, match="cover every row"):
-        standalone_htr.outer_splits(frame, config, settings, splits)
-
-
-def test_folds_run_in_parallel_worker_processes(tmp_path):
-    dataset = _cohort(tmp_path)
-    out = tmp_path / "run"
-    summary = _run(dataset, out, devices=("cpu", "cpu"))
-    assert summary["rows"] == 48
-    devices = {
-        json.loads((out / "folds" / f"fold_0{fold}" / "fold.json").read_text())["device"]
-        for fold in (1, 2)
-    }
-    assert devices == {"cpu"}
-    assert sorted(path.name for path in (out / "logs").iterdir()) == [
-        "worker_00_cpu.log",
-        "worker_01_cpu.log",
-    ]

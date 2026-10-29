@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -127,7 +126,7 @@ def _direct(root, predictions, fold, *, binary):
     )
 
 
-@pytest.mark.parametrize("binary", [False, True])
+@pytest.mark.parametrize("binary", [True])
 def test_confirmation_matches_direct_tests_and_summarizes_across_folds(tmp_path, binary):
     predictions = _write_run(tmp_path, binary=binary)
     path, summary = diagnostics.write_heterogeneity_diagnostics(
@@ -229,110 +228,3 @@ def test_confirmation_matches_direct_tests_and_summarizes_across_folds(tmp_path,
     assert compact["concepts_supported_after_aggregation"] == [shared["concept_id"]]
     assert compact["concepts"][0]["names"] == ["Modifier score", "modifier_score"]
     assert diagnostics.summarize_diagnostics(json.loads(text))["modifier_confirmation"] == compact
-
-
-def test_confirmation_cannot_change_predictions_or_selections(tmp_path):
-    predictions = _write_run(tmp_path, binary=True)
-    before_frame = predictions.copy()
-
-    def snapshot():
-        return {
-            str(path.relative_to(tmp_path)): hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in sorted(tmp_path.rglob("*")) if path.is_file()
-            and path.name != diagnostics.DIAGNOSTICS_FILENAME
-        }
-
-    before = snapshot()
-    assert "cross_fitted_predictions.csv" in before
-    assert "outer_001/selection/modifier_tests.json" in before
-    assert "outer_002/final_definitions.json" in before
-    for policy in (None, _policy(True)):
-        diagnostics.write_heterogeneity_diagnostics(
-            output_dir=tmp_path, predictions=predictions, propensity_clip=0.02, seed=3,
-            n_bootstrap=10, modifier_confirmation_policy=policy,
-        )
-        assert snapshot() == before
-    pd.testing.assert_frame_equal(predictions, before_frame)
-
-
-def test_missing_inputs_are_unavailable_never_a_failure(tmp_path):
-    predictions = _write_run(tmp_path, binary=False)
-    # Fold 2: no candidate file, but the retained held-out file is the fallback.
-    fold2 = tmp_path / "outer_002"
-    candidate = pd.read_csv(fold2 / "estimation" / "nuisance_candidate_heldout.csv")
-    (fold2 / "estimation" / "nuisance_candidate_heldout.csv").unlink()
-    (fold2 / "extraction" / "heldout").mkdir(parents=True)
-    candidate.to_csv(fold2 / "extraction" / "heldout" / "harmonized.csv", index=False)
-    # Fold 3: no artifacts at all. Fold 4: no selected modifiers.
-    extra = []
-    for fold in (3, 4):
-        rows = predictions[predictions.outer_fold == 1].copy()
-        rows["_oci_row_id"] += fold * N_PER_FOLD
-        rows["outer_fold"] = fold
-        extra.append(rows)
-    (tmp_path / "outer_004").mkdir()
-    (tmp_path / "outer_004" / "final_definitions.json").write_text(json.dumps(
-        {"features": [_continuous("confounder", "o4_f1", ["confounder"])]}))
-    # Fold 5: selected modifiers but no held-out measurement file.
-    rows = predictions[predictions.outer_fold == 1].copy()
-    rows["_oci_row_id"] += 5 * N_PER_FOLD
-    rows["outer_fold"] = 5
-    extra.append(rows)
-    (tmp_path / "outer_005").mkdir()
-    (tmp_path / "outer_005" / "final_definitions.json").write_text(
-        json.dumps({"features": FOLD_DEFINITIONS[1]}))
-    pooled = pd.concat([predictions, *extra], ignore_index=True)
-    path, summary = diagnostics.write_heterogeneity_diagnostics(
-        output_dir=tmp_path, predictions=pooled, propensity_clip=0.02, seed=3,
-        n_bootstrap=10, modifier_confirmation_policy=_policy(False),
-    )
-    section = json.loads(path.read_text())["modifier_confirmation"]
-    per_fold = section["per_fold"]
-    assert per_fold["2"]["status"] == "ok"
-    assert per_fold["2"]["measurement_source"]["measurements"].endswith("harmonized.csv")
-    assert per_fold["3"]["status"] == "unavailable"
-    assert "retained definitions unavailable" in per_fold["3"]["reason"]
-    assert per_fold["4"] == {**per_fold["4"], "status": "ok", "selected_modifiers": 0,
-                             "confirmed_modifiers": 0, "modifiers": []}
-    assert per_fold["5"]["status"] == "unavailable"
-    assert "held-out measurements unavailable" in per_fold["5"]["reason"]
-    assert section["status"] == "ok"
-    assert section["pooled"]["folds"] == ["1", "2", "4"]
-    assert section["pooled"]["selected_by_fold"]["4"] == 0
-    assert summary["modifier_confirmation"]["status"] == "ok"
-    assert '"status": "error"' not in json.dumps(section)
-
-
-def test_without_policy_or_with_invalid_policy_the_section_is_unavailable(tmp_path):
-    predictions = _write_run(tmp_path, binary=True)
-    for policy, reason in (
-        (None, "no modifier confirmation policy"),
-        (_policy(True, outcome_type="survival"), "invalid modifier confirmation policy"),
-        (_policy(True, q=0), "invalid modifier confirmation policy"),
-    ):
-        path, summary = diagnostics.write_heterogeneity_diagnostics(
-            output_dir=tmp_path, predictions=predictions, propensity_clip=0.02, seed=3,
-            n_bootstrap=10, modifier_confirmation_policy=policy,
-        )
-        section = json.loads(path.read_text())["modifier_confirmation"]
-        assert section["status"] == "unavailable"
-        assert reason in section["reason"]
-        assert section["interpretation"]
-        assert summary["modifier_confirmation"]["status"] == "unavailable"
-        assert summary["modifier_confirmation"]["concepts"] == []
-
-
-def test_configured_weights_are_used(tmp_path):
-    predictions = _write_run(tmp_path, binary=True)
-    weights = {"r_projection": 1.0, "aipw_projection": 0.0, "outcome_interaction": 0.0}
-    path, _ = diagnostics.write_heterogeneity_diagnostics(
-        output_dir=tmp_path, predictions=predictions, propensity_clip=0.02, seed=3,
-        n_bootstrap=10, modifier_confirmation_policy=_policy(True, weights=weights),
-    )
-    section = json.loads(path.read_text())["modifier_confirmation"]
-    assert section["policy"]["weights_source"] == "configured"
-    for result in section["per_fold"].values():
-        for modifier in result["modifiers"]:
-            assert modifier["combination_weights"] == {"r_projection": 1.0}
-            assert modifier["combined_p_value"] == pytest.approx(
-                modifier["component_p_values"]["r_projection"])

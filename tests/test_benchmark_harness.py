@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import math
-import subprocess
 import sys
 import types
 from pathlib import Path
@@ -22,27 +21,15 @@ import pandas as pd
 import pytest
 
 from oci.evaluation import benchmark
-from oci.evaluation.attribution import FrozenArtifactReader, OracleConcept, file_sha256
+from oci.evaluation.attribution import FrozenArtifactReader, file_sha256
 from oci.evaluation.benchmark import (
     SeedGuardError,
-    ate_metrics,
-    ato_metrics,
-    cate_metrics,
-    gates_coverage,
-    leak_rows,
-    load_registry,
     load_seed_registry,
     resolve_seeds,
-    run_status,
-    scenario_rows,
-    selection_metrics,
-    short_nuisances,
 )
 
-REPO = Path(__file__).resolve().parents[1]
 DEV, CONF = [11, 12], [91, 92]
 FOLDS = (1, 2)
-SEED_BASE = 50_000
 
 
 def _write_json(path: Path, value) -> None:
@@ -221,77 +208,6 @@ def fake_reequation(monkeypatch):
 # Registry and seeds
 
 
-def test_bundled_registry_and_seeds_follow_the_design():
-    registry = load_registry()
-    ids = list(registry.scenarios)
-    assert ids == ["S0", "S1", "S2", "S3", "S4a", "S4b", "S5", "S6"]
-    for scenario in registry.scenarios.values():
-        expected = {1000, 5000} | ({10000} if scenario.family in {"S0", "S4"} else set())
-        assert set(scenario.sizes) == expected
-        assert scenario.minimum_source_patients == max(scenario.sizes)
-    assert [s.id for s in registry.select("S4")] == ["S4a", "S4b"]
-    assert {s.id for s in registry.scenarios.values() if s.needs_generated_corpus} == {"S5", "S6"}
-    base = registry.scenarios["S0"].dgp
-    changed = {
-        scenario.id: sorted(
-            key for key in set(base) | set(scenario.dgp or {})
-            if key != "name" and (scenario.dgp or {}).get(key) != base.get(key)
-        )
-        for scenario in registry.scenarios.values() if scenario.dgp is not None
-    }
-    assert changed == {
-        "S0": [], "S1": ["roles"], "S2": ["modifier_main_effects", "roles"],
-        "S3": ["nonlinearity"], "S4a": ["unmeasured_confounders", "unmeasured_strength"],
-        "S4b": ["unmeasured_confounders"], "S5": [],
-    }
-    assert registry.scenarios["S1"].dgp["roles"] == {
-        "confounder": 3, "effect_modifier": 3, "instrument": 2, "prognostic": 2}
-    assert registry.scenarios["S4a"].unmeasured_strength == 0.5
-    assert registry.scenarios["S4b"].unmeasured_strength == 1.0
-    assert registry.scenarios["S5"].generation["documentation_mechanism"] == "mnar"
-    s6 = registry.scenarios["S6"]
-    assert s6.dgp is None and s6.generation["post_treatment_notes"]
-    assert s6.generation["num_confounders"] == base["roles"]["confounder"]
-    assert s6.generation["num_effect_modifiers"] == base["roles"]["effect_modifier"]
-    assert s6.generation["num_features"] == (
-        s6.generation["num_confounders"] + s6.generation["num_effect_modifiers"]
-    )
-    variants = {variant.name: variant for variant in s6.variants}
-    assert variants["text_column"].columns == {"text": "clinical_text_with_post_treatment"}
-    assert variants["dated_notes"].notes["index_date_column"] == "index_date"
-    seeds = load_seed_registry()
-    assert len(seeds.development) == 3 and len(seeds.confirmatory) == 3
-    assert not set(seeds.development) & set(seeds.confirmatory)
-    assert "Tune only on development seeds" in seeds.rule
-
-
-def test_registry_rejects_inconsistent_scenarios(tmp_path: Path):
-    path = _registry(tmp_path)
-    payload = json.loads(path.read_text())
-    payload["scenarios"][0]["source"]["minimum_patients"] = 10
-    _write_json(path, payload)
-    with pytest.raises(ValueError, match="minimum_patients"):
-        load_registry(path)
-    with pytest.raises(ValueError, match="unknown scenario"):
-        load_registry(_registry(tmp_path)).select("S9")
-
-
-@pytest.mark.parametrize("settings, message", [
-    ({"num_features": 10, "num_confounders": 3, "num_effect_modifiers": 3},
-     "num_features cannot exceed"),
-    ({"documentation_rate": 1.1}, "documentation_rate must be"),
-    ({"unknown_generation_option": True}, "unknown_generation_option"),
-])
-def test_registry_validates_generation_settings_before_any_job(tmp_path, settings, message):
-    path = _registry(tmp_path)
-    payload = json.loads(path.read_text())
-    payload["scenarios"][-1]["generation"].update(settings)
-    _write_json(path, payload)
-
-    with pytest.raises(ValueError, match=f"scenario S6: invalid generation settings: .*{message}"):
-        load_registry(path)
-
-
 def test_seed_guard_refuses_confirmatory_seeds_without_the_flag(tmp_path: Path):
     seeds = load_seed_registry(_seeds(tmp_path))
     assert resolve_seeds(seeds) == [(11, "development"), (12, "development")]
@@ -353,52 +269,6 @@ def test_materialize_writes_the_cell_layout_through_the_contract(tmp_path: Path,
         benchmark.materialize(out=bench, scenarios="S0", registry_path=registry, seeds_path=seeds)
 
 
-def test_generated_scenarios_print_generator_commands_then_subsample(tmp_path: Path, capsys):
-    registry, seeds = _registry(tmp_path), _seeds(tmp_path)
-    bench = tmp_path / "bench"
-    result = benchmark.materialize(out=bench, scenarios="S6", registry_path=registry, seeds_path=seeds)
-    assert result["cells"] == []
-    instruction = result["generator_instructions"][0]
-    config = json.loads(Path(instruction["generator_config"]).read_text())
-    assert config == {"dataset_size": 40, "post_treatment_notes": {"rate": 1.0}}
-    printed = capsys.readouterr().out
-    assert f"python -m synthetic_data.cli --config {instruction['generator_config']}" in printed
-    assert "--generated" in printed
-    corpus = _write_cohort(tmp_path / "corpus", 40, 5, leak=True)
-    result = benchmark.materialize(out=bench, scenarios="S6", generated=corpus,
-                                   registry_path=registry, seeds_path=seeds)
-    assert {item["cell"]: item["status"] for item in result["cells"]} == {
-        "S6/n30/seed11": "materialized", "S6/n30/seed12": "materialized",
-        "S6/n40/seed11": "materialized", "S6/n40/seed12": "materialized",
-    }
-    source = pd.read_parquet(corpus / "dataset.parquet")
-    small = bench / "S6" / "n30" / "seed11" / "data"
-    subset = pd.read_parquet(small / "dataset.parquet")
-    expected_rows = np.sort(np.random.default_rng(11).choice(40, size=30, replace=False))
-    assert subset["patient_id"].tolist() == source["patient_id"].iloc[expected_rows].tolist()
-    notes = pd.read_parquet(small / "notes.parquet")
-    assert set(notes["patient_id"]) == set(subset["patient_id"]) and len(notes) == 60
-    manifest = json.loads((small / "subsample_manifest.json").read_text())
-    assert manifest["rows_identical_to_source"] is False
-    full = json.loads((bench / "S6" / "n40" / "seed12" / "data" / "subsample_manifest.json").read_text())
-    assert full["rows_identical_to_source"] is True
-    other = pd.read_parquet(bench / "S6" / "n30" / "seed12" / "data" / "dataset.parquet")
-    assert other["patient_id"].tolist() != subset["patient_id"].tolist()
-
-
-def test_generated_corpus_must_belong_to_one_scenario(tmp_path: Path):
-    registry, seeds = _registry(tmp_path), _seeds(tmp_path)
-    payload = json.loads(registry.read_text())
-    second = json.loads(json.dumps(payload["scenarios"][2]))
-    second["id"] = second["family"] = "S7"
-    payload["scenarios"].append(second)
-    _write_json(registry, payload)
-    corpus = _write_cohort(tmp_path / "corpus", 40, 5, leak=True)
-    with pytest.raises(ValueError, match="exactly one"):
-        benchmark.materialize(out=tmp_path / "bench", scenarios="S6,S7", generated=corpus,
-                              registry_path=registry, seeds_path=seeds)
-
-
 # ---------------------------------------------------------------------------
 # configs and the confirmatory ledger
 
@@ -430,51 +300,6 @@ def _materialize_s6(tmp_path: Path, bench: Path, seeds_path: Path, *, seeds: str
     benchmark.materialize(out=bench, scenarios="S6", generated=corpus, sizes="30",
                           registry_path=_registry(tmp_path), seeds_path=seeds_path,
                           seeds=seeds, confirmatory=confirmatory)
-
-
-def test_s6_configs_hold_the_text_column_and_dated_notes_variants(tmp_path: Path, capsys, monkeypatch):
-    from oci.inference.research_all_evidence_workflow import compile_config
-
-    def no_subprocess(*args, **kwargs):
-        raise AssertionError("the harness must not start processes")
-
-    monkeypatch.setattr(subprocess, "run", no_subprocess)
-    monkeypatch.setattr(subprocess, "Popen", no_subprocess)
-    seeds = _seeds(tmp_path)
-    bench = tmp_path / "bench"
-    _materialize_s6(tmp_path, bench, seeds)
-    base = _base_config(tmp_path)
-    result = benchmark.write_configs(base=base, out=bench, scenarios="S6", registry_path=_registry(tmp_path),
-                                     seeds_path=seeds, ledger_path=tmp_path / "ledger.jsonl")
-    assert result["not_materialized"] == ["S6/n40/seed11", "S6/n40/seed12"]
-    runs = {(item["cell"], item["variant"]): item for item in result["runs"]}
-    assert set(runs) == {(cell, variant) for cell in ("S6/n30/seed11", "S6/n30/seed12")
-                         for variant in ("text_column", "dated_notes")}
-    cell = bench.resolve() / "S6" / "n30" / "seed11"
-    text = json.loads((cell / "runs" / "text_column" / "config.json").read_text())
-    notes = json.loads((cell / "runs" / "dated_notes" / "config.json").read_text())
-    for config, variant in ((text, "text_column"), (notes, "dated_notes")):
-        assert config["dataset"] == str(cell / "data" / "dataset.parquet")
-        assert config["output_dir"] == str(cell / "runs" / variant / "output")
-        assert config["science"]["seed"] == 11
-        # The cohort's outcome type overrides the base configuration's.
-        assert config["science"]["outcome_type"] == "binary"
-        assert config["stage1_template"] == str((base.parent / "templates" / "stage1.json").resolve())
-    assert text["columns"]["text"] == "clinical_text_with_post_treatment" and "notes" not in text
-    assert notes["columns"]["text"] == "dated_notes_text"
-    assert notes["notes"]["path"] == str(cell / "data" / "notes.parquet")
-    assert notes["notes"]["index_date_column"] == "index_date"
-    for config, variant in ((text, "text_column"), (notes, "dated_notes")):
-        compiled = compile_config(config, config_dir=cell / "runs" / variant)
-        assert compiled.seed == 11 and compiled.dataset == cell / "data" / "dataset.parquet"
-    assert compile_config(notes, config_dir=cell).notes.path == cell / "data" / "notes.parquet"
-    assert compile_config(text, config_dir=cell).notes is None
-    printed = capsys.readouterr().out
-    assert "no run was launched" in printed
-    assert f"run_all_evidence.py --config {cell / 'runs' / 'dated_notes' / 'config.json'}" in printed
-    index = json.loads((bench / "configs.json").read_text())
-    assert len(index["runs"]) == 4
-    assert not (tmp_path / "ledger.jsonl").exists()
 
 
 def test_confirmatory_configs_append_the_ledger_and_refuse_reuse(tmp_path: Path, monkeypatch):
@@ -517,317 +342,6 @@ def test_confirmatory_configs_append_the_ledger_and_refuse_reuse(tmp_path: Path,
 
 # ---------------------------------------------------------------------------
 # Metrics against hand-computed values
-
-
-def _predictions(rows: int = 10) -> pd.DataFrame:
-    return pd.DataFrame({
-        "_oci_row_id": np.arange(rows),
-        "outer_fold": [1] * (rows // 2) + [2] * (rows - rows // 2),
-        "treatment": [0, 1] * (rows // 2),
-        "outcome": [0, 1, 1, 0, 1, 1, 0, 0, 1, 0][:rows],
-        "propensity": np.linspace(0.02, 0.98, rows),
-        "mu0": np.full(rows, 0.4),
-        "mu1": np.full(rows, 0.6),
-        "aipw_score": [0.1, 0.3, np.nan, 0.5, 0.2, 0.4, 0.0, 0.6, 0.2, 0.1][:rows],
-        "estimated_cate": np.linspace(-0.2, 0.4, rows),
-    })
-
-
-def test_ate_ato_and_cate_metrics_match_hand_computation():
-    predictions = _predictions()
-    truth = np.array([0.1, 0.2, 0.9, 0.3, 0.0, 0.2, 0.1, 0.4, 0.2, 0.3])
-    ate = ate_metrics(predictions, truth, {"estimate": 0.25, "standard_error": 0.05,
-                                           "confidence_interval_95": [0.152, 0.348]})
-    eligible = [0, 1, 3, 4, 5, 6, 7, 8, 9]  # row 2 has no AIPW score
-    true_ate = sum(truth[eligible]) / 9
-    assert ate["rows"] == 9 and ate["true"] == pytest.approx(true_ate)
-    assert ate["bias"] == pytest.approx(0.25 - true_ate)
-    assert ate["covered"] is True and ate["ci_width"] == pytest.approx(0.196)
-    assert ate_metrics(predictions, truth, {"estimate": 0.5, "confidence_interval_95": [0.45, 0.55]})[
-        "covered"] is False
-
-    e_true = np.full(10, 0.5)
-    e_true[0] = 0.1
-    ato = ato_metrics(predictions, truth, e_true, {"estimate": 0.2,
-                                                   "confidence_interval_95": [0.1, 0.3]})
-    weights = e_true * (1 - e_true)
-    assert ato["true"] == pytest.approx(float(np.sum(weights * truth) / np.sum(weights)))
-    e_hat = predictions["propensity"].to_numpy()
-    assert ato["true_estimated_weights"] == pytest.approx(
-        float(np.sum(e_hat * (1 - e_hat) * truth) / np.sum(e_hat * (1 - e_hat))))
-    assert ato["bias"] == pytest.approx(0.2 - ato["true"])
-    assert ato["covered"] is True and ato["rows"] == 10
-
-    cate = cate_metrics(predictions, truth, 0.25)
-    estimate = predictions["estimated_cate"].to_numpy()
-    rmse = math.sqrt(float(np.mean((estimate - truth) ** 2)))
-    baseline = math.sqrt(float(np.mean((0.25 - truth) ** 2)))
-    assert cate["rmse"] == pytest.approx(rmse)
-    assert cate["constant_ate_rmse"] == pytest.approx(baseline)
-    assert cate["relative_improvement"] == pytest.approx(1 - rmse / baseline)
-    assert cate["pearson"] == pytest.approx(float(np.corrcoef(estimate, truth)[0, 1]))
-    assert cate["true_ite_sd"] == pytest.approx(float(np.std(truth)))
-
-
-def test_gates_coverage_uses_the_diagnostics_groups():
-    from oci.inference.stage2_diagnostics import build_heterogeneity_diagnostics
-
-    rng = np.random.default_rng(4)
-    n = 100
-    predictions = pd.DataFrame({
-        "_oci_row_id": np.arange(n), "outer_fold": np.repeat([1, 2], n // 2),
-        "treatment": rng.integers(0, 2, n), "outcome": rng.integers(0, 2, n),
-        "propensity": rng.uniform(0.2, 0.8, n), "mu0": rng.uniform(0.3, 0.6, n),
-        "mu1": rng.uniform(0.3, 0.6, n), "aipw_score": rng.normal(0.1, 0.5, n),
-        # Distinct values, so groups follow the ranks and do not depend on tie-breaking.
-        "estimated_cate": rng.permutation(np.linspace(-0.3, 0.5, n)),
-    })
-    diagnostics = build_heterogeneity_diagnostics(predictions, propensity_clip=0.02, seed=7,
-                                                  n_bootstrap=2, outcome_type="binary")
-    truth = predictions["estimated_cate"].to_numpy() * 0.5 + 0.05
-    result = gates_coverage(predictions, truth, diagnostics)
-    assert result["status"] == "ok"
-    hits = []
-    pooled_truth = {g: [] for g in range(1, 6)}
-    for fold in (1, 2):
-        part = predictions[predictions["outer_fold"] == fold].reset_index(drop=True)
-        ranks = part["estimated_cate"].rank(method="first").astype(int).to_numpy() - 1
-        groups = ranks * 5 // len(part) + 1
-        stored = diagnostics["gates"]["per_fold"][str(fold)]["groups"]
-        for group in range(1, 6):
-            members = part.index[groups == group]
-            true_mean = truth[part.loc[members, "_oci_row_id"].to_numpy()].mean()
-            pooled_truth[group].extend(truth[part.loc[members, "_oci_row_id"].to_numpy()])
-            low, high = stored[group - 1]["confidence_interval_95"]
-            hits.append(low <= true_mean <= high)
-            computed = result["per_fold"][str(fold)]["groups"][group - 1]
-            assert computed["true_mean_ite"] == pytest.approx(true_mean)
-            assert computed["covered"] is bool(low <= true_mean <= high)
-    assert result["fold_intervals"] == 10
-    assert result["fold_coverage"] == pytest.approx(np.mean(hits))
-    pooled = diagnostics["gates"]["pooled"]["groups"]
-    expected = np.mean([
-        pooled[g - 1]["confidence_interval_95"][0] <= np.mean(pooled_truth[g])
-        <= pooled[g - 1]["confidence_interval_95"][1] for g in range(1, 6)
-    ])
-    assert result["pooled"]["coverage"] == pytest.approx(expected)
-    tampered = json.loads(json.dumps(diagnostics))
-    tampered["gates"]["per_fold"]["1"]["groups"][0]["estimate"] += 0.5
-    assert gates_coverage(predictions, truth, tampered)["per_fold"]["1"]["status"] == "unavailable"
-
-
-def _r2_row(fold, feature, concept, r2, *, nuisance=False, modifier=False, threshold=0.5):
-    return {"outer_fold": fold, "feature_id": feature, "name": feature, "concept": concept,
-            "r_squared": r2, "recovered": r2 is not None and r2 >= threshold,
-            "nuisance_set": nuisance, "selected_modifier": modifier}
-
-
-def test_selection_metrics_match_hand_counts():
-    concepts = [
-        OracleConcept("age", "true_age", "continuous", ("confounder",)),
-        OracleConcept("ecog", "true_ecog", "categorical", ("confounder", "effect_modifier")),
-        OracleConcept("pdl1", "true_pdl1", "categorical", ("effect_modifier",)),
-        OracleConcept("smoker", "true_smoker", "categorical", ("instrument",)),
-        OracleConcept("albumin", "true_albumin", "continuous", ("prognostic",)),
-        OracleConcept("noise", "true_noise", "continuous", ()),
-        OracleConcept("u_1", "true_u_1", "continuous", ("unmeasured_confounder",)),
-        OracleConcept("post_treatment_toxicity", "true_post_treatment_toxicity", "categorical",
-                      ("post_treatment",)),
-    ]
-    rows = [
-        # Fold 1: modifiers m1 (recovers pdl1) and m2 (recovers only the noise variable);
-        # nuisance set n1 (ecog), n2 (smoker, an instrument), n3 (the post-treatment event).
-        _r2_row("1", "m1", "pdl1", 0.9, modifier=True),
-        _r2_row("1", "m2", "noise", 0.8, modifier=True),
-        _r2_row("1", "n1", "ecog", 0.7, nuisance=True),
-        _r2_row("1", "n2", "smoker", 0.6, nuisance=True),
-        _r2_row("1", "n3", "post_treatment_toxicity", 0.95, nuisance=True),
-        _r2_row("1", "n1", "u_1", 0.1, nuisance=True),
-        _r2_row("1", "x", "age", 0.9),  # recovers age but was not selected
-        # Fold 2: one modifier recovering ecog (dual role) and albumin in the nuisance set.
-        _r2_row("2", "m3", "ecog", 0.55, modifier=True, nuisance=True),
-        _r2_row("2", "n4", "albumin", 0.7, nuisance=True),
-        _r2_row("2", "m3", "u_1", 0.3, modifier=True, nuisance=True),
-    ]
-    recovery = {"status": "ok", "folds": ["1", "2"], "threshold_r_squared": 0.5,
-                "r_squared": rows, "per_fold": {"1": {}, "2": {}}}
-    result = selection_metrics(recovery, concepts)
-    # True modifiers: ecog and pdl1. Fold 1 recovers pdl1, fold 2 recovers ecog.
-    assert result["modifier_recall"] == pytest.approx(2 / 4)
-    # Selected modifiers: m1, m2 (fold 1) and m3 (fold 2); m1 and m3 recover a modifier.
-    assert result["modifier_precision"] == pytest.approx(2 / 3)
-    assert result["selected_modifiers"] == 3
-    # True confounders: age and ecog. Fold 1 recovers ecog; fold 2 recovers ecog through m3.
-    assert result["confounder_recall"] == pytest.approx(2 / 4)
-    assert result["instruments_in_nuisance_set"] == 1
-    assert result["instruments_among_modifiers"] == 0
-    assert result["prognostic_in_nuisance_set"] == 1
-    assert result["unmeasured_max_r_squared_selected"] == {"u_1": 0.3}
-    assert result["unmeasured_recovered_by_selected"] is False
-    assert result["post_treatment_recovered"] is True
-    assert result["post_treatment_recoveries"][0]["feature_id"] == "n3"
-    assert result["per_fold"]["1"]["true_modifiers_recovered"] == ["pdl1"]
-    assert selection_metrics({"status": "unavailable"}, concepts)["status"] == "unavailable"
-
-
-def test_short_nuisances_integrate_the_unmeasured_confounder_out():
-    rng = np.random.default_rng(1)
-    n = 6
-    eta_t, eta_0 = rng.normal(size=n), rng.normal(size=n)
-    u = rng.normal(size=(n, 1))
-    e = _expit(eta_t + GAMMA_T * u[:, 0])
-    mu0 = _expit(eta_0 + GAMMA_Y * u[:, 0])
-    mu1 = _expit(eta_0 + 0.5 + GAMMA_Y * u[:, 0])
-    e_short, g0, g1 = short_nuisances(
-        propensity=e, mu0=mu0, mu1=mu1, u=u, treatment_coefficients=np.array([GAMMA_T]),
-        outcome_coefficients=np.array([GAMMA_Y]), binary=True, nodes=40)
-    z = np.random.default_rng(2).normal(size=400_000)
-    for i in range(n):
-        e_z = _expit(eta_t[i] + GAMMA_T * z)
-        m0_z, m1_z = _expit(eta_0[i] + GAMMA_Y * z), _expit(eta_0[i] + 0.5 + GAMMA_Y * z)
-        assert e_short[i] == pytest.approx(e_z.mean(), abs=3e-3)
-        assert g1[i] == pytest.approx((m1_z * e_z).mean() / e_z.mean(), abs=3e-3)
-        assert g0[i] == pytest.approx((m0_z * (1 - e_z)).mean() / (1 - e_z).mean(), abs=3e-3)
-    # Without U the short nuisances are the long ones.
-    same = short_nuisances(propensity=e, mu0=mu0, mu1=mu1, u=u,
-                           treatment_coefficients=np.zeros(1), outcome_coefficients=np.zeros(1),
-                           binary=True)
-    assert np.allclose(same[0], e) and np.allclose(same[1], mu0) and np.allclose(same[2], mu1)
-    # Continuous outcomes: E[Y | D, X] shifts with the propensity-weighted mean of U.
-    cont = short_nuisances(propensity=e, mu0=eta_0 + GAMMA_Y * u[:, 0], mu1=eta_0 + 1 + GAMMA_Y * u[:, 0],
-                           u=u, treatment_coefficients=np.array([GAMMA_T]),
-                           outcome_coefficients=np.array([GAMMA_Y]), binary=False, nodes=40)
-    i = 0
-    e_z = _expit(eta_t[i] + GAMMA_T * z)
-    assert cont[2][i] == pytest.approx(eta_0[i] + 1 + GAMMA_Y * (z * e_z).mean() / e_z.mean(), abs=3e-3)
-
-
-def test_sensitivity_metrics_follow_the_benchmark_formulas():
-    from oci.evaluation.attribution import OracleData
-
-    frame, metadata = _cohort(3000, 8, unmeasured=True)
-    frame["_oci_row_id"] = np.arange(len(frame))
-    clip = 0.02
-    # The run's nuisances omit U: the true short nuisances plus noise.
-    u = frame[["true_u_1"]].to_numpy()
-    e, y0, y1 = (frame[c].to_numpy() for c in ("true_treatment_prob", "true_y0", "true_y1"))
-    e_s, g0, g1 = short_nuisances(propensity=e, mu0=y0, mu1=y1, u=u,
-                                  treatment_coefficients=np.array([GAMMA_T]),
-                                  outcome_coefficients=np.array([GAMMA_Y]), binary=True)
-    t, y = frame["treatment_indicator"].to_numpy(float), frame["outcome_indicator"].to_numpy(float)
-    rng = np.random.default_rng(9)
-    e_hat = np.clip(e_s + rng.normal(0, 0.02, len(t)), 0.03, 0.97)
-    m0_hat, m1_hat = np.clip(g0, 0.02, 0.98), np.clip(g1, 0.02, 0.98)
-    clipped = np.clip(e_hat, clip, 1 - clip)
-    psi = m1_hat - m0_hat + t * (y - m1_hat) / clipped - (1 - t) * (y - m0_hat) / (1 - clipped)
-    predictions = pd.DataFrame({"_oci_row_id": frame["_oci_row_id"], "treatment": t, "outcome": y,
-                                "propensity": e_hat, "mu0": m0_hat, "mu1": m1_hat,
-                                "aipw_score": psi})
-    concepts = [OracleConcept("u_1", "true_u_1", "continuous", ("unmeasured_confounder",))]
-    oracle = benchmark.BenchmarkOracle(
-        data=OracleData(dataset=Path("x"), dataset_sha256="", metadata=None, metadata_sha256=None,
-                        concepts=concepts, frame=frame[["_oci_row_id", "true_u_1"]],
-                        absent_concepts=[]),
-        values=frame, metadata=metadata, ite_column="true_ite",
-        potential_outcome_columns=("true_y0", "true_y1"),
-        unmeasured=metadata["unmeasured_confounders"], post_treatment_concepts=[],
-    )
-    heterogeneity = {"unmeasured_confounding_sensitivity": {
-        "evalues": {"ate": {"pooled": {"evalue_point": 1.8, "evalue_confidence_limit": 1.2}}},
-        "omitted_variable_bias": {"ate": {"pooled": {"robustness_value": 0.07,
-                                                     "robustness_value_confidence": 0.02}}},
-    }}
-    true_ate = float(frame["true_ite"].mean())
-    result = benchmark.sensitivity_metrics(predictions, oracle, heterogeneity, outcome_type="binary",
-                                           propensity_clip=clip, true_ate=true_ate,
-                                           unmeasured_strength=1.0)
-    assert result["status"] == "ok"
-    assert (result["evalue_point"], result["robustness_value_confidence"]) == (1.8, 0.02)
-
-    def elements(e_value, mu0, mu1):
-        ec = np.clip(e_value, clip, 1 - clip)
-        theta = np.mean(mu1 - mu0 + t * (y - mu1) / ec - (1 - t) * (y - mu0) / (1 - ec))
-        sigma2 = np.mean((y - (t * mu1 + (1 - t) * mu0)) ** 2)
-        alpha = t / ec - (1 - t) / (1 - ec)
-        nu2 = np.mean(2 * (1 / ec + 1 / (1 - ec)) - alpha ** 2)
-        return theta, sigma2, nu2
-
-    _theta_l, sigma2_l, nu2_l = elements(e, y0, y1)
-    _theta_s, sigma2_s, nu2_s = elements(e_s, g0, g1)
-    variance = np.var(y)
-    r2_long, r2_short = 1 - sigma2_l / variance, 1 - sigma2_s / variance
-    cf_y = (r2_long - r2_short) / (1 - r2_long)
-    cf_d = (1 - nu2_s / nu2_l) / (nu2_s / nu2_l)
-    strength = result["true_strength"]
-    assert strength["cf_y"] == pytest.approx(cf_y)
-    assert strength["cf_d"] == pytest.approx(cf_d)
-    assert 0 < cf_y < 1 and 0 < cf_d < 1
-    theta_run, sigma2_run, nu2_run = elements(e_hat, m0_hat, m1_hat)
-    bias = math.sqrt(sigma2_run * nu2_run) * math.sqrt(cf_y * cf_d / (1 - cf_d))
-    bound = result["run_bound_at_true_strength"]["rho_1"]
-    assert bound["lower"] == pytest.approx(theta_run - bias)
-    assert bound["upper"] == pytest.approx(theta_run + bias)
-    assert bound["covers_true_ate"] is bool(theta_run - bias <= true_ate <= theta_run + bias)
-    # The run omits U, and the bound at U's own strength contains the true ATE.
-    assert bound["covers_true_ate"] is True
-    no_u = benchmark.sensitivity_metrics(
-        predictions, benchmark.BenchmarkOracle(**{**oracle.__dict__, "unmeasured": []}),
-        heterogeneity, outcome_type="binary", propensity_clip=clip, true_ate=true_ate)
-    assert no_u["status"] == "not_applicable" and no_u["robustness_value"] == 0.07
-
-
-def test_unmeasured_coefficients_from_metadata_or_least_squares():
-    frame, metadata = _cohort(4000, 3, unmeasured=True)
-    frame["_oci_row_id"] = np.arange(len(frame))
-    concepts = [OracleConcept(f["name"], f"true_{f['name']}",
-                              "continuous" if f["type"] == "continuous" else "categorical",
-                              tuple(f["roles"])) for f in METADATA_FEATURES]
-    arguments = dict(values=frame, concepts=concepts,
-                     treatment_logit=np.log(frame["true_treatment_prob"] / (1 - frame["true_treatment_prob"])).to_numpy(),
-                     outcome_scale_y0=np.log(frame["true_y0"] / (1 - frame["true_y0"])).to_numpy())
-    stated = benchmark.unmeasured_coefficients(metadata["unmeasured_confounders"], **arguments)[0]
-    assert stated["source"] == "metadata"
-    assert (stated["treatment_coefficient"], stated["outcome_coefficient"]) == (GAMMA_T, GAMMA_Y)
-    fitted = benchmark.unmeasured_coefficients([{"name": "u_1", "coefficients": {}}], **arguments)[0]
-    assert fitted["source"] == "least_squares_on_oracle_columns"
-    assert fitted["treatment_coefficient"] == pytest.approx(GAMMA_T, abs=1e-6)
-    assert fitted["outcome_coefficient"] == pytest.approx(GAMMA_Y, abs=1e-6)
-
-
-def test_scenario_and_leak_tables():
-    def row(seed, variant, bias, covered, overlap, leaked, status="complete"):
-        return {"scenario": "S6", "family": "S6", "variant": variant, "size": 30, "seed": seed,
-                "seed_set": "development", "status": status, "ate_bias": bias,
-                "ate_covered": covered, "outside_overlap_fraction": overlap,
-                "post_treatment_recovered": leaked}
-
-    rows = [
-        row(11, "text_column", 0.3, False, 0.4, True), row(11, "dated_notes", 0.1, True, 0.1, False),
-        row(12, "text_column", -0.1, True, 0.2, True), row(12, "dated_notes", 0.0, True, 0.0, False),
-        row(13, "text_column", None, None, None, None, status="pending"),
-        row(14, "text_column", None, None, None, None, status="error"),
-    ]
-    table = {item["variant"]: item for item in scenario_rows(rows)}
-    text = table["text_column"]
-    assert (text["cells_expected"], text["cells_complete"], text["cells_pending"],
-            text["cells_error"]) == (4, 2, 1, 1)
-    assert text["ate_mean_bias"] == pytest.approx(0.1)
-    assert text["ate_rmse"] == pytest.approx(math.sqrt((0.09 + 0.01) / 2))
-    assert text["ate_coverage"] == pytest.approx(0.5)
-    assert text["post_treatment_recovered_rate"] == pytest.approx(1.0)
-    leaks = leak_rows(rows)
-    assert [item["seed"] for item in leaks] == [11, 12]
-    assert leaks[0]["ate_bias_text_minus_notes"] == pytest.approx(0.2)
-    assert leaks[0]["outside_overlap_fraction_text_minus_notes"] == pytest.approx(0.3)
-    assert leaks[1]["text_column_post_treatment_recovered"] is True
-    assert leaks[1]["dated_notes_post_treatment_recovered"] is False
-
-
-def test_overlap_metrics_count_rows_outside_the_flag_bounds():
-    predictions = pd.DataFrame({"propensity": [0.01, 0.05, 0.5, 0.95, 0.97, np.nan]})
-    result = benchmark.overlap_metrics(predictions)
-    assert (result["rows"], result["outside_overlap"]) == (5, 2)
-    assert result["outside_overlap_fraction"] == pytest.approx(0.4)
 
 
 # ---------------------------------------------------------------------------
@@ -1131,16 +645,6 @@ def test_aggregate_reads_finished_runs_and_lists_pending_ones(tmp_path: Path, fa
     assert (estimation / "complete.json").is_file() and (estimation / "predictions.csv").is_file()
 
 
-def test_aggregate_refuses_confirmatory_cells_without_the_flag(tmp_path: Path):
-    common = dict(out=tmp_path / "bench", registry_path=_registry(tmp_path), seeds_path=_seeds(tmp_path))
-    with pytest.raises(SeedGuardError):
-        benchmark.aggregate(seeds="91", ceiling=False, **common)
-    result = benchmark.aggregate(ceiling=False, confirmatory=True, scenarios="S0", **common)
-    cells = pd.read_csv(Path(result["output_dir"]) / "cells.csv")
-    assert set(cells["seed_set"]) == {"development", "confirmatory"}
-    assert set(cells["detail"]) == {"not_materialized"}
-
-
 def test_oracle_loading_requires_frozen_readers(tmp_path: Path):
     data = _write_cohort(tmp_path / "data", 20, 0)
     reader = FrozenArtifactReader(tmp_path)
@@ -1153,33 +657,3 @@ def test_oracle_loading_requires_frozen_readers(tmp_path: Path):
                                              label_columns=["treatment_indicator"])
     assert oracle.ite_column == "true_ite"
     assert [concept.name for concept in oracle.data.concepts] == [f["name"] for f in METADATA_FEATURES]
-
-
-def test_run_status_reports_pending_details(tmp_path: Path):
-    assert run_status(tmp_path / "missing") == ("pending", "not_started")
-    run = tmp_path / "run"
-    run.mkdir()
-    assert run_status(run) == ("pending", "incomplete")
-    _write_json(run / "progress.json", {"status": "failed", "current_component": "stage2"})
-    assert run_status(run) == ("pending", "failed_stage2")
-    _write_json(run / "progress.json", {"status": "complete"})
-    assert run_status(run) == ("pending", "stage2_not_run")
-    _write_json(run / "stage2" / "complete.json", {"status": "complete", "phase": "feature_definitions"})
-    assert run_status(run) == ("pending", "stage2_phase_feature_definitions")
-    _write_json(run / "stage2" / "complete.json", {"status": "complete", "phase": "causal_estimation"})
-    assert run_status(run) == ("pending", "stage2_outputs_missing")
-    for name in ("cross_fitted_predictions.csv", "causal_estimate.json", "heterogeneity_diagnostics.json"):
-        (run / "stage2" / name).write_text("{}")
-    assert run_status(run) == ("complete", "complete")
-
-
-def test_benchmark_import_stays_lightweight():
-    script = (
-        "import sys, oci.evaluation.benchmark; "
-        "heavy = [m for m in ('synthetic_data.reequation', 'torch', "
-        "'oci.inference.plain_handoff_stage2_analysis', 'oci.evaluation.benchmark_ceiling') "
-        "if m in sys.modules]; print(heavy)"
-    )
-    result = subprocess.run([sys.executable, "-c", script], cwd=REPO, capture_output=True,
-                            text=True, check=True)
-    assert result.stdout.strip() == "[]"

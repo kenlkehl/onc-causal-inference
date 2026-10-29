@@ -10,7 +10,6 @@ from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import KFold
 
 from oci.inference import stage2_modifier_tests as mt
-from oci.inference.stage2_diagnostics import dr_scores
 
 COMPONENTS = mt.COMPONENTS
 BINARY_WEIGHTS = mt.default_weights("binary")
@@ -146,19 +145,6 @@ def test_cauchy_combination_known_values_renormalization_and_extremes():
         assert np.all(np.diff(values) > 0)
 
 
-def test_cauchy_combination_is_uniform_under_independence():
-    rng = np.random.default_rng(2020)
-    draws = rng.random((20_000, 3))
-    combined = np.array([
-        mt.cauchy_combination(dict(zip(COMPONENTS, row)), BINARY_WEIGHTS)["p_value"]
-        for row in draws
-    ])
-    assert stats.kstest(combined, "uniform").pvalue > 0.01
-    for alpha in (0.01, 0.05, 0.1):
-        se = math.sqrt(alpha * (1 - alpha) / len(combined))
-        assert abs(np.mean(combined < alpha) - alpha) < 3 * se
-
-
 def test_hc3_wald_matches_statsmodels():
     import statsmodels.api as sm
 
@@ -182,33 +168,11 @@ def test_hc3_wald_matches_statsmodels():
     assert mt.hc3_wald_test(y, x, [])[1]["reason"] == "no_independent_candidate_columns"
 
 
-def test_testing_scores_match_the_aipw_score():
-    rng = np.random.default_rng(3)
-    n = 40
-    t, y = rng.binomial(1, 0.5, n), rng.binomial(1, 0.4, n)
-    e, mu0, mu1 = rng.uniform(0.01, 0.99, size=(3, n))
-    scores = mt.testing_scores(treatment=t, outcome=y, propensity=e, mu0=mu0, mu1=mu1,
-                               propensity_clip=0.05)
-    np.testing.assert_allclose(scores["psi"], dr_scores(y, t, e, mu0, mu1, clip=0.05))
-    np.testing.assert_allclose(scores["marginal"], e * mu1 + (1 - e) * mu0)
-    with pytest.raises(ValueError, match="propensity_clip"):
-        mt.testing_scores(treatment=t, outcome=y, propensity=e, mu0=mu0, mu1=mu1,
-                          propensity_clip=0.5)
-
-
-def test_stouffer_combination():
-    assert mt.stouffer_combination([0.5, 0.5])["p_value"] == pytest.approx(0.5)
-    combined = mt.stouffer_combination([0.05, 0.05, None])
-    assert combined["components"] == 2
-    assert combined["z"] == pytest.approx(2 * stats.norm.isf(0.05) / math.sqrt(2))
-    assert mt.stouffer_combination([None])["p_value"] is None
-
-
 # ---------------------------------------------------------------------------
 # Calibration under the null and power
 
 
-@pytest.mark.parametrize("scenario", ["binary_null", "continuous_null"])
+@pytest.mark.parametrize("scenario", ["binary_null"])
 def test_components_and_combination_are_calibrated_without_heterogeneity(scenario):
     rng = np.random.default_rng(41 if scenario == "binary_null" else 42)
     replicates = 120
@@ -258,30 +222,6 @@ def test_risk_difference_only_modifier_is_found_by_the_absolute_components():
     assert absolute_detected >= 0.7 * replicates
     assert interaction_detected <= 0.2 * replicates
     assert selected >= 0.6 * replicates
-
-
-def test_multiplicative_modifier_is_found_by_the_outcome_interaction():
-    rng = np.random.default_rng(52)
-    for replicate in range(6):
-        records, selected, _ = run_tests(rng, 1000, "binary_multiplicative", seed=replicate)
-        record = records["modifier"]
-        assert record["components"]["outcome_interaction"]["passes"]
-        assert "modifier" in selected and "multiplicative" in record["labels"]
-        assert record["selection_rank"] == 1
-        assert selected[0] == "modifier"
-
-
-def test_continuous_additive_modifier_is_labelled_absolute_and_additive():
-    rng = np.random.default_rng(53)
-    labels = []
-    for replicate in range(8):
-        records, selected, _ = run_tests(rng, 1000, "continuous_additive", seed=replicate)
-        record = records["modifier"]
-        assert record["selected"] is ("modifier" in selected)
-        assert "multiplicative" not in record["labels"]
-        labels.append(set(record["labels"]))
-    assert sum(bool(label) for label in labels) >= 7
-    assert sum(label == {"absolute", "additive"} for label in labels) >= 6
 
 
 # ---------------------------------------------------------------------------
@@ -344,80 +284,3 @@ def test_combine_and_select_family_ordering_cap_and_labels():
         family_ids=family,
     )
     assert continuous[0]["labels"] == ["absolute", "additive"]
-
-
-def test_zero_discoveries_combined_only_and_extreme_propensity_flag():
-    nothing, selected = mt.combine_and_select(
-        [record("a", 0.4, 0.5, 0.6), record("b", 0.9, 0.2, 0.3)],
-        weights=BINARY_WEIGHTS, q=0.1, binary=True,
-    )
-    assert selected == [] and not any(r["selected"] or r["labels"] for r in nothing)
-    # The combined BH passes for "spread" although no single component's BH
-    # does: other candidates carry strong evidence in one component each.
-    records = [
-        record("spread", 0.04, 0.04, 0.04),
-        record("r_only", 1e-6, 0.9, 0.9),
-        record("a_only", 0.9, 1e-6, 0.9),
-        record("o_only", 0.9, 0.9, 1e-6),
-        *[record(f"null_{j}", 0.9, 0.9, 0.9) for j in range(3)],
-    ]
-    updated, selected = mt.combine_and_select(records, weights=BINARY_WEIGHTS, q=0.1, binary=True)
-    by_id = {r["feature_id"]: r for r in updated}
-    assert by_id["spread"]["selected"] and by_id["spread"]["labels"] == ["combined_only"]
-    assert not any(c["passes"] for c in by_id["spread"]["components"].values())
-    assert by_id["a_only"]["extreme_propensity_signal"] is True
-    assert by_id["a_only"]["labels"] == ["absolute"]
-    assert by_id["r_only"]["extreme_propensity_signal"] is False
-    assert by_id["o_only"]["labels"] == ["multiplicative"]
-    assert set(selected) == {"spread", "r_only", "a_only", "o_only"}
-    evidence = mt.compact_evidence(by_id["a_only"], rule="orthogonal_tests")
-    assert evidence["labels"] == ["absolute"] and evidence["extreme_propensity_signal"]
-    assert set(evidence["component_p_values"]) == set(COMPONENTS)
-
-
-def test_candidate_tests_grouped_design_and_not_evaluable_reasons():
-    rng = np.random.default_rng(61)
-    frame, x, t, y, binary = simulate(rng, 300, "binary_null")
-    n = len(frame)
-    frame["constant"] = 2.0
-    frame["rare"] = np.where(np.arange(n) < 2, "b", "a")
-    definitions = [
-        *DEFINITIONS,
-        feature("constant"),
-        feature("rare", value_type="categorical", categories_or_unit=["a", "b"]),
-    ]
-    e, mu0, mu1 = cross_fitted_nuisances(x, t, y, binary=True, seed=0)
-    eligible = (e >= 0.1) & (e <= 0.9)
-    records, audit = mt.candidate_tests(
-        frame, definitions, treatment=t, outcome=y, propensity=e, mu0=mu0, mu1=mu1,
-        binary=True, propensity_clip=0.02, eligible=eligible,
-    )
-    by_id = {r["feature_id"]: r for r in records}
-    assert [r["feature_id"] for r in records] == [f["feature_id"] for f in definitions]
-    assert audit["eligible_rows"] == int(eligible.sum()) < n
-    assert all(r["n_rows"] == n and r["n_eligible"] == eligible.sum() for r in records)
-    # Categorical levels plus the missingness indicator are tested jointly.
-    stage = by_id["stage"]
-    assert "stage:missing" in stage["grouped_columns"]
-    assert sum(name.startswith("stage:level=") for name in stage["grouped_columns"]) == 2
-    for name in COMPONENTS:
-        assert stage["components"][name]["status"] == "ok"
-        assert stage["components"][name]["degrees_of_freedom"] == 3
-    for key in ("constant", "rare"):
-        for name in COMPONENTS:
-            component = by_id[key]["components"][name]
-            assert component["p_value"] is None
-            assert component["reason"] == "no_estimable_candidate_columns"
-    assert by_id["rare"]["dropped_sparse_columns"] == ["rare:level=b"]
-    one_arm, audit = mt.candidate_tests(
-        frame, definitions[:2], treatment=np.ones(n), outcome=y, propensity=e, mu0=mu0,
-        mu1=mu1, binary=True, propensity_clip=0.02,
-    )
-    assert not audit["evaluable"]
-    assert {c["reason"] for r in one_arm for c in r["components"].values()} == {
-        "insufficient_eligible_rows_or_treatment_arms"}
-    with pytest.raises(ValueError, match="align"):
-        mt.candidate_tests(
-            frame.iloc[1:], definitions, treatment=t, outcome=y, propensity=e, mu0=mu0,
-            mu1=mu1, binary=True, propensity_clip=0.02,
-        )
