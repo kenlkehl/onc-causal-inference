@@ -228,12 +228,6 @@ Configuration rules:
   `input/pretreatment_notes_manifest.json` and reuse it without rewriting it
   (Stage 1 checkpoints use its path, size, and mtime); any mismatch fails
   closed. `run_config.json` omits `notes` when it is not configured.
-- An explicit `stage1_checkpoint_relocation.json` in the output directory
-  preserves original text-model checkpoint identities after a verified copy.
-  It verifies the dataset SHA-256 and normalized scientific settings before
-  substituting logical dataset/cache paths for identity only; runtime paths,
-  copied payloads, row checks, and deterministic seeds stay intact. See
-  `docs/configuration.md#checkpoint-relocation`.
 - Stage 2 requires the frozen split file
   `components/tfidf/split_provenance.jsonl` and never resamples folds.
 - `run_config.json` redacts API keys; Stage 2 checks model identity

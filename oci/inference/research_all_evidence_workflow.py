@@ -1104,13 +1104,6 @@ def _run_one_text_model_context(
                 "candidate_proposal_parallelism",
             ):
                 attention_identity.pop(runtime_key, None)
-    from .stage1_checkpoint_relocation import relocated_checkpoint_identity
-
-    source_identity, scientific_config = relocated_checkpoint_identity(
-        output_dir=context_dir.parent.parent.parent,
-        dataset_identity=source_identity,
-        scientific_config=scientific_config,
-    )
     checkpoint_store = Stage1CheckpointStore(
         context_dir / "checkpoints" / "v1",
         context_identity={
