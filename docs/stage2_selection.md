@@ -1048,7 +1048,7 @@ does not produce per-patient confidence intervals.
 
 | Place | Use |
 |---|---|
-| Stage 1 `bow_r_loss` | Sparse ridge DINA on bag-of-words features |
+| Stage 1 `bow_r_loss` | Sparse ridge DINA on bag-of-words features, with the penalty cross-validated over the effect folds |
 | Stage 1 `htr_neural` effect heads | DINA loss with nuisances frozen inside the effect-training fold |
 | Stage 1 `tfidf_topics`, `tfidf_orphan_ngrams`, `neural_query_moments`, embedding effect directions | DINA score `(T − a)(Y − expit(ν + (T − a)δ₀))` around a training-fitted constant `δ₀`, with Fisher-information weights |
 | Stage 2 evidence | One-candidate DINA gains, the joint grouped DINA model, and joint DINA permutation importance |

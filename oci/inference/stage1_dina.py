@@ -140,6 +140,79 @@ def crossfit_nuisance(texts, t, y, *, folds=3, seed=0, view=None, explicit=None,
     return oof, full
 
 
+def _ridge_alphas(view, ridge_alphas):
+    alphas = (
+        [float(getattr(view, "ridge_alpha", 10.0))]
+        if ridge_alphas is None
+        else [float(value) for value in ridge_alphas]
+    )
+    if not alphas or len(set(alphas)) != len(alphas) or not all(
+        np.isfinite(value) and value > 0 for value in alphas
+    ):
+        raise ValueError("DINA ridge penalties must be distinct, finite, and positive")
+    # Largest first: each fit warm-starts the next, weaker penalty.
+    return sorted(alphas, reverse=True)
+
+
+def fit_effect_path(
+    texts,
+    t,
+    y,
+    test_texts,
+    *,
+    ridge_alphas=None,
+    folds=3,
+    seed=0,
+    view=None,
+    explicit=None,
+    test_explicit=None,
+    specs=None,
+):
+    """Effect fits for each ridge penalty on one training set's nested nuisances.
+
+    The regularization is ``ridge_alpha / n``; ``ridge_alphas`` defaults to the
+    view's ``ridge_alpha``. ``path`` is ordered from the largest penalty down,
+    and every fit after the first warm-starts from the previous one.
+    """
+    nt, nuisance = crossfit_nuisance(
+        texts, t, y, folds=folds, seed=seed, view=view, explicit=explicit, specs=specs
+    )
+    nv = nuisance.predict(test_texts, test_explicit)
+    x, encoder = encode(texts, view=view, explicit=explicit, specs=specs)
+    xv = encoder.transform(test_texts, test_explicit)
+    path, model = [], None
+    for alpha in _ridge_alphas(view, ridge_alphas):
+        model = dina.fit(
+            x,
+            y,
+            t,
+            nt["a"],
+            nt["nu"],
+            groups=encoder.groups,
+            regularization=alpha / len(t),
+            initial=model,
+        )
+        delta = model.predict(xv)
+        mu0, mu1 = dina.counterfactuals(delta, nv["a"], nv["nu"])
+        path.append(
+            {
+                "ridge_alpha": alpha,
+                "tau": mu1 - mu0,
+                "delta": delta,
+                "mu0": mu0,
+                "mu1": mu1,
+                "model": model,
+            }
+        )
+    return {
+        "path": path,
+        "encoder": encoder,
+        "training_nuisance": nt,
+        "validation_nuisance": nv,
+        "nuisance_model": nuisance,
+    }
+
+
 def fit_effect(
     texts,
     t,
@@ -154,52 +227,63 @@ def fit_effect(
     specs=None,
 ):
     """One effect training set, with nested nuisances; no test labels accepted."""
-    nt, nuisance = crossfit_nuisance(
-        texts, t, y, folds=folds, seed=seed, view=view, explicit=explicit, specs=specs
-    )
-    nv = nuisance.predict(test_texts, test_explicit)
-    x, encoder = encode(texts, view=view, explicit=explicit, specs=specs)
-    xv = encoder.transform(test_texts, test_explicit)
-    model = dina.fit(
-        x,
-        y,
+    fitted = fit_effect_path(
+        texts,
         t,
-        nt["a"],
-        nt["nu"],
-        groups=encoder.groups,
-        regularization=float(getattr(view, "ridge_alpha", 10.0)) / len(t),
+        y,
+        test_texts,
+        folds=folds,
+        seed=seed,
+        view=view,
+        explicit=explicit,
+        test_explicit=test_explicit,
+        specs=specs,
     )
-    delta = model.predict(xv)
-    mu0, mu1 = dina.counterfactuals(delta, nv["a"], nv["nu"])
-    return {
-        "tau": mu1 - mu0,
-        "delta": delta,
-        "mu0": mu0,
-        "mu1": mu1,
-        "model": model,
-        "encoder": encoder,
-        "training_nuisance": nt,
-        "validation_nuisance": nv,
-        "nuisance_model": nuisance,
-    }
+    (effect,) = fitted.pop("path")
+    effect.pop("ridge_alpha")
+    return {**effect, **fitted}
 
 
 def crossfit_effect(
-    texts, t, y, *, folds=3, seed=0, view=None, explicit=None, specs=None, test_texts=None
+    texts,
+    t,
+    y,
+    *,
+    folds=3,
+    seed=0,
+    view=None,
+    explicit=None,
+    specs=None,
+    test_texts=None,
+    ridge_alphas=None,
 ):
+    """Cross-fitted effects; with several ``ridge_alphas``, the penalty is cross-validated.
+
+    Every effect fold fits each penalty. The penalty with the lowest DINA loss
+    pooled over the effect folds' held-out rows (scored with nuisances fitted
+    without them) gives the returned predictions; ``test_texts`` never enter
+    the choice. ``penalty_selection`` records it.
+    """
+    from .sparse_text_modeling import select_ridge_alpha
+
     t, y = np.asarray(t), np.asarray(y)
     test_texts = list(test_texts or [])
-    result = {key: np.full(len(t), np.nan) for key in ("tau", "delta", "loss", "mu0", "mu1")}
-    external = []
+    alphas = _ridge_alphas(view, ridge_alphas)
+    results = [
+        {key: np.full(len(t), np.nan) for key in ("tau", "delta", "loss", "mu0", "mu1")}
+        for _ in alphas
+    ]
+    external = [[] for _ in alphas]
     for fit, hold in splits(t, folds, seed):
         prediction_texts = [*subset(texts, hold), *test_texts]
         if explicit is not None and test_texts:
             raise ValueError("explicit external predictions require the fit_effect API")
-        f = fit_effect(
+        f = fit_effect_path(
             subset(texts, fit),
             t[fit],
             y[fit],
             prediction_texts,
+            ridge_alphas=alphas,
             folds=folds,
             seed=seed,
             view=view,
@@ -207,14 +291,25 @@ def crossfit_effect(
             test_explicit=subset(explicit, hold),
             specs=specs,
         )
-        for key in ("tau", "delta", "mu0", "mu1"):
-            result[key][hold] = f[key][: len(hold)]
         nv = f["validation_nuisance"]
-        result["loss"][hold] = dina.loss(
-            y[hold], t[hold], nv["a"][: len(hold)], nv["nu"][: len(hold)], f["delta"][: len(hold)]
-        )
-        external.append(f["tau"][len(hold) :])
-    result["test_tau"] = np.mean(external, axis=0)
+        for result, outside, effect in zip(results, external, f["path"], strict=True):
+            for key in ("tau", "delta", "mu0", "mu1"):
+                result[key][hold] = effect[key][: len(hold)]
+            result["loss"][hold] = dina.loss(
+                y[hold],
+                t[hold],
+                nv["a"][: len(hold)],
+                nv["nu"][: len(hold)],
+                effect["delta"][: len(hold)],
+            )
+            outside.append(effect["tau"][len(hold) :])
+    selection = select_ridge_alpha(
+        alphas, [np.mean(result["loss"]) for result in results], criterion="heldout_dina_loss"
+    )
+    best = alphas.index(selection["ridge_alpha"])
+    result = results[best]
+    result["test_tau"] = np.mean(external[best], axis=0)
+    result["penalty_selection"] = selection
     return result
 
 

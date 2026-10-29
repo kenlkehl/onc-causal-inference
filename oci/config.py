@@ -1671,6 +1671,11 @@ class BoWViewConfig:
                 )
 
 
+# ``bow_r_loss`` effect penalty grid, spanning the default views' fixed
+# ``ridge_alpha`` values (10 and 20) by two orders of magnitude each way.
+DEFAULT_BOW_EFFECT_RIDGE_ALPHA_GRID = (0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0, 300.0, 1000.0)
+
+
 def legacy_default_bow_views_v1() -> List[BoWViewConfig]:
     """Default BoW view grid used when a configuration lists no views."""
     return [
@@ -2233,6 +2238,14 @@ class MultiModelForestConfig:
     bow_discovery_enabled: bool = True
     bow_discovery_disable_reason: Optional[str] = None
     bow_views: List[BoWViewConfig] = field(default_factory=list)
+    # ``bow_r_loss`` effect penalties (``ridge_alpha``; the DINA regularization
+    # is ``ridge_alpha / n``). Each effect fold fits every value, and the one
+    # with the lowest held-out effect loss pooled over the effect folds is used
+    # for the view's effect predictions and its effect evidence. An empty list
+    # uses each view's fixed ``ridge_alpha``. Tree learners have no penalty.
+    bow_effect_ridge_alpha_grid: List[float] = field(
+        default_factory=lambda: list(DEFAULT_BOW_EFFECT_RIDGE_ALPHA_GRID)
+    )
     e_clip: float = 0.01
     top_n_features: int = 100
     # Inner discovery folds inside each outer fold.
@@ -2368,6 +2381,23 @@ class MultiModelForestConfig:
             if isinstance(value, bool) or int(value) != value or int(value) < minimum:
                 raise ValueError(f"multi_model_forest.{name} must be an integer >= {minimum}")
             setattr(self, name, int(value))
+        grid = self.bow_effect_ridge_alpha_grid
+        if not isinstance(grid, (list, tuple)) or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0.0
+            for value in grid
+        ):
+            raise ValueError(
+                "multi_model_forest.bow_effect_ridge_alpha_grid must be a list of "
+                "finite positive numbers"
+            )
+        if len({float(value) for value in grid}) != len(grid):
+            raise ValueError(
+                "multi_model_forest.bow_effect_ridge_alpha_grid values must be distinct"
+            )
+        self.bow_effect_ridge_alpha_grid = sorted(float(value) for value in grid)
 
     def set_feature_discovery_methods(
         self,

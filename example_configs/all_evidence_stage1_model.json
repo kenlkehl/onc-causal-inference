@@ -39,6 +39,17 @@
       "multi_model_forest": {
         "bow_discovery_disable_reason": null,
         "bow_discovery_enabled": true,
+        "bow_effect_ridge_alpha_grid": [
+          0.1,
+          0.3,
+          1.0,
+          3.0,
+          10.0,
+          30.0,
+          100.0,
+          300.0,
+          1000.0
+        ],
         "candidate_consistency_inner_folds": 5,
         "cpus_total": 8,
         "e_clip": 0.01,

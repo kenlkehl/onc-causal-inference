@@ -695,6 +695,7 @@ Commonly changed keys, relative to `science.stage1.architecture`:
 | `multi_model_forest.tfidf_topic.orphan_ngram_enabled` | `false` | Add `tfidf_orphan_ngrams` to the default selection |
 | `multi_model_forest.embedding_contrast.include_cluster_contrast_vectors` | `true` | Produce `embedding_clustered` |
 | `multi_model_forest.bow_discovery_enabled`, `htr_evidence_enabled`, `matched_pair_uplift_enabled` | `true` | Enable the BoW, HTR, and matched-pair architectures |
+| `multi_model_forest.bow_effect_ridge_alpha_grid` | `[0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000]` | `bow_r_loss`: effect ridge penalties (`ridge_alpha`; DINA uses `ridge_alpha / n`) chosen by the pooled held-out effect loss over the effect folds; `[]` uses each view's fixed `ridge_alpha` ([details](stage1_architectures.md#2-sparse-residual-effect-associations-bow_r_loss)) |
 | `multi_model_forest.matched_pair_propensity_caliper` | 0.05 | `matched_pair_uplift`: absolute caliper on the cross-fitted propensity |
 | `multi_model_forest.matched_pair_prognostic_caliper` | `null` | `matched_pair_uplift`: caliper on the cross-fitted prognostic score `μ̂0`; `null` means 0.05 on the probability scale for binary outcomes and 0.2 standard deviations of `μ̂0` over the training patients for continuous outcomes. A binary value must be in (0, 1] |
 | `multi_model_forest.matched_pair_l1_ratio` | 0.5 | `matched_pair_uplift`: elastic-net mixing of the pair model and of the continuous-outcome `μ̂0` model (1 is the lasso) |

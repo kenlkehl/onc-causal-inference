@@ -73,6 +73,24 @@ ordinary outcome prediction, but they do not show that the named characteristic
 modifies the treatment effect. The [R-learner weighting note](design_notes/r_learner_weighting.md)
 discusses the weighted and unweighted forms.
 
+The effect models are cross-fitted on `effect_folds` folds of the training
+patients. The ridge penalty of each penalized linear effect model (DINA, on
+every view whatever its learner, for binary outcomes; a linear view's
+pseudo-outcome and weighted R-loss ridge regressions for continuous outcomes)
+is chosen by cross-validation over `bow_effect_ridge_alpha_grid` (`ridge_alpha`
+from 0.1 to 1000 by default; the DINA regularization is `ridge_alpha / n`).
+Every effect fold fits each value, and the value with the lowest loss on the
+effect folds' held-out patients, pooled over the folds, is kept: the DINA
+loss (scored with nuisances fitted without those patients), the pseudo-outcome
+squared error, or the R-loss. Ties go to the larger penalty. The context's
+held-out patients never enter the choice; the training patients' out-of-fold
+effect predictions and the in-context metrics built from them use the chosen
+value. The full-training-patient fit whose coefficients rank the view's terms
+uses the same value, and each view's evidence records the grid, the pooled
+held-out losses, and the chosen value under `effect_penalty` (a choice at an
+end of the grid is also logged as a warning). An empty grid uses each view's
+fixed `ridge_alpha`; tree regressors have no penalty.
+
 ### 3. Matched-pair effect modification (`matched_pair_uplift`)
 
 Within each training context, treated patients are matched one-to-one, without

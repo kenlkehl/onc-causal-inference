@@ -56,6 +56,7 @@ from .sparse_text_modeling import (
     _make_bow_vectorizer,
     _model_feature_scores,
     _model_feature_scores_are_signed,
+    _select_ridge_alpha,
     _top_feature_rows,
 )
 from .multi_model_pair_uplift import (
@@ -136,6 +137,19 @@ def _validate_train_test_prediction_tuple(
         raise ValueError(f"{label} checkpoint held-out row count changed")
 
 
+def _validate_bow_effect_payload(
+    result: Any,
+    train_rows: int,
+    test_rows: int,
+    label: str,
+) -> None:
+    if not isinstance(result, Mapping) or not isinstance(result.get("penalty"), Mapping):
+        raise ValueError(f"{label} checkpoint must contain predictions and the ridge penalty")
+    _validate_train_test_prediction_tuple(
+        (result.get("train", ()), result.get("test", ())), train_rows, test_rows, label
+    )
+
+
 def _validate_nuisance_ensemble_payload(
     payload: Mapping[str, Any],
     train_rows: int,
@@ -170,6 +184,8 @@ def _validate_prediction_fold_payload(
     heldout_rows: int,
     test_rows: int,
     label: str,
+    *,
+    columns: Optional[int] = None,
 ) -> None:
     if len(np.asarray(payload["heldout_pos"])) != int(heldout_rows):
         raise ValueError(f"{label} checkpoint held-out positions changed")
@@ -177,6 +193,10 @@ def _validate_prediction_fold_payload(
         raise ValueError(f"{label} checkpoint held-out predictions changed")
     if len(np.asarray(payload["test_pred"])) != int(test_rows):
         raise ValueError(f"{label} checkpoint outer-test predictions changed")
+    shape = () if columns is None else (int(columns),)
+    for key in ("heldout_pred", "test_pred"):
+        if np.asarray(payload[key]).shape[1:] != shape:
+            raise ValueError(f"{label} checkpoint penalty columns changed")
 
 
 def run_multi_model_forest_handoff_context(
@@ -1281,9 +1301,10 @@ class MultiModelForestStage1Runner:
         if self._bow_enabled():
             for view_index, view in enumerate(self.nn_config.bow_views):
                 pseudo_unit = f"bow/effect/view_{int(view_index):03d}_pseudo_outcome"
-                pseudo_train, pseudo_test = self._checkpointed_value(
+                ridge_alpha_grid = list(self.nn_config.bow_effect_ridge_alpha_grid)
+                pseudo_effect = self._checkpointed_value(
                     pseudo_unit,
-                    lambda: self._fit_bow_regression_train_test(
+                    lambda: self._fit_bow_effect_train_test(
                         texts_train,
                         texts_test,
                         pseudo_target,
@@ -1292,9 +1313,7 @@ class MultiModelForestStage1Runner:
                         view=view,
                         view_index=view_index,
                         target_name="effect_pseudo_target",
-                        dina_data=(
-                            (t, y) if str(self.config.outcome_type).lower() == "binary" else None
-                        ),
+                        dina_data=((t, y) if binary_dina else None),
                         seed_offset=50_000,
                         train_row_ids=train_df["_oci_row_id"].to_numpy(),
                         test_row_ids=test_df["_oci_row_id"].to_numpy(),
@@ -1308,9 +1327,10 @@ class MultiModelForestStage1Runner:
                         "view_index": int(view_index),
                         "view": _bow_view_to_dict(view),
                         "objective": "effect_pseudo_target",
+                        "ridge_alpha_grid": ridge_alpha_grid,
                     },
                     dependencies=("assembly/nuisance_ensemble",),
-                    validator=lambda result: _validate_train_test_prediction_tuple(
+                    validator=lambda result: _validate_bow_effect_payload(
                         result,
                         len(train_df),
                         len(test_df),
@@ -1318,12 +1338,12 @@ class MultiModelForestStage1Runner:
                     ),
                 )
                 weighted_unit = f"bow/effect/view_{int(view_index):03d}_weighted_r"
-                r_train, r_test = self._checkpointed_value(
+                weighted_effect = self._checkpointed_value(
                     weighted_unit,
                     lambda: (
-                        (pseudo_train, pseudo_test)
+                        pseudo_effect
                         if binary_dina
-                        else self._fit_bow_regression_train_test(
+                        else self._fit_bow_effect_train_test(
                             texts_train,
                             texts_test,
                             pseudo_target,
@@ -1332,11 +1352,6 @@ class MultiModelForestStage1Runner:
                             view=view,
                             view_index=view_index,
                             target_name="effect_weighted_r",
-                            dina_data=(
-                                (t, y)
-                                if str(self.config.outcome_type).lower() == "binary"
-                                else None
-                            ),
                             seed_offset=70_000,
                             train_row_ids=train_df["_oci_row_id"].to_numpy(),
                             test_row_ids=test_df["_oci_row_id"].to_numpy(),
@@ -1351,14 +1366,25 @@ class MultiModelForestStage1Runner:
                         "view_index": int(view_index),
                         "view": _bow_view_to_dict(view),
                         "objective": "effect_weighted_r",
+                        "ridge_alpha_grid": ridge_alpha_grid,
                     },
                     dependencies=("assembly/nuisance_ensemble",),
-                    validator=lambda result: _validate_train_test_prediction_tuple(
+                    validator=lambda result: _validate_bow_effect_payload(
                         result,
                         len(train_df),
                         len(test_df),
                         "BoW weighted-R effect",
                     ),
+                )
+                pseudo_train, pseudo_test = pseudo_effect["train"], pseudo_effect["test"]
+                r_train, r_test = weighted_effect["train"], weighted_effect["test"]
+                effect_penalty = (
+                    {"dina": pseudo_effect["penalty"]}
+                    if binary_dina
+                    else {
+                        "pseudo_outcome": pseudo_effect["penalty"],
+                        "weighted_r": weighted_effect["penalty"],
+                    }
                 )
                 self.timer.lap("bow_effect_fits", attribution=BOW_R_LOSS)
                 prediction_frames.append(
@@ -1395,6 +1421,7 @@ class MultiModelForestStage1Runner:
                             pseudo_target=pseudo_target,
                             pseudo_target_sample_weight=r_weight,
                             view=view,
+                            effect_ridge_alpha=weighted_effect["penalty"]["ridge_alpha"],
                         ),
                         train_df=train_df,
                         test_df=test_df,
@@ -1403,6 +1430,7 @@ class MultiModelForestStage1Runner:
                             "view_index": int(view_index),
                             "view": _bow_view_to_dict(view),
                             "top_n": int(self.nn_config.top_n_features),
+                            "effect_ridge_alpha": weighted_effect["penalty"]["ridge_alpha"],
                         },
                         dependencies=(
                             "assembly/nuisance_ensemble",
@@ -1430,7 +1458,7 @@ class MultiModelForestStage1Runner:
                     bow_view_results.append(
                         {
                             "metrics": view_metrics,
-                            "importance": importance,
+                            "importance": {**importance, "effect_penalty": effect_penalty},
                             "pseudo_target": pseudo_target,
                             "t_resid": t_resid,
                             "view": view,
@@ -1776,7 +1804,13 @@ class MultiModelForestStage1Runner:
         pseudo_target: np.ndarray,
         pseudo_target_sample_weight: Optional[np.ndarray],
         view: BoWViewConfig,
+        effect_ridge_alpha: Optional[float],
     ) -> Dict[str, Any]:
+        """Full-training-row models whose coefficients rank the view's terms.
+
+        The effect model uses the penalty the view's cross-fitted effect chose
+        (``effect_ridge_alpha``; ``None`` for a tree learner).
+        """
         vectorizer = _make_bow_vectorizer(_vectorizer_params(view))
         x_model = vectorizer.fit_transform(texts)
         features = np.asarray(vectorizer.get_feature_names_out())
@@ -1814,10 +1848,13 @@ class MultiModelForestStage1Runner:
                 texts, t, y, view=view, folds=self.nn_config.nuisance_folds, seed=303
             )
             effect_model = dina.fit(
-                x_model, y, t, dn["a"], dn["nu"], regularization=view.ridge_alpha / len(y)
+                x_model, y, t, dn["a"], dn["nu"], regularization=effect_ridge_alpha / len(y)
             )
         else:
-            effect_model = _make_bow_regressor(_model_params(view), random_state=303)
+            effect_params = _model_params(view)
+            if effect_ridge_alpha is not None:
+                effect_params["ridge_alpha"] = float(effect_ridge_alpha)
+            effect_model = _make_bow_regressor(effect_params, random_state=303)
             _fit_regressor(
                 effect_model,
                 x_model,
@@ -2112,24 +2149,18 @@ class MultiModelForestStage1Runner:
         test_row_ids: Optional[Sequence[Any]] = None,
         checkpoint_namespace: Optional[str] = None,
         checkpoint_dependencies: Sequence[str] = (),
-        dina_data=None,
+        ridge_alphas: Sequence[float] = (),
     ) -> Tuple[np.ndarray, np.ndarray]:
-        if dina_data is not None:
-            from .stage1_dina import crossfit_effect
-
-            t, y = dina_data
-            fitted = crossfit_effect(
-                texts_train,
-                t,
-                y,
-                test_texts=texts_test,
-                view=view,
-                folds=self.nn_config.effect_folds,
-                seed=13_000 + int(seed_offset) + 100 * outer_fold + 1000 * view_index,
-            )
-            return fitted["tau"], fitted["test_tau"]
+        """Cross-fitted predictions; with ``ridge_alphas``, one column per penalty."""
         values = np.asarray(values, dtype=float)
-        oof = np.full(len(values), np.nan, dtype=float)
+        ridge_alphas = [float(alpha) for alpha in ridge_alphas]
+        if ridge_alphas and str(view.bow_model).strip().lower() != "linear":
+            raise ValueError("BoW ridge penalty paths require a linear view")
+        oof = np.full(
+            (len(values), len(ridge_alphas)) if ridge_alphas else len(values),
+            np.nan,
+            dtype=float,
+        )
         folds = _bounded_fold_count(
             int(
                 self.nn_config.effect_folds
@@ -2170,24 +2201,32 @@ class MultiModelForestStage1Runner:
             x_fit = vectorizer.fit_transform(fit_texts)
             x_heldout = vectorizer.transform(heldout_texts)
             x_test = vectorizer.transform(texts_test)
-            model = _make_bow_regressor(
-                model_params,
-                random_state=17 + int(seed_offset) + int(fold),
-            )
             fold_weight = None
             if sample_weight is not None:
                 fold_weight = np.asarray(sample_weight, dtype=float)[fit_pos]
-            _fit_regressor(
-                model,
-                x_fit,
-                values[fit_pos],
-                sample_weight=fold_weight,
-                unsupported_sample_weight_policy=str(
-                    model_params["unsupported_sample_weight_policy"]
-                ),
-            )
-            heldout_pred = model.predict(x_heldout)
-            test_pred = model.predict(x_test)
+            predictions = []
+            for params in (
+                [{**model_params, "ridge_alpha": alpha} for alpha in ridge_alphas]
+                or [model_params]
+            ):
+                model = _make_bow_regressor(
+                    params,
+                    random_state=17 + int(seed_offset) + int(fold),
+                )
+                _fit_regressor(
+                    model,
+                    x_fit,
+                    values[fit_pos],
+                    sample_weight=fold_weight,
+                    unsupported_sample_weight_policy=str(
+                        model_params["unsupported_sample_weight_policy"]
+                    ),
+                )
+                predictions.append((model.predict(x_heldout), model.predict(x_test)))
+            heldout_pred, test_pred = predictions[0]
+            if ridge_alphas:
+                heldout_pred = np.column_stack([pair[0] for pair in predictions])
+                test_pred = np.column_stack([pair[1] for pair in predictions])
             return {
                 "fold": int(fold),
                 "heldout_pos": heldout_pos,
@@ -2221,6 +2260,7 @@ class MultiModelForestStage1Runner:
                     "target_name": target_name,
                     "seed_offset": int(seed_offset),
                     "sample_weighted": sample_weight is not None,
+                    "ridge_alphas": ridge_alphas,
                 },
                 dependencies=tuple(checkpoint_dependencies),
                 rows={
@@ -2233,6 +2273,7 @@ class MultiModelForestStage1Runner:
                     len(heldout_pos),
                     len(texts_test),
                     "BoW regression fold",
+                    columns=len(ridge_alphas) or None,
                 ),
             ).value
 
@@ -2242,8 +2283,118 @@ class MultiModelForestStage1Runner:
             heldout_pos = result["heldout_pos"]
             oof[heldout_pos] = result["heldout_pred"]
             test_predictions.append(np.asarray(result["test_pred"], dtype=float))
-        test_pred = np.nanmean(np.vstack(test_predictions), axis=0)
+        test_pred = np.nanmean(np.stack(test_predictions), axis=0)
         return oof, test_pred
+
+    def _fit_bow_effect_train_test(
+        self,
+        texts_train: Sequence[str],
+        texts_test: Sequence[str],
+        values: np.ndarray,
+        sample_weight: Optional[np.ndarray],
+        *,
+        outer_fold: int,
+        view: BoWViewConfig,
+        view_index: int,
+        target_name: str,
+        seed_offset: int,
+        train_row_ids: Sequence[Any],
+        test_row_ids: Sequence[Any],
+        checkpoint_namespace: str,
+        checkpoint_dependencies: Sequence[str],
+        dina_data=None,
+    ) -> Dict[str, Any]:
+        """One view's cross-fitted ``bow_r_loss`` effect and its ridge penalty.
+
+        A penalized linear effect (DINA for a binary outcome, ridge otherwise)
+        fits every ``bow_effect_ridge_alpha_grid`` value on each effect fold and
+        keeps the one with the lowest held-out loss pooled over the effect folds;
+        the outer held-out rows never enter the choice.
+        """
+        grid = list(self.nn_config.bow_effect_ridge_alpha_grid)
+        if dina_data is not None:
+            from .stage1_dina import crossfit_effect
+
+            t, y = dina_data
+            fitted = crossfit_effect(
+                texts_train,
+                t,
+                y,
+                test_texts=texts_test,
+                view=view,
+                folds=self.nn_config.effect_folds,
+                seed=13_000 + int(seed_offset) + 100 * outer_fold + 1000 * view_index,
+                ridge_alphas=grid or None,
+            )
+            train, test = fitted["tau"], fitted["test_tau"]
+            penalty = fitted["penalty_selection"]
+        else:
+            linear = str(view.bow_model).strip().lower() == "linear"
+            alphas = grid if linear else []
+            train, test = self._fit_bow_regression_train_test(
+                texts_train,
+                texts_test,
+                values,
+                sample_weight,
+                outer_fold=outer_fold,
+                view=view,
+                view_index=view_index,
+                target_name=target_name,
+                seed_offset=seed_offset,
+                train_row_ids=train_row_ids,
+                test_row_ids=test_row_ids,
+                checkpoint_namespace=checkpoint_namespace,
+                checkpoint_dependencies=checkpoint_dependencies,
+                ridge_alphas=alphas,
+            )
+            if not linear:
+                penalty = {
+                    "selection": "not_applicable",
+                    "criterion": None,
+                    "ridge_alpha": None,
+                    "at_grid_edge": False,
+                    "ridge_alphas": [],
+                    "heldout_loss": [],
+                }
+            else:
+                predictions = train if alphas else train[:, None]
+                squared = np.square(np.asarray(values, dtype=float)[:, None] - predictions)
+                if sample_weight is not None:
+                    squared = squared * np.asarray(sample_weight, dtype=float)[:, None]
+                penalty = _select_ridge_alpha(
+                    alphas or [float(view.ridge_alpha)],
+                    np.mean(squared, axis=0),
+                    criterion=(
+                        "heldout_r_loss"
+                        if sample_weight is not None
+                        else "heldout_pseudo_outcome_mse"
+                    ),
+                )
+                if alphas:
+                    column = alphas.index(penalty["ridge_alpha"])
+                    train, test = train[:, column], test[:, column]
+        if penalty["at_grid_edge"]:
+            logger.warning(
+                "Outer fold %s BoW %s view=%s: ridge_alpha=%s is at the edge of "
+                "bow_effect_ridge_alpha_grid",
+                outer_fold,
+                target_name,
+                view.name,
+                penalty["ridge_alpha"],
+            )
+        logger.info(
+            "Outer fold %s BoW %s view=%s: ridge_alpha=%s (%s)",
+            outer_fold,
+            target_name,
+            view.name,
+            penalty["ridge_alpha"],
+            penalty["selection"],
+        )
+        return {
+            "train": np.asarray(train, dtype=float),
+            "test": np.asarray(test, dtype=float),
+            "penalty": penalty,
+        }
 
     def _enabled_feature_discovery_methods(self) -> List[str]:
         methods = []

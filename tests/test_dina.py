@@ -179,6 +179,39 @@ def test_sparse_effect_fold_excludes_heldout_labels():
     np.testing.assert_array_equal(before["delta"][hold], after["delta"][hold])
 
 
+def test_sparse_effect_penalty_is_chosen_by_pooled_heldout_dina_loss():
+    from oci.inference.stage1_dina import crossfit_effect
+
+    rng = np.random.default_rng(3)
+    n = 120
+    t = np.tile([0, 1], n // 2)
+    x = rng.integers(0, 3, n)
+    y = rng.binomial(1, expit(-0.5 + 1.5 * t * (x - 1)), n)
+    texts = ["patient has group " + ["alpha", "beta", "gamma"][i] for i in x]
+    common = dict(folds=2, seed=25, test_texts=texts[:10])
+    default = crossfit_effect(texts, t, y, **common)
+    single = crossfit_effect(texts, t, y, ridge_alphas=[10.0], **common)
+    for key in ("tau", "delta", "loss", "test_tau"):
+        np.testing.assert_array_equal(default[key], single[key])
+    assert default["penalty_selection"]["selection"] == "fixed"
+    assert default["penalty_selection"]["ridge_alpha"] == 10.0
+
+    grid = [0.1, 1.0, 10.0, 100.0]
+    chosen = crossfit_effect(texts, t, y, ridge_alphas=grid, **common)
+    record = chosen["penalty_selection"]
+    assert record["selection"] == "cross_validated"
+    assert record["criterion"] == "heldout_dina_loss"
+    assert record["ridge_alphas"] == grid
+    assert record["ridge_alpha"] == grid[int(np.argmin(record["heldout_loss"]))]
+    np.testing.assert_allclose(np.mean(chosen["loss"]), min(record["heldout_loss"]))
+    # Warm starts along the path reach the cold fit's optimum.
+    np.testing.assert_allclose(record["heldout_loss"][2], np.mean(default["loss"]), rtol=1e-5)
+    # The external rows are predicted but never enter the choice.
+    internal = crossfit_effect(texts, t, y, folds=2, seed=25, ridge_alphas=grid)
+    assert internal["penalty_selection"] == record
+    np.testing.assert_array_equal(internal["tau"], chosen["tau"])
+
+
 def test_heldout_topic_score_uses_training_constant_and_native_weights():
     from oci.inference.tfidf_topic_score_selection import _bank_contribution
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, fields
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from sklearn.ensemble import (
@@ -348,6 +348,36 @@ def bounded_fold_count(requested: int, n_rows: int) -> int:
     return max(2, min(int(requested), int(n_rows)))
 
 
+def select_ridge_alpha(
+    ridge_alphas: Sequence[float],
+    heldout_losses: Sequence[float],
+    *,
+    criterion: str,
+) -> Dict[str, Any]:
+    """Pick the penalty with the lowest held-out loss; ties go to the larger penalty.
+
+    One penalty is recorded as ``fixed``. The record lists the grid ascending.
+    """
+    alphas = np.asarray(ridge_alphas, dtype=float)
+    losses = np.asarray(heldout_losses, dtype=float)
+    if alphas.ndim != 1 or not len(alphas) or alphas.shape != losses.shape:
+        raise ValueError("one held-out loss is required per ridge penalty")
+    if not np.isfinite(losses).any():
+        raise ValueError("no ridge penalty has a finite held-out loss")
+    descending = np.argsort(-alphas, kind="stable")
+    ranked = np.where(np.isfinite(losses[descending]), losses[descending], np.inf)
+    best = int(descending[int(np.argmin(ranked))])
+    ascending = np.argsort(alphas, kind="stable")
+    return {
+        "selection": "cross_validated" if len(alphas) > 1 else "fixed",
+        "criterion": str(criterion),
+        "ridge_alpha": float(alphas[best]),
+        "at_grid_edge": bool(len(alphas) > 1 and best in (ascending[0], ascending[-1])),
+        "ridge_alphas": [float(value) for value in alphas[ascending]],
+        "heldout_loss": [_finite_or_none(value) for value in losses[ascending]],
+    }
+
+
 def binary_split_items(
     labels: np.ndarray,
     *,
@@ -453,6 +483,7 @@ _make_bow_regressor = make_bow_regressor
 _make_bow_vectorizer = make_bow_vectorizer
 _fit_regressor = fit_regressor
 _bounded_fold_count = bounded_fold_count
+_select_ridge_alpha = select_ridge_alpha
 _binary_split_items = binary_split_items
 _model_feature_scores = model_feature_scores
 _model_feature_scores_are_signed = model_feature_scores_are_signed
@@ -470,5 +501,6 @@ __all__ = [
     "make_bow_vectorizer",
     "model_feature_scores",
     "model_feature_scores_are_signed",
+    "select_ridge_alpha",
     "top_feature_rows",
 ]

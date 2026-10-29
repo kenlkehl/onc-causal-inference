@@ -154,6 +154,10 @@ prerequisites (for example BoW nuisance fits for embedding architectures) may
 run, but only selected architectures enter the handoff.
 Keep the omitted-selector path's behavior unchanged.
 
+`bow_r_loss` cross-validates each penalized linear effect model's ridge penalty
+over `multi_model_forest.bow_effect_ridge_alpha_grid` (the lowest pooled
+held-out effect loss over the effect folds; `[]` restores each view's fixed
+`ridge_alpha`), and its term-ranking fit uses the chosen value.
 Neural-query consensus groups are ordered by the median absolute held-out z of
 their members (scored on inner partitions of the context's training rows,
 never its held-out rows), then by the training score; the order sets query IDs
