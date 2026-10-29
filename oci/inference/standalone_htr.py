@@ -48,6 +48,7 @@ from ..config import (
     AppliedInferenceConfig,
     ModelArchitectureConfig,
     TrainingConfig,
+    omit_inactive_htr_numeric_settings,
     resolve_effect_objective,
 )
 
@@ -726,11 +727,13 @@ def _config_record(
         "text_column": config.text_column,
         "treatment_column": config.treatment_column,
         "outcome_column": config.outcome_column,
-        "architecture": {
-            key: value
-            for key, value in architecture.items()
-            if key.startswith("htr_") or key == "feature_extractor_type"
-        },
+        "architecture": omit_inactive_htr_numeric_settings(
+            {
+                key: value
+                for key, value in architecture.items()
+                if key.startswith("htr_") or key == "feature_extractor_type"
+            }
+        ),
         "training": asdict(config.training),
         "run": asdict(settings),
     }

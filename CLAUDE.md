@@ -66,6 +66,7 @@ oci/
 │   ├── super_learner_nuisance.py     # Stacked nuisance learner (elastic net, boosting, forest)
 │   ├── dina.py                       # Gao–Hastie Bernoulli DINA objectives
 │   ├── hierarchical_transformer_extractor.py   # HTR model
+│   ├── htr_number_summary.py         # Opt-in per-chunk number summaries for HTR
 │   ├── concept_embedding_cache.py    # Chunk embedding cache (Stage 1)
 │   └── explicit_feature_featurizer.py          # `oci run` featurization
 ├── utils/calibration.py              # Platt calibration of nuisance predictions

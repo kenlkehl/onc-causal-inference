@@ -36,9 +36,11 @@ from sklearn.metrics import (
 from sklearn.model_selection import KFold, StratifiedKFold
 
 from ..config import (
+    HTR_NUMERIC_SUMMARY_KEYS,
     AppliedInferenceConfig,
     ExplicitFeatureForestConfig,
     ExplicitFeatureSpec,
+    omit_inactive_htr_numeric_settings,
 )
 from .agentic_explicit_feature_forest import (
     AgenticFeatureProposal,
@@ -2208,6 +2210,7 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
             "htr_normalize_sentence_embeddings",
             "htr_trainable_sentence_encoder_layers",
             "htr_prediction_head_hidden_dim",
+            *HTR_NUMERIC_SUMMARY_KEYS,
         ]
         train_keys = [
             "epochs",
@@ -2233,7 +2236,9 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
             "nuisance_label_smoothing": self.avf_config.nuisance_label_smoothing,
             "nuisance_calibration": self.avf_config.nuisance_calibration,
             "effect_epochs": self.avf_config.effect_epochs,
-            "architecture": {key: getattr(arch, key, None) for key in arch_keys},
+            "architecture": omit_inactive_htr_numeric_settings(
+                {key: getattr(arch, key, None) for key in arch_keys}
+            ),
             "training": {key: getattr(train, key, None) for key in train_keys},
         }
         if extra_payload:

@@ -2672,6 +2672,11 @@ class ModelArchitectureConfig:
     # configured as unfrozen. Lightweight hash-backed tests leave this false.
     htr_require_live_unfrozen_encoder: bool = False
     htr_prediction_head_hidden_dim: int = 64
+    # Opt-in: add a summary of each chunk's numbers (their context and
+    # magnitude) to the chunk's vector, with htr_numeric_queries learned
+    # queries per chunk. Checkpoint identities omit both keys while it is off.
+    htr_numeric_summary: bool = False
+    htr_numeric_queries: int = 4
 
     # Explicit-Feature-Only Causal Forest config (used when model_type="explicit_feature_forest")
     explicit_feature_forest: ExplicitFeatureForestConfig = field(
@@ -2695,6 +2700,28 @@ class ModelArchitectureConfig:
 
     # All-evidence Stage 1 scientific configuration
     multi_model_forest: MultiModelForestConfig = field(default_factory=MultiModelForestConfig)
+
+    def __post_init__(self):
+        if type(self.htr_numeric_summary) is not bool:
+            raise TypeError("htr_numeric_summary must be a boolean")
+        queries = self.htr_numeric_queries
+        if isinstance(queries, bool) or not isinstance(queries, int) or queries < 1:
+            raise ValueError("htr_numeric_queries must be a positive integer")
+
+
+HTR_NUMERIC_SUMMARY_KEYS = ("htr_numeric_summary", "htr_numeric_queries")
+
+
+def omit_inactive_htr_numeric_settings(architecture: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop the HTR number-summary settings from an identity while they are off.
+
+    Runs configured before the settings existed keep their checkpoint
+    identities; turning the summaries on changes the identity.
+    """
+    if architecture.get("htr_numeric_summary") is not True:
+        for key in HTR_NUMERIC_SUMMARY_KEYS:
+            architecture.pop(key, None)
+    return architecture
 
 
 @dataclass

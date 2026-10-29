@@ -22,6 +22,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .gated_attention_pooling import GatedAttentionPooling
+from .htr_number_summary import (
+    ChunkNumberSummary,
+    NumberMentions,
+    collate_number_mentions,
+    tokenize_chunk_numbers,
+)
 from .lossless_tokenization import SemanticTruncationError
 
 logger = logging.getLogger(__name__)
@@ -275,6 +281,7 @@ class HierarchicalTransformerBatchPreprocessor:
         tokenize_for_transformers: bool,
         chunk_cache_max_entries: int,
         tokenization_cache_max_entries: int,
+        number_mentions: bool = False,
     ):
         self._tokenizer = tokenizer
         self._chunk_size_words = int(chunk_size_words)
@@ -286,6 +293,8 @@ class HierarchicalTransformerBatchPreprocessor:
         self._tokenization_cache_max_entries = int(tokenization_cache_max_entries)
         self._chunk_cache: Dict[str, List[str]] = {}
         self._tokenization_cache: Dict[str, Tuple[Tuple[int, ...], Tuple[int, ...]]] = {}
+        self._number_mentions = bool(number_mentions)
+        self._number_cache: Dict[str, NumberMentions] = {}
 
     def __call__(self, texts: Sequence[str]) -> Dict[str, Any]:
         texts = [str(text or "") for text in texts]
@@ -299,7 +308,20 @@ class HierarchicalTransformerBatchPreprocessor:
             encoded = self._tokenize_chunks(flat_chunks)
             batch["chunk_input_ids"] = encoded["input_ids"]
             batch["chunk_attention_mask"] = encoded["attention_mask"]
+            if self._number_mentions:
+                batch.update(
+                    collate_number_mentions([self._chunk_numbers(chunk) for chunk in flat_chunks])
+                )
         return batch
+
+    def _chunk_numbers(self, chunk: str) -> NumberMentions:
+        key = str(chunk or "")
+        cached = self._number_cache.get(key)
+        if cached is None:
+            cached = tokenize_chunk_numbers(self._tokenizer, key)
+            if len(self._number_cache) < self._tokenization_cache_max_entries:
+                self._number_cache[key] = cached
+        return cached
 
     def _chunks_for_texts(self, texts: Sequence[str]) -> List[List[str]]:
         chunks_by_text: List[List[str]] = []
@@ -472,6 +494,10 @@ class HierarchicalTransformerExtractor(nn.Module):
         transformer_dropout: Dropout used in pooling/projection layers.
         projection_dim: Final output dimension.
         hash_embedding_dim: Hash backend chunk vector dimension.
+        numeric_summary: Add a summary of each chunk's numbers to its vector
+            (``htr_number_summary.ChunkNumberSummary``). Needs the transformers
+            backend and a tokenizer with character offsets.
+        numeric_queries: Learned queries per chunk in the number summary.
     """
 
     def __init__(
@@ -493,6 +519,8 @@ class HierarchicalTransformerExtractor(nn.Module):
         sentence_pooling: str = "auto",
         normalize_sentence_embeddings: bool = True,
         trainable_sentence_encoder_layers: int = 0,
+        numeric_summary: bool = False,
+        numeric_queries: int = 4,
         device: Optional[torch.device] = None,
     ):
         super().__init__()
@@ -553,16 +581,31 @@ class HierarchicalTransformerExtractor(nn.Module):
         }
         if self._hash_backend and sentence_pooling == "token_attention":
             raise ValueError("token_attention pooling requires a transformer token encoder")
+        if type(numeric_summary) is not bool:
+            raise TypeError("HTR numeric_summary must be a boolean")
+        if isinstance(numeric_queries, bool) or not isinstance(numeric_queries, int):
+            raise TypeError("HTR numeric_queries must be an integer")
+        if numeric_queries < 1:
+            raise ValueError("HTR numeric_queries must be positive")
+        self._numeric_summary = numeric_summary
+        self._numeric_queries = int(numeric_queries)
+        if self._numeric_summary and self._effective_sentence_encoder_backend() != "transformers":
+            raise ValueError(
+                "HTR numeric summaries read the chunk encoder's token states and need "
+                "the transformers backend"
+            )
 
         self._tokenizer = None
         self._sentence_encoder = None
         self._sentence_transformer_encoder = None
         self._token_pooling: Optional[GatedAttentionPooling] = None
+        self._number_summary: Optional[ChunkNumberSummary] = None
         self._resolved_sentence_encoder_path: Optional[str] = None
         self._sentence_dim = self._hash_embedding_dim if self._hash_backend else None
         self._encoder_initialized = self._hash_backend
         self._chunk_cache: Dict[str, List[str]] = {}
         self._tokenization_cache: Dict[str, Tuple[Tuple[int, ...], Tuple[int, ...]]] = {}
+        self._number_cache: Dict[str, NumberMentions] = {}
         self._chunk_cache_max_entries = _CHUNK_CACHE_MAX_ENTRIES
         self._tokenization_cache_max_entries = _TOKENIZATION_CACHE_MAX_ENTRIES
 
@@ -692,6 +735,7 @@ class HierarchicalTransformerExtractor(nn.Module):
             self._device
         )
         self._ensure_token_pooling_initialized()
+        self._ensure_number_summary_initialized()
         logger.info(
             "Chunk encoder initialized with backend=%s pooling=%s hidden_dim=%s "
             "device=%s trainable_encoder_params=%s/%s",
@@ -974,6 +1018,26 @@ class HierarchicalTransformerExtractor(nn.Module):
                 attention_dim=int(self._transformer_dim),
             ).to(self._device)
 
+    def _ensure_number_summary_initialized(self) -> None:
+        if not self._numeric_summary or self._number_summary is not None:
+            return
+        if self._sentence_dim is None:
+            raise RuntimeError("HTR numeric summaries require an initialized encoder")
+        if not getattr(self._tokenizer, "is_fast", False):
+            raise RuntimeError(
+                "HTR numeric summaries need a fast tokenizer with character offsets "
+                f"for {self._sentence_encoder_model!r}"
+            )
+        # A forked generator leaves every other random draw (initial weights,
+        # data order, dropout) as it would be without number summaries. The
+        # summary has no dropout of its own for the same reason.
+        with torch.random.fork_rng(devices=[]):
+            self._number_summary = ChunkNumberSummary(
+                hidden_dim=int(self._sentence_dim),
+                model_dim=int(self._transformer_dim),
+                num_queries=self._numeric_queries,
+            ).to(self._device)
+
     def _configure_sentence_encoder_training(self) -> None:
         if self._sentence_encoder is None:
             return
@@ -1137,13 +1201,18 @@ class HierarchicalTransformerExtractor(nn.Module):
             valid_len = int(mask_cpu[row].sum().item())
             self._token_weight_capture_buffer.append(weights_cpu[row, :valid_len].clone())
 
-    def _encode_chunks(self, chunks: Sequence[str]) -> torch.Tensor:
+    def _encode_chunks(
+        self,
+        chunks: Sequence[str],
+        numbers: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Return chunk embeddings and, with ``numbers``, their number summaries."""
         self._ensure_encoder_initialized()
         if self._hash_backend:
-            return torch.stack([self._hash_chunk_embedding(chunk) for chunk in chunks])
+            return torch.stack([self._hash_chunk_embedding(chunk) for chunk in chunks]), None
         if self._effective_sentence_encoder_backend() == "sentence_transformers":
-            return self._encode_chunks_with_sentence_transformer(chunks)
-        return self._encode_chunks_with_transformers(chunks)
+            return self._encode_chunks_with_sentence_transformer(chunks), None
+        return self._encode_chunks_with_transformers(chunks, numbers)
 
     def _encode_chunks_with_sentence_transformer(self, chunks: Sequence[str]) -> torch.Tensor:
         if self._sentence_transformer_encoder is None:
@@ -1163,9 +1232,14 @@ class HierarchicalTransformerExtractor(nn.Module):
         embeddings_np = np.concatenate(embeddings_by_batch, axis=0)
         return torch.as_tensor(embeddings_np, dtype=torch.float32, device=self._device)
 
-    def _encode_chunks_with_transformers(self, chunks: Sequence[str]) -> torch.Tensor:
+    def _encode_chunks_with_transformers(
+        self,
+        chunks: Sequence[str],
+        numbers: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         chunk_list = list(chunks)
         outputs_by_batch = []
+        contexts_by_batch = []
         for start in range(0, len(chunk_list), self._sentence_encoder_batch_size):
             batch_chunks = chunk_list[start : start + self._sentence_encoder_batch_size]
             encoded = self._tokenize_chunks_for_transformers(batch_chunks)
@@ -1191,18 +1265,31 @@ class HierarchicalTransformerExtractor(nn.Module):
             )
             self._capture_token_weights(token_weights, attention_mask)
             outputs_by_batch.append(pooled.float())
-        return torch.cat(outputs_by_batch, dim=0)
+            if numbers is not None:
+                contexts_by_batch.append(
+                    self._number_contexts_for_rows(
+                        outputs.last_hidden_state,
+                        attention_mask,
+                        numbers,
+                        start,
+                        start + len(batch_chunks),
+                    )
+                )
+        pooled = torch.cat(outputs_by_batch, dim=0)
+        return pooled, self._number_summaries(contexts_by_batch, numbers, pooled.shape[0])
 
     def _encode_prepared_transformer_chunks(
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
-    ) -> torch.Tensor:
+        numbers: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         input_ids = input_ids.to(self._device, non_blocking=True)
         attention_mask = attention_mask.to(self._device, non_blocking=True)
         if self._sentence_encoder is not None and not self._encoder_has_trainable_params:
             self._sentence_encoder.eval()
         outputs_by_batch = []
+        contexts_by_batch = []
         for start in range(0, input_ids.shape[0], self._sentence_encoder_batch_size):
             batch_input_ids = input_ids[start : start + self._sentence_encoder_batch_size]
             batch_attention_mask = attention_mask[start : start + self._sentence_encoder_batch_size]
@@ -1224,7 +1311,81 @@ class HierarchicalTransformerExtractor(nn.Module):
             )
             self._capture_token_weights(token_weights, batch_attention_mask)
             outputs_by_batch.append(pooled.float())
-        return torch.cat(outputs_by_batch, dim=0)
+            if numbers is not None:
+                contexts_by_batch.append(
+                    self._number_contexts_for_rows(
+                        outputs.last_hidden_state,
+                        batch_attention_mask,
+                        numbers,
+                        start,
+                        start + batch_input_ids.shape[0],
+                    )
+                )
+        pooled = torch.cat(outputs_by_batch, dim=0)
+        return pooled, self._number_summaries(contexts_by_batch, numbers, pooled.shape[0])
+
+    def _number_anchor_positions(
+        self,
+        attention_mask: torch.Tensor,
+        numbers: Dict[str, torch.Tensor],
+        start: int,
+        end: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor, slice]:
+        """Return the padded (row, token) positions of the mentions in rows [start, end)."""
+        chunk_index = numbers["number_chunk_index"].to("cpu")
+        lower = int(torch.searchsorted(chunk_index, int(start)))
+        upper = int(torch.searchsorted(chunk_index, int(end)))
+        window = slice(lower, upper)
+        rows = (chunk_index[window] - int(start)).to(attention_mask.device)
+        tokens = numbers["number_token_index"][window].to(attention_mask.device)
+        if getattr(self._tokenizer, "padding_side", "right") == "left":
+            padding = attention_mask.shape[1] - attention_mask.sum(dim=1)
+            tokens = tokens + padding[rows]
+        return rows, tokens, window
+
+    def _number_contexts_for_rows(
+        self,
+        last_hidden_state: torch.Tensor,
+        attention_mask: torch.Tensor,
+        numbers: Dict[str, torch.Tensor],
+        start: int,
+        end: int,
+    ) -> torch.Tensor:
+        """Return the encoder states at the anchors of the mentions in rows [start, end)."""
+        rows, tokens, _ = self._number_anchor_positions(attention_mask, numbers, start, end)
+        return last_hidden_state[rows, tokens]
+
+    def _number_summaries(
+        self,
+        contexts_by_batch: Sequence[torch.Tensor],
+        numbers: Optional[Dict[str, torch.Tensor]],
+        num_chunks: int,
+    ) -> Optional[torch.Tensor]:
+        """Summarize every chunk's mentions in one pass over the whole batch."""
+        if numbers is None:
+            return None
+        if self._number_summary is None:
+            raise RuntimeError("HTR number summary was not initialized")
+        # Mentions are sorted by chunk, so the encoder batches' anchor states
+        # concatenate in mention order.
+        return self._number_summary(
+            torch.cat(list(contexts_by_batch), dim=0),
+            numbers["number_value"].to(self._device),
+            numbers["number_chunk_index"].to("cpu"),
+            int(num_chunks),
+        )
+
+    def _number_mentions_for_chunks(self, chunks: Sequence[str]) -> Dict[str, torch.Tensor]:
+        mentions_by_chunk = []
+        for chunk in chunks:
+            key = str(chunk or "")
+            cached = self._number_cache.get(key)
+            if cached is None:
+                cached = tokenize_chunk_numbers(self._tokenizer, key)
+                if len(self._number_cache) < self._tokenization_cache_max_entries:
+                    self._number_cache[key] = cached
+            mentions_by_chunk.append(cached)
+        return collate_number_mentions(mentions_by_chunk)
 
     def _tokenize_chunks_for_transformers(
         self,
@@ -1296,6 +1457,7 @@ class HierarchicalTransformerExtractor(nn.Module):
             tokenize_for_transformers=tokenize_for_transformers,
             chunk_cache_max_entries=self._chunk_cache_max_entries,
             tokenization_cache_max_entries=self._tokenization_cache_max_entries,
+            number_mentions=self._numeric_summary,
         )
 
     def _pack_chunk_tensor(
@@ -1385,18 +1547,35 @@ class HierarchicalTransformerExtractor(nn.Module):
             and self._effective_sentence_encoder_backend() == "transformers"
         ):
             self._ensure_encoder_initialized()
-            flat_embeddings = self._encode_prepared_transformer_chunks(
+            numbers = None
+            if self._numeric_summary:
+                if "number_chunk_index" not in prepared_batch:
+                    raise ValueError(
+                        "HTR numeric summaries need a batch prepared with number mentions"
+                    )
+                numbers = {
+                    key: prepared_batch[key]
+                    for key in ("number_chunk_index", "number_token_index", "number_value")
+                }
+            flat_embeddings, number_summaries = self._encode_prepared_transformer_chunks(
                 prepared_batch["chunk_input_ids"],
                 prepared_batch["chunk_attention_mask"],
+                numbers,
             )
         else:
-            flat_embeddings = self._encode_chunks(flat_chunks)
+            self._ensure_encoder_initialized()
+            numbers = (
+                self._number_mentions_for_chunks(flat_chunks) if self._numeric_summary else None
+            )
+            flat_embeddings, number_summaries = self._encode_chunks(flat_chunks, numbers)
         if self._capture_token_attention:
             self._last_token_weights_by_chunk = list(self._token_weight_capture_buffer)
         else:
             self._last_token_weights_by_chunk = []
 
         flat_embeddings = self._input_projection(flat_embeddings)
+        if number_summaries is not None:
+            flat_embeddings = flat_embeddings + number_summaries
         chunk_tensor, chunk_mask = self._pack_chunk_tensor(flat_embeddings, batch_chunks)
         sequence, attn_weights = self._run_chunk_transformer(chunk_tensor, chunk_mask)
         pool_output = sequence[:, 0, :]

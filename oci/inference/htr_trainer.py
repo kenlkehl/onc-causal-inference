@@ -352,6 +352,8 @@ class HTRTrainer:
                 "htr_trainable_sentence_encoder_layers",
                 0,
             ),
+            numeric_summary=getattr(arch, "htr_numeric_summary", False),
+            numeric_queries=getattr(arch, "htr_numeric_queries", 4),
         )
 
     def _assert_htr_sentence_encoder_training_state(

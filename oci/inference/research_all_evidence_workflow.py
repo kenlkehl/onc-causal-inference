@@ -45,7 +45,7 @@ from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
 import numpy as np
 import pandas as pd
 
-from ..config import ExperimentConfig
+from ..config import ExperimentConfig, omit_inactive_htr_numeric_settings
 from ..extraction.llm_routing import redact_api_keys
 from .plain_handoff_stage2 import (
     PlainHandoffStage2Config,
@@ -1076,6 +1076,7 @@ def _run_one_text_model_context(
     scientific_config.pop("dataset_path", None)
     architecture_identity = scientific_config.get("architecture")
     if isinstance(architecture_identity, MutableMapping):
+        omit_inactive_htr_numeric_settings(architecture_identity)
         for model_key in ("multi_model_forest", "multi_model_agentic_forest"):
             model_identity = architecture_identity.get(model_key)
             if isinstance(model_identity, MutableMapping):

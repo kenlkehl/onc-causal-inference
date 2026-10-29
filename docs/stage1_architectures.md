@@ -191,6 +191,19 @@ model, it can distinguish some uses of the same vocabulary and combine
 information spread across a long history. Attention describes what the model
 used, not a causal explanation. `--disable-htr` turns off this architecture.
 
+With `htr_numeric_summary` on, each number written in a chunk ("Hgb 11.07",
+"CrCl 47") also enters the model as a value. A number starts after a character
+that is not a letter, digit, underscore, or period, so identifiers such as
+"R05.9" or "BRCA1" are skipped; values above 10^12 share one encoding. Each
+number is represented by the encoder's output at its first token, which
+reflects the words around it, combined with an encoding of the logarithm of
+its magnitude (not its digit count or precision). A few learned queries
+(`htr_numeric_queries`) attend over the chunk's numbers, and the result is
+added to the chunk's vector before the document transformer, so the document
+sequence keeps one element per chunk however many numbers a record has. The
+added term starts at zero, so training begins from the model without it, and
+a chunk without numbers keeps its vector.
+
 ### 5. Whole-cohort embedding contrasts (`embedding_whole_cohort`)
 
 Each record is cut into chunks (256 words with a 64-word overlap by default) and
