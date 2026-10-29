@@ -9,6 +9,7 @@ from oci.extraction import (
     ExplicitFeatureValue,
     VLLMFeatureExtractor,
     build_extraction_prompt,
+    compact_contract_lexical_context,
 )
 from oci.models.explicit_feature_featurizer import (
     filter_specs_by_role,
@@ -235,6 +236,60 @@ def test_build_extraction_prompt_truncates_to_note_tail():
 
     assert "end age 71" in prompt
     assert "beginning age 44" not in prompt
+
+
+def test_contract_lexical_context_keeps_matching_passages_verbatim_in_order_under_budget():
+    specs = [
+        ExplicitFeatureSpec(
+            name="ecog_performance_status",
+            type="categorical",
+            categories=["0", "1", "2", "3", "4"],
+            description="ECOG performance status",
+            roles=["confounder"],
+        ),
+        ExplicitFeatureSpec(
+            name="brain_metastases",
+            type="categorical",
+            categories=["yes", "no"],
+            description="Brain metastases on imaging",
+            roles=["effect_modifier"],
+            value_aliases={"yes": ["intracranial lesions"]},
+        ),
+    ]
+    filler = "The patient walked in the garden and discussed travel plans with family. "
+    ecog = "ECOG performance status 1 at the visit. "
+    metastases = "MRI showed intracranial lesions consistent with brain metastases. "
+    note = (
+        "Opening remark. " + filler * 20 + ecog + filler * 20 + "Unrelated midpoint remark. "
+        + filler * 20 + metastases + filler * 20 + "Closing remark."
+    )
+
+    context = compact_contract_lexical_context(note, specs, max_chars=3000)
+
+    assert len(context.text) <= 3000
+    assert not context.fallback_tail_used
+    assert ecog in context.text and metastases in context.text
+    assert context.text.index(ecog) < context.text.index(metastases)
+    for remark in ("Opening remark", "Unrelated midpoint remark", "Closing remark"):
+        assert remark not in context.text
+    spans = [(excerpt.start, excerpt.end) for excerpt in context.selected_excerpts]
+    assert spans == sorted(spans)
+    assert all(end <= next_start for (_, end), (next_start, _) in zip(spans, spans[1:]))
+    for start, end in spans:
+        assert note[start:end] in context.text
+    prompt = build_extraction_prompt(
+        note, specs, max_text_length=3000, context_strategy="contract_lexical_rag"
+    )
+    assert context.text in prompt
+    assert "Unrelated midpoint remark" not in prompt
+
+    # With nothing to match, the end of the note is kept.
+    unmatched = "Opening remark. " + filler * 30 + "Closing remark."
+    fallback = compact_contract_lexical_context(unmatched, specs, max_chars=500)
+    assert fallback.fallback_tail_used
+    assert len(fallback.text) <= 500
+    assert fallback.text.endswith("Closing remark.")
+    assert "Opening remark" not in fallback.text
 
 
 def test_unmatched_categorical_value_is_missing_not_the_reference_level(caplog):
