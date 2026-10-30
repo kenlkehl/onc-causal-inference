@@ -4,14 +4,14 @@
       "agentic_attention_variable_forest": {
         "attention_top_k_chunks": 5,
         "e_clip": 0.01,
-        "effect_epochs": 30,
+        "effect_epochs": 10,
         "effect_folds": 5,
         "effect_objective": "auto",
         "nuisance_calibration": "temperature_isotonic",
-        "nuisance_epochs": 30,
+        "nuisance_epochs": 10,
         "nuisance_folds": 5,
         "nuisance_label_smoothing": 0.02,
-        "nuisance_weight_decay": 0.01,
+        "nuisance_weight_decay": 0.1,
         "r_stage_max_propensity": 1,
         "r_stage_min_propensity": 0
       },
@@ -311,7 +311,7 @@
       "gradient_clip_norm": 1,
       "learning_rate": 0.0001,
       "lr_schedule": "linear",
-      "weight_decay": 0.01
+      "weight_decay": 0.1
     },
     "treatment_column": "treatment_indicator"
   },

@@ -2486,12 +2486,12 @@ class AgenticAttentionVariableForestConfig:
     """
 
     nuisance_folds: int = 5
-    nuisance_epochs: Optional[int] = 30
-    nuisance_weight_decay: Optional[float] = 0.01
+    nuisance_epochs: Optional[int] = 10
+    nuisance_weight_decay: Optional[float] = 0.1
     nuisance_label_smoothing: float = 0.02
     nuisance_calibration: str = "temperature_isotonic"
     effect_folds: int = 5
-    effect_epochs: Optional[int] = 30
+    effect_epochs: Optional[int] = 10
     # "auto" parallelizes folds on CPU via num_workers and across configured
     # CUDA devices when more than one device is supplied.
     fold_parallelism: str = "auto"

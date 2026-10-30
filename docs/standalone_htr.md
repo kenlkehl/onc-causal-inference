@@ -154,7 +154,7 @@ section, and its `training` section. `--htr-model` sets `htr_sentence_model`
 | `run.` | `method` (`--method`), `outer_folds` (`--folds`, default 5), `seed` (`--seed`, default 42), `aipw_clip` (default 0.02), `dina_nuisances` (`--dina-nuisances`: `htr`, the default, or `bow`), `dina_nuisance_clip` (default 0.01) |
 | `architecture.` | The `htr_*` fields and `feature_extractor_type` |
 | `training.` | Learning rate, schedule, batch sizes, weight decay, gradient clipping, data-loader workers, `alpha_propensity` |
-| `stage1_htr.` | `two_stage`: the `agentic_attention_variable_forest` fields, including `nuisance_folds` and `effect_folds` (`--inner-folds`, template 5), `nuisance_epochs` and `effect_epochs` (`--epochs`, template 30), `nuisance_calibration`, `nuisance_label_smoothing`, `nuisance_weight_decay`, `e_clip`, `effect_objective`, and `r_stage_*_propensity` |
+| `stage1_htr.` | `two_stage`: the `agentic_attention_variable_forest` fields, including `nuisance_folds` and `effect_folds` (`--inner-folds`, template 5), `nuisance_epochs` and `effect_epochs` (`--epochs`, template 10), `nuisance_calibration`, `nuisance_label_smoothing`, `nuisance_weight_decay`, `e_clip`, `effect_objective`, and `r_stage_*_propensity` |
 | `joint.` | `joint`: the settings below; `--epochs` sets `joint.epochs` |
 
 | `joint.` key | Default | Meaning |

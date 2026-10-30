@@ -353,7 +353,7 @@ Main settings blocks (all under `applied_inference.architecture` except
 |---|---|---|
 | `explicit_feature_forest` | all | `n_estimators` 200, `min_samples_leaf` 10, `honest` true, `inference` true |
 | `agentic_feature_search` | agentic types (agent endpoint for all three) | `outer_folds` 5, `inner_folds` 3, `max_iterations` 3, `broad_candidate_count` 80, `min_r_loss_improvement` 0.01, `agent_server_url` `http://localhost:8000/v1`, `agent_temperature` 0, `agent_max_tokens` 25000. `clinical_text_examples_per_prompt: null` sends every non-empty training-fold note in full |
-| `agentic_attention_variable_forest` | `agentic_attention_variable_forest` | 5 nuisance and 5 effect folds, 30 epochs each, `min_extraction_coverage` 0.10, `effect_objective` `auto` (DINA for binary outcomes) |
+| `agentic_attention_variable_forest` | `agentic_attention_variable_forest` | 5 nuisance and 5 effect folds, 10 epochs each, `min_extraction_coverage` 0.10, `effect_objective` `auto` (DINA for binary outcomes) |
 | `multi_model_agentic_forest` | `multi_model_agentic_forest` | `candidate_proposals_per_fold` 60, `extracted_feature_review_enabled` true, `parsimony_review_enabled` false, `fail_on_extraction_truncation` true |
 | `explicit_features` (under `applied_inference`) | all | Feature list and extraction settings (below) |
 

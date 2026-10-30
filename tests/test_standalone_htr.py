@@ -157,7 +157,8 @@ def test_stage1_template_settings_are_the_two_stage_defaults():
     stage1_htr = config.architecture.agentic_attention_variable_forest
     assert settings.method == "two_stage"
     assert (stage1_htr.nuisance_folds, stage1_htr.effect_folds) == (5, 5)
-    assert (stage1_htr.nuisance_epochs, stage1_htr.effect_epochs) == (30, 30)
+    assert (stage1_htr.nuisance_epochs, stage1_htr.effect_epochs) == (10, 10)
+    assert (stage1_htr.nuisance_weight_decay, config.training.weight_decay) == (0.1, 0.1)
     assert config.architecture.htr_sentence_pooling == "token_attention"
 
 
