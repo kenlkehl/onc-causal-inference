@@ -47,6 +47,11 @@ nuisances `a(x)` and `nu(x)`, which are built from `e`, `mu0`, and `mu1`.
   the nuisance folds: an outer training row's nuisances never come from a
   network that trained on it, but they may come from one that trained on rows
   of its own effect fold. Outer held-out rows enter no network.
+  `run.nuisance_networks` (default `shared`) sets how the nuisances are
+  trained: `shared` is the one network with three heads above; `separate`
+  trains a single-head network for each nuisance and nuisance fold, the
+  propensity on every training row, `mu0` on its control rows, and `mu1` on
+  its treated rows. Calibration and everything after it are the same.
 - **`bow`.** Stage 1 unchanged: sparse bag-of-words logistic nuisances
   cross-fitted inside each effect fold (`stage1_dina.prepare_neural_nuisance`)
   set the loss and `tau`. The nuisance networks are Stage 1's (propensity and
@@ -56,10 +61,11 @@ nuisances `a(x)` and `nu(x)`, which are built from `e`, `mu0`, and `mu1`.
 
 Attention evidence, which only Stage 2 reads, is not computed. Every inner
 network is a Stage 1 checkpoint unit under
-`folds/fold_KK/stage1_checkpoints/` (`htr/arm_nuisance/fold_NNN` or
-`htr/nuisance/fold_NNN`, `assembly/nuisance_ensemble`, and
-`htr/effect/<objective>/fold_NNN`), so an interrupted fold resumes at its next
-network. With K inner folds, each outer fold trains 2K networks.
+`folds/fold_KK/stage1_checkpoints/` (`htr/arm_nuisance/fold_NNN`,
+`htr/single_head/{e,mu0,mu1}/fold_NNN`, or `htr/nuisance/fold_NNN`,
+`assembly/nuisance_ensemble`, and `htr/effect/<objective>/fold_NNN`), so an
+interrupted fold resumes at its next network. With K inner folds, each outer
+fold trains 2K networks, or 4K with separate nuisance networks.
 
 ## `joint`: one network with three heads
 
@@ -151,7 +157,7 @@ section, and its `training` section. `--htr-model` sets `htr_sentence_model`
 
 | Prefix | Settings |
 |---|---|
-| `run.` | `method` (`--method`), `outer_folds` (`--folds`, default 5), `seed` (`--seed`, default 42), `aipw_clip` (default 0.02), `dina_nuisances` (`--dina-nuisances`: `htr`, the default, or `bow`), `dina_nuisance_clip` (default 0.01) |
+| `run.` | `method` (`--method`), `outer_folds` (`--folds`, default 5), `seed` (`--seed`, default 42), `aipw_clip` (default 0.02), `dina_nuisances` (`--dina-nuisances`: `htr`, the default, or `bow`), `dina_nuisance_clip` (default 0.01), `nuisance_networks` (`shared`, the default, or `separate`; HTR DINA nuisances only) |
 | `architecture.` | The `htr_*` fields and `feature_extractor_type` |
 | `training.` | Learning rate, schedule, batch sizes, weight decay, gradient clipping, data-loader workers, `alpha_propensity` |
 | `stage1_htr.` | `two_stage`: the `agentic_attention_variable_forest` fields, including `nuisance_folds` and `effect_folds` (`--inner-folds`, template 5), `nuisance_epochs` and `effect_epochs` (`--epochs`, template 10), `nuisance_calibration`, `nuisance_label_smoothing`, `nuisance_weight_decay`, `e_clip`, `effect_objective`, and `r_stage_*_propensity` |

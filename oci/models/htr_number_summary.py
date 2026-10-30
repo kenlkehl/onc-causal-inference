@@ -1,4 +1,4 @@
-"""Per-chunk summaries of the numbers written in an HTR chunk (opt-in).
+"""Per-chunk summaries of the numbers written in an HTR chunk.
 
 Each number in a chunk becomes a mention: the chunk encoder's final hidden
 state at the number's first token, which carries what the number measures from

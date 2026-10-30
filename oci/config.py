@@ -2672,9 +2672,10 @@ class ModelArchitectureConfig:
     # configured as unfrozen. Lightweight hash-backed tests leave this false.
     htr_require_live_unfrozen_encoder: bool = False
     htr_prediction_head_hidden_dim: int = 64
-    # Opt-in: add a summary of each chunk's numbers (their context and
-    # magnitude) to the chunk's vector, with htr_numeric_queries learned
-    # queries per chunk. Checkpoint identities omit both keys while it is off.
+    # Add a summary of each chunk's numbers (their context and magnitude) to
+    # the chunk's vector, with htr_numeric_queries learned queries per chunk.
+    # The Stage 1 template turns it on; a configuration that omits it leaves it
+    # off. Checkpoint identities omit both keys while it is off.
     htr_numeric_summary: bool = False
     htr_numeric_queries: int = 4
 

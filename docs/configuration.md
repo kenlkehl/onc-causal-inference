@@ -690,7 +690,7 @@ Commonly changed keys, relative to `science.stage1.architecture`:
 | Key | Template value | Meaning |
 |---|---|---|
 | `htr_max_chunks` | 512 | Maximum HTR chunks per record |
-| `htr_numeric_summary` | `false` | Add a summary of each chunk's numbers to the HTR chunk vector ([details](stage1_architectures.md#4-hierarchical-transformer-htr_neural)); needs the transformers backend and a fast tokenizer. Checkpoint identities include it, and `htr_numeric_queries`, only when it is `true` |
+| `htr_numeric_summary` | `true` | Add a summary of each chunk's numbers to the HTR chunk vector ([details](stage1_architectures.md#4-hierarchical-transformer-htr_neural)); needs the transformers backend and a fast tokenizer, so set it to `false` for a hash or sentence-transformers HTR encoder. Checkpoint identities include it, and `htr_numeric_queries`, only when it is `true`; a configuration that omits it leaves it off |
 | `htr_numeric_queries` | 4 | Learned queries per chunk in the number summary |
 | `multi_model_forest.embedding_contrast.max_chunks` | 512 | Maximum embedding chunks per record |
 | `multi_model_forest.embedding_contrast.retrieval_tfidf_enabled` | `false` | Add `tfidf_semantic_retrieval_contrasts` to the default selection |

@@ -63,6 +63,7 @@ DEFAULT_TEMPLATE = (
 DEFAULT_HTR_MODEL = "prajjwal1/bert-tiny"
 METHODS = ("two_stage", "joint")
 DINA_NUISANCE_SOURCES = ("htr", "bow")
+NUISANCE_NETWORKS = ("shared", "separate")
 SELECTION_RULES = ("validation_loss", "last_epoch")
 CALIBRATION_METHODS = ("none", "temperature", "isotonic", "temperature_isotonic")
 
@@ -84,6 +85,11 @@ class StandaloneHTRConfig:
     # nu = logit(mu) is unbounded, and isotonic calibration returns exact 0 and
     # 1 in pure tail blocks.
     dina_nuisance_clip: float = 0.01
+    # HTR DINA nuisances: "shared" trains one network per nuisance fold with a
+    # propensity head and one outcome head per arm; "separate" trains three
+    # single-head networks, the propensity on every row and each arm's outcome
+    # on that arm's rows only.
+    nuisance_networks: str = "shared"
 
     def __post_init__(self) -> None:
         self.method = str(self.method).strip().lower()
@@ -94,6 +100,9 @@ class StandaloneHTRConfig:
             raise ValueError(
                 f"run.dina_nuisances must be one of {list(DINA_NUISANCE_SOURCES)}"
             )
+        self.nuisance_networks = str(self.nuisance_networks).strip().lower()
+        if self.nuisance_networks not in NUISANCE_NETWORKS:
+            raise ValueError(f"run.nuisance_networks must be one of {list(NUISANCE_NETWORKS)}")
         if int(self.outer_folds) < 2:
             raise ValueError("run.outer_folds must be >= 2")
         if not 0.0 < float(self.aipw_clip) < 0.5:
@@ -743,6 +752,10 @@ def _config_record(
     if not _dina_uses_htr_nuisances(config, settings):
         record["run"].pop("dina_nuisances")
         record["run"].pop("dina_nuisance_clip")
+    # Likewise for the shared nuisance networks, the only kind before the
+    # setting existed.
+    if settings.nuisance_networks == "shared":
+        record["run"].pop("nuisance_networks")
     if settings.method == "two_stage":
         stage1_htr = config.architecture.agentic_attention_variable_forest
         record["stage1_htr"] = asdict(stage1_htr)
@@ -856,6 +869,38 @@ def build_arm_nuisance_net(extractor: Any, hidden_dim: int):
             )
 
     return ArmNuisanceNet()
+
+
+def build_single_head_net(extractor: Any, hidden_dim: int):
+    """An HTR network with one logit head, for one nuisance."""
+
+    import torch.nn as nn
+
+    from .htr_trainer import _configured_hidden_head
+
+    class SingleHeadNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.extractor = extractor
+            # ArmNuisanceNet's hidden layer, with a single head.
+            self.hidden = _configured_hidden_head(
+                input_dim=int(extractor.output_dim),
+                hidden_dim=hidden_dim,
+                depth=1,
+                activation="relu",
+                dropout=0.1,
+                layer_norm=False,
+                bias=True,
+            )
+            self.output = nn.Linear(hidden_dim, 1)
+
+        def forward(self, texts_or_batch):
+            features = self.extractor(
+                texts_or_batch if isinstance(texts_or_batch, dict) else list(texts_or_batch)
+            )
+            return self.output(self.hidden(features)).squeeze(-1)
+
+    return SingleHeadNet()
 
 
 def _two_stage_trainer_class():
@@ -1036,6 +1081,121 @@ def _two_stage_trainer_class():
                         parts[key].append(torch.sigmoid(logit).cpu().numpy())
             return {key: np.concatenate(values).astype(float) for key, values in parts.items()}
 
+        def train_single_head(
+            self, model, df, positions, target_column, *, name, outer_fold, fold, total_folds
+        ):
+            """Nuisance training of a single-head network on ``positions`` against one column."""
+
+            torch = _torch()
+            import torch.nn.functional as F
+
+            train_config = self.config.training
+            stage1_htr = self.avf_config
+            epochs = int(
+                stage1_htr.nuisance_epochs
+                if stage1_htr.nuisance_epochs is not None
+                else train_config.epochs
+            )
+            weight_decay = float(
+                stage1_htr.nuisance_weight_decay
+                if stage1_htr.nuisance_weight_decay is not None
+                else train_config.weight_decay
+            )
+            smoothing = float(stage1_htr.nuisance_label_smoothing)
+            model.extractor.fit_tokenizer(
+                df.iloc[positions][self.config.text_column].astype(str).tolist()
+            )
+            self._assert_htr_sentence_encoder_training_state(model.extractor)
+            loader = self._make_text_loader(
+                model,
+                df,
+                positions,
+                fields={"target": df[target_column].to_numpy(dtype=np.float32)},
+                shuffle=True,
+                total_folds=total_folds,
+            )
+            optimizer = torch.optim.AdamW(
+                [p for p in model.parameters() if p.requires_grad],
+                lr=train_config.learning_rate,
+                weight_decay=weight_decay,
+            )
+            self._assert_htr_sentence_encoder_optimizer_coverage(model.extractor, optimizer)
+            num_batches = max(1, len(loader))
+            scheduler = make_linear_lr_scheduler(
+                optimizer, train_config, num_batches, epochs_override=epochs
+            )
+            progress_every = max(1, num_batches // 5)
+            logger.info(
+                "Outer fold %s %s nuisance fold %s/%s: training for %s epoch(s) on %s rows, "
+                "batch_size=%s, batches/epoch=%s, dataloader_workers=%s, lr=%.3g, "
+                "weight_decay=%.3g, label_smoothing=%.3g%s",
+                outer_fold,
+                name,
+                fold,
+                total_folds,
+                epochs,
+                len(positions),
+                train_config.batch_size,
+                num_batches,
+                loader.num_workers,
+                current_lr(optimizer),
+                weight_decay,
+                smoothing,
+                self._cuda_memory_summary(),
+            )
+            for epoch in range(1, epochs + 1):
+                model.train()
+                total = torch.zeros((), device=self.device, dtype=torch.float64)
+                batch_count = 0
+                for batch_idx, batch in enumerate(loader, start=1):
+                    target = batch["target"].to(self.device, non_blocking=True)
+                    optimizer.zero_grad(set_to_none=True)
+                    loss = F.binary_cross_entropy_with_logits(
+                        model(batch["model_input"]), target * (1.0 - smoothing) + 0.5 * smoothing
+                    )
+                    loss.backward()
+                    self._clip_and_step(model, optimizer, scheduler)
+                    batch_count += 1
+                    total.add_(loss.detach().to(torch.float64))
+                    if batch_idx == 1 or batch_idx == num_batches or batch_idx % progress_every == 0:
+                        logger.info(
+                            "Outer fold %s %s nuisance fold %s/%s epoch %s/%s batch %s/%s "
+                            "lr=%.3g%s",
+                            outer_fold,
+                            name,
+                            fold,
+                            total_folds,
+                            epoch,
+                            epochs,
+                            batch_idx,
+                            num_batches,
+                            current_lr(optimizer),
+                            self._cuda_memory_summary(),
+                        )
+                logger.info(
+                    "Outer fold %s %s nuisance fold %s/%s epoch %s/%s complete: loss=%.4f "
+                    "lr=%.3g%s",
+                    outer_fold,
+                    name,
+                    fold,
+                    total_folds,
+                    epoch,
+                    epochs,
+                    float(total.item()) / max(1, batch_count),
+                    current_lr(optimizer),
+                    self._cuda_memory_summary(),
+                )
+
+        def predict_single_head(self, model, df: pd.DataFrame) -> np.ndarray:
+            torch = _torch()
+            model.eval()
+            loader = self._make_text_loader(model, df, np.arange(len(df), dtype=int))
+            parts: List[np.ndarray] = []
+            with torch.no_grad():
+                for batch in loader:
+                    parts.append(torch.sigmoid(model(batch["model_input"])).cpu().numpy())
+            return np.concatenate(parts).astype(float)
+
     return TwoStageHTRTrainer
 
 
@@ -1065,9 +1225,20 @@ def _stage1_htr_provider(config: AppliedInferenceConfig, device: str, store: Any
 
 
 def _fit_arm_nuisance_ensemble(
-    trainer: Any, store: Any, train_df: pd.DataFrame, test_df: pd.DataFrame, outer_fold: int
+    trainer: Any,
+    store: Any,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    outer_fold: int,
+    *,
+    networks: str = "shared",
 ) -> Dict[str, Any]:
-    """Cross-fitted HTR e, mu0, and mu1 on Stage 1's nuisance folds, calibrated out of fold."""
+    """Cross-fitted HTR e, mu0, and mu1 on Stage 1's nuisance folds, calibrated out of fold.
+
+    ``networks`` is ``run.nuisance_networks``: one three-head network per fold
+    (``shared``), or one single-head network per nuisance and fold
+    (``separate``).
+    """
 
     from sklearn.model_selection import KFold
 
@@ -1124,7 +1295,84 @@ def _fit_arm_nuisance_ensemble(
             deterministic_seed=True,
         ).value
 
-    results = [run(fold, fit_pos, heldout_pos) for fold, (fit_pos, heldout_pos) in splits]
+    t_all = train_df[config.treatment_column].to_numpy(dtype=float)
+    # Each separate network: its unit objective, the treatment arm it trains on
+    # (None for every row), and its target column.
+    single_heads = {
+        "e": ("propensity_nuisance", None, config.treatment_column),
+        "mu0": ("control_outcome_nuisance", 0, config.outcome_column),
+        "mu1": ("treated_outcome_nuisance", 1, config.outcome_column),
+    }
+
+    def compute_single(
+        name: str, fold: int, train_pos: np.ndarray, heldout_pos: np.ndarray
+    ) -> Dict[str, np.ndarray]:
+        model = build_single_head_net(trainer._create_extractor(), hidden_dim).to(trainer.device)
+        try:
+            trainer.train_single_head(
+                model,
+                train_df,
+                train_pos,
+                single_heads[name][2],
+                name=name,
+                outer_fold=outer_fold,
+                fold=fold,
+                total_folds=folds,
+            )
+            return {
+                "heldout": trainer.predict_single_head(model, train_df.iloc[heldout_pos]),
+                "test": trainer.predict_single_head(model, test_df),
+            }
+        finally:
+            trainer._cleanup_model(model)
+
+    def run_single(
+        name: str, fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray
+    ) -> Dict[str, np.ndarray]:
+        objective, arm, _ = single_heads[name]
+        train_pos = fit_pos if arm is None else fit_pos[t_all[fit_pos] == arm]
+        if len(train_pos) == 0:
+            raise ValueError(
+                f"outer fold {outer_fold} nuisance fold {fold} has no rows in treatment arm {arm}"
+            )
+        return store.run(
+            f"htr/single_head/{name}/fold_{int(fold):03d}",
+            lambda: compute_single(name, fold, train_pos, heldout_pos),
+            parameters={
+                "outer_fold": int(outer_fold),
+                "inner_fold": int(fold),
+                "total_folds": int(folds),
+                "objective": objective,
+            },
+            rows={
+                "fit": row_id_identity(train_df.iloc[train_pos][ROW_ID].to_numpy()),
+                "validation": row_id_identity(train_df.iloc[heldout_pos][ROW_ID].to_numpy()),
+                "heldout": row_id_identity(test_df[ROW_ID].to_numpy()),
+            },
+            deterministic_seed=True,
+        ).value
+
+    def run_separate(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray) -> Dict[str, Any]:
+        fit_pos = np.asarray(fit_pos, dtype=int)
+        heldout_pos = np.asarray(heldout_pos, dtype=int)
+        values = {name: run_single(name, fold, fit_pos, heldout_pos) for name in single_heads}
+        return {
+            "fold": int(fold),
+            "heldout_pos": heldout_pos,
+            "heldout": {name: value["heldout"] for name, value in values.items()},
+            "test": {name: value["test"] for name, value in values.items()},
+        }
+
+    if networks == "separate":
+        results = [
+            run_separate(fold, fit_pos, heldout_pos) for fold, (fit_pos, heldout_pos) in splits
+        ]
+        units = [
+            f"htr/single_head/{name}/fold_{fold:03d}" for fold, _ in splits for name in single_heads
+        ]
+    else:
+        results = [run(fold, fit_pos, heldout_pos) for fold, (fit_pos, heldout_pos) in splits]
+        units = [f"htr/arm_nuisance/fold_{fold:03d}" for fold, _ in splits]
     names = ("e", "mu0", "mu1")
     raw = {name: np.full(len(train_df), np.nan) for name in names}
     fold_of_row = np.zeros(len(train_df), dtype=int)
@@ -1173,7 +1421,7 @@ def _fit_arm_nuisance_ensemble(
     return {
         "train": {"predictions": train_predictions},
         "test_predictions": test_predictions,
-        "units": [f"htr/arm_nuisance/fold_{fold:03d}" for fold, _ in splits],
+        "units": units,
     }
 
 
@@ -1221,7 +1469,14 @@ def _fit_two_stage_fold(
     with store.context_lock():
         if htr_dina_nuisances:
             trainer = provider._ensure_runner(train_df)
-            nuisance = _fit_arm_nuisance_ensemble(trainer, store, train_df, test_df, int(fold))
+            nuisance = _fit_arm_nuisance_ensemble(
+                trainer,
+                store,
+                train_df,
+                test_df,
+                int(fold),
+                networks=settings.nuisance_networks,
+            )
             nuisance_units = nuisance["units"]
         else:
             nuisance = provider.fit_nuisance_inner_ensemble_predict(train_df, test_df, int(fold))
@@ -1234,7 +1489,13 @@ def _fit_two_stage_fold(
             lambda: nuisance["train"]["predictions"],
             parameters={
                 "outer_fold": int(fold),
-                "sources": ["htr_arms"] if htr_dina_nuisances else ["htr"],
+                "sources": (
+                    ["htr"]
+                    if not htr_dina_nuisances
+                    else ["htr_arms"]
+                    if settings.nuisance_networks == "shared"
+                    else ["htr_single_heads"]
+                ),
             },
             dependencies=tuple(nuisance_units),
             rows={
@@ -1273,6 +1534,8 @@ def _fit_two_stage_fold(
     }
     if effect_objective == "dina":
         record["dina_nuisances"] = "htr" if htr_dina_nuisances else "bow"
+    if htr_dina_nuisances:
+        record["nuisance_networks"] = settings.nuisance_networks
     return (
         test_nuisance["e_hat"].to_numpy(dtype=float),
         test_nuisance["m_hat"].to_numpy(dtype=float),
@@ -1833,6 +2096,10 @@ def build_configs(
         ),
         training=TrainingConfig(**sections["training"]),
     )
+    if settings.nuisance_networks == "separate" and not _dina_uses_htr_nuisances(config, settings):
+        raise ValueError(
+            "run.nuisance_networks=separate needs two_stage DINA with run.dina_nuisances=htr"
+        )
     return config, settings, JointHTRConfig(**sections["joint"])
 
 

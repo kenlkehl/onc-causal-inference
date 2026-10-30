@@ -191,8 +191,10 @@ model, it can distinguish some uses of the same vocabulary and combine
 information spread across a long history. Attention describes what the model
 used, not a causal explanation. `--disable-htr` turns off this architecture.
 
-With `htr_numeric_summary` on, each number written in a chunk ("Hgb 11.07",
-"CrCl 47") also enters the model as a value. A number starts after a character
+With `htr_numeric_summary` on (the template value), each number written in a
+chunk ("Hgb 11.07", "CrCl 47") also enters the model as a value. It needs the
+transformers backend, so a hash or sentence-transformers HTR encoder must turn
+it off. A number starts after a character
 that is not a letter, digit, underscore, or period, so identifiers such as
 "R05.9" or "BRCA1" are skipped; values above 10^12 share one encoding. Each
 number is represented by the encoder's output at its first token, which

@@ -14,6 +14,8 @@ from oci.inference import stage1_dina, standalone_htr
 from oci.inference.htr_trainer import HTRTrainer
 
 TINY_HTR = [
+    # The hash encoder has no token states for the number summaries.
+    "architecture.htr_numeric_summary=false",
     "architecture.htr_sentence_pooling=auto",
     "architecture.htr_require_live_unfrozen_encoder=false",
     "architecture.htr_num_layers=1",
@@ -139,6 +141,10 @@ def test_settings_are_validated():
         standalone_htr.StandaloneHTRConfig(dina_nuisances="tfidf")
     with pytest.raises(ValueError, match="run.dina_nuisance_clip"):
         standalone_htr.StandaloneHTRConfig(dina_nuisance_clip=0.5)
+    with pytest.raises(ValueError, match="run.nuisance_networks"):
+        standalone_htr.StandaloneHTRConfig(nuisance_networks="tied")
+    with pytest.raises(ValueError, match="nuisance_networks=separate needs"):
+        _configs("run.nuisance_networks=separate", "run.dina_nuisances=bow")
     with pytest.raises(ValueError, match="unknown joint settings"):
         _configs("joint.not_a_setting=1")
     with pytest.raises(ValueError, match="unknown stage1_htr settings"):
@@ -160,6 +166,7 @@ def test_stage1_template_settings_are_the_two_stage_defaults():
     assert (stage1_htr.nuisance_epochs, stage1_htr.effect_epochs) == (10, 10)
     assert (stage1_htr.nuisance_weight_decay, config.training.weight_decay) == (0.1, 0.1)
     assert config.architecture.htr_sentence_pooling == "token_attention"
+    assert config.architecture.htr_numeric_summary is True
 
 
 def _checkpoint_units(out, fold=1):
@@ -210,6 +217,7 @@ def test_two_stage_dina_uses_htr_arm_nuisances_without_reading_oracle_columns(
     run = json.loads((out / "run.json").read_text())
     assert run["identity"]["config"]["run"]["dina_nuisances"] == "htr"
     assert run["identity"]["config"]["run"]["dina_nuisance_clip"] == 0.01
+    assert "nuisance_networks" not in run["identity"]["config"]["run"]
     report = standalone_htr.evaluate_against_oracle(out)
     assert report["cate"]["rows"] == 48
 
@@ -234,6 +242,41 @@ def test_two_stage_bow_dina_nuisances_run_stage1_unchanged(tmp_path, monkeypatch
     # Stage 1's value is left out of the identity, as before the setting existed.
     run = json.loads((out / "run.json").read_text())
     assert not {"dina_nuisances", "dina_nuisance_clip"} & set(run["identity"]["config"]["run"])
+
+
+def _unit_fit_rows(out, unit, fold=1):
+    (complete,) = (
+        out / "folds" / f"fold_{fold:02d}" / "stage1_checkpoints" / "units" / unit
+    ).glob("*/complete.json")
+    return json.loads(complete.read_text())["rows"]["fit"]["count"]
+
+
+def test_two_stage_separate_nuisance_networks_fit_one_single_head_network_each(
+    tmp_path, monkeypatch
+):
+    dataset = _cohort(tmp_path)
+    out = tmp_path / "run"
+    _forbid(monkeypatch, standalone_htr, "build_arm_nuisance_net")
+    _forbid(monkeypatch, stage1_dina, "prepare_neural_nuisance", "neural_predictions")
+    _run(dataset, out, "run.nuisance_networks=separate")
+    _assert_cross_fitted_predictions(out)
+    units = _checkpoint_units(out)
+    assert {
+        f"htr/single_head/{name}/fold_{fold:03d}" for name in ("e", "mu0", "mu1") for fold in (1, 2)
+    } <= units
+    assert not any(unit.startswith(("htr/arm_nuisance/", "htr/nuisance/")) for unit in units)
+    # The propensity network trains on every row; each outcome network on its own arm's.
+    for fold in (1, 2):
+        rows = {
+            name: _unit_fit_rows(out, f"htr/single_head/{name}/fold_{fold:03d}")
+            for name in ("e", "mu0", "mu1")
+        }
+        assert rows["mu0"] > 0 and rows["mu1"] > 0
+        assert rows["e"] == rows["mu0"] + rows["mu1"]
+    record = json.loads((out / "folds" / "fold_01" / "fold.json").read_text())
+    assert record["nuisance_networks"] == "separate"
+    run = json.loads((out / "run.json").read_text())
+    assert run["identity"]["config"]["run"]["nuisance_networks"] == "separate"
 
 
 def test_two_stage_fold_resumes_from_inner_network_checkpoints(tmp_path, monkeypatch):

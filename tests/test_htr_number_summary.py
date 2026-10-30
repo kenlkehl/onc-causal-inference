@@ -200,18 +200,15 @@ def test_identities_omit_the_settings_while_summaries_are_off():
     )
     assert (enabled["htr_numeric_summary"], enabled["htr_numeric_queries"]) == (True, 2)
 
-    record = standalone_htr._config_record(
-        *standalone_htr.build_configs(outcome_type="binary", htr_model="hash")
-    )
-    assert "htr_numeric_summary" not in record["architecture"]
+    # The Stage 1 template turns the summaries on.
+    record = standalone_htr._config_record(*standalone_htr.build_configs(outcome_type="binary"))
+    assert record["architecture"]["htr_numeric_summary"] is True
     record = standalone_htr._config_record(
         *standalone_htr.build_configs(
-            outcome_type="binary",
-            htr_model="hash",
-            overrides=["architecture.htr_numeric_summary=true"],
+            outcome_type="binary", overrides=["architecture.htr_numeric_summary=false"]
         )
     )
-    assert record["architecture"]["htr_numeric_summary"] is True
+    assert "htr_numeric_summary" not in record["architecture"]
 
 
 def test_standalone_htr_trains_with_number_summaries(tmp_path, tiny_bert):

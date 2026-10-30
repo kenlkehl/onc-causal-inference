@@ -27,7 +27,7 @@
       "htr_num_heads": 4,
       "htr_num_layers": 2,
       "htr_numeric_queries": 4,
-      "htr_numeric_summary": false,
+      "htr_numeric_summary": true,
       "htr_prediction_head_hidden_dim": 64,
       "htr_projection_dim": 128,
       "htr_require_live_unfrozen_encoder": true,
