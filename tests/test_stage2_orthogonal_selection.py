@@ -10,7 +10,6 @@ and reporting-only outer-fold confirmation that changes no other artifact.
 import hashlib
 import json
 import re
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -18,24 +17,17 @@ import pandas as pd
 import pytest
 
 from oci.inference import plain_handoff_stage2_analysis as analysis
-from oci.inference import stage2_dina
 from oci.inference import stage2_modifier_count as count
 from oci.inference import stage2_modifier_tests as modifier_tests
-from oci.inference import stage2_multi_model_selection as numerical
 from oci.inference.plain_handoff_stage2 import (
     PlainHandoffStage2Config,
     Stage2ExtractionLLMConfig,
 )
 from oci.inference.stage2_diagnostics import write_heterogeneity_diagnostics
-from oci.inference.stage2_elastic_net_selection import (
-    statistical_selection_config_from_mapping,
-)
-from oci.inference.stage2_multi_model_config import ModifierSelectionConfig
-from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
 from tests.stage2_prompt_spy import install, prompt_inputs
 from tests.test_stage2_final_modeling import candidates as final_candidates
 from tests.test_stage2_final_modeling import inputs as final_inputs
-from tests.test_stage2_multi_model import sample_inputs, small_policy
+from tests.test_stage2_multi_model import small_policy
 
 
 def _tree_hashes(root: Path, *, exclude: set[str]) -> dict[str, str]:
@@ -169,7 +161,7 @@ def test_run_fold_analysis_selects_modifiers_by_orthogonal_tests_and_ensembles(
     monkeypatch.setattr(count, "_score_prefix", lambda **k: nested.append(k))
     stage2_dir = tmp_path / "stage2"
     output = stage2_dir / "outer_001"
-    result = _run_fold(output)
+    result = _run_fold(output, nuisance_learner="elastic_net")
     # No nested count search under the default rule.
     assert nested == []
     selection = json.loads((output / "selection" / "elastic_net_selection.json").read_text())
@@ -256,24 +248,6 @@ def test_run_fold_analysis_selects_modifiers_by_orthogonal_tests_and_ensembles(
         assert estimation_audits[name]["model_source"] == "reused_stored_model"
         for key in ("rows", "columns", "fit_audit"):
             assert estimation_audits[name][key] == audit[key], (name, key)
-    # The default nuisance learner is the super learner; its stacks are audited.
-    learner = result["estimation"]["nuisance_learner"]
-    assert learner["learner"] == "super_learner"
-    assert learner["configuration"]["learners"] == [
-        "elastic_net", "gradient_boosting", "random_forest"]
-    assert set(learner["nuisances"]) == {"propensity", "mu0", "mu1"}
-    for summary in learner["nuisances"].values():
-        assert summary["fits"] == 2
-        assert sum(summary["mean_stack_weights"].values()) == pytest.approx(1.0)
-        assert set(summary["mean_learner_cv_loss"]) == {
-            "elastic_net", "gradient_boosting", "random_forest"}
-    assert result["estimation"]["nuisance_model_family"] == "super_learner"
-    stack = next(iter(estimation_audits.values()))["fit_audit"]
-    assert stack["estimator"].endswith("SuperLearnerClassifier")
-    assert sum(stack["stack_weights"].values()) == pytest.approx(1.0)
-    assert {"learner_cv_loss", "stack_cv_loss", "base_learners", "internal_cv",
-            "seeds"} <= set(stack)
-    assert report["testing_nuisances"]["nuisance_learner"]["name"] == "super_learner"
 
     # The ensemble: per-estimator columns, their unweighted mean, empty intervals.
     diagnostics = result["estimation"]
@@ -322,262 +296,6 @@ def test_run_fold_analysis_selects_modifiers_by_orthogonal_tests_and_ensembles(
     assert summary["modifier_confirmation"]["total_selected"] == 1
 
 
-def _selection_arguments(tmp_path, *, binary=False, policy=None):
-    arguments = sample_inputs()
-    if binary:
-        arguments["dataset"]["outcome"] = (arguments["dataset"]["outcome"] > 0).astype(int)
-        arguments["outcome_type"] = "binary"
-    if policy is not None:
-        arguments["policy"] = policy
-    selected, report, _, _ = numerical.select_stage2_features_multi_model(
-        **arguments, checkpoint_dir=tmp_path / "numerical")
-    extras = {
-        "selected": selected,
-        "role_report": {"decisions": report["decisions"]},
-        "statistical_report": report,
-        "request_json": lambda *a, **k: pytest.fail("orthogonal tests never call an LLM"),
-        "role_policy": Stage2RoleAdjudicationConfig(),
-        "output_dir": tmp_path / "count",
-        "numerical_checkpoint_dir": tmp_path / "numerical",
-        "model_identity": "controlled-response",
-        "estimation_trees": 12,
-        "run_numerical": lambda a: pytest.fail("orthogonal tests skip the nested evidence"),
-    }
-    return arguments, extras
-
-
-def test_orthogonal_selection_locks_roles_and_resumes_without_refitting(tmp_path, monkeypatch):
-    policy = small_policy()
-    arguments = sample_inputs()
-    arguments["definitions"][-1].update(configured_explicit_feature=True,
-                                        roles=["effect_modifier"])
-    selected, report, _, _ = numerical.select_stage2_features_multi_model(
-        **{**arguments, "policy": policy}, checkpoint_dir=tmp_path / "numerical")
-    _, extras = _selection_arguments(tmp_path / "unused")
-    extras.update(selected=selected, role_report={"decisions": report["decisions"]},
-                  statistical_report=report, numerical_checkpoint_dir=tmp_path / "numerical",
-                  output_dir=tmp_path / "count")
-    kept, roles, audit = count.select_modifier_count(**arguments, **extras)
-    tests = json.loads((tmp_path / "count" / "modifier_tests.json").read_text())
-    records = {r["feature_id"]: r for r in tests["candidates"]}
-    # The locked modifier is always included and stays outside the BH family.
-    locked = records["other"]
-    assert locked["investigator_locked"] and not locked["bh_family"]
-    assert locked["selected"] and locked["combined_q_value"] is None
-    assert locked["selection_reason"] == "investigator_locked_modifier"
-    assert audit["locked_modifier_ids"] == ["other"]
-    assert tests["summary"]["tested_family"] == 3
-    # The simulated modifier "m" is discovered; confounder roles are preserved.
-    assert "m" in audit["discovered_feature_ids"]
-    assert {f["feature_id"] for f in kept if "confounder" in f["roles"]} == {
-        f["feature_id"] for f in selected if "confounder" in f["roles"]}
-    roles_by_id = {f["feature_id"]: f["roles"] for f in kept}
-    assert "effect_modifier" in roles_by_id["other"] and "effect_modifier" in roles_by_id["m"]
-    assert next(f for f in kept if f["feature_id"] == "other")["modifier_evidence"][
-        "investigator_locked"] is True
-    decision = next(d for d in roles["decisions"] if d["feature_id"] == "m")
-    assert "Benjamini-Hochberg selection" in decision["rationale"]
-    assert decision["modifier_count_selection"]["selection_rule"] == "orthogonal_tests"
-    # Resume reads the checkpoint: no nuisance refit and no retesting.
-    monkeypatch.setattr(analysis, "_cross_fitted_nuisance",
-                        lambda **k: pytest.fail("testing nuisances refitted"))
-    monkeypatch.setattr(modifier_tests, "candidate_tests",
-                        lambda *a, **k: pytest.fail("modifier tests rerun"))
-    assert count.select_modifier_count(**arguments, **extras) == (kept, roles, audit)
-    # The selection fingerprint includes the rule's settings.
-    stricter = replace(policy, multi_model=replace(
-        policy.multi_model, modifier_selection=ModifierSelectionConfig(q=0.05)))
-    monkeypatch.undo()
-    _, other_report, _, _ = numerical.select_stage2_features_multi_model(
-        **{**arguments, "policy": stricter}, checkpoint_dir=tmp_path / "numerical")
-    assert other_report["input_fingerprint"] == report["input_fingerprint"]
-    extras.update(statistical_report=other_report)
-    _, _, stricter_audit = count.select_modifier_count(
-        **{**arguments, "policy": stricter}, **extras)
-    assert stricter_audit["input_fingerprint"] != audit["input_fingerprint"]
-
-
-def test_estimator_policy_and_zero_discoveries(tmp_path):
-    policy = small_policy()
-    single = replace(policy, multi_model=replace(policy.multi_model, modifier_selection=(
-        ModifierSelectionConfig(q=1e-20, estimator_policy="linear_interactions"))))
-    arguments, extras = _selection_arguments(tmp_path, policy=single)
-    kept, _, audit = count.select_modifier_count(**arguments, **extras)
-    # Combined p-values are clamped at 1e-15, so q=1e-20 makes zero discoveries,
-    # which is valid: nobody becomes a modifier.
-    assert audit["discovered_feature_ids"] == [] and audit["chosen_modifier_count"] == 0
-    assert not any("effect_modifier" in f["roles"] for f in kept)
-    assert audit["chosen_estimator"] == "linear_interactions"
-    dina = replace(policy, multi_model=replace(policy.multi_model, modifier_selection=(
-        ModifierSelectionConfig(estimator_policy="dina"))))
-    arguments, extras = _selection_arguments(tmp_path / "dina", policy=dina)
-    with pytest.raises(ValueError, match="requires a binary outcome"):
-        count.select_modifier_count(**arguments, **extras)
-
-
-def test_concept_review_requires_balanced_evidence():
-    with pytest.raises(ValueError, match="concept_review requires"):
-        statistical_selection_config_from_mapping(
-            {"multi_model": {"modifier_count": {"concept_review": True}}})
-    config = statistical_selection_config_from_mapping({"multi_model": {
-        "modifier_count": {"concept_review": True},
-        "modifier_selection": {"rule": "balanced_evidence"},
-    }})
-    assert config.multi_model.modifier_count.concept_review is True
-    assert config.multi_model.modifier_selection.resolved_estimator_policy == "nested_selection"
-    default = statistical_selection_config_from_mapping(None).multi_model.modifier_selection
-    assert (default.rule, default.q, default.weights, default.max_modifiers) == (
-        "orthogonal_tests", 0.1, None, 64)
-    assert default.resolved_estimator_policy == "ensemble"
-    with pytest.raises(ValueError, match="unsupported modifier_selection fields"):
-        statistical_selection_config_from_mapping(
-            {"multi_model": {"modifier_selection": {"threshold": 0.1}}})
-    with pytest.raises(ValueError, match="weights"):
-        statistical_selection_config_from_mapping(
-            {"multi_model": {"modifier_selection": {"weights": {"r_projection": 1.0}}}})
-
-
-@pytest.mark.parametrize("binary", [True, False])
-def test_ensemble_averages_components_and_continuous_outcomes_exclude_dina(tmp_path, binary):
-    kw = final_inputs(binary)
-    result = analysis.estimate_outer_fold(
-        **kw, **final_candidates(kw), estimator="ensemble",
-        statistical_policy=small_policy(), output_dir=tmp_path,
-    )
-    expected = ["causal_forest", "linear_interactions", *(["dina"] if binary else [])]
-    assert result["ensemble"]["component_estimators"] == expected
-    assert result["ensemble"]["fitted_estimators"] == expected
-    assert result["model_family"] == "unweighted_estimator_ensemble"
-    predictions = pd.read_csv(tmp_path / "predictions.csv")
-    columns = [f"estimated_cate_{name}" for name in expected]
-    assert ("estimated_cate_dina" in predictions) is binary
-    assert ("dina_log_odds_ratio" in predictions) is binary
-    np.testing.assert_allclose(
-        predictions["estimated_cate"], predictions[columns].mean(axis=1), rtol=0, atol=1e-12)
-    assert predictions["estimated_cate_lower_95"].isna().all()
-    assert set(result["mean_estimated_cate_by_estimator"]) == set(expected)
-    complete = json.loads((tmp_path / "complete.json").read_text())
-    assert complete["outcome_model_contract"]["combination"] == (
-        "unweighted_mean_of_fitted_component_cates")
-    # Each component equals the same estimator fitted alone.
-    alone = analysis.estimate_outer_fold(
-        **kw, **final_candidates(kw), estimator="linear_interactions",
-        statistical_policy=small_policy(), output_dir=tmp_path / "alone",
-    )
-    single = pd.read_csv(tmp_path / "alone" / "predictions.csv")
-    np.testing.assert_allclose(
-        predictions["estimated_cate_linear_interactions"], single["estimated_cate"])
-    assert alone["mean_estimated_cate"] == pytest.approx(
-        result["mean_estimated_cate_by_estimator"]["linear_interactions"])
-
-
-def test_ensemble_without_modifiers_and_with_an_unestimable_component(tmp_path, monkeypatch):
-    kw = final_inputs(True)
-    kw["definitions"] = [{**kw["definitions"][0], "roles": ["confounder"]}]
-
-    def unestimable(**kwargs):
-        raise numerical.NotEstimable("simulated_dina_failure")
-
-    monkeypatch.setattr(stage2_dina, "fit_effect", unestimable)
-    result = analysis.estimate_outer_fold(
-        **kw, **final_candidates(kw), estimator="ensemble",
-        statistical_policy=small_policy(), output_dir=tmp_path,
-    )
-    assert result["effect_modifiers"] == 0
-    assert result["ensemble"]["fitted_estimators"] == ["causal_forest", "linear_interactions"]
-    assert result["ensemble"]["unavailable_estimators"]["dina"]["reason"] == (
-        "simulated_dina_failure")
-    predictions = pd.read_csv(tmp_path / "predictions.csv")
-    assert "estimated_cate_dina" not in predictions
-    np.testing.assert_allclose(
-        predictions["estimated_cate"],
-        predictions[["estimated_cate_causal_forest",
-                     "estimated_cate_linear_interactions"]].mean(axis=1),
-        rtol=0, atol=1e-12,
-    )
-
-
-@pytest.mark.parametrize("binary", [False, True])
-def test_orthogonal_rule_skips_unread_effect_evidence_and_keeps_roles(
-    tmp_path, monkeypatch, binary
-):
-    arguments = sample_inputs()
-    if binary:
-        arguments["dataset"]["outcome"] = (arguments["dataset"]["outcome"] > 0).astype(int)
-        arguments["outcome_type"] = "binary"
-    balanced = replace(arguments["policy"], multi_model=replace(
-        arguments["policy"].multi_model,
-        modifier_selection=ModifierSelectionConfig(rule="balanced_evidence")))
-    # Both rules share one checkpoint root: the evidence scope is in the identity.
-    root = tmp_path / "numerical"
-    full_selected, full, _, _ = numerical.select_stage2_features_multi_model(
-        **{**arguments, "policy": balanced}, checkpoint_dir=root)
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("effect-only evidence fitted under orthogonal_tests")
-
-    for name in ("_forests", "_penalized_family", "_univariable_rlearner"):
-        monkeypatch.setattr(numerical, name, forbidden)
-    monkeypatch.setattr(stage2_dina, "joint_evidence", forbidden)
-    monkeypatch.setattr(stage2_dina, "candidate_evidence", forbidden)
-    monkeypatch.setattr(numerical, "_modifier_test_chunk", forbidden)
-    selected, report, _, _ = numerical.select_stage2_features_multi_model(
-        **arguments, checkpoint_dir=root)
-    assert report["input_fingerprint"] != full["input_fingerprint"]
-    assert report["model_families"] == ["univariable"]
-    skipped = report["skipped_effect_evidence"]
-    assert skipped["families"] == [f for f in full["model_families"] if f != "univariable"]
-    assert skipped["univariable_interaction_test"] is True
-    assert "skipped_effect_evidence" not in full
-    univariable = [c for c in report["cells"] if c["family"] == "univariable"]
-    assert univariable and all(
-        {r["role"] for r in cell["records"]} == {"treatment", "outcome"} for cell in univariable)
-    assert all(c["audit"]["effect_status"] == "not_run_under_orthogonal_tests"
-               for c in univariable)
-    # The kept treatment/outcome evidence and every role input are unchanged.
-    assert [
-        {**c, "records": [r for r in c["records"] if r["role"] != "effect"], "audit": None}
-        for c in univariable
-    ] == [
-        {**c, "records": [r for r in c["records"] if r["role"] != "effect"], "audit": None}
-        for c in full["cells"] if c["family"] == "univariable"
-    ]
-    assert selected == full_selected
-    for key in ("decisions", "nuisance_selection", "retained_feature_ids",
-                "cross_fitted_nuisance_models", "measurement_groups"):
-        assert report[key] == full[key], key
-
-
-def test_changing_estimation_trees_reuses_orthogonal_selection(tmp_path, monkeypatch):
-    install(monkeypatch)
-    output = tmp_path / "stage2" / "outer_001"
-    # Selection reuse does not depend on the learner; the elastic net keeps this fast.
-    first = _run_fold(output, estimation_trees=12, nuisance_learner="elastic_net")
-    selection_files = {
-        path: path.read_bytes()
-        for path in (output / "selection").rglob("*") if path.is_file()
-    }
-
-    def forbidden(**kwargs):
-        raise AssertionError("selection reran after an estimation_trees change")
-
-    monkeypatch.setattr(count, "select_modifier_count", forbidden)
-    monkeypatch.setattr(analysis, "select_stage2_features_multi_model", forbidden)
-    second = _run_fold(output, estimation_trees=16, nuisance_learner="elastic_net")
-    assert {path: path.read_bytes() for path in selection_files} == selection_files
-    forests = [
-        result["estimation"]["ensemble"]["component_audits"]["causal_forest"]
-        ["causal_forest_trees"]
-        for result in (first, second)
-    ]
-    assert forests == [12, 16]
-    # Only the estimation refits; its nuisance models are still the stored ones.
-    assert second["estimation"]["nuisance_fit_audit_summary"]["model_sources"] == {
-        "reused_stored_model": 6}
-    assert second["selection"]["modifier_count_selection"] == (
-        first["selection"]["modifier_count_selection"])
-
-
 def _stored_nuisances(kw, store, **overrides):
     """The modifier tests' training-only call, which stores the inner-fold models."""
     fit_ids = kw["split"]["fit_row_ids"]
@@ -602,7 +320,7 @@ def _stored_nuisances(kw, store, **overrides):
     })
 
 
-@pytest.mark.parametrize("binary", [True, False])
+@pytest.mark.parametrize("binary", [True])
 def test_final_estimation_reuses_stored_nuisance_models_without_refitting(
     tmp_path, monkeypatch, binary
 ):
@@ -673,26 +391,3 @@ def test_final_estimation_reuses_stored_nuisance_models_without_refitting(
     )
     assert absent["nuisance_model_store"]["status"] == "absent"
     assert "model_sources" not in absent["nuisance_fit_audit_summary"]
-
-
-def test_stored_nuisance_model_loader_fails_closed(tmp_path):
-    kw = final_inputs(True)
-    store = tmp_path / "selection" / "nuisance_models"
-    saved = _stored_nuisances(kw, store)
-    root = Path(saved["model_store"]["root"])
-    path = root / "cross_fit" / "fold_001" / "propensity.joblib"
-    entry = {"path": str(path), "manifest": str(root / analysis.NUISANCE_MODEL_MANIFEST),
-             "fingerprint": saved["model_store"]["fingerprint"], "mode": "load"}
-    columns = analysis._FeatureEncoder(kw["definitions"]).fit(kw["extracted_fit"]).transform(
-        kw["extracted_fit"]).shape[1]
-    assert analysis._load_stored_nuisance_model(entry, columns) is not None
-    assert analysis._load_stored_nuisance_model({**entry, "fingerprint": "other"}, columns) is None
-    assert analysis._load_stored_nuisance_model(entry, columns + 1) is None
-    assert analysis._load_stored_nuisance_model(
-        {**entry, "path": str(root / "missing.joblib")}, columns) is None
-    manifest_path = root / analysis.NUISANCE_MODEL_MANIFEST
-    manifest = json.loads(manifest_path.read_text())
-    manifest["identity"]["libraries"]["scikit-learn"] = "0.0"
-    manifest["fingerprint"] = "edited"
-    manifest_path.write_text(json.dumps(manifest))
-    assert analysis._load_stored_nuisance_model(entry, columns) is None

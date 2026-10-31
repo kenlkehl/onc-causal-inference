@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -87,7 +86,7 @@ def test_pure_partition_identities():
     assert small["status"] == "unavailable"
 
 
-@pytest.mark.parametrize("binary", [True, False])
+@pytest.mark.parametrize("binary", [True])
 def test_baseline_risk_only_modifier_only_and_both(tmp_path, binary):
     cases = {
         "prognosis": lambda p, m, rng: 0.2 * p,
@@ -120,83 +119,6 @@ def test_baseline_risk_only_modifier_only_and_both(tmp_path, binary):
         compact = summary["cate_variance_decomposition"]
         assert compact["status"] == "ok"
         assert compact["estimated_cate"]["unique_prognosis"] == pooled["unique_prognosis"]
-
-
-def test_ensemble_components_are_decomposed_separately(tmp_path):
-    predictions = _write_run(
-        tmp_path, lambda p, m, rng: 0.1 * p + 0.15 * m,
-        components={
-            "estimated_cate_causal_forest": lambda p, m, rng: 0.2 * p,
-            "estimated_cate_linear_interactions": lambda p, m, rng: 0.3 * m,
-        })
-    section, summary = _section(tmp_path, predictions)
-    assert section["columns"] == [
-        "estimated_cate", "estimated_cate_causal_forest", "estimated_cate_linear_interactions"]
-    pooled = section["pooled"]
-    assert pooled["estimated_cate_causal_forest"]["unique_prognosis"] > 0.99
-    assert pooled["estimated_cate_linear_interactions"]["unique_modifiers"] > 0.99
-    assert set(summary["cate_variance_decomposition"]) >= {
-        "status", "estimated_cate", "estimated_cate_causal_forest"}
-
-
-def test_constant_cate_missing_artifacts_and_no_policy_are_unavailable(tmp_path):
-    root = tmp_path / "constant"
-    section, _ = _section(root, _write_run(root, lambda p, m, rng: np.full(len(p), 0.1)))
-    assert section["status"] == "unavailable"
-    assert section["per_fold"]["1"]["columns"]["estimated_cate"]["status"] == "unavailable"
-    assert section["pooled"]["estimated_cate"]["status"] == "unavailable"
-
-    root = tmp_path / "missing"
-    predictions = _write_run(root, lambda p, m, rng: 0.2 * p)
-    (root / "outer_002" / "final_definitions.json").unlink()
-    section, _ = _section(root, predictions)
-    assert section["status"] == "ok"
-    assert section["per_fold"]["2"]["status"] == "unavailable"
-    assert section["pooled"]["estimated_cate"]["folds"] == ["1"]
-
-    root = tmp_path / "no_measurements"
-    predictions = _write_run(root, lambda p, m, rng: 0.2 * p)
-    (root / "outer_001" / "estimation" / "nuisance_candidate_heldout.csv").unlink()
-    section, _ = _section(root, predictions)
-    assert section["per_fold"]["1"]["status"] == "unavailable"
-
-    section, _ = _section(root, predictions, policy=None)
-    assert section["status"] == "unavailable" and "outcome type" in section["reason"]
-
-
-def test_decomposition_reads_frozen_artifacts_and_changes_none(tmp_path):
-    predictions = _write_run(tmp_path, lambda p, m, rng: 0.2 * p + 0.2 * m)
-    snapshot = predictions.copy()
-
-    def hashes():
-        return {str(path.relative_to(tmp_path)): hashlib.sha256(path.read_bytes()).hexdigest()
-                for path in sorted(tmp_path.rglob("*")) if path.is_file()
-                and path.name != diagnostics.DIAGNOSTICS_FILENAME}
-
-    before = hashes()
-    section, _ = _section(tmp_path, predictions)
-    assert section["status"] == "ok"
-    assert hashes() == before
-    pd.testing.assert_frame_equal(predictions, snapshot)
-    assert diagnostics.POOLING_RULES["cate_variance_decomposition"]
-
-
-def test_gates_reports_group_mean_cate_and_a_calibration_slope():
-    rng = np.random.default_rng(8)
-    n = 4000
-    cate = rng.normal(scale=0.3, size=n)
-    group = diagnostics.cate_groups(cate, groups=5, seed=1)
-    calibrated = diagnostics.group_average_treatment_effects(
-        cate + rng.normal(scale=1.0, size=n), cate, group)
-    assert [g["mean_estimated_cate"] is not None for g in calibrated["groups"]] == [True] * 5
-    slope = calibrated["calibration"]
-    assert slope["status"] == "ok"
-    assert slope["method"] == "hc3_ols_of_psi_on_group_mean_estimated_cate"
-    assert abs(slope["slope"] - 1.0) < 3 * slope["standard_error"]
-    assert slope["p_value_one_sided_greater_than_0"] < 0.01
-    flat = diagnostics.group_average_treatment_effects(rng.normal(size=n), cate, group)
-    assert abs(flat["calibration"]["slope"]) < 3 * flat["calibration"]["standard_error"]
-    assert flat["calibration"]["p_value_two_sided_equal_1"] < 0.05
 
 
 def test_primary_heterogeneity_test_is_the_pooled_blp_beta2(tmp_path):

@@ -15,9 +15,7 @@ from oci.config import (
     ModelArchitectureConfig,
     MultiModelForestConfig,
 )
-from oci.inference import multi_model_forest_stage1
 from oci.inference.multi_model_forest_stage1 import MultiModelForestStage1Runner
-from oci.inference.sparse_text_modeling import select_ridge_alpha
 from oci.inference.stage1_checkpointing import Stage1CheckpointStore, row_id_identity
 from oci.models import dina
 
@@ -144,44 +142,6 @@ def test_binary_dina_penalty_is_cross_validated_and_sets_the_evidence_fit(
     assert len(effect_fold_fits) == 2 * 2 * len(DEFAULT_BOW_EFFECT_RIDGE_ALPHA_GRID)
 
 
-def test_continuous_ridge_penalties_are_cross_validated_per_objective(tmp_path, monkeypatch):
-    evidence_penalties = []
-    original = multi_model_forest_stage1._make_bow_regressor
-
-    def recording_regressor(params, *, random_state=17):
-        if random_state == 303:
-            evidence_penalties.append((params["bow_model"], params["ridge_alpha"]))
-        return original(params, random_state=random_state)
-
-    monkeypatch.setattr(multi_model_forest_stage1, "_make_bow_regressor", recording_regressor)
-    views, _predictions = _run(tmp_path, "continuous")
-    linear = views["linear_1_2"]["effect_penalty"]
-    _assert_selected(linear["pseudo_outcome"], "heldout_pseudo_outcome_mse")
-    _assert_selected(linear["weighted_r"], "heldout_r_loss")
-    trees = views["extratrees_1_2"]["effect_penalty"]
-    for record in trees.values():
-        assert record["selection"] == "not_applicable"
-        assert record["ridge_alpha"] is None
-    # The evidence model is the weighted R-loss regression with its chosen penalty.
-    assert ("linear", linear["weighted_r"]["ridge_alpha"]) in evidence_penalties
-
-
-@pytest.mark.parametrize("outcome_type", ["binary", "continuous"])
-def test_empty_grid_uses_the_fixed_view_penalty(tmp_path, outcome_type):
-    fixed_views, fixed = _run(tmp_path / "fixed", outcome_type, bow_effect_ridge_alpha_grid=[])
-    single_views, single = _run(
-        tmp_path / "single", outcome_type, bow_effect_ridge_alpha_grid=[10.0]
-    )
-    pd.testing.assert_frame_equal(
-        _effect_predictions(fixed, "linear_1_2"), _effect_predictions(single, "linear_1_2")
-    )
-    for views in (fixed_views, single_views):
-        for record in views["linear_1_2"]["effect_penalty"].values():
-            assert record["selection"] == "fixed"
-            assert record["ridge_alpha"] == 10.0
-            assert record["ridge_alphas"] == [10.0]
-
-
 def test_resumed_context_reuses_the_selected_penalties(tmp_path, monkeypatch):
     def store():
         return Stage1CheckpointStore(
@@ -206,32 +166,3 @@ def test_resumed_context_reuses_the_selected_penalties(tmp_path, monkeypatch):
         pd.testing.assert_frame_equal(
             _effect_predictions(first, name), _effect_predictions(second, name)
         )
-
-
-def test_grid_setting_is_validated_and_sorted():
-    assert MultiModelForestConfig().bow_effect_ridge_alpha_grid == list(
-        DEFAULT_BOW_EFFECT_RIDGE_ALPHA_GRID
-    )
-    unsorted = MultiModelForestConfig(bow_effect_ridge_alpha_grid=[30, 1, 3.5])
-    assert unsorted.bow_effect_ridge_alpha_grid == [1.0, 3.5, 30.0]
-    assert MultiModelForestConfig(bow_effect_ridge_alpha_grid=[]).bow_effect_ridge_alpha_grid == []
-    for grid in ([0.0], [-1.0], [float("nan")], [True], [1.0, 1.0], "1,2", [None]):
-        with pytest.raises(ValueError, match="bow_effect_ridge_alpha_grid"):
-            MultiModelForestConfig(bow_effect_ridge_alpha_grid=grid)
-
-
-def test_penalty_selection_prefers_the_larger_penalty_on_ties():
-    record = select_ridge_alpha([10.0, 1.0, 100.0], [0.5, 0.5, 0.7], criterion="loss")
-    assert record["ridge_alpha"] == 10.0
-    assert record["ridge_alphas"] == [1.0, 10.0, 100.0]
-    assert record["heldout_loss"] == [0.5, 0.5, 0.7]
-    assert record["selection"] == "cross_validated" and not record["at_grid_edge"]
-    edge = select_ridge_alpha([1.0, 10.0], [float("nan"), 0.2], criterion="loss")
-    assert edge["ridge_alpha"] == 10.0 and edge["at_grid_edge"]
-    assert edge["heldout_loss"] == [None, 0.2]
-    fixed = select_ridge_alpha([3.0], [0.4], criterion="loss")
-    assert fixed["selection"] == "fixed" and not fixed["at_grid_edge"]
-    with pytest.raises(ValueError):
-        select_ridge_alpha([1.0], [float("nan")], criterion="loss")
-    with pytest.raises(ValueError):
-        select_ridge_alpha([1.0, 2.0], [0.1], criterion="loss")

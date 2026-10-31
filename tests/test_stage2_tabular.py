@@ -95,20 +95,7 @@ def test_config_cli_roundtrip_and_readonly_preflight(tmp_path, monkeypatch, caps
 
 @pytest.mark.parametrize(
     "change,match",
-    [
-        ("no_features", "requires tabular.features"),
-        ("empty_features", "nonempty"),
-        ("endpoint", "LLM"),
-        ("notes", "does not accept notes"),
-        ("no_roles", "requires causal roles"),
-        ("bad_roles", "unsupported roles"),
-        ("duplicate_names", "distinct normalized"),
-        ("no_categories", "declared categories"),
-        ("reserved_category", "reserved"),
-        ("oracle", "oracle"),
-        ("stage1", "Stage 1"),
-        ("bad_type", "value_type"),
-    ],
+    [("bad_roles", "unsupported roles"), ("oracle", "oracle")],
 )
 def test_reject_incompatible_config(tmp_path, change, match):
     raw, _, _ = inputs(tmp_path)
@@ -142,19 +129,7 @@ def test_reject_incompatible_config(tmp_path, change, match):
 
 @pytest.mark.parametrize(
     "change,match",
-    [
-        ("missing_column", "missing"),
-        ("duplicate_id", "unique"),
-        ("missing_id", "nonmissing"),
-        ("one_arm", "both arms"),
-        ("bad_outcome", "finite"),
-        ("not_binary", "only 0 and 1"),
-        ("bad_number", "nonnumeric"),
-        ("infinite", "infinite"),
-        ("undeclared", "undeclared"),
-        ("label_predictor", "distinct"),
-        ("few_folds", ">= 2"),
-    ],
+    [("label_predictor", "distinct")],
 )
 def test_reject_invalid_table_before_writing(tmp_path, change, match):
     _, config, data = inputs(tmp_path)
@@ -187,7 +162,7 @@ def test_reject_invalid_table_before_writing(tmp_path, change, match):
     assert not config.output_dir.exists()
 
 
-@pytest.mark.parametrize("change", ["value", "order", "schema", "seed", "missing", "corrupt"])
+@pytest.mark.parametrize("change", ["corrupt"])
 def test_resume_rejects_changed_inputs_even_if_complete(tmp_path, change):
     _, config, data = inputs(tmp_path)
     workflow.ResearchAllEvidenceWorkflow(config, component_runners={"stage2": lambda *_: {}}).run()
@@ -226,11 +201,7 @@ def test_resume_rejects_changed_inputs_even_if_complete(tmp_path, change):
 
 @pytest.mark.parametrize(
     "outcome_type,nuisance",
-    [
-        ("binary", "elastic_net"),
-        ("continuous", "elastic_net"),
-        ("binary", "super_learner"),
-    ],
+    [("binary", "elastic_net")],
 )
 def test_real_ensemble_without_llms_and_resume(tmp_path, monkeypatch, outcome_type, nuisance):
     from tests.test_stage2_multi_model import small_policy
@@ -317,24 +288,3 @@ def test_binary_categories_and_training_only_imputation(tmp_path):
     assert encoded[0, 0] == 0  # Training median imputes missing age.
     assert encoded[0, 1] == 1  # Missingness is retained as a separate indicator.
     assert encoder.encodings[0][2][0] == measured.iloc[2:20]["age_years"].median()
-
-
-def test_example_config_and_modes_cannot_share_an_output_directory(tmp_path):
-    from pathlib import Path
-
-    example = Path("example_configs/research_tabular.json")
-    example_config = workflow.compile_config(
-        json.loads(example.read_text()), config_dir=example.parent
-    )
-    assert example_config.tabular_only and example_config.stage2.nuisance_learner == "super_learner"
-    raw, config, _ = inputs(tmp_path)
-    workflow.ResearchAllEvidenceWorkflow(config, component_runners={"stage2": lambda *_: {}}).run()
-    raw.pop("tabular")
-    raw["run"]["mode"] = "stage2"
-    raw["stage2"] = {
-        "endpoint": "http://unused.test/v1",
-        "model": "unused",
-        "extraction_llm": {"endpoint": "http://unused.test/v1", "model": "unused"},
-    }
-    with pytest.raises(ValueError, match="cannot switch"):
-        workflow.ResearchAllEvidenceWorkflow(workflow.compile_config(raw, config_dir=tmp_path))

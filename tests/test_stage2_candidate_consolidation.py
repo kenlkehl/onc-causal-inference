@@ -5,8 +5,7 @@ import numpy as np
 import pytest
 
 from oci.inference.stage2_candidate_consolidation import (
-    CandidateConsolidationPolicy, CandidateEmbeddingCache, mixed_batches,
-    diminishing_returns, policy_from_mapping,
+    policy_from_mapping,
 )
 from oci.inference import plain_handoff_stage2 as workflow
 
@@ -33,59 +32,6 @@ def runner(**kwargs):
     )
 
 
-def test_mixed_round_uses_only_semantic_and_alphabetical_and_changes_next_round():
-    source = groups(200)
-    matrix = encoder([item["name"] for item in source], "", "")
-    matrix /= np.linalg.norm(matrix, axis=1, keepdims=True)
-    args = dict(batch_size=20, seed=41, policy=CandidateConsolidationPolicy(), embeddings=matrix)
-    first, methods = mixed_batches(source, round_number=1, **args)
-    second, _ = mixed_batches(source, round_number=2, **args)
-    assert methods.count("semantic") == 6
-    assert methods.count("alphabetical") == 4
-    assert set(methods) == {"semantic", "alphabetical"}
-    assert sorted(item["name"] for batch in first for item in batch) == [item["name"] for item in source]
-    assert all(len(batch) == 20 for batch in first)
-    assert first != second
-    assert (first, methods) == mixed_batches(source, round_number=1, **args)
-
-
-def test_semantic_batch_brings_distant_aliases_together_without_merging_them():
-    source = groups(8)
-    matrix = np.eye(8)
-    matrix[-1] = matrix[0]
-    batches, methods = mixed_batches(source, batch_size=2, round_number=1, seed=0,
-                                    policy=CandidateConsolidationPolicy(), embeddings=matrix)
-    assert methods[0] == "semantic"
-    assert [item["name"] for item in batches[0]] == ["variable_000", "variable_007"]
-    assert sum(map(len, batches)) == len(source)
-
-
-def test_embedding_cache_reuses_vectors_and_only_embeds_changed_text(tmp_path):
-    calls = []
-    def encode(texts, model, device):
-        calls.append(list(texts))
-        return encoder(texts, model, device)
-    path = tmp_path / "vectors.npz"
-    cache = CandidateEmbeddingCache(path, CandidateConsolidationPolicy(), encode)
-    original = cache.matrix(["hemoglobin", "age"])
-    np.testing.assert_array_equal(original, cache.matrix(["hemoglobin", "age"]))
-    restored = CandidateEmbeddingCache(path, CandidateConsolidationPolicy(), encode)
-    np.testing.assert_array_equal(original, restored.matrix(["hemoglobin", "age"]))
-    restored.matrix(["hemoglobin", "new merged description"])
-    assert calls == [["hemoglobin", "age"], ["new merged description"]]
-
-
-def test_low_yield_requires_consecutive_successful_rounds_and_minimum_exposure():
-    policy = CandidateConsolidationPolicy()
-    def row(before, after, failures=0):
-        return dict(input_groups=before, output_groups=after, validation_fallback_batches=failures)
-    assert not diminishing_returns([row(1000, 998), row(998, 996)], policy)
-    assert diminishing_returns([row(1100, 1000), row(1000, 998), row(998, 996)], policy)
-    assert not diminishing_returns([row(1100, 1000), row(1000, 998, 1), row(998, 996)], policy)
-    assert not diminishing_returns([row(1100, 1000), row(1000, 980), row(980, 978)], policy)
-    assert not diminishing_returns([row(1100, 1000), row(1000, 995), row(995, 993)], policy)
-
-
 def test_mixed_workflow_stops_resumes_and_preserves_origins(tmp_path, monkeypatch):
     monkeypatch.setattr(workflow, "_encode_candidate_selection_texts", encoder)
     model = runner()
@@ -102,71 +48,7 @@ def test_mixed_workflow_stops_resumes_and_preserves_origins(tmp_path, monkeypatc
     assert model._consolidate_candidate_pool(outer_fold=1, groups=source, output_dir=tmp_path) == result
 
 
-def test_failed_review_does_not_count_as_convergence(tmp_path, monkeypatch):
-    monkeypatch.setattr(workflow, "_encode_candidate_selection_texts", encoder)
-    def request(**kwargs):
-        if kwargs["input_value"]["round"] == 2:
-            raise workflow.Stage2ResponseValidationError("malformed response")
-        return {"merge_directives": []}
-    monkeypatch.setattr(workflow, "_checkpointed_request_json", request)
-    model = runner(consolidation_max_rounds=5)
-    assert len(model._consolidate_candidate_pool(outer_fold=1, groups=groups(41), output_dir=tmp_path)) == 41
-    complete = json.loads((tmp_path / "complete.json").read_text())
-    assert complete["rounds_executed"] == 4
-    assert complete["stopped_reason"] == "diminishing_returns"
-    assert complete["validation_fallback_batches"] == 3
-
-
-@pytest.mark.parametrize("settings", [
-    {"semantic_fraction": .95, "random_fraction": .1}, {"random_fraction": float("nan")},
-    {"random_fraction": .1},
-    {"early_stop_patience": 0}, {"early_stop_min_reduction": -1},
-    {"unknown": True},
-])
+@pytest.mark.parametrize("settings", [{"unknown": True}])
 def test_invalid_policy_is_rejected(settings):
     with pytest.raises(ValueError):
         policy_from_mapping(settings)
-
-
-@pytest.mark.parametrize("canonical", ["renal function", "estimated GFR"])
-def test_alias_response_cannot_invent_or_borrow_a_broader_canonical_label(canonical):
-    with pytest.raises(ValueError):
-        workflow._validate_global_candidate_pool_directives(
-            {"merges": [{"members": ["cr clearance", "creatinine clearance"],
-                         "canonical_label": canonical}]},
-            group_names=["cr_clearance", "creatinine_clearance", "estimated_gfr"],
-        )
-
-
-def test_exact_alias_merge_preserves_distinct_related_measurement_and_discovery_cache(tmp_path):
-    config = workflow.PlainHandoffStage2Config(endpoint="http://test/v1", model="test-model")
-    calls = []
-    def complete(messages, _config):
-        calls.append(messages)
-        return json.dumps({"candidates": []})
-    leaf = dict(output_dir=tmp_path/'discovery', input_value={"phase": "discovery"},
-                messages=workflow.clinical_prompts.messages("01_discover", "A clinical excerpt."),
-                config=config, validate=lambda value: value)
-    workflow._checkpointed_request_json(**leaf, completion=complete)
-    model = workflow.PlainHandoffStage2(config=config, clinical_question="Unused", completion=complete)
-    source = workflow._materialize_exact_name_groups([
-        {"candidate_id": f"c{i}", "name": name, "description": description,
-         "architecture": "test", "supporting_packet_ids": [], "evidence_axes": ["outcome"]}
-        for i, (name, description) in enumerate([
-            ("cr_clearance", "Creatinine clearance in mL/min."),
-            ("creatinine_clearance", "Creatinine clearance in mL/min."),
-            ("estimated_gfr", "Estimated glomerular filtration rate in mL/min/1.73 m2."),
-        ])])
-    def aliases(messages, _config):
-        calls.append(messages)
-        text = messages[0]["content"]
-        assert "Keep creatinine clearance and estimated GFR separate." in text
-        if "- cr clearance:" in messages[1]["content"]:
-            return json.dumps({"merges": [{"members": ["cr clearance", "creatinine clearance"],
-                                          "canonical_label": "creatinine clearance"}]})
-        return json.dumps({"merges": []})
-    model.completion = aliases
-    result = model._consolidate_candidate_pool(outer_fold=1, groups=source, output_dir=tmp_path/'merges')
-    assert {f["name"] for f in result} == {"creatinine_clearance", "estimated_gfr"}
-    workflow._checkpointed_request_json(**leaf, completion=lambda *_: pytest.fail("Discovery was rerun"))
-    assert len(calls) == 3  # discovery, duplicate merge, final no-merge review

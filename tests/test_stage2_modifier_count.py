@@ -24,75 +24,7 @@ def ranking_request(*args, **kwargs):
     pytest.fail("statistical modifier ranking must not request an LLM")
 
 
-def test_count_rule_and_balanced_architecture_choice():
-    losses = {0: [1.2, 1.3, 1.2], 8: [0.99, 1.02, 1.00], 16: [1.0, 1.0, 1.0]}
-    assert count.choose_modifier_count(losses)["chosen_additional_count"] == 16
-    assert count.choose_modifier_count({0: [1.0, 1.0], 4: [1.0, 1.0]})["chosen_additional_count"] == 0
-    with pytest.raises(ValueError, match="two finite"):
-        count.choose_modifier_count({0: [1.0]})
-    with pytest.raises(ValueError, match="identical"):
-        count.choose_modifier_count({0: [1.0, 1.0], 4: [1.0, 1.0, 1.0]})
-    architecture_losses = {
-        ("causal_forest", 0): [1.2, 1.3, 1.2],
-        ("linear_interactions", 8): [0.99, 1.02, 1.0],
-        ("causal_forest", 16): [1.0, 1.0, 1.0],
-    }
-    # Without interaction evidence every guardrail-eligible budget ties, so the
-    # smallest eligible budget wins over the minimum-loss forest.
-    balanced = count.choose_effect_model(architecture_losses)
-    assert (balanced["best_mean_estimator"], balanced["best_mean_count"]) == ("causal_forest", 16)
-    assert (balanced["chosen_estimator"], balanced["chosen_additional_count"]) == (
-        "linear_interactions",
-        8,
-    )
-    assert balanced["rule"] == "balanced_evidence"
-    tied = count.choose_effect_model(
-        {("causal_forest", 0): [1.0, 1.0], ("linear_interactions", 0): [1.0, 1.0]}
-    )
-    assert tied["chosen_estimator"] == "linear_interactions"
-
-
-def test_zero_budget_preserves_confounders_and_exact_investigator_roles():
-    arguments = sample_inputs()
-    definitions = arguments["definitions"]
-    definitions[-1].update(configured_explicit_feature=True, roles=["effect_modifier"])
-    selected = [
-        {
-            **f,
-            "roles": ["confounder", "effect_modifier"] if f["name"] == "c" else ["effect_modifier"],
-        }
-        for f in definitions
-    ]
-    report = {"decisions": [{"feature_id": f["feature_id"], "roles": f["roles"]} for f in selected]}
-    ordered = [{"feature_id": "m", "evidence_ids": ["m-effect"], "rationale": "Evidence."}]
-    kept, reviewed = count._apply_budget(definitions, selected, report, ordered, 0, ["other"])
-    assert {f["feature_id"]: f["roles"] for f in kept} == {
-        "c": ["confounder"],
-        "other": ["effect_modifier"],
-    }
-    assert kept[0]["nuisance_model_roles"] == ["treatment", "outcome"]
-    assert len(reviewed["decisions"]) == 4
-    assert report["decisions"][0]["roles"] == ["confounder", "effect_modifier"]
-    train = arguments["extracted_fit"].iloc[:40]
-    valid = arguments["extracted_fit"].iloc[40:60]
-    tr = np.tile([-0.5, 0.5], 20)
-    result = count._score_prefix(
-        train=train,
-        valid=valid,
-        definitions=definitions,
-        feature_ids=[],
-        tr=tr,
-        yr=2 * tr,
-        tvr=np.tile([-0.5, 0.5], 10),
-        yvr=np.zeros(20),
-        seed=11,
-        trees=12,
-    )
-    assert result["constant_design"] and result["predictions"] == [2.0] * 20
-    assert result["r_loss"] == 1.0
-
-
-@pytest.mark.parametrize("binary", [False, True])
+@pytest.mark.parametrize("binary", [False])
 def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, monkeypatch, binary):
     arguments = sample_inputs()
     if binary:

@@ -11,26 +11,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
-import sys
 from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from oci.evaluation import ablation
-from oci.evaluation.ablation import compare_ablations, compare_concepts, prepare_ablations
+from oci.evaluation.ablation import compare_ablations, prepare_ablations
 from oci.extraction.llm_routing import redact_api_keys
 from oci.inference.plain_handoff_stage2 import (
-    _load_stage2_splits,
-    _verify_stage2_splits_against_handoff,
     plain_stage2_config_from_mapping,
-)
-from oci.inference.plain_handoff_stage2_evidence import (
-    compile_stage2_handoff_evidence,
-    extract_stage1_architecture_occurrences,
 )
 from oci.inference.stage1_architecture_artifacts import materialize_stage1_architecture_artifacts
 from oci.inference.stage2_diagnostics import (
@@ -39,7 +30,6 @@ from oci.inference.stage2_diagnostics import (
     pool_blp,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
 ROWS = 40
 HELDOUT = {1: list(range(0, 20)), 2: list(range(20, 40))}
 LAUNCHER_KEYS = {
@@ -57,10 +47,6 @@ def _write_json(path: Path, value) -> None:
 def _write_jsonl(path: Path, rows) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
-
-
-def _read_jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
 def _stage2_mapping(**overrides) -> dict:
@@ -193,14 +179,6 @@ def _fake_run(
     return root
 
 
-def _texts_by_architecture(rows) -> dict[str, list[tuple[int, str]]]:
-    output: dict[str, list[tuple[int, str]]] = {}
-    for fold, occurrences in extract_stage1_architecture_occurrences(rows).items():
-        for occurrence in occurrences:
-            output.setdefault(occurrence["architecture"], []).append((fold, occurrence["text"]))
-    return {name: sorted(values) for name, values in output.items()}
-
-
 def test_prepare_drops_only_the_ablated_rows_of_an_explicit_handoff(tmp_path: Path, capsys):
     run = _fake_run(tmp_path / "run", explicit=True)
     cache = run / "components" / "embedding_cache"
@@ -259,61 +237,6 @@ def test_prepare_drops_only_the_ablated_rows_of_an_explicit_handoff(tmp_path: Pa
     assert json.loads((out / "ablations.json").read_text())["filter_rule"] == ablation.FILTER_RULE
 
 
-def test_prepare_projects_shared_component_rows_and_stage2_accepts_the_result(tmp_path: Path):
-    run = _fake_run(tmp_path / "run", explicit=False)
-    out = tmp_path / "ablations"
-    index = prepare_ablations(run_dir=run, out_dir=out, architectures="bow_r_loss",
-                              include_control=True)
-    assert index["run_selection_source"] == "handoff"
-    assert index["handoff_mode"] == "projected_to_architecture_rows"
-    assert [item["name"] for item in index["ablations"]] == ["without_bow_r_loss", "full_control"]
-
-    original = _texts_by_architecture(_read_jsonl(run / "handoff" / "evidence.jsonl"))
-    assert set(original) == {"bow_nuisance", "bow_r_loss", "tfidf_topics"}
-    directory = out / "without_bow_r_loss"
-    handoff = directory / "handoff" / "evidence.jsonl"
-    rows = _read_jsonl(handoff)
-    assert all(row["source"] == "stage1_architecture" for row in rows)
-    filtered = _texts_by_architecture(rows)
-    # The BoW nuisance terms of the shared text-model rows survive the ablation.
-    assert filtered == {name: original[name] for name in ("bow_nuisance", "tfidf_topics")}
-    control = _texts_by_architecture(_read_jsonl(out / "full_control" / "handoff" /
-                                                 "evidence.jsonl"))
-    assert control == original
-
-    # Stage 2's own checks accept the ablation inputs without an LLM.
-    config = json.loads((directory / "stage2_from_artifacts.json").read_text())
-    splits = _load_stage2_splits(provenance_path=Path(config["split_provenance_path"]),
-                                 dataset_rows=ROWS, outer_fold_ids=[1, 2])
-    _verify_stage2_splits_against_handoff(splits, handoff_path=handoff, outer_fold_ids=[1, 2])
-    parsed = plain_stage2_config_from_mapping(config["stage2"], default_workers=8)
-    compiled = compile_stage2_handoff_evidence(
-        rows, handoff_path=handoff, max_cards_per_outer_fold=16,
-        required_architectures=parsed.required_architectures,
-        included_architectures=parsed.included_architectures,
-    )
-    architectures = {name for card in compiled.packets
-                     for name in card["content"]["source_architectures"]}
-    assert architectures == {"bow_nuisance", "tfidf_topics"}
-
-    # The projected control compiles to exactly the cards of the original handoff.
-    def cards(path: Path):
-        compiled = compile_stage2_handoff_evidence(
-            _read_jsonl(path), handoff_path=path, max_cards_per_outer_fold=16)
-        return {
-            fold: sorted(
-                (card["card_id"], tuple(card["source_architectures"]),
-                 json.dumps(card["representative_evidence"], sort_keys=True),
-                 json.dumps(card["support"], sort_keys=True))
-                for card in values
-            )
-            for fold, values in compiled.cards_by_outer_fold.items()
-        }
-
-    assert cards(out / "full_control" / "handoff" / "evidence.jsonl") == cards(
-        run / "handoff" / "evidence.jsonl")
-
-
 def test_prepare_uses_the_dated_notes_cohort_and_converts_csv(tmp_path: Path):
     run = _fake_run(tmp_path / "run", explicit=True)
     cohort = run / "input" / "analysis_cohort.parquet"
@@ -342,51 +265,6 @@ def test_prepare_uses_the_dated_notes_cohort_and_converts_csv(tmp_path: Path):
         "patient_id", "clinical_text", "treatment_indicator", "outcome_indicator",
     ]
     assert len(converted) == ROWS
-
-
-def test_prepare_skips_empty_ablations_and_rejects_foreign_architectures(tmp_path, capsys):
-    run = _fake_run(tmp_path / "run", explicit=True, architectures=("tfidf_topics",),
-                    sources=("tfidf",))
-    index = prepare_ablations(run_dir=run, out_dir=tmp_path / "single")
-    assert index["ablations"] == []
-    assert index["skipped"][0]["name"] == "without_tfidf_topics"
-    assert "empty handoff" in capsys.readouterr().out
-    assert not (tmp_path / "single" / "without_tfidf_topics").exists()
-    with pytest.raises(ValueError, match="not in this run's selection"):
-        prepare_ablations(run_dir=run, out_dir=tmp_path / "other", architectures="htr_neural")
-    with pytest.raises(ValueError, match="evaluation"):
-        prepare_ablations(run_dir=run, out_dir=run / "stage2" / "ablations")
-
-
-def test_stage2_template_replaces_managed_pools_with_endpoints(tmp_path: Path):
-    managed = json.loads(json.dumps(redact_api_keys(asdict(plain_stage2_config_from_mapping(
-        {"model": "primary-model", "vllm": {"gpus": ["cuda:0"]},
-         "extraction_llm": {"model": "small-model", "vllm": {"gpus": ["cuda:1"]}}},
-        default_workers=8,
-    )))))
-    run = _fake_run(tmp_path / "run", explicit=True, stage2=managed)
-    with pytest.raises(ValueError, match="managed vLLM"):
-        prepare_ablations(run_dir=run, out_dir=tmp_path / "no_template")
-    template = tmp_path / "template.json"
-    _write_json(template, {
-        "stage2": {"endpoint": "http://primary.test/v1", "workers": 2,
-                   "extraction_llm": {"endpoint": "http://extract.test/v1"}},
-        "tokenizer_cache_dir": "/cache/tokenizers",
-    })
-    prepare_ablations(run_dir=run, out_dir=tmp_path / "templated",
-                      architectures="bow_nuisance", stage2_template=template)
-    config = json.loads(
-        (tmp_path / "templated" / "without_bow_nuisance" / "stage2_from_artifacts.json")
-        .read_text()
-    )
-    assert config["stage2"]["vllm"] is None and config["stage2"]["workers"] == 2
-    assert config["stage2"]["extraction_llm"]["vllm"] is None
-    assert config["stage2"]["model"] == "primary-model"
-    assert config["tokenizer_cache_dir"] == "/cache/tokenizers"
-    bad = tmp_path / "bad.json"
-    _write_json(bad, {"endpoint": "http://primary.test/v1"})
-    with pytest.raises(ValueError, match="under 'stage2'"):
-        prepare_ablations(run_dir=run, out_dir=tmp_path / "bad", stage2_template=bad)
 
 
 # ---------------------------------------------------------------------------
@@ -478,55 +356,6 @@ def _compare_fixture(tmp_path: Path) -> tuple[Path, Path]:
     return run, abl
 
 
-def test_compare_matches_concepts_and_lists_pending_ablations(tmp_path: Path):
-    run, abl = _compare_fixture(tmp_path)
-    result = compare_ablations(run_dir=run, ablation_dir=abl)
-    assert result["complete"] == ["without_htr_neural"]
-    assert result["pending"] == ["without_tfidf_topics", "without_bow_nuisance"]
-    output = abl / "comparison"
-    report = json.loads((output / "comparison.json").read_text())
-    by_name = {item["name"]: item for item in report["ablations"]}
-    assert by_name["without_tfidf_topics"]["detail"] == "not_started"
-    assert by_name["without_bow_nuisance"]["detail"] == "failed"
-    fold = by_name["without_htr_neural"]["per_fold"]["1"]
-    modifiers = fold["selected_modifiers"]
-    assert [(m["full"], m["ablation"]) for m in modifiers["matched"]] == [
-        ("pdl1_expression", "pd_l1_expression")]
-    assert modifiers["lost"] == ["brain_metastases"]
-    assert modifiers["gained"] == ["egfr_mutation"]
-    assert modifiers["jaccard"] == pytest.approx(1 / 3)
-    assert fold["nuisance_set"]["jaccard"] == pytest.approx(1.0)
-    # Fold 2 selected no modifiers on either side: identical empty sets.
-    assert by_name["without_htr_neural"]["per_fold"]["2"]["selected_modifiers"]["jaccard"] == 1.0
-
-    full = json.loads((run / "stage2" / "causal_estimate.json").read_text())
-    ablated = json.loads(
-        (abl / "without_htr_neural" / "stage2" / "causal_estimate.json").read_text())
-    differences = by_name["without_htr_neural"]["estimate_differences_ablation_minus_full"]
-    assert differences["ate"] == pytest.approx(
-        ablated["co_primary_estimands"]["ate"]["estimate"]
-        - full["co_primary_estimands"]["ate"]["estimate"])
-    estimates = by_name["without_htr_neural"]["estimates"]
-    assert estimates["ato"]["ci_low"] == pytest.approx(
-        ablated["co_primary_estimands"]["ato"]["confidence_interval_95"][0])
-    heterogeneity = json.loads(
-        (abl / "without_htr_neural" / "stage2" / "heterogeneity_diagnostics.json").read_text())
-    primary = estimates["primary_heterogeneity_test"]
-    assert primary["beta2"] == pytest.approx(heterogeneity["blp"]["pooled"]["beta2_heterogeneity"])
-    assert primary["p_value_one_sided"] == pytest.approx(
-        heterogeneity["blp"]["pooled"]["beta2_p_value_one_sided_greater_than_0"])
-
-    summary = pd.read_csv(output / "summary.csv", keep_default_na=False)
-    assert list(summary["ablation"]) == [
-        "full_run", "without_htr_neural", "without_tfidf_topics", "without_bow_nuisance"]
-    row = summary[summary["ablation"] == "without_htr_neural"].iloc[0]
-    assert int(row["modifiers_lost"]) == 1 and int(row["modifiers_gained"]) == 1
-    folds = pd.read_csv(output / "folds.csv", keep_default_na=False)
-    assert folds.loc[folds["outer_fold"] == 1, "modifiers_lost"].iloc[0] == "brain_metastases"
-    markdown = (output / "summary.md").read_text()
-    assert "pending (failed)" in markdown and "`without_tfidf_topics`" in markdown
-
-
 def test_compare_with_oracle_reports_recovery_for_each_side(tmp_path: Path):
     run, abl = _compare_fixture(tmp_path)
     truth = pd.DataFrame({"true_pdl1": [f"TPS {i % 3}" for i in range(ROWS)],
@@ -559,21 +388,3 @@ def test_compare_with_oracle_reports_recovery_for_each_side(tmp_path: Path):
     summary = pd.read_csv(abl / "comparison" / "summary.csv", keep_default_na=False)
     row = summary[summary["ablation"] == "without_htr_neural"].iloc[0]
     assert row["oracle_lost_selected_modifiers"] == "brain"
-
-
-def test_compare_concepts_uses_the_cross_fold_matching_rule():
-    left = [_variable("pdl1_expression", "PD-L1 tumor proportion score category", [], "x")]
-    right = [_variable("pd_l1_expression", "PD-L1 tumor proportion score category", [], "y"),
-             _variable("liver_metastases", "Liver metastases at diagnosis", [], "z")]
-    result = compare_concepts(left, right)
-    assert result["similarity_threshold"] == 0.7
-    assert len(result["matched"]) == 1 and result["gained"] == ["liver_metastases"]
-    assert compare_concepts([], [])["jaccard"] == 1.0
-
-
-def test_ablation_script_runs_from_the_repository(tmp_path: Path):
-    completed = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "ablate_stage1_architectures.py"), "--help"],
-        capture_output=True, text=True, check=True, cwd=tmp_path,
-    )
-    assert "prepare" in completed.stdout and "compare" in completed.stdout

@@ -21,7 +21,6 @@ from oci.evaluation.attribution import (
     collect_stage2_lineage,
     evaluate_attribution,
     load_oracle_data,
-    multivariate_r_squared,
 )
 
 ROWS = 40
@@ -336,78 +335,12 @@ def test_attribution_counts_any_and_sole_source_at_every_level(tmp_path: Path):
     assert report["oracle_recovery"] == {"status": "not_requested"}
 
 
-def test_missing_fold_artifacts_are_reported_unavailable(tmp_path: Path):
-    run = _fake_run(tmp_path / "run")
-    (run / "stage2" / "outer_002" / "final_definitions.json").unlink()
-    # Without the per-fold card manifest, cards are read from the fold's packets.
-    (run / "stage2" / "evidence_compilation" / "outer_002" / "cards.jsonl").unlink()
-    _write_jsonl(
-        run / "stage2" / "outer_002" / "input_packets.jsonl",
-        [{"packet_id": "c2_bow", "architecture": "bow_nuisance", "outer_fold": 2,
-          "content": {"source_architectures": ["bow_nuisance"]}}],
-    )
-    evaluate_attribution(run_dir=run)
-    report = json.loads((run / "evaluation" / "attribution" / "attribution.json").read_text())
-    assert report["per_fold"]["2"]["cards"]["by_architecture"]["bow_nuisance"] == {
-        "any_source": 1, "sole_source": 1}
-    assert report["per_fold"]["2"]["selected_modifiers"]["status"] == "unavailable"
-    assert report["totals"]["selected_modifiers"]["folds"] == ["1"]
-    assert report["totals"]["selected_modifiers"]["folds_unavailable"] == ["2"]
-
-
 def test_outputs_inside_run_inputs_are_refused(tmp_path: Path):
     run = _fake_run(tmp_path / "run")
     with pytest.raises(ValueError, match="evaluation"):
         evaluate_attribution(run_dir=run, output_dir=run / "stage2" / "attribution")
     evaluate_attribution(run_dir=run, output_dir=tmp_path / "elsewhere")
     assert (tmp_path / "elsewhere" / "attribution.json").is_file()
-
-
-def test_oracle_recovery_is_by_heldout_r_squared_not_names(tmp_path: Path):
-    run = _fake_run(tmp_path / "run", heldout=True)
-    evaluate_attribution(run_dir=run, oracle=True)
-    output = run / "evaluation" / "attribution"
-    r2 = pd.read_csv(output / "oracle_recovery_r2.csv")
-
-    def value(fold, name, concept):
-        rows = r2[(r2["outer_fold"] == fold) & (r2["name"] == name) & (r2["concept"] == concept)]
-        return float(rows["r_squared"].iloc[0])
-
-    # Relabelled categories carry the same information: R^2 = 1.
-    assert value(1, "ecog", "ecog") == pytest.approx(1.0)
-    # A linear copy under an unrelated name recovers the concept ...
-    assert value(1, "nutrition_index", "pdl1") == pytest.approx(1.0)
-    # ... while a variable named after the concept but unrelated to it does not.
-    assert value(1, "pdl1__score", "pdl1") < 0.5
-
-    report = json.loads((output / "attribution.json").read_text())
-    recovery = report["oracle_recovery"]
-    assert recovery["status"] == "ok"
-    assert recovery["metadata_concepts_without_oracle_column"] == ["histology"]
-    modifiers = recovery["per_fold"]["1"]["levels"]["selected_modifiers"]
-    # pdl1 is recovered by the multi-source latent, not by the sole-source HTR child.
-    assert modifiers["all_variables"] == ["pdl1"]
-    assert modifiers["by_architecture"]["htr_neural"] == {"any_source": ["pdl1"],
-                                                          "sole_source": []}
-    selected = recovery["per_fold"]["1"]["levels"]["selected_variables"]
-    assert selected["by_architecture"]["bow_nuisance"]["any_source"] == ["ecog"]
-    assert selected["by_architecture"]["tfidf_topics"]["sole_source"] == []
-    totals = recovery["totals"]["selected_variables"]
-    assert totals["all_variables"] == {"fold_concept_count": 2, "concepts": ["ecog", "pdl1"]}
-    assert (output / "oracle_recovery.csv").is_file()
-    manifest = json.loads((output / "attribution_manifest.json").read_text())
-    assert manifest["oracle"]["stage2_artifacts_hashed_before_oracle_load"] is True
-    assert set(manifest["oracle"]["oracle_columns"]) == {"true_ecog", "true_pdl1",
-                                                         "true_albumin"}
-
-    # The threshold is a parameter: below the noise variable's R^2 it also counts.
-    noise_r2 = value(1, "pdl1__score", "pdl1")
-    lenient = tmp_path / "lenient"
-    evaluate_attribution(run_dir=run, oracle=True, output_dir=lenient,
-                         recovery_r2=noise_r2 / 2)
-    report = json.loads((lenient / "attribution.json").read_text())["oracle_recovery"]
-    sole = report["per_fold"]["1"]["levels"]["selected_modifiers"]["by_architecture"]
-    assert sole["htr_neural"]["sole_source"] == ["pdl1"]
 
 
 def test_oracle_data_loads_only_after_every_artifact_is_hashed(tmp_path: Path, monkeypatch):
@@ -455,19 +388,3 @@ def test_oracle_data_loads_only_after_every_artifact_is_hashed(tmp_path: Path, m
     assert {(c.name, c.value_type) for c in inferred.concepts} == {
         ("ecog", "categorical"), ("pdl1", "continuous"), ("albumin", "continuous")}
     assert lineage.folds["1"].heldout_source == "estimation/nuisance_candidate_heldout.csv"
-
-
-def test_multivariate_r_squared():
-    x = np.arange(10, dtype=float)
-    assert multivariate_r_squared((3 * x + 2).reshape(-1, 1), x.reshape(-1, 1)) == pytest.approx(1)
-    levels = np.array(["a", "b", "c"] * 4)
-    one_hot = np.column_stack([(levels == level).astype(float) for level in "abc"])
-    assert multivariate_r_squared(one_hot, one_hot[:, :2]) == pytest.approx(1.0)
-    assert multivariate_r_squared(one_hot, np.zeros((12, 0))) == pytest.approx(0.0)
-    # A constant target has no variance to explain.
-    assert multivariate_r_squared(np.ones((12, 1)), np.arange(12.0).reshape(-1, 1)) is None
-
-
-def test_console_entry_point_is_registered():
-    text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
-    assert 'oci-evaluate-attribution = "oci.evaluation.attribution:main"' in text

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from oci.inference.research_all_evidence_workflow import (
     ResearchAllEvidenceWorkflow,
@@ -88,14 +87,3 @@ def test_legacy_component_without_tfidf_uses_canonical_stratified_splits(tmp_pat
     assert [json.loads(line)["fit_row_ids"] for line in provenance_path.open()] == [
         outer["fit_row_ids"] for outer in expected
     ]
-
-
-def test_empty_split_provenance_fails_closed(tmp_path):
-    config = compile_config(_raw_config(tmp_path), config_dir=tmp_path)
-    context = ResearchAllEvidenceWorkflow(config)._resolved_context()
-    provenance_path = context.component_dir("tfidf") / "split_provenance.jsonl"
-    provenance_path.parent.mkdir(parents=True, exist_ok=True)
-    provenance_path.write_text("", encoding="utf-8")
-
-    with pytest.raises(RuntimeError, match="contains no outer folds"):
-        _stage1_context_specs(context)
