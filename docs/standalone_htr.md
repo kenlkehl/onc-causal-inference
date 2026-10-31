@@ -67,6 +67,38 @@ network is a Stage 1 checkpoint unit under
 interrupted fold resumes at its next network. With K inner folds, each outer
 fold trains 2K networks, or 4K with separate nuisance networks.
 
+### Masked-language-model pretraining
+
+By default (`run.mlm_epochs`, 3 for `two_stage`; 0 turns it off) the chunk
+encoder is first pretrained on the masked-language-model task, and
+`run.mlm_scope` sets whose text it reads:
+
+- `outer_fold` (the default): one pretraining on the outer training fold's text
+  (`htr/mlm/outer_fold`), and every nuisance and effect network of the fold
+  starts from that encoder. The encoder has then read the text, though not the
+  treatment or outcome, of the inner validation rows whose out-of-fold
+  predictions the fold uses.
+- `network`: each network's own training rows only, that is, a nuisance
+  network's fold training rows (the three separate nuisance networks of a fold
+  share one pretraining) and an effect network's training rows. A network's
+  validation rows never enter its pretraining. An outer fold runs 2K
+  pretrainings (`htr/mlm/nuisance/fold_NNN`, `htr/mlm/effect/fold_NNN`).
+
+The outer held-out rows never enter a pretraining, and no pretraining reads a
+treatment or outcome. The encoder sees the chunks the HTR builds, tokenized
+the same way; each non-special token is selected with probability
+`mlm_mask_probability` (default 0.15) and becomes the mask token (80%), a
+random token (10%), or stays unchanged (10%). The prediction head starts from
+the checkpoint's pretrained masked-LM head when it has one (bert-tiny does)
+and decodes through the encoder's input embeddings. Optimization uses AdamW at
+`mlm_learning_rate` (default 1e-4), decaying linearly to a tenth of it, with
+`mlm_weight_decay` (default 0.01), batches of `mlm_batch_size` chunks (default
+32), and the training gradient clip. Each pretraining is a checkpoint unit
+keyed by its rows, and runs with the global random streams saved and restored,
+so a network draws the same numbers whether its pretraining was computed or
+reloaded. It needs the transformers backend (the hash and sentence-transformers
+encoders must set `run.mlm_epochs=0`); `joint` does not pretrain.
+
 ## `joint`: one network with three heads
 
 One network per outer fold, on the HTR extractor, with three heads:
@@ -157,7 +189,7 @@ section, and its `training` section. `--htr-model` sets `htr_sentence_model`
 
 | Prefix | Settings |
 |---|---|
-| `run.` | `method` (`--method`), `outer_folds` (`--folds`, default 5), `seed` (`--seed`, default 42), `aipw_clip` (default 0.02), `dina_nuisances` (`--dina-nuisances`: `htr`, the default, or `bow`), `dina_nuisance_clip` (default 0.01), `nuisance_networks` (`shared`, the default, or `separate`; HTR DINA nuisances only) |
+| `run.` | `method` (`--method`), `outer_folds` (`--folds`, default 5), `seed` (`--seed`, default 42), `aipw_clip` (default 0.02), `dina_nuisances` (`--dina-nuisances`: `htr`, the default, or `bow`), `dina_nuisance_clip` (default 0.01), `nuisance_networks` (`shared`, the default, or `separate`; HTR DINA nuisances only), `mlm_epochs` (default 3 for `two_stage`, 0 for `joint`; 0 turns pretraining off), `mlm_scope` (`outer_fold`, the default, or `network`), `mlm_mask_probability`, `mlm_learning_rate`, `mlm_weight_decay`, `mlm_batch_size` ([pretraining](#masked-language-model-pretraining)) |
 | `architecture.` | The `htr_*` fields and `feature_extractor_type` |
 | `training.` | Learning rate, schedule, batch sizes, weight decay, gradient clipping, data-loader workers, `alpha_propensity` |
 | `stage1_htr.` | `two_stage`: the `agentic_attention_variable_forest` fields, including `nuisance_folds` and `effect_folds` (`--inner-folds`, template 5), `nuisance_epochs` and `effect_epochs` (`--epochs`, template 10), `nuisance_calibration`, `nuisance_label_smoothing`, `nuisance_weight_decay`, `e_clip`, `effect_objective`, and `r_stage_*_propensity` |
@@ -183,6 +215,7 @@ section, and its `training` section. `--htr-model` sets `htr_sentence_model`
 | `folds/fold_KK/fold.json` | Fold identity and prediction hash, row counts; `two_stage`: effect objective, DINA nuisance source, inner fold counts, reused checkpoint units; `joint`: selected epoch and calibration |
 | `folds/fold_KK/inner_oof.parquet` | `two_stage`: the outer training rows' inner out-of-fold `e_hat`, `m_hat` (and, with HTR DINA nuisances, `mu0_hat`, `mu1_hat`, and the raw predictions), residuals, and `tau_hat_r_stage` (with `tau_logit_modifier` for DINA) |
 | `folds/fold_KK/stage1_checkpoints/` | `two_stage`: one Stage 1 checkpoint unit per inner network, and `checkpoint_progress.json` |
+| `folds/fold_KK/mlm_pretraining.json` | `two_stage` with pretraining (the default): each pretraining's rows, chunks, head source, and per-epoch masked-token loss and accuracy |
 | `folds/fold_KK/history.json` | `joint`: per-epoch training means and validation metrics |
 | `predictions.parquet` | Every row's held-out `propensity`, `m_hat`, `estimated_cate`, `mu0`, `mu1`, `y_residual`, `t_residual`, and `aipw_score` (`joint` adds `propensity_raw` and `m_hat_raw`) |
 | `predictions_manifest.json` | SHA-256 of `predictions.parquet` |

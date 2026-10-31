@@ -289,16 +289,20 @@ schema, missing values, preflight, and outputs.
 
 ### Estimate effects with HTR models alone
 
-`scripts/run_standalone_htr.py` fits HTR models per outer fold, without an LLM,
-handoff, or Stage 2, and writes cross-fitted held-out `tau`, `e`, and `m`, an
-oracle-free summary, and (with `--evaluate`, on synthetic data) an oracle
-comparison. The default method, `two_stage`, runs Stage 1's `htr_neural`
-training: cross-fitted HTR nuisance networks, then HTR effect networks. For a
-binary outcome the effect networks use DINA against the HTR nuisances
-(propensity and per-arm outcome heads on one network, or a single-head network
-for each with `--set run.nuisance_networks=separate`); `--dina-nuisances bow`
-keeps Stage 1's bag-of-words DINA nuisances. `--method joint` instead trains one network with
-propensity, outcome, and effect heads:
+`scripts/run_standalone_htr.py` fits HTR models per outer fold, without an
+LLM, handoff, or Stage 2, and writes cross-fitted held-out `tau`, `e`, and
+`m`, an oracle-free summary, and (with `--evaluate`, on synthetic data) an
+oracle comparison. The default method, `two_stage`, runs Stage 1's
+`htr_neural` training: cross-fitted HTR nuisance networks, then HTR effect
+networks. For a binary outcome the effect networks use DINA against the HTR
+nuisances (propensity and per-arm outcome heads on one network, or a
+single-head network for each with `--set run.nuisance_networks=separate`);
+`--dina-nuisances bow` keeps Stage 1's bag-of-words DINA nuisances.
+The chunk encoder is first pretrained on the masked-language-model task, once
+per outer fold on its training text (`--set run.mlm_epochs=0` turns this off;
+`--set run.mlm_scope=network` pretrains each network on its own training rows).
+`--method joint` instead trains one network with propensity, outcome, and
+effect heads:
 
 ```bash
 uv run python scripts/run_standalone_htr.py run --dataset DATA.parquet --out OUT \

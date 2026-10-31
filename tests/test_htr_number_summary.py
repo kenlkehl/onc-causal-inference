@@ -248,6 +248,7 @@ def test_standalone_htr_trains_with_number_summaries(tmp_path, tiny_bert):
         "stage1_htr.effect_folds=2",
         "stage1_htr.nuisance_epochs=1",
         "stage1_htr.effect_epochs=1",
+        "run.mlm_epochs=0",
     ]
     config, settings, joint = standalone_htr.build_configs(
         outcome_type="binary", htr_model=str(tiny_bert), overrides=overrides

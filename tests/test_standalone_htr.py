@@ -14,8 +14,10 @@ from oci.inference import stage1_dina, standalone_htr
 from oci.inference.htr_trainer import HTRTrainer
 
 TINY_HTR = [
-    # The hash encoder has no token states for the number summaries.
+    # The hash encoder has no token states for the number summaries and no
+    # masked-LM task to pretrain on.
     "architecture.htr_numeric_summary=false",
+    "run.mlm_epochs=0",
     "architecture.htr_sentence_pooling=auto",
     "architecture.htr_require_live_unfrozen_encoder=false",
     "architecture.htr_num_layers=1",
@@ -167,6 +169,15 @@ def test_stage1_template_settings_are_the_two_stage_defaults():
     assert (stage1_htr.nuisance_weight_decay, config.training.weight_decay) == (0.1, 0.1)
     assert config.architecture.htr_sentence_pooling == "token_attention"
     assert config.architecture.htr_numeric_summary is True
+    assert (settings.nuisance_networks, settings.mlm_epochs, settings.mlm_scope) == (
+        "shared",
+        3,
+        "outer_fold",
+    )
+    _, joint_settings, _ = standalone_htr.build_configs(
+        outcome_type="binary", overrides=["run.method=joint"]
+    )
+    assert joint_settings.mlm_epochs == 0
 
 
 def _checkpoint_units(out, fold=1):
