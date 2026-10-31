@@ -239,7 +239,7 @@ def _all_architecture_raw_rows() -> list[dict]:
             "evidence": {
                 "evidence": [
                     {
-                        "retrieval_policy": query_retrieval_policy(1),
+                        "retrieval_policy": query_retrieval_policy(1, 30),
                         "query_id": "effect_query_1",
                         "bank": "effect",
                         "top_chunks": [

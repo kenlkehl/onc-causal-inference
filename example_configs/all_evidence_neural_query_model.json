@@ -27,6 +27,7 @@
   "evidence_ngram_sublinear_tf": true,
   "evidence_ngram_token_pattern": "(?u)\\b\\w\\w+\\b",
   "evidence_ngram_top_k": 30,
+  "evidence_ngram_top_patients": 30,
   "evidence_ngram_use_idf": true,
   "evidence_ngram_vocabulary_max_features": null,
   "evidence_patient_batch_size": 96,

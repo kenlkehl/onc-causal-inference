@@ -75,6 +75,10 @@ class NeuralQueryAgenticForestConfig:
     retrieval_patient_batch_size: int = 128
     evidence_patient_batch_size: int = 96
     evidence_top_patients: int = 10
+    # Patients whose witness chunks form the phrase contrast's foreground.
+    # Both counts take a prefix of the same ranking, so the handed-off witness
+    # chunks are always among them (or contain them, if this is smaller).
+    evidence_ngram_top_patients: int = 30
     # Scientific retrieval selection, distinct from capacity/length ceilings.
     # Preserve the complete text of each selected chunk, not every chunk of a
     # patient whose best chunk matched. Both contrastive arms use this rule.
@@ -189,6 +193,7 @@ class NeuralQueryAgenticForestConfig:
             "retrieval_patient_batch_size",
             "evidence_patient_batch_size",
             "evidence_retrieval_top_k",
+            "evidence_ngram_top_patients",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -559,9 +564,12 @@ def build_query_evidence(
 ) -> List[Dict[str, Any]]:
     """Build training-only retrieved evidence for every final query.
 
-    Witnesses and background chunks are chosen among informative chunks only,
-    the same chunks the queries were fitted on; a patient without one is
-    neither a witness nor background.
+    The ``evidence_top_patients`` highest-ranked patients hand off their
+    witness chunks; the phrases contrast the same chunks of the
+    ``evidence_ngram_top_patients`` highest-ranked patients with the
+    background, which excludes them. Witnesses and background chunks are
+    chosen among informative chunks only, the same chunks the queries were
+    fitted on; a patient without one is neither a witness nor background.
     """
 
     config.validate()
@@ -614,10 +622,11 @@ def build_query_evidence(
             dtype=int,
         )
         selected_positions = order[: int(config.evidence_top_patients)]
-        remaining = order[int(config.evidence_top_patients) :]
+        term_positions = order[: int(config.evidence_ngram_top_patients)]
+        remaining = order[int(config.evidence_ngram_top_patients) :]
         if config.evidence_background_patients is None:
             # Complete-background mode preserves all fit patients that are
-            # not in the configured foreground.
+            # not in the phrase foreground.
             background_positions = remaining
         else:
             background_count = min(
@@ -663,13 +672,18 @@ def build_query_evidence(
             for position in selected_positions
             for item in patient_items(int(position))
         ]
+        term_items = [
+            item
+            for position in term_positions
+            for item in patient_items(int(position))
+        ]
         background_items = [
             item
             for position in background_positions
             for item in patient_items(int(position))
         ]
         terms, positive_terms = _contrastive_ngrams(
-            [item["text"] for item in foreground_items],
+            [item["text"] for item in term_items],
             [item["text"] for item in background_items],
             limit=config.evidence_top_ngrams,
             config=config,
@@ -679,7 +693,8 @@ def build_query_evidence(
                 "query_id": str(record["query_id"]),
                 "bank": str(bank),
                 "retrieval_policy": query_retrieval_policy(
-                    int(config.evidence_retrieval_top_k)
+                    int(config.evidence_retrieval_top_k),
+                    int(config.evidence_ngram_top_patients),
                 ),
                 "mechanical_role": mechanical_role_for_bank(bank),
                 "statistical_gate_applied": False,
@@ -693,7 +708,7 @@ def build_query_evidence(
                 "top_chunks": foreground_items,
                 "term_normalization": query_term_normalization(config),
                 "term_selection": query_term_selection(
-                    config.evidence_ngram_top_k, positive_terms
+                    config.evidence_ngram_top_k, positive_terms, len(term_positions)
                 ),
                 "top_contrastive_ngrams": terms,
             }

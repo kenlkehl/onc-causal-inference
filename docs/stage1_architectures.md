@@ -335,13 +335,18 @@ only a few chunks activates a long record less than a short one, although a
 long record also has more chances to contain a closely matching chunk. The
 objectives and held-out statistics use this activation.
 
-Witnesses are chosen by the single best chunk instead: the patients whose
-best-matching chunk has the highest cosine (ten by default) contribute that
-chunk (one per patient per query by default). The query's phrases are the 30
-terms (`evidence_ngram_top_k`) with the largest positive TF-IDF contrast
-between those chunks and the other training patients' best-matching chunks;
-`term_selection` in each query's evidence records how many terms had a
-positive contrast. Queries can learn several distinct detectors for the same
+Witnesses are chosen by the single best chunk instead. Patients are ranked by
+the cosine of their best-matching chunk, which is their witness chunk (one per
+patient per query by default). The ten highest-ranked patients
+(`evidence_top_patients`) hand off their witness chunks. The query's phrases
+are the 30 terms (`evidence_ngram_top_k`) with the largest positive TF-IDF
+contrast between the witness chunks of the 30 highest-ranked patients
+(`evidence_ngram_top_patients`) and the other training patients'
+best-matching chunks. Drawing phrases from more patients than chunks makes
+them less dependent on which few records rank highest; the handed-off chunks
+are the strongest of the phrase witnesses. `term_selection` in each query's
+evidence records how many patients formed the contrast and how many terms had
+a positive contrast. Queries can learn several distinct detectors for the same
 objective, which a single mean-difference direction cannot.
 
 Each bank is fitted in two steps within a training context:

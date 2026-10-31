@@ -15,7 +15,7 @@ def _query_row(outer, *, inner=1):
     return {
         "source": "neural_queries", "outer_fold": outer, "inner_fold": inner,
         "scope": "inner_train", "evidence": {"evidence": [{
-            "query_id": "q0", "bank": "outcome", "retrieval_policy": query_retrieval_policy(1),
+            "query_id": "q0", "bank": "outcome", "retrieval_policy": query_retrieval_policy(1, 30),
             "fit_standardized_score": 123456.0,
             "top_chunks": [{
                 "_oci_row_id": outer, "chunk_index": 0, "similarity": 0.8,

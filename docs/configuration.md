@@ -743,9 +743,10 @@ overridden through `science.neural_queries`, for example
 | `treatment_query_count`, `outcome_query_count`, `effect_query_count` | 5, 5, 5 | Queries per bank |
 | `query_inner_folds` | `science.inner_folds` | Inner folds that produce candidate queries |
 | `temperature` | 0.05 | Temperature of the log-mean-exp patient activation |
-| `evidence_top_patients` | 10 | Witness patients per query, chosen by their best-matching chunk |
+| `evidence_top_patients` | 10 | Witness patients per query, chosen by their best-matching chunk; their witness chunks are handed off |
 | `evidence_retrieval_top_k` | 1 | Witness chunks per witness patient |
-| `evidence_ngram_top_k` | 30 | Phrases kept per query: the positive-contrast terms with the largest contrast between the witness chunks and the other training patients' best-matching chunks; `null` keeps every positive-contrast term |
+| `evidence_ngram_top_patients` | 30 | Patients whose witness chunks form the phrase contrast, taken from the same ranking as `evidence_top_patients` |
+| `evidence_ngram_top_k` | 30 | Phrases kept per query: the positive-contrast terms with the largest contrast between the `evidence_ngram_top_patients` patients' witness chunks and the other training patients' best-matching chunks; `null` keeps every positive-contrast term |
 | `evidence_top_ngrams` | `null` | Ceiling on the phrases kept per query; a query that would keep more stops the run with a capacity error rather than dropping terms |
 
 Queries are fitted, scored, and retrieved on chunks with at least 12 letters
