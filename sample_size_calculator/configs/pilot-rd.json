@@ -1,0 +1,50 @@
+{
+  "variables": {
+    "confounder": {
+      "continuous": 1,
+      "binary": 0,
+      "categorical": 0
+    },
+    "modifier": {
+      "continuous": 1,
+      "binary": 0,
+      "categorical": 0
+    },
+    "both": {
+      "continuous": 0,
+      "binary": 0,
+      "categorical": 0
+    },
+    "noise": {
+      "continuous": 10,
+      "binary": 0,
+      "categorical": 0
+    }
+  },
+  "scale": "RD",
+  "modifier_strength": 0.05,
+  "treatment_coefficient": 0.2,
+  "outcome_coefficient": 0.2,
+  "baseline_risk": 0.4,
+  "treated_fraction": 0.5,
+  "constant_effect": 0.02,
+  "binary_prevalence": 0.5,
+  "category_probs": [
+    0.5,
+    0.3,
+    0.2
+  ],
+  "correlation": 0.0,
+  "goal": "all",
+  "recovery_fraction": 0.8,
+  "false_allowance": 1,
+  "target_probability": 0.8,
+  "nuisance": "oracle",
+  "sample_sizes": [
+    400
+  ],
+  "replications": 4,
+  "seed": 910100,
+  "calibration_seed": 910000,
+  "mode": "pilot"
+}

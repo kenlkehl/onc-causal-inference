@@ -20,7 +20,8 @@ with a two-stage, science-first workflow:
 User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 `how_it_works.md`, `stage1_architectures.md`, `stage2_selection.md`,
 `configuration.md`, `serving.md`, `optional_extensions.md`,
-`synthetic_data.md`, `benchmarks.md`, and `design_notes/`.
+`synthetic_data.md`, `benchmarks.md`, `standalone_htr.md`,
+`sample_size_calculator.md`, and `design_notes/`.
 
 ## Entry points
 
@@ -38,6 +39,7 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 | `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
 | `python -m synthetic_data.cli` | `synthetic_data/` (`generator.py`, `generation_factors.py`, `dgp_terms.py`) | Synthetic cohort generator: confounder, effect-modifier, instrument, and prognostic roles; generation-time factors (covariate correlation, MCAR/MNAR documentation, post-treatment dated notes, proxies) |
 | `python -m synthetic_data.cli reequation` | `synthetic_data/reequation.py` (`reequation_cohort`) | Recompute treatment and outcome over an existing synthetic cohort's true characteristics for a scenario (no LLM; text copied unchanged; refuses cohorts with post-treatment notes) |
+| `./run_sample_size_calculator.sh` | `sample_size_calculator/` (`app.py`, `population.py`, `orthogonal_tests.py`, `engine.R`, `run.R`, `binary_selection_methods.R`, `index.html`, `app.js`) | Modifier-selection sample-size calculator: a loopback web dashboard (`--port`, `--runs-dir`; runs in `artifacts/sample_size_calculator/`) or one run with `--config CONFIG.json --output NEW_DIR`; simulates binary-outcome studies from a tabular DGP and reports how often a selector meets sensitivity and false-positive-rate targets per sample size: `selector: "lasso"` (Gao DINA lasso for log OR, Zhao residual lasso for RD) or `"orthogonal_tests"` (Stage 2's `candidate_tests` and `combine_and_select` with Stage 2's defaults, BH at `modifier_q`); standard-library Python plus R (`glmnet`, `jsonlite`); the orthogonal tests need the OCI environment (`PYTHON=.venv/bin/python`) |
 
 Helper scripts: `scripts/detect_all_evidence_hardware.py` (GPU and worker
 sizing for `run_synthetic.sh`) and `scripts/configure_local_cuda.py` (exposes
@@ -121,6 +123,23 @@ oci/
     └── applied.py, applied_explicit_feature_forest.py, agentic_explicit_feature_forest.py,
         agentic_attention_variable_forest.py, multi_model_agentic_forest.py
 ```
+
+`sample_size_calculator/` sits beside `oci/` and `synthetic_data/` but is not
+in the wheel (`[tool.setuptools.packages.find]`). `app.py` and `population.py`
+are standard-library only (3.9+) and never import `oci`; only
+`orthogonal_tests.py` does, in a worker that `app.py` starts once per run with
+its own interpreter when `selector` is `orthogonal_tests` (R sends it each
+study over a loopback socket; `OCI_CALCULATOR_TESTS_PORT`). The lasso
+selectors are R. `./run_sample_size_calculator.sh` runs `python3 -m
+sample_size_calculator` with the repository root on `PYTHONPATH`. Each run
+copies its sources into `RUN/sources/`, and R and the worker execute those
+copies. Study seeds come from `engine.R`'s `study_seed` (1000 apart, 2500 per
+size); `app.py` keeps `calibration_seed` outside them. The worker reads
+`max_modifiers` and `categorical_min_count` from OCI's config classes but
+copies `propensity_clip`, and `app.py` copies the default `q`;
+`tests/test_sample_size_calculator.py` checks both copies against Stage 2, and
+signature changes in `stage2_modifier_tests.py` must be reflected in
+`orthogonal_tests.py`.
 
 Stage 1 uses `htr_trainer.py` and `sparse_text_modeling.py` and never imports
 the `oci run` agentic runners (`tests/test_import_boundaries.py` enforces
@@ -358,6 +377,10 @@ python scripts/run_standalone_htr.py run --dataset DATA.parquet --out OUT --seed
 
 # Standalone explicit-feature workflow
 oci run --config example_configs/agentic_explicit_feature_forest_config.json
+
+# Modifier-selection sample-size calculator (needs R with glmnet and jsonlite)
+./run_sample_size_calculator.sh                       # dashboard at http://127.0.0.1:8765
+./run_sample_size_calculator.sh --config sample_size_calculator/configs/pilot-v2.json --output /tmp/pilot
 
 # Tests
 pytest -q

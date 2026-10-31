@@ -563,6 +563,35 @@ turn, and aggregates. Rerun the same command to resume:
 
 See [Benchmarks](docs/benchmarks.md).
 
+## Plan a sample size for modifier discovery
+
+Before collecting a cohort, the sample-size calculator in
+`sample_size_calculator/` estimates how many patients a binary-outcome study
+needs to discover its effect modifiers. Describe the variables (counts of
+confounders, modifiers, dual-role, and noise variables, and their strengths),
+the untreated outcome risk, and the success criterion (the sensitivity and the
+false positive rate a study must achieve). The calculator then simulates
+repeated studies at each sample size and reports how often a modifier
+selector succeeds: Stage 2's own orthogonal modifier tests, or a lasso for the
+effect scale (a penalized DINA fit on the log odds ratio scale, Zhao's
+residual lasso on the risk-difference scale). It is a local web dashboard with
+an R simulation engine. It needs Python 3.9+, R, and the R packages `glmnet`
+and `jsonlite`; the orthogonal-tests selector also needs the OCI environment:
+
+```bash
+Rscript -e 'install.packages(c("glmnet", "jsonlite"), repos="https://cloud.r-project.org")'
+./run_sample_size_calculator.sh            # dashboard at http://127.0.0.1:8765
+PYTHON=.venv/bin/python ./run_sample_size_calculator.sh   # with the orthogonal-tests selector
+./run_sample_size_calculator.sh --config sample_size_calculator/configs/pilot-v2.json --output /tmp/pilot
+```
+
+Its covariates are measured exactly and its nuisances are simpler than Stage
+2's, so its answer is a planning guide, not a prediction of OCI's results;
+text discovery and extraction error raise the sample size needed.
+Run pilots first; a planning grid gives a provisional size that still needs
+an independent confirmation. See
+[Sample-size calculator](docs/sample_size_calculator.md).
+
 ## Documentation
 
 | Guide | Scope |
@@ -579,6 +608,7 @@ See [Benchmarks](docs/benchmarks.md).
 | [Optional extensions](docs/optional_extensions.md) | Optional Stage 2 steps and the standalone `oci run` workflows |
 | [Synthetic data](docs/synthetic_data.md) | The synthetic cohort generator, causal roles, generation-time factors, re-equation, bundled cohorts, and oracle columns |
 | [Benchmarks](docs/benchmarks.md) | The scenario registry, seeds and the confirmatory rule, the benchmark commands, metrics, and caveats |
+| [Sample-size calculator](docs/sample_size_calculator.md) | Simulation-based sample sizes for discovering effect modifiers with a binary outcome, with Stage 2's orthogonal tests or a lasso: the dashboard, inputs, mechanism, selectors, and outputs |
 | [R-learner weighting](docs/design_notes/r_learner_weighting.md) | Design note on weighted and unweighted effect objectives |
 
 ## Citation

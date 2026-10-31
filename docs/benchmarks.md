@@ -19,6 +19,11 @@ metrics) and `oci/evaluation/benchmark_ceiling.py` (the oracle-covariate
 ceiling). `run_benchmark.sh` runs every step on one machine, including the LLM
 text and the runs ([End-to-end driver](#end-to-end-driver)).
 
+The benchmark measures OCI at a few fixed sample sizes. To plan a sample size
+for discovering effect modifiers before running OCI, use the
+[sample-size calculator](sample_size_calculator.md), which simulates tabular
+studies with exactly measured covariates.
+
 ## Contents
 
 - [Design](#design)

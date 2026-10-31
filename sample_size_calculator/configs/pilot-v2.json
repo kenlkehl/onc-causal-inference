@@ -1,0 +1,208 @@
+{
+  "variables": {
+    "confounder": {
+      "continuous": 0,
+      "binary": 1,
+      "categorical": 0
+    },
+    "modifier": {
+      "continuous": 1,
+      "binary": 0,
+      "categorical": 1
+    },
+    "both": {
+      "continuous": 0,
+      "binary": 0,
+      "categorical": 0
+    },
+    "noise": {
+      "continuous": 10,
+      "binary": 1,
+      "categorical": 0
+    }
+  },
+  "scale": "logOR",
+  "modifier_strength": 0.4,
+  "treatment_coefficient": 0.3,
+  "outcome_coefficient": 0.3,
+  "baseline_risk": 0.3,
+  "treated_fraction": 0.5,
+  "constant_effect": 0.2,
+  "binary_prevalence": 0.5,
+  "category_probs": [
+    0.5,
+    0.3,
+    0.2
+  ],
+  "correlation": 0.0,
+  "goal": "all",
+  "recovery_fraction": 0.8,
+  "false_allowance": 1,
+  "target_probability": 0.8,
+  "nuisance": "oracle",
+  "sample_sizes": [
+    400
+  ],
+  "replications": 2,
+  "seed": 920100,
+  "calibration_seed": 910000,
+  "mode": "pilot",
+  "schema_version": 2,
+  "sensitivity": 0.8,
+  "false_positive_rate": 0.1,
+  "modifier_sd": 0.1,
+  "treatment_sd": 0.05,
+  "outcome_sd": 0.05,
+  "population_seed": 920000,
+  "binary_mode": "beta",
+  "binary_alpha": 5.0,
+  "binary_beta": 5.0,
+  "category_mode": "dirichlet",
+  "category_concentration": 20.0,
+  "population": [
+    {
+      "group": "C1",
+      "role": "confounder",
+      "kind": "binary",
+      "alpha": 0.29149508379287725,
+      "gamma": 0.29341717100711173,
+      "beta": 0.0,
+      "prevalence": 0.5457327759233144,
+      "probabilities": null
+    },
+    {
+      "group": "M1",
+      "role": "modifier",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.379825783220383,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "M2",
+      "role": "modifier",
+      "kind": "categorical",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.44623070140918847,
+      "prevalence": null,
+      "probabilities": [
+        0.4825416898707227,
+        0.2961906874251134,
+        0.2212676227041639
+      ]
+    },
+    {
+      "group": "N1",
+      "role": "noise",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "N2",
+      "role": "noise",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "N3",
+      "role": "noise",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "N4",
+      "role": "noise",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "N5",
+      "role": "noise",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "N6",
+      "role": "noise",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "N7",
+      "role": "noise",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "N8",
+      "role": "noise",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "N9",
+      "role": "noise",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "N10",
+      "role": "noise",
+      "kind": "continuous",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": null,
+      "probabilities": null
+    },
+    {
+      "group": "N11",
+      "role": "noise",
+      "kind": "binary",
+      "alpha": 0.0,
+      "gamma": 0.0,
+      "beta": 0.0,
+      "prevalence": 0.29369498325209514,
+      "probabilities": null
+    }
+  ]
+}
