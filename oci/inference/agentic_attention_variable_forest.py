@@ -146,6 +146,11 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
         self._thread_state = threading.local()
         # Sets ``config``, ``device`` (via the property setter) and ``avf_config``.
         super().__init__(config=config, device=device, num_workers=num_workers)
+        if int(self.avf_config.mlm_epochs) > 0:
+            raise ValueError(
+                "agentic_attention_variable_forest.mlm_epochs (chunk-encoder pretraining) "
+                "applies to Stage 1 and scripts/run_standalone_htr.py; `oci run` does not pretrain"
+            )
         self.dataset = drop_oracle_columns(dataset).reset_index(drop=True).copy()
         self.dataset["_oci_row_id"] = np.arange(len(self.dataset), dtype=int)
         self.output_path = Path(output_path)

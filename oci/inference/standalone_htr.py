@@ -29,14 +29,12 @@ verifies the SHA-256 of the frozen predictions.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import dataclasses
 import hashlib
 import json
 import logging
 import math
 import multiprocessing
-import random
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -50,6 +48,7 @@ from ..config import (
     AppliedInferenceConfig,
     ModelArchitectureConfig,
     TrainingConfig,
+    omit_inactive_htr_mlm_settings,
     omit_inactive_htr_numeric_settings,
     resolve_effect_objective,
 )
@@ -66,15 +65,6 @@ DEFAULT_HTR_MODEL = "prajjwal1/bert-tiny"
 METHODS = ("two_stage", "joint")
 DINA_NUISANCE_SOURCES = ("htr", "bow")
 NUISANCE_NETWORKS = ("shared", "separate")
-MLM_SETTINGS = (
-    "mlm_epochs",
-    "mlm_mask_probability",
-    "mlm_learning_rate",
-    "mlm_weight_decay",
-    "mlm_batch_size",
-)
-MLM_SCOPES = ("network", "outer_fold")
-DEFAULT_MLM_EPOCHS = 3
 SELECTION_RULES = ("validation_loss", "last_epoch")
 CALIBRATION_METHODS = ("none", "temperature", "isotonic", "temperature_isotonic")
 
@@ -101,19 +91,6 @@ class StandaloneHTRConfig:
     # single-head networks, the propensity on every row and each arm's outcome
     # on that arm's rows only.
     nuisance_networks: str = "shared"
-    # two_stage: masked-language-model pretraining of the chunk encoder before
-    # each HTR network trains (htr_mlm_pretraining.py); 0 epochs turns it off.
-    # Unset, it is 3 epochs for two_stage and 0 for joint, which does not
-    # pretrain. mlm_scope "outer_fold" pretrains once on the outer training
-    # fold's text, and every nuisance and effect network of the fold starts from
-    # that encoder; "network" pretrains each network's encoder on the text of
-    # that network's training rows only. Neither reads outer held-out text.
-    mlm_epochs: Optional[int] = None
-    mlm_scope: str = "outer_fold"
-    mlm_mask_probability: float = 0.15
-    mlm_learning_rate: float = 1e-4
-    mlm_weight_decay: float = 0.01
-    mlm_batch_size: int = 32
 
     def __post_init__(self) -> None:
         self.method = str(self.method).strip().lower()
@@ -133,19 +110,6 @@ class StandaloneHTRConfig:
             raise ValueError("run.aipw_clip must be in (0, 0.5)")
         if not 0.0 < float(self.dina_nuisance_clip) < 0.5:
             raise ValueError("run.dina_nuisance_clip must be in (0, 0.5)")
-        if self.mlm_epochs is None:
-            self.mlm_epochs = DEFAULT_MLM_EPOCHS if self.method == "two_stage" else 0
-        if isinstance(self.mlm_epochs, bool) or int(self.mlm_epochs) < 0:
-            raise ValueError("run.mlm_epochs must be a nonnegative integer")
-        self.mlm_scope = str(self.mlm_scope).strip().lower()
-        if self.mlm_scope not in MLM_SCOPES:
-            raise ValueError(f"run.mlm_scope must be one of {list(MLM_SCOPES)}")
-        if not 0.0 < float(self.mlm_mask_probability) < 1.0:
-            raise ValueError("run.mlm_mask_probability must be in (0, 1)")
-        if float(self.mlm_learning_rate) <= 0 or float(self.mlm_weight_decay) < 0:
-            raise ValueError("run.mlm_learning_rate must be positive and mlm_weight_decay >= 0")
-        if int(self.mlm_batch_size) < 1:
-            raise ValueError("run.mlm_batch_size must be >= 1")
 
 
 @dataclass
@@ -218,24 +182,6 @@ def _torch():
     import torch
 
     return torch
-
-
-@contextlib.contextmanager
-def _preserved_random_state(device: Any):
-    """Leave Python's, NumPy's, and Torch's global random streams as they were."""
-
-    torch = _torch()
-    states = (random.getstate(), np.random.get_state(), torch.get_rng_state())
-    cuda = torch.device(device).type == "cuda" and torch.cuda.is_available()
-    cuda_state = torch.cuda.get_rng_state(device) if cuda else None
-    try:
-        yield
-    finally:
-        random.setstate(states[0])
-        np.random.set_state(states[1])
-        torch.set_rng_state(states[2])
-        if cuda_state is not None:
-            torch.cuda.set_rng_state(cuda_state, device)
 
 
 def build_joint_net(extractor: Any, hidden_dim: int, outcome_type: str):
@@ -811,15 +757,9 @@ def _config_record(
     # setting existed.
     if settings.nuisance_networks == "shared":
         record["run"].pop("nuisance_networks")
-    if int(settings.mlm_epochs) == 0:
-        for key in MLM_SETTINGS:
-            record["run"].pop(key)
-    # Per-network pretraining was the only scope before the setting existed.
-    if int(settings.mlm_epochs) == 0 or settings.mlm_scope == "network":
-        record["run"].pop("mlm_scope")
     if settings.method == "two_stage":
         stage1_htr = config.architecture.agentic_attention_variable_forest
-        record["stage1_htr"] = asdict(stage1_htr)
+        record["stage1_htr"] = omit_inactive_htr_mlm_settings(asdict(stage1_htr))
         record["effect_objective"] = resolve_effect_objective(
             stage1_htr.effect_objective, outcome_type=config.outcome_type
         )
@@ -972,127 +912,14 @@ def _two_stage_trainer_class():
 
         When ``dina_nuisance_table`` (``e``, ``mu0``, ``mu1`` indexed by row ID) is
         set, DINA effect networks train and predict against it in place of Stage
-        1's per-effect-fold bag-of-words nuisances. When ``mlm`` (the checkpoint
-        store and run settings) is set, every network's chunk encoder starts
-        from masked-LM pretraining, on its own training rows' text or, with
-        ``run.mlm_scope=outer_fold``, on ``mlm_corpus`` (the outer training fold).
+        1's per-effect-fold bag-of-words nuisances.
         """
 
         dina_nuisance_table: Optional[pd.DataFrame] = None
-        mlm: Optional[Tuple[Any, StandaloneHTRConfig]] = None
-        mlm_corpus: Optional[pd.DataFrame] = None
-
-        def __init__(self, *args, **kwargs) -> None:
-            super().__init__(*args, **kwargs)
-            self.mlm_records: Dict[str, Dict[str, Any]] = {}
 
         def _attention_evidence(self, *args, **kwargs):
             # Attention records feed Stage 2 interpretation; they never change a fit.
             return []
-
-        def apply_mlm_encoder(self, model, df: pd.DataFrame, positions, *, unit: str) -> None:
-            """Load masked-LM pretrained encoder weights for the rows at ``positions``.
-
-            The pretraining is its own checkpoint unit, keyed by those rows, and
-            runs with every global random stream saved and restored, so the
-            network draws the same numbers whether it was computed or reloaded.
-            """
-
-            if self.mlm is None:
-                return
-            from .htr_mlm_pretraining import load_encoder_weights, pretrain_chunk_encoder
-            from .stage1_checkpointing import row_id_identity
-
-            store, settings = self.mlm
-            corpus = df.iloc[np.asarray(positions, dtype=int)]
-
-            def compute() -> Dict[str, Any]:
-                extractor = self._create_extractor()
-                try:
-                    return pretrain_chunk_encoder(
-                        extractor,
-                        corpus[self.config.text_column].astype(str).tolist(),
-                        epochs=int(settings.mlm_epochs),
-                        mask_probability=float(settings.mlm_mask_probability),
-                        learning_rate=float(settings.mlm_learning_rate),
-                        weight_decay=float(settings.mlm_weight_decay),
-                        batch_size=int(settings.mlm_batch_size),
-                        gradient_clip_norm=float(self.config.training.gradient_clip_norm),
-                        label=unit,
-                    )
-                finally:
-                    self._cleanup_model(extractor)
-
-            with _preserved_random_state(self.device):
-                value = store.run(
-                    unit,
-                    compute,
-                    parameters={
-                        "objective": "masked_language_model",
-                        **{key: getattr(settings, key) for key in MLM_SETTINGS},
-                    },
-                    rows={"corpus": row_id_identity(corpus[ROW_ID].to_numpy())},
-                    deterministic_seed=True,
-                ).value
-            load_encoder_weights(model.extractor, value["encoder"])
-            self.mlm_records[unit] = {
-                "rows": int(len(corpus)),
-                "chunks": int(value["chunks"]),
-                "head": value["head"],
-                "history": value["history"],
-            }
-
-        def apply_network_mlm_encoder(
-            self, model, df: pd.DataFrame, positions, *, kind: str, fold: int
-        ) -> None:
-            """Pretrained encoder weights for one nuisance or effect network of inner ``fold``."""
-
-            if self.mlm is None:
-                return
-            if self.mlm[1].mlm_scope == "outer_fold":
-                corpus = self.mlm_corpus
-                unit = "htr/mlm/outer_fold"
-                self.apply_mlm_encoder(model, corpus, np.arange(len(corpus)), unit=unit)
-            else:
-                unit = f"htr/mlm/{kind}/fold_{int(fold):03d}"
-                self.apply_mlm_encoder(model, df, positions, unit=unit)
-
-        def _train_nuisance_model(self, model, df, positions, outer_fold, fold, total_folds):
-            self.apply_network_mlm_encoder(model, df, positions, kind="nuisance", fold=fold)
-            return super()._train_nuisance_model(
-                model, df, positions, outer_fold=outer_fold, fold=fold, total_folds=total_folds
-            )
-
-        def _train_effect_model(
-            self,
-            model,
-            df,
-            positions,
-            outcomes,
-            treatments,
-            e_hat,
-            m_hat,
-            y_residuals,
-            t_residuals,
-            outer_fold,
-            fold,
-            total_folds,
-        ):
-            self.apply_network_mlm_encoder(model, df, positions, kind="effect", fold=fold)
-            return super()._train_effect_model(
-                model,
-                df,
-                positions,
-                outcomes,
-                treatments,
-                e_hat,
-                m_hat,
-                y_residuals,
-                t_residuals,
-                outer_fold=outer_fold,
-                fold=fold,
-                total_folds=total_folds,
-            )
 
         def _dina_rows(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
             from ..models import dina
@@ -1399,7 +1226,7 @@ def _stage1_htr_provider(config: AppliedInferenceConfig, device: str, store: Any
 
 
 def _fit_arm_nuisance_ensemble(
-    trainer: Any,
+    provider: Any,
     store: Any,
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
@@ -1411,7 +1238,8 @@ def _fit_arm_nuisance_ensemble(
 
     ``networks`` is ``run.nuisance_networks``: one three-head network per fold
     (``shared``), or one single-head network per nuisance and fold
-    (``separate``).
+    (``separate``). Every network starts from the provider's pretrained chunk
+    encoder when pretraining is on.
     """
 
     from sklearn.model_selection import KFold
@@ -1420,6 +1248,7 @@ def _fit_arm_nuisance_ensemble(
     from .multi_model_forest_stage1 import _bounded_fold_count
     from .stage1_checkpointing import row_id_identity
 
+    trainer = provider._ensure_runner(train_df)
     config = trainer.config
     stage1_htr = trainer.avf_config
     folds = _bounded_fold_count(stage1_htr.nuisance_folds, len(train_df))
@@ -1437,7 +1266,7 @@ def _fit_arm_nuisance_ensemble(
     def compute(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray) -> Dict[str, Any]:
         model = build_arm_nuisance_net(trainer._create_extractor(), hidden_dim).to(trainer.device)
         try:
-            trainer.apply_network_mlm_encoder(model, train_df, fit_pos, kind="nuisance", fold=fold)
+            provider.apply_pretrained_encoder(model, train_df)
             trainer.train_arm_nuisance(
                 model, train_df, fit_pos, outer_fold=outer_fold, fold=fold, total_folds=folds
             )
@@ -1484,9 +1313,7 @@ def _fit_arm_nuisance_ensemble(
     ) -> Dict[str, np.ndarray]:
         model = build_single_head_net(trainer._create_extractor(), hidden_dim).to(trainer.device)
         try:
-            # The fold's three networks share one pretraining (of all its fit rows
-            # under the network scope).
-            trainer.apply_network_mlm_encoder(model, train_df, fit_pos, kind="nuisance", fold=fold)
+            provider.apply_pretrained_encoder(model, train_df)
             trainer.train_single_head(
                 model,
                 train_df,
@@ -1645,13 +1472,10 @@ def _fit_two_stage_fold(
     provider = _stage1_htr_provider(config, device, store)
     nuisance_folds = _bounded_fold_count(stage1_htr.nuisance_folds, len(train_df))
     trainer = provider._ensure_runner(train_df)
-    if int(settings.mlm_epochs) > 0:
-        trainer.mlm = (store, settings)
-        trainer.mlm_corpus = train_df
     with store.context_lock():
         if htr_dina_nuisances:
             nuisance = _fit_arm_nuisance_ensemble(
-                trainer,
+                provider,
                 store,
                 train_df,
                 test_df,
@@ -1697,6 +1521,7 @@ def _fit_two_stage_fold(
         effect = provider.fit_effect_variant_inner_ensemble_predict(
             train_df, test_df, nuisance_train, int(fold), effect_objective=effect_objective
         )
+        pretraining = provider.mlm_pretraining_record(train_df)
         store.mark_context_complete()
     test_effect = effect["test_predictions"]
     for name, part in (("nuisance", test_nuisance), ("effect", test_effect)):
@@ -1717,13 +1542,8 @@ def _fit_two_stage_fold(
         record["dina_nuisances"] = "htr" if htr_dina_nuisances else "bow"
     if htr_dina_nuisances:
         record["nuisance_networks"] = settings.nuisance_networks
-    if int(settings.mlm_epochs) > 0:
-        # Pretraining computed or reloaded in this session, added to earlier sessions'.
-        mlm_path = fold_dir / "mlm_pretraining.json"
-        records = json.loads(mlm_path.read_text()) if mlm_path.exists() else {}
-        records.update(trainer.mlm_records)
-        _write_json(mlm_path, dict(sorted(records.items())))
-        record["mlm_units"] = sorted(records)
+    if pretraining is not None:
+        record["mlm_pretraining"] = pretraining
     return (
         test_nuisance["e_hat"].to_numpy(dtype=float),
         test_nuisance["m_hat"].to_numpy(dtype=float),
@@ -2288,8 +2108,6 @@ def build_configs(
         raise ValueError(
             "run.nuisance_networks=separate needs two_stage DINA with run.dina_nuisances=htr"
         )
-    if int(settings.mlm_epochs) > 0 and settings.method != "two_stage":
-        raise ValueError("run.mlm_epochs needs run.method=two_stage")
     return config, settings, JointHTRConfig(**sections["joint"])
 
 

@@ -692,6 +692,8 @@ Commonly changed keys, relative to `science.stage1.architecture`:
 | `htr_max_chunks` | 512 | Maximum HTR chunks per record |
 | `htr_numeric_summary` | `true` | Add a summary of each chunk's numbers to the HTR chunk vector ([details](stage1_architectures.md#4-hierarchical-transformer-htr_neural)); needs the transformers backend and a fast tokenizer, so set it to `false` for a hash or sentence-transformers HTR encoder. Checkpoint identities include it, and `htr_numeric_queries`, only when it is `true`; a configuration that omits it leaves it off |
 | `htr_numeric_queries` | 4 | Learned queries per chunk in the number summary |
+| `agentic_attention_variable_forest.mlm_epochs` | 3 | Masked-language-model pretraining epochs of the HTR chunk encoder, once per context on its training text, before its networks train ([details](stage1_architectures.md#4-hierarchical-transformer-htr_neural)); 0 turns it off and must be set for a hash or sentence-transformers HTR encoder. Checkpoint identities include the `mlm_*` keys only when it is above 0; a configuration that omits it leaves it off, and `oci run` refuses it |
+| `agentic_attention_variable_forest.mlm_mask_probability`, `mlm_learning_rate`, `mlm_weight_decay`, `mlm_batch_size` | 0.15, 1e-4, 0.01, 32 | Pretraining masking rate, AdamW learning rate (decaying linearly to a tenth) and weight decay, and chunks per batch |
 | `multi_model_forest.embedding_contrast.max_chunks` | 512 | Maximum embedding chunks per record |
 | `multi_model_forest.embedding_contrast.retrieval_tfidf_enabled` | `false` | Add `tfidf_semantic_retrieval_contrasts` to the default selection |
 | `multi_model_forest.tfidf_topic.orphan_ngram_enabled` | `false` | Add `tfidf_orphan_ngrams` to the default selection |

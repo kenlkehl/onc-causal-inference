@@ -11,10 +11,12 @@ are read, so the caller decides whose text the encoder sees.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
+import random
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, Iterator, List, Sequence
 
 import numpy as np
 import torch
@@ -197,6 +199,23 @@ def pretrain_chunk_encoder(
         "texts": len(texts),
         "head": "pretrained" if pretrained_head else "random",
     }
+
+
+@contextlib.contextmanager
+def preserved_random_state(device: Any) -> Iterator[None]:
+    """Leave Python's, NumPy's, and Torch's global random streams as they were."""
+
+    states = (random.getstate(), np.random.get_state(), torch.get_rng_state())
+    cuda = torch.device(device).type == "cuda" and torch.cuda.is_available()
+    cuda_state = torch.cuda.get_rng_state(device) if cuda else None
+    try:
+        yield
+    finally:
+        random.setstate(states[0])
+        np.random.set_state(states[1])
+        torch.set_rng_state(states[2])
+        if cuda_state is not None:
+            torch.cuda.set_rng_state(cuda_state, device)
 
 
 def load_encoder_weights(extractor: Any, weights: Dict[str, np.ndarray]) -> None:

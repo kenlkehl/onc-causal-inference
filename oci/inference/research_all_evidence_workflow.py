@@ -45,7 +45,11 @@ from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
 import numpy as np
 import pandas as pd
 
-from ..config import ExperimentConfig, omit_inactive_htr_numeric_settings
+from ..config import (
+    ExperimentConfig,
+    omit_inactive_htr_mlm_settings,
+    omit_inactive_htr_numeric_settings,
+)
 from ..extraction.llm_routing import redact_api_keys
 from .plain_handoff_stage2 import (
     PlainHandoffStage2Config,
@@ -1099,6 +1103,7 @@ def _run_one_text_model_context(
             "agentic_attention_variable_forest"
         )
         if isinstance(attention_identity, MutableMapping):
+            omit_inactive_htr_mlm_settings(attention_identity)
             for runtime_key in (
                 "outer_parallelism",
                 "fold_parallelism",

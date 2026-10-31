@@ -17,7 +17,7 @@ TINY_HTR = [
     # The hash encoder has no token states for the number summaries and no
     # masked-LM task to pretrain on.
     "architecture.htr_numeric_summary=false",
-    "run.mlm_epochs=0",
+    "stage1_htr.mlm_epochs=0",
     "architecture.htr_sentence_pooling=auto",
     "architecture.htr_require_live_unfrozen_encoder=false",
     "architecture.htr_num_layers=1",

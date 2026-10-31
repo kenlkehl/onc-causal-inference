@@ -206,6 +206,19 @@ sequence keeps one element per chunk however many numbers a record has. The
 added term starts at zero, so training begins from the model without it, and
 a chunk without numbers keeps its vector.
 
+Before a context's HTR networks train, the chunk encoder is further pretrained
+on the masked-language-model task for `mlm_epochs` epochs (3 in the template),
+once per context and only on the text of its training rows: never its held-out
+rows, and never a treatment or outcome. Every nuisance and effect network of
+the context starts from that encoder. Each non-special token is selected with
+probability `mlm_mask_probability` (0.15) and becomes the mask token (80%), a
+random token (10%), or stays unchanged (10%), with BERT's own masked-LM head
+as the starting prediction head. The pretraining is one Stage 1 checkpoint
+unit (`htr/mlm_pretraining`); it runs with the global random streams saved and
+restored, so the networks draw the same numbers whether it was computed or
+reloaded. It needs the transformers backend, so a hash or sentence-transformers
+HTR encoder must set `mlm_epochs` to 0.
+
 ### 5. Whole-cohort embedding contrasts (`embedding_whole_cohort`)
 
 Each record is cut into chunks (256 words with a 64-word overlap by default) and

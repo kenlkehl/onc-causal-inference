@@ -18,6 +18,7 @@ from sklearn.metrics import brier_score_loss, log_loss, mean_squared_error
 from sklearn.model_selection import KFold
 
 from ..config import (
+    HTR_MLM_KEYS,
     AppliedInferenceConfig,
     BoWViewConfig,
     MultiModelForestConfig,
@@ -294,6 +295,91 @@ def _serial_torch_worker_environment():
 class MultiModelForestStage1HTRProvider(HTREvidenceProvider):
     """HTR inner-fold ensembles with full outer-train -> outer-test predictions."""
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        # The context's masked-LM pretraining: its corpus rows and the result.
+        self._mlm_pretraining: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+
+    def apply_pretrained_encoder(self, model: Any, train_df: pd.DataFrame) -> None:
+        """Start ``model``'s chunk encoder from the context's masked-LM pretraining.
+
+        With ``agentic_attention_variable_forest.mlm_epochs`` above 0, the context
+        pretrains the chunk encoder once, on the text of its training rows
+        ``train_df`` only, and every HTR nuisance and effect network of the
+        context starts from those weights.
+        """
+
+        pretraining = self._context_pretraining(train_df)
+        if pretraining is not None:
+            from .htr_mlm_pretraining import load_encoder_weights
+
+            load_encoder_weights(model.extractor, pretraining["encoder"])
+
+    def mlm_pretraining_record(self, train_df: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """The context's pretraining corpus size and history; None while it is off."""
+
+        pretraining = self._context_pretraining(train_df)
+        if pretraining is None:
+            return None
+        return {
+            "rows": int(len(train_df)),
+            "chunks": int(pretraining["chunks"]),
+            "head": pretraining["head"],
+            "history": pretraining["history"],
+        }
+
+    def _context_pretraining(self, train_df: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """Compute, reload, or reuse the context's pretraining (checkpoint unit
+        ``htr/mlm_pretraining``, keyed by its rows).
+
+        It runs with the global random streams saved and restored, so a network
+        draws the same numbers whether the pretraining was computed, reloaded,
+        or already held in memory.
+        """
+
+        runner = self._ensure_runner(train_df)
+        settings = runner.avf_config
+        if int(getattr(settings, "mlm_epochs", 0)) == 0:
+            return None
+        rows = row_id_identity(train_df["_oci_row_id"].to_numpy())
+        if self._mlm_pretraining is not None and self._mlm_pretraining[0] == rows:
+            return self._mlm_pretraining[1]
+        from .htr_mlm_pretraining import preserved_random_state, pretrain_chunk_encoder
+
+        def compute() -> Dict[str, Any]:
+            extractor = runner._create_extractor()
+            try:
+                return pretrain_chunk_encoder(
+                    extractor,
+                    train_df[runner.config.text_column].astype(str).tolist(),
+                    epochs=int(settings.mlm_epochs),
+                    mask_probability=float(settings.mlm_mask_probability),
+                    learning_rate=float(settings.mlm_learning_rate),
+                    weight_decay=float(settings.mlm_weight_decay),
+                    batch_size=int(settings.mlm_batch_size),
+                    gradient_clip_norm=float(runner.config.training.gradient_clip_norm),
+                    label="htr/mlm_pretraining",
+                )
+            finally:
+                runner._cleanup_model(extractor)
+
+        with preserved_random_state(runner.device):
+            if self.checkpoint_store is None:
+                value = compute()
+            else:
+                value = self.checkpoint_store.run(
+                    "htr/mlm_pretraining",
+                    compute,
+                    parameters={
+                        "objective": "masked_language_model",
+                        **{key: getattr(settings, key) for key in HTR_MLM_KEYS},
+                    },
+                    rows={"corpus": rows},
+                    deterministic_seed=True,
+                ).value
+        self._mlm_pretraining = (rows, value)
+        return value
+
     @contextmanager
     def _temporary_effect_objective(self, objective: str):
         runner = self._runner
@@ -355,6 +441,7 @@ class MultiModelForestStage1HTRProvider(HTREvidenceProvider):
                     ),
                     outcome_type=runner.config.outcome_type,
                 ).to(runner.device)
+                self.apply_pretrained_encoder(model, train_df)
                 runner._train_nuisance_model(
                     model,
                     train_df,
@@ -606,6 +693,7 @@ class MultiModelForestStage1HTRProvider(HTREvidenceProvider):
                             64,
                         ),
                     ).to(runner.device)
+                    self.apply_pretrained_encoder(model, train_df)
                     runner._train_effect_model(
                         model,
                         train_df,

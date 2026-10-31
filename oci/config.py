@@ -2492,6 +2492,16 @@ class AgenticAttentionVariableForestConfig:
     nuisance_calibration: str = "temperature_isotonic"
     effect_folds: int = 5
     effect_epochs: Optional[int] = 10
+    # Masked-language-model pretraining of the HTR chunk encoder, once per
+    # Stage 1 context on the text of its training rows, before that context's
+    # nuisance and effect networks train from it (htr_mlm_pretraining.py); 0
+    # epochs turns it off. The Stage 1 template turns it on; `oci run` does not
+    # pretrain.
+    mlm_epochs: int = 0
+    mlm_mask_probability: float = 0.15
+    mlm_learning_rate: float = 1e-4
+    mlm_weight_decay: float = 0.01
+    mlm_batch_size: int = 32
     # "auto" parallelizes folds on CPU via num_workers and across configured
     # CUDA devices when more than one device is supplied.
     fold_parallelism: str = "auto"
@@ -2575,6 +2585,19 @@ class AgenticAttentionVariableForestConfig:
                     "agentic_attention_variable_forest.outer_parallelism must be 'auto' "
                     "or a positive integer"
                 ) from exc
+        if isinstance(self.mlm_epochs, bool) or int(self.mlm_epochs) < 0:
+            raise ValueError("agentic_attention_variable_forest.mlm_epochs must be >= 0")
+        if not 0.0 < float(self.mlm_mask_probability) < 1.0:
+            raise ValueError(
+                "agentic_attention_variable_forest.mlm_mask_probability must be in (0, 1)"
+            )
+        if float(self.mlm_learning_rate) <= 0 or float(self.mlm_weight_decay) < 0:
+            raise ValueError(
+                "agentic_attention_variable_forest.mlm_learning_rate must be > 0 and "
+                "mlm_weight_decay >= 0"
+            )
+        if int(self.mlm_batch_size) < 1:
+            raise ValueError("agentic_attention_variable_forest.mlm_batch_size must be >= 1")
         if self.attention_top_k_chunks < 1:
             raise ValueError(
                 "agentic_attention_variable_forest.attention_top_k_chunks must be >= 1"
@@ -2723,6 +2746,28 @@ def omit_inactive_htr_numeric_settings(architecture: Dict[str, Any]) -> Dict[str
         for key in HTR_NUMERIC_SUMMARY_KEYS:
             architecture.pop(key, None)
     return architecture
+
+
+HTR_MLM_KEYS = (
+    "mlm_epochs",
+    "mlm_mask_probability",
+    "mlm_learning_rate",
+    "mlm_weight_decay",
+    "mlm_batch_size",
+)
+
+
+def omit_inactive_htr_mlm_settings(attention: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop the chunk-encoder pretraining settings from an identity while it is off.
+
+    ``attention`` is an ``agentic_attention_variable_forest`` mapping. Runs
+    configured before the settings existed keep their checkpoint identities;
+    turning pretraining on changes the identity.
+    """
+    if not attention.get("mlm_epochs"):
+        for key in HTR_MLM_KEYS:
+            attention.pop(key, None)
+    return attention
 
 
 @dataclass
