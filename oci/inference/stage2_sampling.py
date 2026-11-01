@@ -27,6 +27,12 @@ def is_qwen_flash_next(model: str) -> bool:
     return bool(re.search(r"qwen[-_ ]?3[._]8[-_ ]flash[-_ ]next", str(model), re.I))
 
 
+def is_qwen_3_6_35b_a3b(model: str) -> bool:
+    """Qwen3.6-35B-A3B and its quantizations (for example -FP8)."""
+
+    return bool(re.search(r"qwen[-_ ]?3[._]6[-_ ]35b[-_ ]a3b(?![0-9])", str(model), re.I))
+
+
 def is_nemotron_3_5(model: str) -> bool:
     """Nemotron 3.5 releases; earlier Nemotron models use other reasoning switches."""
 
@@ -49,6 +55,9 @@ def sampling_provenance(model: str, family: str) -> dict[str, Any]:
     if is_qwen_flash_next(model):
         return {"profile": "qwen3.8_flash_next", "verified_on": "2026-09-23",
                 "source": "https://huggingface.co/Qwen/Qwen3.8-Flash-Next#best-practices"}
+    if is_qwen_3_6_35b_a3b(model):
+        return {"profile": "qwen3.6_35b_a3b", "verified_on": "2026-10-31",
+                "source": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B#best-practices"}
     if family == "gemma4":
         return {"profile": "gemma4", "verified_on": "2026-09-23",
                 "source": "https://huggingface.co/google/gemma-4-31B-it#best-practices"}
@@ -80,17 +89,21 @@ def recommended_sampling(model: str, family: str, thinking: bool) -> dict[str, A
         # https://huggingface.co/Qwen/Qwen3-32B#best-practices
         # https://huggingface.co/Qwen/Qwen3.5-27B#best-practices
         # https://huggingface.co/Qwen/Qwen3.6-27B#best-practices
+        # https://huggingface.co/Qwen/Qwen3.6-35B-A3B#best-practices
         # https://huggingface.co/Qwen/Qwen3.8-27B#best-practices
         # Keep the version separator: Qwen3-8B is not Qwen3.8.
         version_match = re.search(r"qwen[-_ ]?3[._]([568])(?:[-_/]|$)", model.lower())
         version = version_match.group(1) if version_match else ""
         modern = bool(version)
+        # Qwen 3.5 and Qwen3.6-35B-A3B also keep presence penalty 1.5 when
+        # thinking; Qwen3.6-27B and Qwen 3.8 use 0 there.
+        thinking_presence_penalty = version == "5" or is_qwen_3_6_35b_a3b(model)
         defaults.update(
             temperature=(1.0 if modern else 0.6) if thinking else 0.7,
             top_p=0.95 if thinking else 0.8,
             top_k=20,
             presence_penalty=1.5
-            if (version == "5" or (modern and not thinking))
+            if (thinking_presence_penalty or (modern and not thinking))
             else 0.0,
         )
     elif family == "nemotron3.5":

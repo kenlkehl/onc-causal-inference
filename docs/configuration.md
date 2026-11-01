@@ -967,16 +967,17 @@ Stage 2 looks up a checked-in sampling profile for the model family (using the
 backing model ID when the server advertises one, so an alias still resolves).
 The interpretation and extraction LLMs resolve separately. The Gemma 4 and
 Qwen 3.8 Flash Next profiles follow the publishers' recommendations as
-verified on 2026-09-23, the Qwen 3 and LFM 2.5 profiles on 2026-09-12, and the
-Nemotron 3.5 and Beam 1 profiles on 2026-10-16.
+verified on 2026-09-23, the Qwen 3 and LFM 2.5 profiles on 2026-09-12, the
+Nemotron 3.5 and Beam 1 profiles on 2026-10-16, and the Qwen3.6-35B-A3B profile
+(which also covers its quantizations, such as `-FP8`) on 2026-10-31.
 
 | Model family | Mode | Temperature | Top-p | Top-k | Presence penalty | Repetition penalty |
 |---|---|---|---|---|---|---|
 | Gemma 4 | either | 1.0 | 0.95 | 64 | 0 | 1.0 |
 | Qwen 3 | thinking | 0.6 | 0.95 | 20 | 0 | 1.0 |
 | Qwen 3 | non-thinking | 0.7 | 0.8 | 20 | 0 | 1.0 |
-| Qwen 3.5 | thinking | 1.0 | 0.95 | 20 | 1.5 | 1.0 |
-| Qwen 3.6 and 3.8 (including Flash Next) | thinking | 1.0 | 0.95 | 20 | 0 | 1.0 |
+| Qwen 3.5 and Qwen3.6-35B-A3B | thinking | 1.0 | 0.95 | 20 | 1.5 | 1.0 |
+| Other Qwen 3.6 models (for example 27B) and Qwen 3.8 (including Flash Next) | thinking | 1.0 | 0.95 | 20 | 0 | 1.0 |
 | Qwen 3.5, 3.6, and 3.8 | non-thinking | 0.7 | 0.8 | 20 | 1.5 | 1.0 |
 | LFM 2.5 2.6B | either | 0.1 | 1.0 | 50 | 0 | 1.1 |
 | LFM 2.5 1.2B | either | 0.1 | 1.0 | 50 | 0 | 1.05 |
@@ -988,6 +989,7 @@ Sources: [Gemma 4](https://huggingface.co/google/gemma-4-31B-it#best-practices),
 [Qwen 3](https://huggingface.co/Qwen/Qwen3-32B#best-practices),
 [Qwen 3.5](https://huggingface.co/Qwen/Qwen3.5-27B#best-practices),
 [Qwen 3.6](https://huggingface.co/Qwen/Qwen3.6-27B#best-practices),
+[Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B#best-practices),
 [Qwen 3.8](https://huggingface.co/Qwen/Qwen3.8-27B#best-practices),
 [Qwen 3.8 Flash Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next#best-practices),
 [LFM 2.5 2.6B](https://huggingface.co/LiquidAI/LFM2.5-2.6B),
