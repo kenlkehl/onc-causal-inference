@@ -315,7 +315,11 @@ See [Standalone HTR](docs/standalone_htr.md).
 
 The output directory is the checkpoint. **Rerunning the same command resumes an
 interrupted run**; completed work is reused. The directory holds the resolved
-settings (`run_config.json`), `progress.json`, and `logs/workflow.log`.
+settings (`run_config.json`), `progress.json`, and `logs/workflow.log`. A
+resumed run whose LLM servers are down at startup continues its non-LLM work
+and checks the servers before its first LLM request, provided the same
+endpoints previously served the same models
+([Serving](docs/serving.md#external-openai-compatible-servers)).
 
 ```bash
 # Relaunch Stage 2 from the run's resolved settings

@@ -261,7 +261,13 @@ Configuration rules:
 - Stage 2 requires the frozen split file
   `components/tfidf/split_provenance.jsonl` and never resamples folds.
 - `run_config.json` redacts API keys; Stage 2 checks model identity
-  (`stage2/model_identity.json`) and selection policy on resume. Selection or
+  (`stage2/model_identity.json`) and selection policy on resume. On resume, an
+  endpoint whose `/models` list is unreachable for a transport reason defers
+  its check to the first request (`_DeferredEndpointCheck`) when the saved
+  identity holds a live verification of the same served model on the same
+  URLs; the runner is configured from that verification, and the check fails
+  the request as exhausted while the endpoint is still down, or stops the run
+  if the live identity would configure it differently. Selection or
   estimation policy changes on a completed run go through
   `--stage2-only --stage2-reselect`; under `orthogonal_tests`,
   `estimation_trees` is not part of the selection identity, so changing it

@@ -1666,6 +1666,10 @@ class _ServedModelIds(list[str]):
         self.records = tuple(dict(record) for record in records)
 
 
+class _Stage2EndpointUnreachable(RuntimeError):
+    """An endpoint's /models list could not be read for a transport reason."""
+
+
 def _served_model_ids(config: PlainHandoffStage2Config) -> list[str]:
     """Return the distinct model IDs advertised by an OpenAI-compatible server."""
 
@@ -1680,7 +1684,12 @@ def _served_model_ids(config: PlainHandoffStage2Config) -> list[str]:
     try:
         response = client.models.list()
     except Exception as exc:
-        raise RuntimeError(
+        error_type = (
+            _Stage2EndpointUnreachable
+            if _is_retryable_transport_error(exc)
+            else RuntimeError
+        )
+        raise error_type(
             "Stage 2 could not auto-discover a model from "
             f"{config.endpoint}/models: {type(exc).__name__}: {exc}"
         ) from exc
@@ -1809,9 +1818,15 @@ def _endpoint_model_identity(
     verify_live_endpoint: bool,
     endpoint_models: Mapping[str, str] | None = None,
     allow_model_variants: bool = False,
+    served_model_ids: Callable[[PlainHandoffStage2Config], list[str]] | None = None,
 ) -> dict[str, Any]:
-    """Record the selected model and, for live transports, verify every replica."""
+    """Record the selected model and, for live transports, verify every replica.
 
+    ``served_model_ids`` replaces the live ``/models`` query; a deferred start
+    uses it to rebuild an identity from a previous verification.
+    """
+
+    probe = served_model_ids or _served_model_ids
     selected_model = str(config.model).strip()
     if not selected_model:
         raise RuntimeError(f"Stage 2 {role} model identity is unresolved")
@@ -1823,7 +1838,7 @@ def _endpoint_model_identity(
     for endpoint in normalized_endpoints:
         served_model = (endpoint_models or {}).get(endpoint) or selected_model
         if verify_live_endpoint:
-            advertised = _served_model_ids(replace(config, endpoint=endpoint, model=served_model))
+            advertised = probe(replace(config, endpoint=endpoint, model=served_model))
             if served_model not in advertised:
                 raise RuntimeError(
                     f"Stage 2 {role} endpoint {endpoint}/models advertises {advertised}, "
@@ -1901,6 +1916,209 @@ def _endpoint_model_identity(
         "live_endpoint_verified": bool(verify_live_endpoint),
         "endpoint_observations": observations,
     }
+
+
+DEFERRED_ENDPOINT_VERIFICATION = "deferred_to_first_request"
+
+
+def _recorded_endpoint_probe(
+    prior_role: Any,
+    *,
+    selected_model: str,
+    endpoints: Sequence[str],
+) -> Callable[[PlainHandoffStage2Config], list[str]] | None:
+    """Replay a role's last live ``/models`` observations for the same endpoints."""
+
+    if not isinstance(prior_role, Mapping):
+        return None
+    if str(prior_role.get("selected_model") or "").strip() != selected_model:
+        return None
+    if prior_role.get("live_endpoint_verified") is True:
+        observations = prior_role.get("endpoint_observations")
+    else:
+        previous = prior_role.get("previous_live_endpoint_verification")
+        if not isinstance(previous, Mapping) or previous.get("live_endpoint_verified") is not True:
+            return None
+        observations = previous.get("endpoint_observations")
+    if not isinstance(observations, list) or not observations:
+        return None
+    recorded: dict[str, _ServedModelIds] = {}
+    for observation in observations:
+        if not isinstance(observation, Mapping):
+            return None
+        endpoint = str(observation.get("endpoint") or "").strip().rstrip("/")
+        advertised = observation.get("advertised_model_ids")
+        record = observation.get("selected_model_record")
+        if (
+            not endpoint
+            or observation.get("selected_model_advertised") is not True
+            or not isinstance(advertised, list)
+            or not isinstance(record, Mapping)
+        ):
+            return None
+        recorded[endpoint] = _ServedModelIds(
+            (str(model_id) for model_id in advertised), records=[record]
+        )
+    current = {str(endpoint).strip().rstrip("/") for endpoint in endpoints}
+    if set(recorded) != current:
+        return None
+
+    def probe(config: PlainHandoffStage2Config) -> list[str]:
+        return recorded[str(config.endpoint).strip().rstrip("/")]
+
+    return probe
+
+
+def _live_or_deferred_endpoint_identity(
+    config: PlainHandoffStage2Config,
+    *,
+    endpoints: Sequence[str],
+    role: str,
+    verify_live_endpoint: bool,
+    prior_role: Any = None,
+    endpoint_models: Mapping[str, str] | None = None,
+    allow_model_variants: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Verify a role's endpoints, deferring the check only when they are unreachable.
+
+    Returns the identity that configures the runner and, for a deferred check,
+    the unverified identity to record until the first request verifies it. A
+    check is deferred only on resume, when ``prior_role`` (the role's entry in
+    the saved ``model_identity.json``) holds a live verification of the same
+    served model on the same endpoints; the runner is then configured exactly
+    as that verification configured it.
+    """
+
+    identity_arguments = {
+        "endpoints": endpoints,
+        "role": role,
+        "endpoint_models": endpoint_models,
+        "allow_model_variants": allow_model_variants,
+    }
+    try:
+        identity = _endpoint_model_identity(
+            config, verify_live_endpoint=verify_live_endpoint, **identity_arguments
+        )
+    except _Stage2EndpointUnreachable as exc:
+        probe = _recorded_endpoint_probe(
+            prior_role, selected_model=str(config.model).strip(), endpoints=endpoints,
+        )
+        if probe is None:
+            raise
+        try:
+            identity = _endpoint_model_identity(
+                config, verify_live_endpoint=True, served_model_ids=probe, **identity_arguments
+            )
+        except RuntimeError:
+            # The recorded verification does not cover this configuration
+            # (for example, another per-endpoint served model); nothing to defer.
+            raise exc
+        LOGGER.warning(
+            "Stage 2 %s endpoint is unreachable at startup (%s); resuming with its "
+            "last verified identity model=%s and verifying the endpoint before the "
+            "first Stage 2 request",
+            role, exc, config.model,
+        )
+        return identity, {
+            **identity,
+            "live_endpoint_verified": False,
+            "endpoint_verification": DEFERRED_ENDPOINT_VERIFICATION,
+            "endpoint_observations": [],
+            "previous_live_endpoint_verification": {
+                "live_endpoint_verified": True,
+                "endpoint_observations": identity["endpoint_observations"],
+            },
+        }
+    return identity, None
+
+
+def _endpoint_runtime_signature(
+    config: PlainHandoffStage2Config,
+    identity: Mapping[str, Any],
+) -> tuple[str, str, int | None]:
+    """Return the runner settings that an endpoint identity determines."""
+
+    return (
+        str(identity["model_family"]),
+        str(identity.get("sampling_model") or ""),
+        _primary_context_window_tokens(config, identity),
+    )
+
+
+@dataclass(frozen=True)
+class _DeferredEndpointRole:
+    """One role whose startup endpoint check waits for its first request."""
+
+    identity_key: str
+    role: str
+    config: PlainHandoffStage2Config
+    endpoints: tuple[str, ...]
+    expected_signature: tuple[str, str, int | None]
+    endpoint_models: Mapping[str, str] | None = None
+    allow_model_variants: bool = False
+
+
+class _DeferredEndpointCheck:
+    """Run a deferred startup endpoint check once, before the first request.
+
+    Every deferred role is checked together, so the first request of any role
+    confirms the whole configuration a live start would have produced. An
+    unreachable endpoint fails the request as an exhausted one (the bounded
+    outage handling of a server lost mid-run); a reachable endpoint whose
+    model, backing model family, or context window would configure the runner
+    differently stops the run.
+    """
+
+    def __init__(
+        self,
+        roles: Sequence[_DeferredEndpointRole],
+        *,
+        on_verified: Callable[[Mapping[str, Mapping[str, Any]]], None],
+    ) -> None:
+        self.roles = tuple(roles)
+        self.on_verified = on_verified
+        self._lock = threading.Lock()
+        self.verified = False
+
+    def __call__(self) -> None:
+        if self.verified:
+            return
+        with self._lock:
+            if self.verified:
+                return
+            live: dict[str, Mapping[str, Any]] = {}
+            for deferred in self.roles:
+                try:
+                    identity = _endpoint_model_identity(
+                        deferred.config,
+                        endpoints=deferred.endpoints,
+                        role=deferred.role,
+                        verify_live_endpoint=True,
+                        endpoint_models=deferred.endpoint_models,
+                        allow_model_variants=deferred.allow_model_variants,
+                    )
+                except _Stage2EndpointUnreachable as exc:
+                    raise Stage2RequestExhaustedError(
+                        f"Stage 2 needs its {deferred.role} endpoint, which was "
+                        f"unreachable at startup and still is: {exc}"
+                    ) from exc
+                observed = _endpoint_runtime_signature(deferred.config, identity)
+                if observed != deferred.expected_signature:
+                    fields = ("model_family", "sampling_model", "context_window_tokens")
+                    raise RuntimeError(
+                        f"Stage 2 {deferred.role} endpoint is reachable now but would "
+                        "configure the run differently from the verified identity it "
+                        f"resumed with: resumed={dict(zip(fields, deferred.expected_signature))}, "
+                        f"live={dict(zip(fields, observed))}. Restart the run so Stage 2 "
+                        "is configured from the live endpoint."
+                    )
+                live[deferred.identity_key] = identity
+            self.on_verified(live)
+            self.verified = True
+            LOGGER.info(
+                "Stage 2 verified the deferred endpoint check roles=%s",
+                ",".join(sorted(live)),
+            )
 
 
 def _scientific_model_identity(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -2884,9 +3102,13 @@ class _ConcurrencyLimitedCompletion:
         self._semaphore = threading.BoundedSemaphore(max(1, int(max_concurrency)))
         # Optional live admission policy, installed before starting the run.
         self.admission_gate: Callable[[], Any] | None = None
+        # A startup endpoint check deferred to the first request, if any.
+        self.endpoint_check: Callable[[], None] | None = None
 
     @contextmanager
     def request_slot(self) -> Iterator[CompletionFunction]:
+        if self.endpoint_check is not None:
+            self.endpoint_check()
         queued_at = time.monotonic()
         gate = self.admission_gate() if self.admission_gate is not None else nullcontext()
         with gate, self._semaphore:
@@ -5076,19 +5298,37 @@ class PlainHandoffStage2:
         completion: CompletionFunction | None = None,
         extraction_completion: CompletionFunction | None = None,
         extraction_tokenizer: Any | None = None,
+        prior_model_identity: Mapping[str, Any] | None = None,
     ) -> None:
+        """Build a runner, verifying each live endpoint's served model.
+
+        ``prior_model_identity`` is a resumed run's saved ``model_identity.json``.
+        When it holds a live verification of the same served model on the same
+        endpoints, an endpoint that is unreachable now defers its check to the
+        first request instead of stopping the start.
+        """
+
         if config.feature_source == "tabular":
             raise ValueError("use the tabular workflow for supplied covariate columns")
         config = _resolve_stage2_model(config)
         config = _resolve_extraction_llm_model(config)
         config.validate()
+        prior_model_identity = prior_model_identity or {}
+        deferred_roles: list[_DeferredEndpointRole] = []
         endpoints = config.runtime_endpoints or (config.endpoint,)
-        primary_identity = _endpoint_model_identity(
+        primary_identity, deferred_primary_identity = _live_or_deferred_endpoint_identity(
             config,
             endpoints=endpoints,
             role="primary",
             verify_live_endpoint=_uses_default_openai_transport(completion),
+            prior_role=prior_model_identity.get("primary"),
         )
+        if deferred_primary_identity is not None:
+            deferred_roles.append(_DeferredEndpointRole(
+                identity_key="primary", role="primary", config=config,
+                endpoints=tuple(endpoints),
+                expected_signature=_endpoint_runtime_signature(config, primary_identity),
+            ))
         config = replace(
             config,
             runtime_model_family=str(primary_identity["model_family"]),
@@ -5191,17 +5431,36 @@ class PlainHandoffStage2:
             uses_default_extraction_transport = _uses_default_openai_transport(
                 routed_extraction
             )
-            live_extraction_identity = _endpoint_model_identity(
-                extraction_request_config,
-                endpoints=extraction_endpoints,
-                role=(
-                    "extraction_runtime_continuation"
-                    if continuation_route
-                    else "extraction"
-                ),
-                verify_live_endpoint=_uses_default_openai_transport(routed_extraction),
-                endpoint_models={server.endpoint: server.model for server in extraction.endpoints},
-                allow_model_variants=extraction.allow_model_variants,
+            extraction_role = (
+                "extraction_runtime_continuation" if continuation_route else "extraction"
+            )
+            extraction_endpoint_models = {
+                server.endpoint: server.model for server in extraction.endpoints
+            }
+            live_extraction_identity, deferred_extraction_identity = (
+                _live_or_deferred_endpoint_identity(
+                    extraction_request_config,
+                    endpoints=extraction_endpoints,
+                    role=extraction_role,
+                    verify_live_endpoint=_uses_default_openai_transport(routed_extraction),
+                    prior_role=prior_model_identity.get(extraction_role),
+                    endpoint_models=extraction_endpoint_models,
+                    allow_model_variants=extraction.allow_model_variants,
+                )
+            )
+            if deferred_extraction_identity is not None:
+                deferred_roles.append(_DeferredEndpointRole(
+                    identity_key=extraction_role, role=extraction_role,
+                    config=extraction_request_config,
+                    endpoints=tuple(extraction_endpoints),
+                    expected_signature=_endpoint_runtime_signature(
+                        extraction_request_config, live_extraction_identity,
+                    ),
+                    endpoint_models=extraction_endpoint_models,
+                    allow_model_variants=extraction.allow_model_variants,
+                ))
+            recorded_extraction_identity = (
+                deferred_extraction_identity or live_extraction_identity
             )
             if continuation_route:
                 extraction_identity = {
@@ -5213,9 +5472,9 @@ class PlainHandoffStage2:
                     "endpoint_observations": [],
                     "runtime_continuation_is_separately_audited": True,
                 }
-                extraction_runtime_identity = live_extraction_identity
+                extraction_runtime_identity = recorded_extraction_identity
             else:
-                extraction_identity = live_extraction_identity
+                extraction_identity = recorded_extraction_identity
                 extraction_runtime_identity = None
             self.extraction_request_config = replace(
                 extraction_request_config,
@@ -5256,7 +5515,7 @@ class PlainHandoffStage2:
         self.model_identity = {
             "schema_version": MODEL_IDENTITY_SCHEMA_VERSION,
             "feature_definition_model": config.frozen_feature_definition_model or config.model,
-            "primary": primary_identity,
+            "primary": deferred_primary_identity or primary_identity,
             "extraction": extraction_identity,
             "extraction_runtime_continuation": extraction_runtime_identity,
             "selection_consolidation_runtime": consolidation_identity,
@@ -5268,10 +5527,30 @@ class PlainHandoffStage2:
                 ),
             },
         }
+        self._model_identity_output_dir: Path | None = None
+        self.deferred_endpoint_check: _DeferredEndpointCheck | None = None
+        if deferred_roles:
+            self.deferred_endpoint_check = _DeferredEndpointCheck(
+                deferred_roles, on_verified=self._record_verified_endpoints,
+            )
+            for limiter in (self.completion, self.extraction_completion):
+                if isinstance(limiter, _ConcurrencyLimitedCompletion):
+                    limiter.endpoint_check = self.deferred_endpoint_check
+
+    def _record_verified_endpoints(self, live: Mapping[str, Mapping[str, Any]]) -> None:
+        """Record the live identities that completed a deferred endpoint check."""
+
+        self.model_identity = {
+            **self.model_identity,
+            **{key: dict(identity) for key, identity in live.items()},
+        }
+        if self._model_identity_output_dir is not None:
+            self._check_and_record_model_identity(self._model_identity_output_dir)
 
     def _check_and_record_model_identity(self, output_dir: Path) -> None:
         """Check served names while allowing endpoint and backing model changes."""
 
+        self._model_identity_output_dir = Path(output_dir)
         identity_path = output_dir / "model_identity.json"
         current_scientific = _scientific_model_identity(self.model_identity)
         previous_scientific: dict[str, Any] | None = None
@@ -7096,6 +7375,16 @@ def _all_gpu_extraction_vllm_config(
     )
 
 
+def _saved_model_identity(output_dir: Path) -> Mapping[str, Any] | None:
+    """Read a resumed run's model identity; an unreadable file defers nothing."""
+
+    try:
+        value = json.loads((output_dir / "model_identity.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, Mapping) else None
+
+
 def run_plain_handoff_stage2(
     *,
     handoff_path: Path | None,
@@ -7148,6 +7437,7 @@ def run_plain_handoff_stage2(
             completion=runtime_primary_completion,
             extraction_completion=runtime_extraction_completion,
             extraction_tokenizer=extraction_tokenizer,
+            prior_model_identity=_saved_model_identity(Path(output_dir)),
         )
         return runner.run(
             handoff_path=handoff_path,

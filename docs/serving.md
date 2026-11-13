@@ -47,6 +47,25 @@ The resolved identities are written to
 `stage2/model_identity.json` and checked whenever the run resumes (see
 [Checkpoints and resuming](configuration.md#checkpoints-and-resuming)).
 
+**Resuming while a server is down.** A resumed run does not need its servers
+at startup. If an endpoint's `/models` list cannot be read for a transport
+reason (connection error, timeout, or HTTP 408, 409, 429, or 5xx), and
+`stage2/model_identity.json` records a live verification of the same served
+model on the same endpoint URLs, Stage 2 starts from that recorded identity:
+the same backing model family, sampling model, and context window. Work that
+needs no LLM, such as selection and estimation, continues. The endpoint check
+runs before the first LLM request instead, for every role it was deferred
+for. If an endpoint is still unreachable then, the request fails as an
+exhausted request: extraction's deferred retry passes and outer-fold recovery
+apply as for a server lost mid-run, and then the run stops. If the endpoint is
+back but serves another model, or a backing model or context window that would
+configure the run differently, the run stops; restart it. A fresh run, a
+resume on different endpoint URLs, and any other `/models` error still stop at
+startup. Until the check passes, `model_identity.json` marks each deferred role
+`"endpoint_verification": "deferred_to_first_request"` with
+`live_endpoint_verified: false`, and keeps the earlier observations under
+`previous_live_endpoint_verification`.
+
 **API keys.** `stage2.api_key` and `stage2.extraction_llm.api_key` default to
 `EMPTY`. When a key is absent from the configuration (or is the `<redacted>`
 placeholder that saved `run_config.json` files contain), Stage 2 reads
@@ -458,6 +477,9 @@ summary) and requires PyTorch to see at least one CUDA GPU:
 | `Stage 2 model auto-discovery requires exactly one served model; ... Set stage2.model explicitly.` | The server lists several models |
 | `Stage 2 ... endpoint .../models advertises [...], not the selected model 'M'` | The configured model ID does not match the served ID exactly (case-sensitive) |
 | `Stage 2 cannot resume because the actual running model identity changed for the primary role` | A saved run must keep its interpretation model; use a different output directory for a different model |
+| `Stage 2 ROLE endpoint is unreachable at startup (...); resuming with its last verified identity ...` | Informational: a resumed run continues without the server and checks it before its first LLM request (see "Resuming while a server is down" under [External OpenAI-compatible servers](#external-openai-compatible-servers)) |
+| `Stage 2 needs its ROLE endpoint, which was unreachable at startup and still is` | A resumed run reached an LLM request with the server still down; start the server, then rerun the same command |
+| `Stage 2 ROLE endpoint is reachable now but would configure the run differently ...` | The returning server's model family, backing model, or context window differs from the verified identity the run resumed with; rerun the same command |
 | `Stage 2 outer fold N has feature definitions from a different evidence plan, feature-definition policy, or explicit-feature configuration` | Interpretation sampling, reasoning, output ceiling, evidence, or explicit features changed on a saved run |
 | `Stage 2 endpoint rejected optional request controls; trying compatibility variant i/n` | Informational: request negotiation is in progress |
 | `Stage 2 transport exhausted N attempt(s); ...` or `... exhausted its HTTP attempt budget while negotiating optional request controls` | The server kept failing or rejected too many controls. Check the server; raise `transport_max_attempts` for servers that reject many controls |

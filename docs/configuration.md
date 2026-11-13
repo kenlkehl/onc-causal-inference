@@ -1277,6 +1277,7 @@ Text-based Stage 2 checks its saved state on every start:
 | Different interpretation model ID | Refused; use a different output directory |
 | Different extraction model ID | Allowed only when no extraction-dependent checkpoints exist |
 | Endpoint URLs, ports, worker counts, timeouts | Allowed |
+| Same endpoint URLs, server down at startup | Allowed when `stage2/model_identity.json` records a live verification of the same served model there; the endpoint check moves to the first LLM request, which fails as an exhausted request if the server is still down ([Serving](serving.md#external-openai-compatible-servers)) |
 | Interpretation sampling, reasoning, or `max_tokens` | Completed feature definitions do not match the requested policy; the run stops |
 | Extraction context window, margin, chunk size, or output ceilings | Affected extraction chunks are extracted again |
 | `min_propensity`, `max_propensity`, `statistical_selection` (other than the two selected-modifier penalty keys), or, after selection has run, `propensity_clip`, `nuisance_learner`, or `super_learner` (under `orthogonal_tests`) or `estimation_trees` (under `balanced_evidence`) | Refused; use [guarded reselection](#guarded-reselection) |
