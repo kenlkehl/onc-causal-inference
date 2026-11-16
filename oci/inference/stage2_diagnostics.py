@@ -2691,8 +2691,9 @@ def _read_json(path: Path) -> Any:
 def _read_measurements(path: Path, failure_mask: Path | None = None) -> pd.DataFrame:
     """Read raw measurements, adding extraction-failure companions from a mask file."""
 
-    # Strings keep categorical levels exactly as written ("1", not "1.0").
-    frame = pd.read_csv(path, dtype=str, keep_default_na=True)
+    # Strings keep categorical levels exactly as written ("1", not "1.0"), and
+    # only empty cells are missing, so a label such as None or NA stays a label.
+    frame = pd.read_csv(path, dtype=str, keep_default_na=False, na_values=[""])
     if failure_mask is None or not failure_mask.is_file() or ROW_ID not in frame.columns:
         return frame
     mask = pd.read_csv(failure_mask)

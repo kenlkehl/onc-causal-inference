@@ -305,11 +305,11 @@ Configure exactly one of `endpoint`, `endpoints`, or `vllm`.
 | `evidence_max_exemplars_per_card` | 4 | Text excerpts per card |
 | `evidence_max_exemplar_chars` | 2400 | Characters per excerpt (minimum 256) |
 | `max_prompt_chars` | 100000 | Character limit for interpretation prompts |
-| `consolidation_batch_size` | 20 | Candidates per duplicate-merging request (minimum 2) |
-| `consolidation_max_rounds` | 55 | Maximum duplicate-merging rounds |
-| `consolidation_max_prompt_chars` | 640000 | Character limit for duplicate-merging prompts |
+| `consolidation_batch_size` | 20 | Defined variables per merge-and-harmonize request (minimum 2) |
+| `consolidation_max_rounds` | 55 | Maximum merge-and-harmonize rounds |
+| `consolidation_max_prompt_chars` | 640000 | Character limit for merge-and-harmonize prompts |
 | `consolidation_policy` | see below | How merging batches are formed and when merging stops |
-| `operationalization_max_prompt_chars` | 640000 | Character limit for prompts that write [extraction definitions](glossary.md#extraction-definition-ontology) |
+| `operationalization_max_prompt_chars` | 640000 | Character limit for the prompts that define or decompose each candidate into [extraction definitions](glossary.md#extraction-definition-ontology) |
 | `max_review_rounds` | 4 | Maximum aggregate extraction-review rounds per outer fold; stops early when definitions are unchanged and no validation fallbacks remain |
 | `ontology_refinement_min_failure_patients` | 3 | A recurring extraction failure triggers definition refinement when it affects at least this many patients (minimum 2) |
 | `max_ontology_refinement_rounds` | 2 | Refinement rounds per review round; 0 disables refinement |
@@ -1080,7 +1080,7 @@ OUTPUT_DIR/
     │   ├── input_packets.jsonl          this fold's evidence cards
     │   ├── interpretations/             one checkpointed interpretation per card
     │   ├── interpreted_candidates.json  candidate variables proposed from the cards
-    │   ├── consolidation/               duplicate merging and extraction-definition writing
+    │   ├── consolidation/               ontology_definition/ (define or decompose each candidate), ontology_harmonization/ (merge rounds, label crosswalks)
     │   ├── feature_definitions.json     frozen candidate definitions
     │   ├── ontology_supervision/        extraction review rounds, definition refinement, convergence.json
     │   ├── estimand_ontology/           [estimand_ontology.enabled]

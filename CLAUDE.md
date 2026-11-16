@@ -116,6 +116,8 @@ oci/
     ├── stage2_sampling.py, stage2_endpoint_pool.py, stage2_concurrency.py, vllm_server_pool.py
     │                                 # Sampling profiles, extraction routing, live limits, managed vLLM
     ├── stage2_preflight.py           # Read-only Stage 2-only validation
+    ├── stage2_variable_ontology.py   # Define-or-decompose and merge-and-harmonize validators,
+    │                                 #   label crosswalks, exact-duplicate merging, dispositions
     ├── stage2_prompt_catalog.py, stage2_clinical_prompts.py, stage2_request_audit.py, ...
     ├── standalone_htr.py             # scripts/run_standalone_htr.py: HTR-only effects (Stage 1 two-stage or joint)
     ├── htr_mlm_pretraining.py        # Masked-LM pretraining of the HTR chunk encoder (Stage 1, per context)
@@ -205,7 +207,14 @@ checkpoint identity or a fitted value.
 ## Stage 2
 
 `multi_model` is the only selection mode and the default. Per outer fold:
-evidence cards → interpretation → candidate merging → extraction definitions →
+evidence cards → interpretation → closed-format definitions (each exact-name
+candidate group is defined as one variable or decomposed into 2 to 12, every
+label with a meaning and the statements that establish it; no free-text type;
+`04_define_or_decompose`, validated in `stage2_variable_ontology.py`; a group
+still invalid after repairs is dropped) → harmonized merging in mixed batches
+(`03_merge_and_harmonize`: one shared definition per group and a label
+crosswalk mapping every member label; investigator-specified features are
+locked members) →
 outer-training extraction with aggregate review and failure-driven definition
 refinement (each cell is a value, not documented (null), the reserved
 `documented_unknown`, or an extraction failure; every encoder keeps the three

@@ -374,7 +374,12 @@ The rule for measuring one candidate variable from text: its meaning, value type
 units or allowed categories, missing-value rule (including when to answer null
 and when to answer [documented unknown](#documented-unknown)), and how to resolve
 repeated or conflicting mentions (for example, latest value, maximum, or most
-frequent value). The code and logs call the set of definitions the **ontology**.
+frequent value). A discovered variable always has a closed answer format, a
+number in one unit or exactly one label from a fixed list, and each label has
+**label definitions**: its meaning (the patient's clinical state, or a value
+range) and the documented statements that establish it. A statement listed for
+a label decides it; the meaning applies when the record describes the state
+without one. The code and logs call the set of definitions the **ontology**.
 
 ### Documented unknown
 
@@ -402,8 +407,9 @@ the parent variable.
 Stage 2 uses two LLM roles, which may be served by the same model:
 
 - The **interpretation LLM** (`stage2.endpoint`, `stage2.model`) reads evidence
-  cards, names and merges candidates, writes extraction definitions, reviews
-  aggregate extraction quality, and plans value harmonization. Configuration
+  cards, names candidates, defines each as one or more closed-format variables,
+  merges variables that measure the same attribute into shared definitions,
+  reviews aggregate extraction quality, and plans value harmonization. Configuration
   comments sometimes call it the "primary" model.
 - The **extraction LLM** (`stage2.extraction_llm`) reads one patient's record at
   a time and returns that patient's values.

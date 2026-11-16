@@ -117,6 +117,7 @@ def _variant(feature, alternative):
     result = {k: deepcopy(v) for k, v in feature.items() if k not in {
         "harmonization_plan", "harmonization_fallback", "modeling_strategy",
         "conflict_resolution", "accepted_representations", "estimand_ontology",
+        "label_definitions",
     }}
     result.update({k: deepcopy(alternative[k]) for k in DEFINITION_FIELDS})
     suffix = _fingerprint({k: result[k] for k in DEFINITION_FIELDS})[:12]

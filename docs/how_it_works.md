@@ -196,23 +196,54 @@ it assigns no causal roles. Because one card can mention several attributes and
 one attribute can appear on many cards, the number of candidates is not tied to
 the number of cards.
 
-### 3. Merge duplicates and write extraction definitions
+### 3. Define each candidate, then merge and harmonize
 
-Candidates from different cards overlap. The interpretation LLM reviews them in
-bounded batches (20 names per batch by default), grouped partly by semantic
-similarity and partly alphabetically, over repeated rounds that stop when merges
-become rare. The operation is merge-only: names for the same scalar measurement
-are combined with their evidence, distinct measurements stay separate (a
-neutrophil count and a neutrophil-to-lymphocyte ratio are not merged into one
-"inflammation" variable), and no candidate is dropped.
+The interpretation LLM first writes an
+[extraction definition](glossary.md#extraction-definition-ontology) for every
+candidate; candidates with the same normalized name are defined together from
+their combined excerpts. It either defines the candidate as one variable or,
+when the candidate bundles several attributes (for example presence, severity,
+and location), several separately documented findings, or open-ended answers,
+decomposes it into 2 to 12 component variables. Every variable has a closed
+answer format: a number in one stated unit, or exactly one label from a fixed
+list of mutually exclusive labels. There is no free-text type. Each label has
+a two-part definition: its meaning (the patient's clinical state, or a value
+range in a stated unit) and the documented statements that establish it (a
+grade or category from a recognized system, the label's own term, and common
+equivalents). A documented statement listed for a label decides it; the meaning
+is used only when the record describes the patient's state without such a
+statement. A severity grade for a finding that records can document as absent
+starts with an absent level. Each definition also states its missing-value rule
+and its rule for repeated or conflicting mentions (latest value, maximum, most
+frequent value, any positive mention, and so on). These rules define different
+measurements, so they are part of the variable.
 
-The interpretation LLM then writes one
-[extraction definition](glossary.md#extraction-definition-ontology) per merged
-candidate: its meaning, value type, units or allowed categories, missing-value
-rule, and rule for repeated or conflicting mentions (latest value, maximum,
-most frequent value, any positive mention, and so on). These rules define
-different measurements, so they are part of the variable. Investigator-specified
-variables, if configured, keep their supplied definitions and roles.
+Python checks every reply and asks for a repair when, for example, a label only
+says that the value is unknown or that a test was not done (the reserved
+documented-unknown answer and null cover those states), a level is listed with
+its own sublevels (M1 with M1a), a grade with a few levels is recorded as a
+number, or a continuous unit names several scales. A candidate whose reply is
+still invalid after the bounded repairs is dropped; `candidate_dispositions` in
+`feature_definitions.json` records it, and every other candidate as retained,
+merged, or decomposed.
+
+Variables defined from different cards overlap. The interpretation LLM reviews
+them in bounded batches (20 variables per batch by default), grouped partly by
+semantic similarity and partly alphabetically, over repeated rounds that stop
+when merges become rare. Each merge writes one shared definition and maps every
+member label to exactly one shared label (a label crosswalk). Python rejects a
+merge that would change what a label means: a member label mapped to its own
+sublevel (Stage IV to Stage IVB), a specific label mapped to a residual label
+(Positive to Other), a residual label mapped to the residual of a narrower
+class, two labels of one member collapsed into one, a shared label that no
+member label maps to, or two members whose labels share no answer (two
+classification systems). A batch whose reply stays invalid keeps its variables
+unchanged. Variables with the same name and answer format merge without a
+review. Distinct measurements stay separate (a neutrophil count and a
+neutrophil-to-lymphocyte ratio are not merged into one "inflammation"
+variable). Investigator-specified variables, if configured, keep their supplied
+definitions and roles; a discovered variable merges into one only by mapping
+onto its labels.
 
 ### 4. Extract every candidate from the outer-training records
 
@@ -253,8 +284,9 @@ Several checks precede any statistical modeling:
 - **Definition refinement.** When the same validation problem recurs across
   patients (by default in at least 3 patients), the interpretation LLM can
   revise the affected definition, for example to clarify categories that keep
-  producing incompatible values. Only variables whose definitions changed are
-  re-extracted.
+  producing incompatible values, or split it into components. A revision keeps
+  a closed answer format and defines every label. Only variables whose
+  definitions changed are re-extracted.
 - **Aggregate review.** The interpretation LLM reviews value distributions and
   failure summaries for each variable (by default for up to 2 rounds). It can
   revise a definition but cannot add, drop, rename, or assign roles to

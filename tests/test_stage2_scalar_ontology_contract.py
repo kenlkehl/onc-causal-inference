@@ -22,6 +22,12 @@ def split_answer():
             "components": [{
                 "name": name, "description": f"Metastasis in the {name}.",
                 "value_type": "binary", "categories_or_unit": ["Present", "Absent"],
+                "label_definitions": {
+                    "Present": {"meaning": f"Metastatic disease involves the {name}.",
+                                "established_by": f"A documented metastasis in the {name}."},
+                    "Absent": {"meaning": f"The {name} is free of metastatic disease.",
+                               "established_by": f"An explicit statement of no metastasis in the {name}."},
+                },
                 "measurement_definition": f"Use the latest explicit finding of metastasis in the {name}. "
                     "Present requires positive evidence; Absent requires an explicit negative finding.",
                 "missing_value_rule": "Return null if this site is not assessed.",
@@ -63,3 +69,26 @@ def test_invalid_splits_and_locked_features_are_rejected(change):
         original["configured_explicit_feature"] = True
     with pytest.raises(ValueError):
         analysis._validate_ontology_refinement(answer, feature=original)
+
+
+def test_revisions_need_closed_types_and_label_definitions():
+    original = feature()
+    revision = {"action": "revise", "reason": "Clarify.", "definition": {
+        "description": "Any brain metastasis.", "value_type": "binary",
+        "categories_or_unit": ["Present", "Absent"],
+        "label_definitions": split_answer()["components"][0]["label_definitions"],
+        "measurement_definition": "Use the latest explicit finding.",
+        "missing_value_rule": "Return null when undocumented."}}
+    decision = analysis._validate_ontology_refinement(revision, feature=original)
+    assert list(decision["label_definitions"]) == ["Present", "Absent"]
+    assert analysis._validate_ontology_refinement(decision, feature=original) == decision
+    [revised] = analysis._apply_ontology_decision(original, decision)
+    assert revised["label_definitions"] == decision["label_definitions"]
+    without = {**revision, "definition": {k: v for k, v in revision["definition"].items()
+                                          if k != "label_definitions"}}
+    with pytest.raises(ValueError, match="label_definitions"):
+        analysis._validate_ontology_refinement(without, feature=original)
+    free_text = {**revision, "definition": {**revision["definition"], "value_type": "ambiguous",
+                                            "categories_or_unit": [], "label_definitions": {}}}
+    with pytest.raises(ValueError, match="no free-text or ambiguous type"):
+        analysis._validate_ontology_refinement(free_text, feature=original)

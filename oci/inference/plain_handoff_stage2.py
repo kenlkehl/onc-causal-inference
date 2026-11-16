@@ -77,6 +77,7 @@ from .stage2_candidate_consolidation import (
     mixed_batches, diminishing_returns,
 )
 from . import stage2_clinical_prompts as clinical_prompts
+from . import stage2_variable_ontology as variable_ontology
 from . import stage2_request_audit as request_audit
 from .stage2_sequential_consolidation import (
     Stage2SequentialConsolidationConfig,
@@ -159,12 +160,9 @@ FEATURE_DEFINITION_INPUT_SCHEMA_VERSION = (
     "stage2_feature_definition_inputs_v2_primary_model_only"
 )
 _CANDIDATE_SELECTION_ENCODING_LOCK = threading.Lock()
-CONSOLIDATION_SCHEMA_VERSION = "global_candidate_pool_v16_exhaustive_cards"
+CONSOLIDATION_SCHEMA_VERSION = "global_candidate_pool_v17_define_then_harmonize"
 EXTRACTION_ONTOLOGY_FEEDBACK_SCHEMA_VERSION = (
     "training_failure_ontology_refinement_v1_explicit_feature_invariants"
-)
-OPERATIONALIZATION_SCHEMA_VERSION = (
-    "feature_name_bounded_supporting_text_v8_documented_unknown"
 )
 INTERPRETATION_SCHEMA_VERSION = DISCOVERY_PROMPT_VERSION
 INTERPRETATION_AUDIT_SCHEMA_VERSION = (
@@ -2513,7 +2511,9 @@ def _feature_definition_input_value(
     return {
         "feature_definition_input_schema": FEATURE_DEFINITION_INPUT_SCHEMA_VERSION,
         "prompt_catalog_version": clinical_prompts.PROMPT_VERSION,
-        "alias_merge_prompt_version": clinical_prompts.ALIAS_MERGE_PROMPT_VERSION,
+        "harmonized_merge_prompt_version": clinical_prompts.HARMONIZED_MERGE_PROMPT_VERSION,
+        "ontology_definition_schema": variable_ontology.ONTOLOGY_DEFINITION_SCHEMA_VERSION,
+        "harmonization_schema": variable_ontology.HARMONIZATION_SCHEMA_VERSION,
         "outer_fold": int(outer_fold),
         "compiler": EVIDENCE_COMPILER_VERSION,
         "candidate_discovery_source": (
@@ -4354,317 +4354,30 @@ def _materialize_exact_name_groups(
     return materialized
 
 
-def _candidate_group_sort_key(group: Mapping[str, Any]) -> tuple[str, str, str]:
-    name = str(group.get("name") or "")
-    return (
-        _snake_case_name(name, fallback=""),
-        name.casefold(),
-        str(group.get("candidate_id") or ""),
-    )
-
-
-def _coalesce_exact_candidate_group_names(
-    groups: Sequence[Mapping[str, Any]],
-) -> tuple[list[dict[str, Any]], int]:
-    """Coalesce identical canonical outputs produced by independent batches."""
-
-    members_by_name: dict[str, list[Mapping[str, Any]]] = {}
-    for index, group in enumerate(groups, start=1):
-        name = _snake_case_name(group.get("name"), fallback=f"measurement_{index:03d}")
-        members_by_name.setdefault(name, []).append(group)
-
-    coalesced: list[dict[str, Any]] = []
-    exact_merges = 0
-    for name, members in members_by_name.items():
-        if len(members) == 1:
-            coalesced.append(dict(members[0]))
-            continue
-        exact_merges += len(members) - 1
-        canonical = _canonical_cluster_member(members)
-        coalesced.append(
-            _materialize_candidate_group(
-                candidate_id=str(members[0]["candidate_id"]),
-                members=members,
-                canonical_name=name,
-                canonical_description=_short_text(
-                    canonical.get("description") or name,
-                    max_chars=2_000,
-                ),
-            )
-        )
-    return sorted(coalesced, key=_candidate_group_sort_key), exact_merges
-
-
-def _candidate_pool_feature_view(group: Mapping[str, Any]) -> dict[str, Any]:
-    """Expose all distinct candidate descriptions without internal provenance."""
-
-    descriptions = list(
-        dict.fromkeys(
-            description
-            for description in [
-                _short_text(group.get("description"), max_chars=400),
-                *(
-                    _short_text(member.get("description"), max_chars=400)
-                    for member in list(group.get("member_measurements") or [])
-                ),
-            ]
-            if description
-        )
-    )
-    return {
-        "name": str(group.get("name") or ""),
-        "descriptions": descriptions,
-    }
-
-
-def _global_candidate_pool_prompt(*, groups: Sequence[Mapping[str, Any]], configured_feature_names: Sequence[str] = (), batch_ordering: str = "alphabetical_shift") -> list[dict[str, str]]:
-    del batch_ordering
-    views = [_candidate_pool_feature_view(group) for group in sorted(groups, key=_candidate_group_sort_key)]
-    text = "Variables\n" + "\n".join(
-        "- " + clinical_prompts.label(view["name"]) + ": " + "; ".join(view.get("descriptions") or [view.get("description") or ""])
-        for view in views
-    )
-    text += "\n\nProtected names: " + ("; ".join(clinical_prompts.label(n) for n in configured_feature_names) or "none")
-    return clinical_prompts.messages("03_merge_aliases", text)
-
-
-
-def _validate_global_candidate_pool_directives(
-    value: Mapping[str, Any],
+def _define_or_decompose_prompt(
     *,
-    group_names: Sequence[str],
-    configured_feature_names: Sequence[str] = (),
-    group_descriptions: Mapping[str, Sequence[str]] | None = None,
-) -> dict[str, Any]:
-    """Validate directives using only names and descriptions supplied in the batch."""
-
-    if set(value) == {"merges"}:
-        names = {clinical_prompts.label(n): str(n) for n in group_names}
-        if not isinstance(value["merges"], list):
-            raise ValueError("merges must be an array")
-        directives = []
-        for row in value["merges"]:
-            if not isinstance(row, Mapping) or set(row) != {"members", "canonical_label"}:
-                raise ValueError("each merge requires members and canonical_label")
-            if not isinstance(row["members"], list) or not isinstance(row["canonical_label"], str):
-                raise ValueError("members must be an array and canonical_label must be text")
-            inputs = [clinical_prompts.resolve_label(n, names) for n in row["members"]]
-            output = clinical_prompts.resolve_label(row["canonical_label"], names)
-            if output not in inputs:
-                raise ValueError("canonical_label must be one of the merge's supplied member names")
-            directives.append({"inputs": inputs, "output": output})
-        value = {"merge_directives": directives}
-    available = [str(name) for name in group_names]
-    if len(available) != len(set(available)):
-        raise ValueError("global candidate pool requires unique supplied feature names")
-    available_set = set(available)
-    exact_alias_owners: dict[str, set[str]] = defaultdict(set)
-    normalized_alias_owners: dict[str, set[str]] = defaultdict(set)
-
-    def register_alias(alias: Any, owner: str) -> None:
-        rendered = str(alias or "").strip()
-        if not rendered:
-            return
-        exact_alias_owners[rendered.casefold()].add(owner)
-        normalized = _snake_case_name(rendered, fallback="")
-        if normalized:
-            normalized_alias_owners[normalized].add(owner)
-
-    supplied_descriptions = group_descriptions or {}
-    unknown_description_names = sorted(set(map(str, supplied_descriptions)) - available_set)
-    if unknown_description_names:
-        raise ValueError(
-            "global candidate pool received descriptions for unknown feature names: "
-            f"{unknown_description_names}"
-        )
-    for name in available:
-        register_alias(name, name)
-        for description in supplied_descriptions.get(name, ()):
-            register_alias(description, name)
-    configured_names = set(map(str, configured_feature_names))
-    unknown_configured_names = sorted(configured_names - available_set)
-    if unknown_configured_names:
-        raise ValueError(
-            "global candidate pool received unknown configured feature names: "
-            f"{unknown_configured_names}"
-        )
-
-    def resolve_input_name(raw_name: Any) -> str:
-        rendered = str(raw_name or "").strip()
-        if rendered in available_set:
-            return rendered
-        matches = exact_alias_owners.get(rendered.casefold(), set())
-        if len(matches) == 1:
-            return next(iter(matches))
-        normalized = _snake_case_name(rendered, fallback="")
-        matches = normalized_alias_owners.get(normalized, set())
-        if len(matches) == 1:
-            return next(iter(matches))
-        raise ValueError(f"global candidate pool named unknown or ambiguous feature {rendered!r}")
-
-    def resolve_output_name(raw_name: Any) -> tuple[str, str | None]:
-        rendered = str(raw_name or "").strip()
-        if not rendered:
-            return "", None
-        try:
-            known_name = resolve_input_name(rendered)
-        except ValueError:
-            return _snake_case_name(rendered, fallback=""), None
-        return known_name, known_name
-
-    payload = value
-    if not isinstance(payload.get("merge_directives"), list):
-        for key in ("result", "response", "consolidation"):
-            nested = payload.get(key)
-            if isinstance(nested, Mapping):
-                payload = nested
-                break
-    if "exclude_feature_names" in payload:
-        raise ValueError(
-            "iterative candidate consolidation is merge-only; omit exclude_feature_names"
-        )
-    raw_directives = payload.get("merge_directives")
-    if raw_directives is None:
-        raw_directives = payload.get("merges")
-    if not isinstance(raw_directives, list):
-        raise ValueError("global candidate pool requires a merge_directives array")
-
-    directives: list[dict[str, Any]] = []
-    used_inputs: set[str] = set()
-    input_directive_by_name: dict[str, int] = {}
-    for index, raw_directive in enumerate(raw_directives, start=1):
-        if not isinstance(raw_directive, Mapping):
-            raise ValueError(f"global merge directive {index} must be an object")
-        raw_inputs = raw_directive.get("inputs")
-        if not isinstance(raw_inputs, list):
-            raise ValueError(f"global merge directive {index} requires an inputs array")
-        inputs = list(dict.fromkeys(resolve_input_name(name) for name in raw_inputs))
-        output, known_output_name = resolve_output_name(raw_directive.get("output"))
-        if not output:
-            raise ValueError(f"global merge directive {index} requires an output name")
-        # Models sometimes omit a reused canonical feature from ``inputs`` even
-        # though they select it as ``output``. The intended complete family is
-        # unambiguous when that output resolves to one supplied feature.
-        if known_output_name is not None and known_output_name not in inputs:
-            inputs.append(known_output_name)
-        if len(inputs) < 2:
-            # A name and its own supplied prose description can be emitted as
-            # two apparent aliases. Once both resolve to the same feature this
-            # is a harmless no-op, not a reason to reject the whole batch.
-            continue
-        repeated = sorted(set(inputs).intersection(used_inputs))
-        if repeated:
-            owners = {name: input_directive_by_name[name] for name in repeated}
-            raise ValueError(
-                "global merge input names may appear in only one directive; "
-                f"directive {index} repeats inputs already used by earlier directives: "
-                f"{dict(list(owners.items())[:8])}. Combine the complete alias family "
-                "into one directive instead of chaining or splitting directives"
-            )
-        configured_inputs = [name for name in inputs if name in configured_names]
-        if len(configured_inputs) > 1:
-            raise ValueError(
-                "global merge directives must not combine distinct investigator-configured "
-                f"features: {configured_inputs}"
-            )
-        if configured_inputs and output != configured_inputs[0]:
-            raise ValueError(
-                "a global merge containing an investigator-configured feature must use "
-                f"that exact configured name as output: {configured_inputs[0]!r}"
-            )
-        for name in inputs:
-            input_directive_by_name[name] = index
-        used_inputs.update(inputs)
-        directives.append({"inputs": inputs, "output": output})
-
-    output_directive_by_name: dict[str, int] = {}
-    pass_through_names = set(available) - used_inputs
-    for index, directive in enumerate(directives, start=1):
-        output = str(directive["output"])
-        previous_output_index = output_directive_by_name.get(output)
-        if previous_output_index is not None:
-            raise ValueError(
-                f"global merge directive {index} duplicates output name {output!r} from "
-                f"directive {previous_output_index}; each directive requires a unique output"
-            )
-        own_inputs = set(map(str, directive["inputs"]))
-        if output in available and output not in own_inputs:
-            input_owner = input_directive_by_name.get(output)
-            if input_owner is not None:
-                raise ValueError(
-                    f"global merge directive {index} output name {output!r} is an input "
-                    f"of global merge directive {input_owner}; do not chain directives. "
-                    "Combine the complete alias family into one directive, or choose an "
-                    "output name that is not a supplied feature"
-                )
-            if output in pass_through_names:
-                raise ValueError(
-                    f"global merge directive {index} output name {output!r} names an "
-                    "unchanged supplied feature; include it in this directive's inputs, "
-                    "or choose an output name that is not a supplied feature"
-                )
-            raise RuntimeError(  # pragma: no cover - exhaustive partition invariant
-                f"unclassified global merge output collision for {output!r}"
-            )
-        output_directive_by_name[output] = index
-    return {"merge_directives": directives}
-
-
-def _apply_global_candidate_pool_directives(
-    groups: Sequence[Mapping[str, Any]],
-    directives: Sequence[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    """Apply name directives while passing every unmentioned group through unchanged."""
-
-    group_by_name = {str(group["name"]): group for group in groups}
-    position_by_name = {str(group["name"]): index for index, group in enumerate(groups)}
-    directive_by_first_position: dict[int, Mapping[str, Any]] = {}
-    consumed: set[str] = set()
-    for directive in directives:
-        inputs = [str(name) for name in directive["inputs"]]
-        missing = [name for name in inputs if name not in group_by_name]
-        if missing:  # pragma: no cover - validator invariant
-            raise ValueError(f"global merge directive contains unknown input(s): {missing[:8]}")
-        first_position = min(position_by_name[name] for name in inputs)
-        directive_by_first_position[first_position] = directive
-        consumed.update(inputs)
-
-    merged: list[dict[str, Any]] = []
-    for position, raw_group in enumerate(groups):
-        group_name = str(raw_group["name"])
-        position_directive = directive_by_first_position.get(position)
-        if position_directive is not None:
-            inputs = [str(name) for name in position_directive["inputs"]]
-            members = [group_by_name[name] for name in inputs]
-            output_name = str(position_directive["output"])
-            canonical = next(
-                (member for member in members if str(member["name"]) == output_name),
-                _canonical_cluster_member(members),
-            )
-            first = groups[position]
-            merged.append(
-                _materialize_candidate_group(
-                    candidate_id=str(first["candidate_id"]),
-                    members=members,
-                    canonical_name=output_name,
-                    canonical_description=_short_text(
-                        canonical.get("description") or output_name,
-                        max_chars=2_000,
-                    ),
-                )
-            )
-            continue
-        if group_name not in consumed:
-            merged.append(dict(raw_group))
-    return merged
-
-
-def _operationalization_prompt(*, feature_name: str, supporting_evidence: Sequence[str]) -> list[dict[str, str]]:
+    feature_name: str,
+    descriptions: Sequence[str],
+    rationales: Sequence[str],
+    supporting_evidence: Sequence[str],
+) -> list[dict[str, str]]:
     evidence = list(dict.fromkeys(str(item).strip() for item in supporting_evidence if str(item).strip()))
     if not evidence:
-        raise ValueError("operationalization requires readable supporting evidence")
-    return clinical_prompts.messages("04_define_ontology", "Clinical variable: " + clinical_prompts.label(feature_name) + "\n\nExample clinical excerpts\n\n" + "\n\n".join(evidence))
+        raise ValueError("candidate definition requires readable supporting evidence")
+    return clinical_prompts.messages(
+        "04_define_or_decompose",
+        variable_ontology.definition_request_text(
+            name=feature_name,
+            descriptions=descriptions,
+            rationales=rationales,
+            evidence=evidence,
+        ),
+    )
 
+
+def _harmonized_merge_prompt(*, entries: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    text, _identifiers = variable_ontology.merge_listing(entries)
+    return clinical_prompts.messages("03_merge_and_harmonize", text)
 
 
 def _readable_supporting_text(
@@ -4688,23 +4401,6 @@ def _readable_supporting_text(
             if text:
                 texts.append(text)
     return list(dict.fromkeys(texts))
-
-
-def _natural_language_feature_name(value: Any) -> str:
-    """Render an identifier as a short natural-language embedding query."""
-
-    raw = str(value or "").strip()
-    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", raw)
-    words = re.findall(r"[A-Za-z0-9]+", spaced.replace("_", " ").replace("-", " "))
-    rendered: list[str] = []
-    for word in words:
-        if word.isupper():
-            rendered.append(word)
-        elif any(character.isdigit() for character in word) and len(word) <= 8:
-            rendered.append(word.upper())
-        else:
-            rendered.append(word[:1].upper() + word[1:].lower())
-    return " ".join(rendered) or raw
 
 
 def _packet_observable_axes(packet: Mapping[str, Any]) -> list[str]:
@@ -4757,27 +4453,6 @@ def _encode_candidate_selection_texts(
     return matrix / norms
 
 
-def _candidate_registry_text(candidate: Mapping[str, Any]) -> str:
-    name = _natural_language_feature_name(candidate.get("name"))
-    descriptions = list(
-        dict.fromkeys(
-            text
-            for text in [
-                _short_text(candidate.get("description"), max_chars=600),
-                *(
-                    _short_text(member.get("description"), max_chars=600)
-                    for member in list(candidate.get("member_measurements") or [])
-                ),
-            ]
-            if text
-        )
-    )
-    # Exact-name groups can carry thousands of distinct interpretations. The
-    # name remains the primary identity signal; a small deterministic sample of
-    # descriptions supplies enough context for conservative alias matching.
-    return ". ".join([name, *descriptions[:4]])
-
-
 def _packet_support_architectures(packet: Mapping[str, Any]) -> list[str]:
     content = packet.get("content")
     architectures = content.get("source_architectures") if isinstance(content, Mapping) else None
@@ -4786,25 +4461,28 @@ def _packet_support_architectures(packet: Mapping[str, Any]) -> list[str]:
     return list(dict.fromkeys(_string_values(architectures)))
 
 
-def _pack_operationalization_supporting_evidence(
+def _pack_supporting_evidence(
     *,
-    feature_name: str,
+    render: Callable[[Sequence[str]], list[dict[str, str]]],
     supporting_evidence: Sequence[str],
     max_prompt_chars: int,
 ) -> tuple[list[str], dict[str, Any]]:
-    """Pack whole evidence excerpts under a prompt limit with repair headroom."""
+    """Pack whole evidence excerpts under a prompt limit with repair headroom.
+
+    ``render`` builds the exact messages for a list of excerpts, so the budget
+    counts the prose the model receives, including Unicode text.
+    """
 
     evidence = list(
         dict.fromkeys(str(item).strip() for item in supporting_evidence if str(item).strip())
     )
     if not evidence:
-        raise ValueError("operationalization requires readable supporting evidence")
+        raise ValueError("candidate definition requires readable supporting evidence")
     prompt_limit = int(max_prompt_chars)
     repair_headroom = min(16_000, max(512, prompt_limit // 20))
     initial_prompt_budget = prompt_limit - repair_headroom
 
-    # Count exactly the prose the model receives, including Unicode text.
-    template = _operationalization_prompt(feature_name=feature_name, supporting_evidence=[evidence[0]])
+    template = render([evidence[0]])
     fixed_chars_without_list = sum(len(message["content"]) for message in template) - len(evidence[0])
     list_chars = 0
     packed: list[str] = []
@@ -4834,19 +4512,16 @@ def _pack_operationalization_supporting_evidence(
         if not best:
             raise ValueError(
                 "stage2.operationalization_max_prompt_chars is too small for the "
-                "operationalization instructions and one evidence excerpt"
+                "candidate definition instructions and one evidence excerpt"
             )
         packed = [best]
         truncated_items = 1
 
-    messages = _operationalization_prompt(
-        feature_name=feature_name,
-        supporting_evidence=packed,
-    )
+    messages = render(packed)
     prompt_chars = sum(len(message["content"]) for message in messages)
     if prompt_chars > initial_prompt_budget:  # pragma: no cover - exact accounting invariant
         raise RuntimeError(
-            "operationalization evidence packing exceeded its calculated prompt budget"
+            "candidate definition evidence packing exceeded its calculated prompt budget"
         )
     metadata = {
         "available_evidence_items": len(evidence),
@@ -4862,214 +4537,6 @@ def _pack_operationalization_supporting_evidence(
         "request_prompt_limit_chars": prompt_limit,
     }
     return packed, metadata
-
-
-def _ambiguous_operationalization_fallback(
-    *,
-    group: Mapping[str, Any],
-    validation_error: Stage2ResponseValidationError,
-) -> dict[str, Any]:
-    """Return a conservative extraction-ready ontology after exhausted repairs."""
-
-    name = str(group.get("name") or "measurement")
-    readable_name = name.replace("_", " ")
-    description = str(group.get("description") or readable_name).strip()
-    existing_caveats = str(group.get("caveats") or "").strip()
-    fallback_caveat = (
-        "The ontology response remained structurally invalid after bounded repairs; "
-        "the value type is conservatively marked ambiguous for training-fold extraction "
-        "and review."
-    )
-    return {
-        "description": description,
-        "value_type": "ambiguous",
-        "categories_or_unit": [],
-        "measurement_definition": (
-            f"Extract one explicitly documented pretreatment scalar for {readable_name}; "
-            "preserve the documented scalar representation without inventing categories."
-        ),
-        "missing_value_rule": (
-            "Return null when the pretreatment record does not explicitly document one "
-            "unambiguous scalar value."
-        ),
-        "conflict_resolution": {
-            "strategy": "single_or_null",
-            "positive_category": None,
-        },
-        "stability_summary": "Model-authored ontology required a conservative fallback.",
-        "caveats": " ".join(value for value in (existing_caveats, fallback_caveat) if value),
-        "validation_fallback_error": str(validation_error),
-    }
-
-
-def _validate_operationalization(
-    value: Mapping[str, Any],
-    *,
-    group: Mapping[str, Any],
-) -> dict[str, Any]:
-    # Some instruction-following models wrap the requested fields in a named
-    # object or helpfully repeat the feature name/provenance. Those extras are
-    # harmless here: Python never reads them when assembling the final feature.
-    # Prefer the first recognized nested object while preserving usable scalar
-    # fields returned at the top level.
-    normalized = dict(value)
-    if "unit" in normalized or "categories" in normalized:
-        unit, categories = normalized.pop("unit", None), normalized.pop("categories", [])
-        if unit is not None and not isinstance(unit, str):
-            raise ValueError("unit must be a string or null")
-        if not isinstance(categories, list):
-            raise ValueError("categories must be an array")
-        if normalized.get("value_type") == "continuous":
-            if categories:
-                raise ValueError("a continuous measurement requires an empty categories array")
-            normalized["categories_or_unit"] = [unit] if unit else []
-        else:
-            if unit is not None:
-                raise ValueError("categorical and ambiguous variables require a null unit")
-            normalized["categories_or_unit"] = categories
-        if isinstance(normalized.get("caveats"), list):
-            normalized["caveats"] = " ".join(map(str, normalized["caveats"]))
-    for key in ("operationalization", "feature", "definition", "variable", "result"):
-        nested = value.get(key)
-        if isinstance(nested, Mapping):
-            normalized.update(nested)
-            break
-    raw_features = value.get("features")
-    if isinstance(raw_features, Sequence) and not isinstance(raw_features, str):
-        if len(raw_features) == 1 and isinstance(raw_features[0], Mapping):
-            normalized.update(raw_features[0])
-
-    raw_categories = normalized.get("categories_or_unit")
-    if isinstance(raw_categories, Mapping):
-        raw_categories = (
-            raw_categories.get("categories")
-            or raw_categories.get("values")
-            or raw_categories.get("unit")
-        )
-    if raw_categories is None:
-        raw_categories = (
-            normalized.get("categories")
-            or normalized.get("allowed_values")
-            or normalized.get("levels")
-            or normalized.get("unit")
-        )
-    categories = _string_values(raw_categories)
-    raw_value_type = (
-        normalized.get("value_type") or normalized.get("data_type") or normalized.get("type")
-    )
-    if not str(raw_value_type or "").strip():
-        raise ValueError(
-            "operationalization requires the model to choose value_type from "
-            "binary, categorical, continuous, ordinal, or ambiguous"
-        )
-    value_type = str(raw_value_type)
-    value_type = value_type.strip().lower()
-    value_type = {
-        "bool": "binary",
-        "boolean": "binary",
-        "category": "categorical",
-        "numeric": "continuous",
-        "number": "continuous",
-        "unknown": "ambiguous",
-    }.get(value_type, value_type)
-    if value_type not in ALLOWED_VALUE_TYPES:
-        raise ValueError(
-            "operationalization value_type must be binary, categorical, continuous, "
-            f"ordinal, or ambiguous; received {value_type!r}"
-        )
-    if value_type in {"binary", "categorical", "ordinal"}:
-        from .plain_handoff_stage2_analysis import _validated_closed_category_values
-
-        categories = _validated_closed_category_values(
-            value_type=value_type,
-            values=categories,
-            source="operationalization",
-        )
-    description = str(
-        normalized.get("description")
-        or normalized.get("clinical_definition")
-        or normalized.get("summary")
-        or group.get("description")
-        or ""
-    ).strip()
-    measurement_definition = str(
-        normalized.get("measurement_definition")
-        or normalized.get("operational_definition")
-        or normalized.get("extraction_definition")
-        or normalized.get("extraction_instruction")
-        or normalized.get("measurement_rule")
-        or normalized.get("how_to_measure")
-        or (
-            normalized.get("definition")
-            if not isinstance(normalized.get("definition"), Mapping)
-            else ""
-        )
-        or ""
-    ).strip()
-    if not measurement_definition:
-        canonical_name = str(group.get("name") or "measurement").replace("_", " ")
-        canonical_description = description or canonical_name
-        measurement_definition = (
-            f"Extract one pretreatment scalar for {canonical_name} according to this "
-            f"canonical definition: {canonical_description}"
-        )
-    missing_value_rule = str(
-        normalized.get("missing_value_rule")
-        or normalized.get("missingness_rule")
-        or normalized.get("missing_data_rule")
-        or normalized.get("missing_value_handling")
-        or ""
-    ).strip()
-    if not missing_value_rule:
-        missing_value_rule = (
-            "Return null when the pretreatment record does not explicitly document "
-            "a single unambiguous value."
-        )
-    from .plain_handoff_stage2_analysis import _resolved_conflict_resolution
-
-    conflict_resolution = _resolved_conflict_resolution(
-        {
-            "name": str(group.get("name") or ""),
-            "description": description,
-            "value_type": value_type,
-            "categories_or_unit": categories,
-            "measurement_definition": measurement_definition,
-            "missing_value_rule": missing_value_rule,
-            "conflict_resolution": (
-                normalized.get("conflict_resolution")
-                or normalized.get("longitudinal_resolution")
-                or normalized.get("conflict_rule")
-            ),
-        }
-    )
-    architecture_count = len(_candidate_architectures(group))
-    packet_count = len(_string_values(group.get("supporting_packet_ids")))
-    stability_summary = str(
-        normalized.get("stability_summary")
-        or normalized.get("support_summary")
-        or normalized.get("evidence_summary")
-        or ""
-    ).strip()
-    if not stability_summary:
-        stability_summary = (
-            f"Supported by {packet_count} evidence packet(s) across "
-            f"{architecture_count} Stage 1 architecture(s)."
-        )
-    return {
-        "description": description or str(group.get("name") or ""),
-        "value_type": value_type,
-        "categories_or_unit": categories,
-        "measurement_definition": measurement_definition,
-        "missing_value_rule": missing_value_rule,
-        "conflict_resolution": {
-            "strategy": conflict_resolution["strategy"],
-            "positive_category": conflict_resolution["positive_category"],
-        },
-        "stability_summary": stability_summary,
-        "caveats": str(
-            normalized.get("caveats") or normalized.get("limitations") or group.get("caveats") or ""
-        ).strip(),
-    }
 
 
 _SPLIT_PROVENANCE_REMEDY = (
@@ -5882,171 +5349,177 @@ class PlainHandoffStage2:
         )
         return result
 
-    def _operationalize_candidate_group(
+    def _configured_feature(
+        self,
+        *,
+        group: Mapping[str, Any],
+        output_dir: Path | None = None,
+    ) -> dict[str, Any]:
+        """Return an investigator-configured feature unchanged (its definition is locked)."""
+
+        configured = _configured_feature_definitions(group)
+        if len(configured) != 1:
+            raise ValueError(
+                "Stage 2 consolidation attempted to assign more than one supplied "
+                "ontology to one feature group"
+            )
+        definition = dict(configured[0])
+        configured_name = str(definition.pop("name"))
+        group_name = _snake_case_name(group.get("name"), fallback="")
+        if group_name != configured_name:
+            raise ValueError(
+                "Stage 2 consolidation renamed an investigator-configured feature; "
+                f"expected {configured_name!r}, received {group_name!r}"
+            )
+        roles = [
+            role
+            for role in _string_values(definition.pop("roles", []))
+            if role in ALLOWED_ROLES
+        ]
+        if not roles:  # pragma: no cover - config validation invariant
+            raise ValueError(
+                f"Stage 2 configured feature {configured_name!r} has no causal role"
+            )
+        if output_dir is not None:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            _write_json(
+                output_dir / "provided_ontology.json",
+                {
+                    "status": "used_without_model_definition",
+                    "source": "stage2.explicit_features",
+                    "feature": {"name": configured_name, **definition, "roles": roles},
+                },
+            )
+        return {
+            "name": configured_name,
+            **definition,
+            "roles": roles,
+            "supporting_packet_ids": _string_values(group.get("supporting_packet_ids")),
+            "supporting_architectures": _string_values(group.get("supporting_architectures")),
+            "configured_explicit_feature": True,
+        }
+
+    def _define_candidate_group(
         self,
         *,
         group: Mapping[str, Any],
         packet_by_id: Mapping[str, Mapping[str, Any]],
         output_dir: Path | None = None,
     ) -> dict[str, Any]:
-        configured = _configured_feature_definitions(group)
-        if configured:
-            if len(configured) != 1:
-                raise ValueError(
-                    "Stage 2 consolidation attempted to assign more than one supplied "
-                    "ontology to one feature group"
-                )
-            definition = dict(configured[0])
-            configured_name = str(definition.pop("name"))
-            group_name = _snake_case_name(group.get("name"), fallback="")
-            if group_name != configured_name:
-                raise ValueError(
-                    "Stage 2 consolidation renamed an investigator-configured feature; "
-                    f"expected {configured_name!r}, received {group_name!r}"
-                )
-            roles = [
-                role
-                for role in _string_values(definition.pop("roles", []))
-                if role in ALLOWED_ROLES
-            ]
-            if not roles:  # pragma: no cover - config validation invariant
-                raise ValueError(
-                    f"Stage 2 configured feature {configured_name!r} has no causal role"
-                )
-            if output_dir is not None:
-                output_dir.mkdir(parents=True, exist_ok=True)
-                _write_json(
-                    output_dir / "provided_ontology.json",
-                    {
-                        "status": "used_without_model_operationalization",
-                        "source": "stage2.explicit_features",
-                        "feature": {
-                            "name": configured_name,
-                            **definition,
-                            "roles": roles,
-                        },
-                    },
-                )
-            return {
-                "name": configured_name,
-                **definition,
-                "roles": roles,
-                "supporting_packet_ids": _string_values(group.get("supporting_packet_ids")),
-                "supporting_architectures": _string_values(group.get("supporting_architectures")),
-                "configured_explicit_feature": True,
-            }
+        """Define one exact-name candidate group as closed-format variables.
+
+        The reply defines the candidate as one variable or decomposes it into
+        2 to 12 component variables. A group whose reply stays invalid after the
+        bounded repairs is recorded with no variables and leaves the pool.
+        """
 
         ontology_packet_ids = _string_values(group.get("ontology_packet_ids"))
         if not ontology_packet_ids:
             raise ValueError(
                 f"Stage 2 group {group.get('name')!r} has no original evidence packet "
-                "for ontology definition"
+                "for its definition"
             )
         missing_packet_ids = [
             packet_id for packet_id in ontology_packet_ids if packet_id not in packet_by_id
         ]
         if missing_packet_ids:
             raise ValueError(
-                f"Stage 2 group {group.get('name')!r} cites unknown ontology evidence "
+                f"Stage 2 group {group.get('name')!r} cites unknown evidence "
                 f"packet(s): {missing_packet_ids[:8]}"
             )
-        evidence_packets = [packet_by_id[packet_id] for packet_id in ontology_packet_ids]
-        available_supporting_evidence = _readable_supporting_text(evidence_packets)
+        available_supporting_evidence = _readable_supporting_text(
+            [packet_by_id[packet_id] for packet_id in ontology_packet_ids]
+        )
         if not available_supporting_evidence:
             raise ValueError(
                 f"Stage 2 group {group.get('name')!r} has no readable supporting "
-                "evidence for ontology definition"
+                "evidence for its definition"
             )
         feature_name = str(group.get("name") or "")
-        operationalization_prompt_limit = int(self.config.operationalization_max_prompt_chars)
-        supporting_evidence, evidence_packing = _pack_operationalization_supporting_evidence(
-            feature_name=feature_name,
+        members = list(group.get("member_measurements") or []) or [group]
+        descriptions = [
+            str(group.get("description") or ""),
+            *(str(member.get("description") or "") for member in members),
+        ]
+        rationales = [str(member.get("evidence_rationale") or "") for member in members]
+
+        def render(evidence: Sequence[str]) -> list[dict[str, str]]:
+            return _define_or_decompose_prompt(
+                feature_name=feature_name,
+                descriptions=descriptions,
+                rationales=rationales,
+                supporting_evidence=evidence,
+            )
+
+        prompt_limit = int(self.config.operationalization_max_prompt_chars)
+        supporting_evidence, evidence_packing = _pack_supporting_evidence(
+            render=render,
             supporting_evidence=available_supporting_evidence,
-            max_prompt_chars=operationalization_prompt_limit,
+            max_prompt_chars=prompt_limit,
         )
         if (
             evidence_packing["omitted_evidence_items"]
             or evidence_packing["truncated_evidence_items"]
         ):
             LOGGER.warning(
-                "Stage 2 operationalization packed supporting evidence feature=%s "
+                "Stage 2 candidate definition packed supporting evidence feature=%s "
                 "included=%s available=%s prompt_chars=%s prompt_limit=%s",
                 feature_name,
                 evidence_packing["included_evidence_items"],
                 evidence_packing["available_evidence_items"],
                 evidence_packing["prompt_chars"],
-                operationalization_prompt_limit,
+                prompt_limit,
             )
-        messages = _operationalization_prompt(
-            feature_name=feature_name,
-            supporting_evidence=supporting_evidence,
-        )
-        request_config = replace(
-            self.config,
-            max_prompt_chars=operationalization_prompt_limit,
-        )
-        operational = _checkpointed_request_json(
+        return _checkpointed_request_json(
             output_dir=output_dir,
             input_value={
-                "phase": "group_operationalization",
-                "operationalization_schema": OPERATIONALIZATION_SCHEMA_VERSION,
+                "phase": "candidate_ontology_definition",
+                "ontology_definition_schema": variable_ontology.ONTOLOGY_DEFINITION_SCHEMA_VERSION,
                 "candidate_feature_name": feature_name,
                 "ontology_packet_ids": ontology_packet_ids,
                 "supporting_evidence": supporting_evidence,
                 "evidence_packing": evidence_packing,
             },
-            messages=messages,
-            config=request_config,
+            messages=render(supporting_evidence),
+            config=replace(self.config, max_prompt_chars=prompt_limit),
             completion=self.completion,
-            validate=lambda value: _validate_operationalization(value, group=group),
-            validation_fallback=lambda exc: _ambiguous_operationalization_fallback(
-                group=group,
-                validation_error=exc,
-            ),
+            validate=variable_ontology.validate_definition_response,
+            validation_fallback=variable_ontology.definition_fallback,
         )
-        return {
-            "name": str(group["name"]),
-            **operational,
-            # Discovered candidates receive causal roles only from the
-            # fold-local statistical screens. Evidence never pre-selects a role.
-            "roles": [],
-            "supporting_packet_ids": _string_values(group.get("supporting_packet_ids")),
-            "supporting_architectures": _string_values(group.get("supporting_architectures")),
-        }
 
-    def _consolidate_candidate_pool(
+    def _harmonize_variable_pool(
         self,
         *,
         outer_fold: int,
-        groups: Sequence[Mapping[str, Any]],
+        entries: Sequence[Mapping[str, Any]],
         output_dir: Path | None = None,
         seed: int = 42,
     ) -> list[dict[str, Any]]:
-        """Review bounded candidate groups, preserving all unmerged candidates."""
+        """Merge variables that measure the same attribute and harmonize their labels.
 
-        current = [dict(group) for group in sorted(groups, key=_candidate_group_sort_key)]
-        if not current or all(_configured_feature_definitions(group) for group in current):
-            return current
+        Each round partitions the pool into mixed semantic and alphabetical
+        batches; every reviewed batch either merges groups through an explicit
+        label crosswalk or leaves its variables unchanged. Variables with the
+        same name and answer format then merge without a model review.
+        """
+
+        policy = self.config.consolidation_policy
+        batch_size = int(self.config.consolidation_batch_size)
         prompt_limit = int(self.config.consolidation_max_prompt_chars)
         request_config = replace(self.config, max_prompt_chars=prompt_limit)
-        round_summaries: list[dict[str, Any]] = []
-        stopped_reason = "maximum_rounds_reached"
-        policy = self.config.consolidation_policy
-        pool_schema = MIXED_SCHEMA
-        embedding_cache = None
         process_input = {
-            "phase": "iterative_candidate_pool_merge_only_consolidation",
-            "alias_merge_prompt_version": clinical_prompts.ALIAS_MERGE_PROMPT_VERSION,
-            "consolidation_schema": CONSOLIDATION_SCHEMA_VERSION,
-            "global_candidate_pool_schema": pool_schema,
+            "phase": "harmonized_variable_merge",
+            "harmonized_merge_prompt_version": clinical_prompts.HARMONIZED_MERGE_PROMPT_VERSION,
+            "harmonization_schema": variable_ontology.HARMONIZATION_SCHEMA_VERSION,
+            "global_candidate_pool_schema": MIXED_SCHEMA,
             "consolidation_policy": policy.public_dict(),
             "outer_fold": int(outer_fold),
-            "consolidation_batch_size": int(self.config.consolidation_batch_size),
+            "consolidation_batch_size": batch_size,
             "consolidation_max_rounds": int(self.config.consolidation_max_rounds),
             "consolidation_seed": int(seed),
-            "features": [_candidate_pool_feature_view(group) for group in current],
-            "configured_feature_names": [
-                str(group["name"]) for group in current if _configured_feature_definitions(group)
+            "variables": [
+                variable_ontology.entry_view(entry)
+                for entry in sorted(entries, key=variable_ontology.pool_view_name)
             ],
         }
         process_fingerprint = _value_fingerprint(process_input)
@@ -6056,97 +5529,75 @@ class PlainHandoffStage2:
                 output_dir / "input.json",
                 {**process_input, "input_fingerprint": process_fingerprint},
             )
-
+        current, initial_exact = variable_ontology.coalesce_exact_duplicates(
+            entries, entry_prefix="exact_r000"
+        )
+        round_summaries: list[dict[str, Any]] = []
+        stopped_reason = "maximum_rounds_reached"
+        embedding_cache = None
         for round_number in range(1, int(self.config.consolidation_max_rounds) + 1):
+            if len(current) < 2 or all(entry.get("locked") for entry in current):
+                stopped_reason = "nothing_to_merge"
+                break
             round_dir = output_dir / f"round_{round_number:03d}" if output_dir is not None else None
-            if not current:
-                stopped_reason = "candidate_pool_empty"
-                break
-            if all(_configured_feature_definitions(group) for group in current):
-                stopped_reason = "only_explicit_features_remain"
-                break
+            current = sorted(current, key=variable_ontology.pool_view_name)
+            views = [{"name": variable_ontology.pool_view_name(entry)} for entry in current]
+            by_view = {view["name"]: entry for view, entry in zip(views, current)}
             matrix = None
-            if len(current) > self.config.consolidation_batch_size and policy.semantic_fraction:
+            if len(current) > batch_size and policy.semantic_fraction:
                 if embedding_cache is None:
                     embedding_cache = CandidateEmbeddingCache(
                         output_dir / "semantic_embeddings.npz" if output_dir is not None else None,
                         policy, _encode_candidate_selection_texts,
                     )
-                LOGGER.info("Stage 2 semantic grouping fold=%s round=%s candidates=%s", outer_fold, round_number, len(current))
-                matrix = embedding_cache.matrix([_candidate_registry_text(group) for group in current])
-            batches, batch_orderings = mixed_batches(
-                current, batch_size=self.config.consolidation_batch_size,
-                round_number=round_number, seed=int(seed) + 1_000_003 * int(outer_fold),
-                policy=policy, embeddings=matrix,
-            )
-
-            batch_responses: dict[int, dict[str, Any]] = {}
-            jobs: list[dict[str, Any]] = []
-            for batch_number, batch in enumerate(batches, start=1):
-                group_names = [str(group["name"]) for group in batch]
-                configured_feature_names = [
-                    str(group["name"]) for group in batch if _configured_feature_definitions(group)
-                ]
-                if len(configured_feature_names) == len(batch):
-                    batch_responses[batch_number] = {"merge_directives": []}
-                    continue
-                messages = _global_candidate_pool_prompt(
-                    groups=batch,
-                    configured_feature_names=configured_feature_names,
-                    batch_ordering=batch_orderings[batch_number - 1],
+                matrix = embedding_cache.matrix(
+                    [variable_ontology.embedding_text(entry) for entry in current]
                 )
+            batches, batch_orderings = mixed_batches(
+                views, batch_size=batch_size, round_number=round_number,
+                seed=int(seed) + 1_000_003 * int(outer_fold), policy=policy, embeddings=matrix,
+            )
+            batch_entries = [[by_view[view["name"]] for view in batch] for batch in batches]
+            identifiers_by_batch: dict[int, list[str]] = {}
+            responses: dict[int, Mapping[str, Any]] = {}
+            jobs: list[dict[str, Any]] = []
+            for batch_number, members in enumerate(batch_entries, start=1):
+                _listing, identifiers = variable_ontology.merge_listing(members)
+                identifiers_by_batch[batch_number] = identifiers
+                if len(members) < 2 or all(member.get("locked") for member in members):
+                    responses[batch_number] = {"groups": []}
+                    continue
+                messages = _harmonized_merge_prompt(entries=members)
                 prompt_chars = sum(len(message["content"]) for message in messages)
                 if prompt_chars > prompt_limit:
                     raise ValueError(
-                        "one Stage 2 candidate consolidation batch cannot fit the prompt "
-                        f"budget in round {round_number}, batch {batch_number} "
-                        f"({prompt_chars} > {prompt_limit}); reduce "
-                        "stage2.consolidation_batch_size or increase "
+                        "one Stage 2 variable merge batch cannot fit the prompt budget in "
+                        f"round {round_number}, batch {batch_number} ({prompt_chars} > "
+                        f"{prompt_limit}); reduce stage2.consolidation_batch_size or increase "
                         "stage2.consolidation_max_prompt_chars"
                     )
-                feature_views = [_candidate_pool_feature_view(group) for group in batch]
-                group_descriptions = {
-                    str(feature["name"]): tuple(_string_values(feature.get("descriptions")))
-                    for feature in feature_views
-                }
-                jobs.append(
-                    {
-                        "batch_number": batch_number,
-                        "output_dir": (
-                            round_dir / f"batch_{batch_number:03d}"
-                            if round_dir is not None
-                            else None
-                        ),
-                        "input_value": {
-                            "phase": "iterative_candidate_pool_batch_consolidation",
-                            "global_candidate_pool_schema": pool_schema,
-                            "consolidation_policy": policy.public_dict(),
-                            "outer_fold": int(outer_fold),
-                            "round": round_number,
-                            "batch": batch_number,
-                            "ordering": batch_orderings[batch_number - 1],
-                            "consolidation_batch_size": int(self.config.consolidation_batch_size),
-                            "consolidation_max_rounds": int(self.config.consolidation_max_rounds),
-                            "consolidation_seed": int(seed),
-                            "features": feature_views,
-                            "configured_feature_names": configured_feature_names,
-                        },
-                        "messages": messages,
-                        "validate": (
-                            lambda value, names=tuple(group_names), configured=tuple(
-                                configured_feature_names
-                            ), descriptions=group_descriptions: (
-                                _validate_global_candidate_pool_directives(
-                                    value,
-                                    group_names=names,
-                                    configured_feature_names=configured,
-                                    group_descriptions=descriptions,
-                                )
+                jobs.append({
+                    "batch_number": batch_number,
+                    "output_dir": round_dir / f"batch_{batch_number:03d}" if round_dir is not None else None,
+                    "input_value": {
+                        "phase": "harmonized_variable_merge_batch",
+                        "harmonization_schema": variable_ontology.HARMONIZATION_SCHEMA_VERSION,
+                        "global_candidate_pool_schema": MIXED_SCHEMA,
+                        "outer_fold": int(outer_fold),
+                        "round": round_number,
+                        "batch": batch_number,
+                        "ordering": batch_orderings[batch_number - 1],
+                        "variables": [variable_ontology.entry_view(member) for member in members],
+                    },
+                    "messages": messages,
+                    "validate": (
+                        lambda value, ids=tuple(identifiers), batch=tuple(members): (
+                            variable_ontology.validate_merge_response(
+                                value, members=dict(zip(ids, batch))
                             )
-                        ),
-                    }
-                )
-
+                        )
+                    ),
+                })
             validation_fallbacks: dict[int, str] = {}
             if jobs:
                 job_by_batch = {int(job["batch_number"]): job for job in jobs}
@@ -6168,16 +5619,13 @@ class PlainHandoffStage2:
                     for future in concurrent.futures.as_completed(futures):
                         batch_number = futures[future]
                         try:
-                            batch_responses[batch_number] = future.result()
+                            responses[batch_number] = future.result()
                         except Stage2ResponseValidationError as exc:
-                            # Consolidation is an optional semantic reduction.
-                            # Retaining every member of an invalid batch is the
-                            # conservative, lossless fallback and necessarily
-                            # preserves investigator-configured features.
+                            # Merging only reduces the pool. Keeping every
+                            # member of an invalid batch is the lossless fallback.
                             validation_fallbacks[batch_number] = str(exc)
-                            batch_responses[batch_number] = {"merge_directives": []}
-                            job = job_by_batch[batch_number]
-                            batch_output_dir = job["output_dir"]
+                            responses[batch_number] = {"groups": []}
+                            batch_output_dir = job_by_batch[batch_number]["output_dir"]
                             if batch_output_dir is not None:
                                 _write_json(
                                     Path(batch_output_dir) / "fallback.json",
@@ -6186,74 +5634,41 @@ class PlainHandoffStage2:
                                         "completed_at": _now(),
                                         "round": round_number,
                                         "batch": batch_number,
-                                        "retained_feature_names": [
-                                            str(feature["name"])
-                                            for feature in job["input_value"]["features"]
-                                        ],
                                         "validation_error": str(exc),
                                     },
                                 )
                             LOGGER.warning(
-                                "Stage 2 consolidation round=%s batch=%s remained invalid; "
-                                "retaining all %s supplied features unchanged (%s)",
-                                round_number,
-                                batch_number,
-                                len(job["input_value"]["features"]),
-                                exc,
+                                "Stage 2 variable merge round=%s batch=%s remained invalid; "
+                                "keeping its %s variables unchanged (%s)",
+                                round_number, batch_number,
+                                len(batch_entries[batch_number - 1]), exc,
                             )
-
-            next_groups: list[dict[str, Any]] = []
-            directive_count = 0
-            merged_input_count = 0
-            for batch_number, batch in enumerate(batches, start=1):
-                response = batch_responses[batch_number]
-                directives = list(response["merge_directives"])
-                directive_count += len(directives)
-                merged_input_count += sum(
-                    max(0, len(_string_values(directive.get("inputs"))) - 1)
-                    for directive in directives
+            next_entries: list[dict[str, Any]] = []
+            merges: list[dict[str, Any]] = []
+            for batch_number, members in enumerate(batch_entries, start=1):
+                merged, summaries = variable_ontology.apply_merge_groups(
+                    members, identifiers_by_batch[batch_number], responses[batch_number],
+                    entry_prefix=f"r{round_number:03d}_b{batch_number:03d}",
                 )
-                next_groups.extend(
-                    _apply_global_candidate_pool_directives(
-                        batch,
-                        directives,
-                    )
-                )
-
-            next_groups, cross_batch_exact_merges = _coalesce_exact_candidate_group_names(
-                next_groups
+                next_entries.extend(merged)
+                merges.extend(summaries)
+            next_entries, exact = variable_ontology.coalesce_exact_duplicates(
+                next_entries, entry_prefix=f"exact_r{round_number:03d}"
             )
-            for group in next_groups:
-                configured = _configured_feature_definitions(group)
-                if len(configured) > 1:
-                    raise ValueError(
-                        "iterative Stage 2 consolidation attempted to merge distinct "
-                        "investigator-configured features: "
-                        f"{[feature['name'] for feature in configured]}"
-                    )
-                if configured and str(group["name"]) != str(configured[0]["name"]):
-                    raise ValueError(
-                        "iterative Stage 2 consolidation renamed an investigator-configured "
-                        f"feature; expected {configured[0]['name']!r}, received "
-                        f"{group['name']!r}"
-                    )
-
-            changed = bool(merged_input_count or cross_batch_exact_merges)
+            changed = len(next_entries) != len(current)
             round_summary = {
                 "round": round_number,
                 "input_groups": len(current),
                 "batches": len(batches),
                 "model_requested_batches": len(jobs),
-                "explicit_only_batches": len(batches) - len(jobs),
-                "merge_directives": directive_count,
-                "merged_inputs_removed": merged_input_count,
-                "cross_batch_exact_name_merges": cross_batch_exact_merges,
+                "merge_groups": len(merges),
+                "exact_duplicate_merges": len(exact),
                 "validation_fallback_batches": len(validation_fallbacks),
                 "validation_fallback_batch_numbers": sorted(validation_fallbacks),
-                "output_groups": len(next_groups),
+                "output_groups": len(next_entries),
                 "changed": changed,
                 "grouping_batches": dict(Counter(batch_orderings)),
-                "relative_reduction": (len(current) - len(next_groups)) / len(current),
+                "relative_reduction": (len(current) - len(next_entries)) / len(current),
             }
             round_summaries.append(round_summary)
             if round_dir is not None:
@@ -6262,34 +5677,20 @@ class PlainHandoffStage2:
                     {
                         "status": "complete",
                         "completed_at": _now(),
-                        "global_candidate_pool_schema": pool_schema,
                         **round_summary,
+                        "merges": merges,
+                        "exact_duplicates": exact,
                     },
                 )
             LOGGER.info(
-                "Stage 2 iterative consolidation round=%s input_groups=%s "
-                "grouping=%s batches=%s merge_directives=%s "
-                "cross_batch_exact_merges=%s output_groups=%s changed=%s",
-                round_number,
-                len(current),
-                dict(Counter(batch_orderings)),
-                len(batches),
-                directive_count,
-                cross_batch_exact_merges,
-                len(next_groups),
-                changed,
+                "Stage 2 variable merge fold=%s round=%s variables=%s batches=%s "
+                "merge_groups=%s exact_duplicates=%s fallbacks=%s output=%s",
+                outer_fold, round_number, len(current), len(batches), len(merges),
+                len(exact), len(validation_fallbacks), len(next_entries),
             )
-            current = next_groups
+            current = next_entries
             if diminishing_returns(round_summaries, policy):
                 stopped_reason = "diminishing_returns"
-                LOGGER.info("Stage 2 mixed consolidation stopped fold=%s round=%s: last %s successful rounds each removed <%.3f%%",
-                            outer_fold, round_number, policy.early_stop_patience, 100 * policy.early_stop_min_reduction)
-                break
-            if not current:
-                stopped_reason = "candidate_pool_empty"
-                break
-            if all(_configured_feature_definitions(group) for group in current):
-                stopped_reason = "only_explicit_features_remain"
                 break
             if not changed and len(batches) == 1:
                 stopped_reason = (
@@ -6298,12 +5699,13 @@ class PlainHandoffStage2:
                     else "single_batch_no_change"
                 )
                 break
-
+        current = sorted(current, key=variable_ontology.pool_view_name)
         if output_dir is not None:
             _write_json(
                 output_dir / "result.json",
                 {
-                    "groups": current,
+                    "variables": current,
+                    "initial_exact_duplicates": initial_exact,
                     "rounds": round_summaries,
                 },
             )
@@ -6313,11 +5715,12 @@ class PlainHandoffStage2:
                     "status": "complete",
                     "completed_at": _now(),
                     "input_fingerprint": process_fingerprint,
-                    "global_candidate_pool_schema": pool_schema,
+                    "harmonization_schema": variable_ontology.HARMONIZATION_SCHEMA_VERSION,
                     "consolidation_policy": policy.public_dict(),
                     "rounds_executed": len(round_summaries),
                     "stopped_reason": stopped_reason,
-                    "output_groups": len(current),
+                    "input_variables": len(entries),
+                    "output_variables": len(current),
                     "validation_fallback_batches": sum(
                         int(summary["validation_fallback_batches"]) for summary in round_summaries
                     ),
@@ -6334,7 +5737,7 @@ class PlainHandoffStage2:
         output_dir: Path | None = None,
         seed: int = 42,
     ) -> Mapping[str, Any]:
-        """Iteratively consolidate candidate batches, then operationalize routed groups."""
+        """Define every candidate as closed-format variables, then merge and harmonize them."""
 
         configured_candidates = [
             {
@@ -6385,60 +5788,117 @@ class PlainHandoffStage2:
             len(all_candidates),
             len(groups),
         )
-        retained_groups = self._consolidate_candidate_pool(
-            outer_fold=outer_fold,
-            groups=groups,
-            output_dir=(
-                output_dir / "candidate_pool_consolidation_mixed"
-                if output_dir is not None else None
-            ),
-            seed=seed,
-        )
-        features_by_group_id: dict[str, dict[str, Any]] = {}
-        if retained_groups:
+        definition_dir = output_dir / "ontology_definition" if output_dir is not None else None
+        group_dirs = {
+            index: definition_dir / f"group_{index:04d}" if definition_dir is not None else None
+            for index in range(1, len(groups) + 1)
+        }
+        configured: dict[int, dict[str, Any]] = {}
+        discovered: list[tuple[int, Mapping[str, Any]]] = []
+        for index, group in enumerate(groups, start=1):
+            if _configured_feature_definitions(group):
+                configured[index] = self._configured_feature(
+                    group=group, output_dir=group_dirs[index]
+                )
+            else:
+                discovered.append((index, group))
+        definitions: dict[int, Mapping[str, Any]] = {}
+        if discovered:
             with concurrent.futures.ThreadPoolExecutor(
-                max_workers=max(1, min(self.config.workers, len(retained_groups)))
+                max_workers=max(1, min(self.config.workers, len(discovered)))
             ) as executor:
                 futures = {
                     executor.submit(
-                        self._operationalize_candidate_group,
+                        self._define_candidate_group,
                         group=group,
                         packet_by_id=packet_by_id,
-                        output_dir=(
-                            output_dir / "operationalization" / f"group_{group_index:03d}"
-                            if output_dir is not None
-                            else None
-                        ),
-                    ): str(group["candidate_id"])
-                    for group_index, group in enumerate(retained_groups, start=1)
+                        output_dir=group_dirs[index],
+                    ): index
+                    for index, group in discovered
                 }
                 for future in concurrent.futures.as_completed(futures):
-                    features_by_group_id[futures[future]] = future.result()
-        features = [features_by_group_id[str(group["candidate_id"])] for group in retained_groups]
+                    definitions[futures[future]] = future.result()
 
-        dispositions: dict[str, dict[str, str]] = {}
         original_id_set = set(original_ids)
-        for group, feature in zip(retained_groups, features):
-            origins = [
-                origin
-                for origin in _string_values(group.get("origin_candidate_ids"))
-                if origin in original_id_set
-            ]
-            for origin_index, origin in enumerate(origins):
-                dispositions[origin] = {
-                    "status": "retained" if origin_index == 0 else "merged",
-                    "feature_name": str(feature["name"]),
-                    "reason": (
-                        "Retained as the canonical candidate for this scalar measurement."
-                        if origin_index == 0
-                        else "Merged with candidates describing the same scalar measurement."
-                    ),
+        entries: list[dict[str, Any]] = []
+        unmerged: list[dict[str, Any]] = []
+        dropped: dict[str, str] = {}
+        for index, group in enumerate(groups, start=1):
+            provenance = {
+                "origin_candidate_ids": [
+                    origin
+                    for origin in _string_values(group.get("origin_candidate_ids"))
+                    if origin in original_id_set
+                ],
+                "supporting_packet_ids": _string_values(group.get("supporting_packet_ids")),
+                "supporting_architectures": _string_values(group.get("supporting_architectures")),
+            }
+            if index in configured:
+                feature = configured[index]
+                entry_id = f"c{index:04d}"
+                definition = variable_ontology.locked_definition(feature)
+                entry = {
+                    "entry_id": entry_id,
+                    "definition": definition,
+                    "locked": True,
+                    "explicit_feature": feature,
+                    "origin_variable_ids": [entry_id],
+                    "label_map": {f"{entry_id}|{label}": label for label in definition["categories"]},
+                    **provenance,
                 }
+                # A free-text investigator feature has no answer format to share.
+                (entries if definition["value_type"] in variable_ontology.VALUE_TYPES else unmerged).append(entry)
+                continue
+            result = definitions[index]
+            if not result["variables"]:
+                for origin in provenance["origin_candidate_ids"]:
+                    dropped[origin] = (
+                        "No valid closed-format definition after bounded repairs: "
+                        + str(result["reason"])
+                    )
+                continue
+            for number, variable in enumerate(result["variables"], start=1):
+                entry_id = f"d{index:04d}_{number:02d}"
+                entries.append({
+                    "entry_id": entry_id,
+                    "definition": dict(variable),
+                    "locked": False,
+                    "explicit_feature": None,
+                    "origin_variable_ids": [entry_id],
+                    "label_map": {f"{entry_id}|{label}": label for label in variable["categories"]},
+                    **provenance,
+                })
+        LOGGER.info(
+            "Stage 2 candidate definitions fold=%s groups=%s variables=%s dropped_candidates=%s",
+            outer_fold, len(groups), len(entries), len(dropped),
+        )
+        pool = (
+            self._harmonize_variable_pool(
+                outer_fold=outer_fold,
+                entries=entries,
+                output_dir=output_dir / "ontology_harmonization" if output_dir is not None else None,
+                seed=seed,
+            )
+            if entries
+            else []
+        )
+        final_entries = [*pool, *unmerged]
+        names = variable_ontology.unique_feature_names(final_entries)
+        features = []
+        for entry in sorted(final_entries, key=lambda item: names[item["entry_id"]]):
+            feature = variable_ontology.feature_from_entry(entry, name=names[entry["entry_id"]])
+            if not entry.get("explicit_feature"):
+                # Discovered candidates receive causal roles only from the
+                # fold-local statistical screens. Evidence never pre-selects a role.
+                feature["roles"] = []
+            feature["supporting_packet_ids"] = list(entry["supporting_packet_ids"])
+            feature["supporting_architectures"] = list(entry["supporting_architectures"])
+            features.append(feature)
+        dispositions = variable_ontology.dispositions(final_entries, names, dropped, original_ids)
         missing_origins = sorted(original_id_set - set(dispositions))
-        if missing_origins:
+        if missing_origins:  # pragma: no cover - bookkeeping invariant
             raise RuntimeError(
-                "merge-only Stage 2 consolidation lost candidate origin IDs: "
-                f"{missing_origins[:8]}"
+                "Stage 2 consolidation lost candidate origin IDs: " f"{missing_origins[:8]}"
             )
         return {"features": features, "candidate_dispositions": dispositions}
 

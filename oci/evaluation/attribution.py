@@ -224,7 +224,7 @@ class FrozenArtifactReader:
         data = self.read_bytes(path)
         if data is None:
             return None
-        frame = pd.read_csv(io.BytesIO(data), dtype=str, keep_default_na=True)
+        frame = pd.read_csv(io.BytesIO(data), dtype=str, keep_default_na=False, na_values=[""])
         mask_bytes = self.read_bytes(mask_path) if mask_path is not None else None
         if mask_bytes is None or ROW_ID not in frame.columns:
             return frame
@@ -564,10 +564,15 @@ def variable_lineage(
             ancestor_name = str(ancestor.get("name") or "")
         else:
             ancestor_name = name
+        # A decomposed candidate lists every component in feature_names.
         candidates = {
             candidate_id
             for candidate_id, disposition in lineage.dispositions.items()
-            if str(disposition.get("feature_name") or "") == ancestor_name
+            if ancestor_name
+            in {
+                str(disposition.get("feature_name") or ""),
+                *_strings(disposition.get("feature_names")),
+            }
         }
         by_id = lineage.candidates_by_id
         for candidate_id in candidates:

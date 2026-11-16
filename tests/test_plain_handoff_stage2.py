@@ -69,9 +69,32 @@ def _original_evidence_packets(packet_ids):
 def _prompt_job(body):
     if "job" in body:
         return body["job"]
-    if set(body) == {"candidate_feature_name", "supporting_evidence"}:
-        return "operationalize_stage2_candidate_group"
     raise AssertionError(f"unrecognized prompt body keys: {sorted(body)}")
+
+
+def _label_definitions(labels):
+    return {
+        label: {
+            "meaning": f"The patient's state corresponds to level {label}.",
+            "established_by": f"A documented level of {label}.",
+        }
+        for label in labels
+    }
+
+
+def _defined_variable(name, *, value_type="continuous", unit="standard unit", labels=()):
+    labels = list(labels)
+    return {
+        "name": name,
+        "description": name.replace("_", " "),
+        "value_type": value_type,
+        "unit": unit if value_type == "continuous" else None,
+        "categories": labels,
+        "label_definitions": _label_definitions(labels),
+        "measurement_definition": "Extract the last pretreatment value.",
+        "missing_value_rule": "Return null when undocumented.",
+        "conflict_resolution": {"strategy": "latest", "positive_category": None},
+    }
 
 
 def _page_observation(
@@ -521,22 +544,19 @@ def _fake_completion(calls):
                 "basis": "The supplied text reports performance status.",
                 "uncertainty": "",
             }]})
-        if job == "consolidate_stage2_candidate_pool":
+        if job == "merge_and_harmonize_stage2_variables":
             assert "candidate_id" not in messages[1]["content"]
-            return json.dumps({"merge_directives": []})
-        assert job == "operationalize_stage2_candidate_group"
+            return json.dumps({"groups": []})
+        assert job == "define_or_decompose_stage2_candidate"
         assert "packet_id" not in messages[1]["content"]
-        return json.dumps(
-            {
-                "description": "Baseline ECOG performance status.",
-                "value_type": "ordinal",
-                "categories_or_unit": ["ECOG 0", "ECOG 1", "ECOG 2", "ECOG 3", "ECOG 4"],
-                "measurement_definition": "Extract the last pretreatment ECOG score.",
-                "missing_value_rule": "Record undocumented separately from ECOG 0.",
-                "stability_summary": "Supported in the supplied discovery contexts.",
-                "caveats": "Resolve conflicting scores by date.",
-            }
+        variable = _defined_variable(
+            body["candidate_feature_name"],
+            value_type="ordinal",
+            labels=["ECOG 0", "ECOG 1", "ECOG 2", "ECOG 3", "ECOG 4"],
         )
+        variable["description"] = "Baseline ECOG performance status."
+        variable["measurement_definition"] = "Extract the last pretreatment ECOG score."
+        return json.dumps({"action": "define", "reason": "One graded score.", "variables": [variable]})
 
     return complete
 
@@ -641,26 +661,32 @@ def test_configured_feature_is_consolidated_with_discovery_and_keeps_supplied_on
     )
     assert config is not None
     jobs = []
+    levels = ["0", "1", "2", "3", "4"]
 
     def completion(messages, _config):
         body = prompt_inputs(messages)
         job = _prompt_job(body)
         jobs.append(job)
-        assert job == "consolidate_stage2_candidate_pool"
-        assert body["configured_feature_names"] == ["ecog_performance_status"]
-        return json.dumps(
-            {
-                "merge_directives": [
-                    {
-                        "inputs": [
-                            "ecog_performance_status",
-                            "performance_status",
-                        ],
-                        "output": "ecog_performance_status",
-                    }
-                ],
-            }
-        )
+        if job == "define_or_decompose_stage2_candidate":
+            assert body["candidate_feature_name"] == "performance_status"
+            return json.dumps({"action": "define", "reason": "One graded score.", "variables": [
+                _defined_variable("performance_status", value_type="ordinal", labels=levels)]})
+        assert job == "merge_and_harmonize_stage2_variables"
+        by_name = {variable["name"]: variable for variable in body["variables"]}
+        assert by_name["ecog_performance_status"]["locked"] is True
+        assert "Locked: its definition cannot change" in messages[1]["content"]
+        locked = by_name["ecog_performance_status"]["identifier"]
+        found = by_name["performance_status"]["identifier"]
+        return json.dumps({"groups": [{
+            "members": [locked, found],
+            "reason": "The same score.",
+            "definition": {"name": "ecog_performance_status", "value_type": "ordinal",
+                           "unit": None, "categories": levels},
+            "category_crosswalk": [
+                {"member": member, "member_label": level, "shared_label": level}
+                for member in (locked, found) for level in levels
+            ],
+        }]})
 
     runner = PlainHandoffStage2(
         config=config,
@@ -685,7 +711,7 @@ def test_configured_feature_is_consolidated_with_discovery_and_keeps_supplied_on
         output_dir=tmp_path / "consolidation",
     )
 
-    assert jobs == ["consolidate_stage2_candidate_pool"]
+    assert jobs == ["define_or_decompose_stage2_candidate", "merge_and_harmonize_stage2_variables"]
     assert len(result["features"]) == 1
     feature = result["features"][0]
     assert feature["name"] == "ecog_performance_status"
@@ -696,6 +722,7 @@ def test_configured_feature_is_consolidated_with_discovery_and_keeps_supplied_on
     # Configured roles and ontology remain authoritative even when the Stage 1
     # evidence would independently route the alias as a confounder.
     assert feature["roles"] == ["effect_modifier"]
+    assert "label_definitions" not in feature
     assert feature["supporting_packet_ids"] == ["packet_ecog"]
     assert feature["supporting_architectures"] == ["architecture_alpha"]
     assert feature["configured_explicit_feature"] is True
@@ -708,7 +735,12 @@ def test_configured_feature_is_consolidated_with_discovery_and_keeps_supplied_on
             encoding="utf-8"
         )
     )
-    assert provided["status"] == "used_without_model_operationalization"
+    assert provided["status"] == "used_without_model_definition"
+    harmonized = json.loads(
+        (tmp_path / "consolidation" / "ontology_harmonization" / "result.json").read_text()
+    )
+    [entry] = harmonized["variables"]
+    assert entry["label_map"]["d0002_01|3"] == "3"
 
     exact_result = runner._consolidate_candidates(
         outer_fold=2,
@@ -726,11 +758,11 @@ def test_configured_feature_is_consolidated_with_discovery_and_keeps_supplied_on
         ],
         evidence_packets=_original_evidence_packets(["packet_exact"]),
     )
-    assert jobs == ["consolidate_stage2_candidate_pool"]
+    assert len(jobs) == 2
     assert [feature["name"] for feature in exact_result["features"]] == ["ecog_performance_status"]
 
 
-def test_global_consolidation_merges_aliases_and_retains_all_candidates_for_screening(
+def test_candidates_are_defined_or_decomposed_then_merged_with_a_label_crosswalk(
     tmp_path: Path,
 ):
     prompt_bodies = []
@@ -752,10 +784,16 @@ def test_global_consolidation_merges_aliases_and_retains_all_candidates_for_scre
         {
             "packet_id": "packet_delta",
             "content": {
-                "representative_evidence": [
-                    {"text": "James Lee had several unrelated chart findings."}
-                ]
+                "representative_evidence": [{"text": "Wheezing and cough on examination."}]
             },
+        },
+        {
+            "packet_id": "packet_epsilon",
+            "content": {"representative_evidence": [{"text": "Dyspnea graded as mild."}]},
+        },
+        {
+            "packet_id": "packet_zeta",
+            "content": {"representative_evidence": [{"text": "Shortness of breath: none."}]},
         },
     ]
 
@@ -764,45 +802,48 @@ def test_global_consolidation_merges_aliases_and_retains_all_candidates_for_scre
         body = prompt_inputs(messages)
         prompt_bodies.append(body)
         job = _prompt_job(body)
-        if job == "consolidate_stage2_candidate_pool":
-            names = [feature["name"] for feature in body["features"]]
-            if "glycemia" not in names:
-                assert "james_lee_clinical_profile" in names
-                return json.dumps({"merge_directives": []})
-            assert names == [
-                "blood_glucose_concentration",
-                "glycemia",
-                "heart_rate",
-                "james_lee_clinical_profile",
-            ]
-            assert "clinical_question" not in body
-            assert body["features"][-1]["descriptions"] == [
-                "A named patient's multi-variable clinical profile."
-            ]
-            assert "candidate_id" not in rendered
-            assert "group_id" not in rendered
-            return json.dumps(
-                {
-                    "merge_directives": [
-                        {
-                            "inputs": ["blood_glucose_concentration", "glycemia"],
-                            "output": "blood_glucose_concentration",
-                        }
-                    ],
-                }
-            )
-        assert job == "operationalize_stage2_candidate_group"
-        return json.dumps(
-            {
-                "description": body["candidate_feature_name"].replace("_", " "),
-                "value_type": "continuous",
-                "categories_or_unit": ["standard unit"],
-                "measurement_definition": "Extract the last pretreatment scalar value.",
-                "missing_value_rule": "Return null when undocumented.",
-                "stability_summary": "Supported by candidate evidence.",
-                "caveats": "",
-            }
-        )
+        assert "candidate_" not in rendered and "packet_" not in rendered
+        if job == "define_or_decompose_stage2_candidate":
+            name = body["candidate_feature_name"]
+            if name == "chest_examination_findings":
+                return json.dumps({"action": "decompose", "reason": "Two findings.", "variables": [
+                    _defined_variable("wheezing_on_examination", value_type="binary",
+                                      labels=["Present", "Absent"]),
+                    _defined_variable("cough_on_examination", value_type="binary",
+                                      labels=["Present", "Absent"]),
+                ]})
+            if name == "dyspnea_severity":
+                return json.dumps({"action": "define", "reason": "A grade.", "variables": [
+                    _defined_variable(name, value_type="ordinal", labels=["None", "Mild", "Severe"])]})
+            if name == "breathlessness_grade":
+                return json.dumps({"action": "define", "reason": "A grade.", "variables": [
+                    _defined_variable(name, value_type="ordinal", labels=["absent", "mild", "severe"])]})
+            return json.dumps({"action": "define", "reason": "One quantity.",
+                               "variables": [_defined_variable(name)]})
+        assert job == "merge_and_harmonize_stage2_variables"
+        ids = {variable["name"]: variable["identifier"] for variable in body["variables"]}
+        groups = []
+        if "glycemia" in ids:
+            groups.append({
+                "members": [ids["blood_glucose_concentration"], ids["glycemia"]],
+                "reason": "The same analyte.",
+                "definition": _defined_variable("blood_glucose_concentration", unit="mg/dL"),
+                "category_crosswalk": [],
+            })
+        if "breathlessness_grade" in ids:
+            levels = ["None", "Mild", "Severe"]
+            groups.append({
+                "members": [ids["dyspnea_severity"], ids["breathlessness_grade"]],
+                "reason": "The same symptom grade.",
+                "definition": _defined_variable("dyspnea_severity", value_type="ordinal", labels=levels),
+                "category_crosswalk": [
+                    *({"member": ids["dyspnea_severity"], "member_label": level, "shared_label": level}
+                      for level in levels),
+                    *({"member": ids["breathlessness_grade"], "member_label": label,
+                       "shared_label": level} for label, level in zip(["absent", "mild", "severe"], levels)),
+                ],
+            })
+        return json.dumps({"groups": groups})
 
     runner = PlainHandoffStage2(
         config=PlainHandoffStage2Config(
@@ -814,45 +855,23 @@ def test_global_consolidation_merges_aliases_and_retains_all_candidates_for_scre
     )
     candidates = [
         {
-            "candidate_id": "candidate_0001",
-            "architecture": "architecture_alpha",
-            "name": "blood_glucose_concentration",
-            "description": "Laboratory analyte A.",
-            "value_type": "continuous",
-            "supporting_packet_ids": ["packet_alpha"],
-            "evidence_axes": ["treatment", "outcome"],
-            "caveats": "",
-        },
-        {
-            "candidate_id": "candidate_0002",
-            "architecture": "architecture_beta",
-            "name": "glycemia",
-            "description": "Metabolic measurement B.",
-            "value_type": "continuous",
-            "supporting_packet_ids": ["packet_beta"],
-            "evidence_axes": ["residual_effect"],
-            "caveats": "",
-        },
-        {
-            "candidate_id": "candidate_0003",
-            "architecture": "architecture_gamma",
-            "name": "heart_rate",
-            "description": "Pretreatment heart rate.",
-            "value_type": "continuous",
-            "supporting_packet_ids": ["packet_gamma"],
+            "candidate_id": f"candidate_{index:04d}",
+            "architecture": f"architecture_{index}",
+            "name": name,
+            "description": description,
+            "value_type": "ambiguous",
+            "supporting_packet_ids": [packet],
             "evidence_axes": ["outcome"],
             "caveats": "",
-        },
-        {
-            "candidate_id": "candidate_0004",
-            "architecture": "architecture_delta",
-            "name": "james_lee_clinical_profile",
-            "description": "A named patient's multi-variable clinical profile.",
-            "value_type": "ambiguous",
-            "supporting_packet_ids": ["packet_delta"],
-            "evidence_axes": ["unclear"],
-            "caveats": "",
-        },
+        }
+        for index, (name, description, packet) in enumerate([
+            ("blood_glucose_concentration", "Laboratory analyte A.", "packet_alpha"),
+            ("glycemia", "Metabolic measurement B.", "packet_beta"),
+            ("heart_rate", "Pretreatment heart rate.", "packet_gamma"),
+            ("chest_examination_findings", "Findings of the chest examination.", "packet_delta"),
+            ("dyspnea_severity", "Severity of dyspnea.", "packet_epsilon"),
+            ("breathlessness_grade", "Grade of breathlessness.", "packet_zeta"),
+        ], start=1)
     ]
 
     result = runner._consolidate_candidates(
@@ -862,40 +881,90 @@ def test_global_consolidation_merges_aliases_and_retains_all_candidates_for_scre
         output_dir=tmp_path / "consolidation",
     )
 
-    assert [feature["name"] for feature in result["features"]] == [
+    by_name = {feature["name"]: feature for feature in result["features"]}
+    assert sorted(by_name) == [
         "blood_glucose_concentration",
+        "cough_on_examination",
+        "dyspnea_severity",
         "heart_rate",
-        "james_lee_clinical_profile",
+        "wheezing_on_examination",
     ]
-    assert result["features"][0]["supporting_packet_ids"] == [
+    assert by_name["blood_glucose_concentration"]["categories_or_unit"] == ["mg/dL"]
+    assert by_name["blood_glucose_concentration"]["supporting_packet_ids"] == [
         "packet_alpha",
         "packet_beta",
     ]
-    assert [feature["roles"] for feature in result["features"]] == [[], [], []]
-    assert result["candidate_dispositions"]["candidate_0001"]["status"] == "retained"
-    assert result["candidate_dispositions"]["candidate_0002"]["status"] == "merged"
-    assert result["candidate_dispositions"]["candidate_0003"]["status"] == "retained"
-    assert result["candidate_dispositions"]["candidate_0004"]["status"] == "retained"
-    assert [_prompt_job(body) for body in prompt_bodies].count(
-        "consolidate_stage2_candidate_pool"
-    ) == 2
-    assert [_prompt_job(body) for body in prompt_bodies].count(
-        "operationalize_stage2_candidate_group"
-    ) == 3
-    assert not (tmp_path / "consolidation" / "causal_role_filter.json").exists()
-    ontology_bodies = {
+    dyspnea = by_name["dyspnea_severity"]
+    assert dyspnea["categories_or_unit"] == ["None", "Mild", "Severe"]
+    assert list(dyspnea["label_definitions"]) == ["None", "Mild", "Severe"]
+    assert all(feature["value_type"] != "ambiguous" for feature in result["features"])
+    assert all(feature["roles"] == [] for feature in result["features"])
+    dispositions = result["candidate_dispositions"]
+    assert dispositions["candidate_0001"]["status"] == "retained"
+    assert dispositions["candidate_0002"]["status"] == "merged"
+    assert dispositions["candidate_0002"]["feature_name"] == "blood_glucose_concentration"
+    assert dispositions["candidate_0003"]["status"] == "retained"
+    assert dispositions["candidate_0004"]["status"] == "decomposed"
+    assert dispositions["candidate_0004"]["feature_names"] == [
+        "cough_on_examination", "wheezing_on_examination"]
+    jobs = [_prompt_job(body) for body in prompt_bodies]
+    assert jobs.count("define_or_decompose_stage2_candidate") == 6
+    assert jobs.count("merge_and_harmonize_stage2_variables") >= 1
+    definition_bodies = {
         body["candidate_feature_name"]: body
         for body in prompt_bodies
-        if _prompt_job(body) == "operationalize_stage2_candidate_group"
+        if _prompt_job(body) == "define_or_decompose_stage2_candidate"
     }
-    assert ontology_bodies["blood_glucose_concentration"]["supporting_evidence"] == [
-        "Blood glucose measured 105 mg/dL.",
-        "Glycemia was documented numerically.",
+    assert definition_bodies["heart_rate"]["supporting_evidence"] == ["Resting pulse was 72 bpm."]
+    harmonized = json.loads(
+        (tmp_path / "consolidation" / "ontology_harmonization" / "result.json").read_text()
+    )
+    [dyspnea_entry] = [
+        entry for entry in harmonized["variables"] if entry["definition"]["name"] == "dyspnea_severity"
     ]
-    assert ontology_bodies["heart_rate"]["supporting_evidence"] == ["Resting pulse was 72 bpm."]
-    assert ontology_bodies["james_lee_clinical_profile"]["supporting_evidence"] == [
-        "James Lee had several unrelated chart findings."
-    ]
+    assert dyspnea_entry["label_map"]["d0006_01|absent"] == "None"
+    assert dyspnea_entry["origin_candidate_ids"] == ["candidate_0005", "candidate_0006"]
+
+    # A resumed fold reuses every saved request.
+    runner.completion = lambda *_: pytest.fail("A saved LLM request was repeated")
+    assert runner._consolidate_candidates(
+        outer_fold=1,
+        candidates=candidates,
+        evidence_packets=evidence_packets,
+        output_dir=tmp_path / "consolidation",
+    ) == result
+
+
+def test_candidate_without_a_valid_closed_definition_is_dropped(tmp_path: Path):
+    def completion(messages, _config):
+        body = prompt_inputs(messages)
+        assert _prompt_job(body) == "define_or_decompose_stage2_candidate"
+        variable = _defined_variable("free_text_profile", value_type="ambiguous")
+        return json.dumps({"action": "define", "reason": "Free text.", "variables": [variable]})
+
+    runner = PlainHandoffStage2(
+        config=PlainHandoffStage2Config(
+            endpoint="http://stage2.test/v1", model="test-model", max_response_repairs=1,
+        ),
+        clinical_question="Estimate a treatment effect.",
+        completion=completion,
+    )
+    result = runner._consolidate_candidates(
+        outer_fold=1,
+        candidates=[{
+            "candidate_id": "candidate_0001", "architecture": "architecture_alpha",
+            "name": "free_text_profile", "description": "A narrative profile.",
+            "value_type": "ambiguous", "supporting_packet_ids": ["packet_alpha"],
+            "evidence_axes": ["outcome"], "caveats": "",
+        }],
+        evidence_packets=_original_evidence_packets(["packet_alpha"]),
+        output_dir=tmp_path / "consolidation",
+    )
+    assert result["features"] == []
+    disposition = result["candidate_dispositions"]["candidate_0001"]
+    assert disposition["status"] == "dropped"
+    assert "ambiguous type" in disposition["reason"]
+    assert (tmp_path / "consolidation" / "ontology_definition" / "group_0001" / "fallback.json").is_file()
 
 
 def test_llm_harmonizes_generic_mixed_values_and_applies_plan_to_heldout(
@@ -1080,10 +1149,12 @@ def test_plain_stage2_is_fold_scoped_and_resumable(tmp_path: Path):
     assert definitions["features"][0]["roles"] == []
     # Architecture-stratified compilation interprets the two producers
     # independently, then deterministically coalesces their exact shared name
-    # before iterative semantic batches.
+    # before its one definition request; a single variable needs no merge review.
     assert calls.count("infer_clinical_features_from_text_evidence") == 2
-    assert calls.count("consolidate_stage2_candidate_pool") == 1
-    assert calls.count("operationalize_stage2_candidate_group") == 1
+    assert calls.count("define_or_decompose_stage2_candidate") == 1
+    assert calls.count("merge_and_harmonize_stage2_variables") == 0
+    assert list(definitions["features"][0]["label_definitions"]) == [
+        "ECOG 0", "ECOG 1", "ECOG 2", "ECOG 3", "ECOG 4"]
 
     second = run_plain_handoff_stage2(
         handoff_path=handoff,
@@ -1094,7 +1165,7 @@ def test_plain_stage2_is_fold_scoped_and_resumable(tmp_path: Path):
     )
 
     assert second["features_by_fold"] == {"1": 1}
-    assert len(calls) == 4
+    assert len(calls) == 3
 
     rows[0]["evidence"] = _tfidf_topic_payload(
         "treatment-ecog", ["ECOG", "poor performance status", "newly compiled evidence"]
@@ -1538,6 +1609,7 @@ def test_repeated_training_extraction_failures_refine_ontology_and_reextract(
                     "description": "Pretreatment overall disease stage group.",
                     "value_type": "ordinal",
                     "categories_or_unit": ["stage_iii", "stage_iv"],
+                    "label_definitions": _label_definitions(["stage_iii", "stage_iv"]),
                     "measurement_definition": (
                         "Extract the explicitly documented pretreatment overall stage group."
                     ),

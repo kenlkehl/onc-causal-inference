@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping
 
 from .stage2_prompt_catalog import (  # noqa: F401 - versions are read as module attributes
-    ALIAS_MERGE_PROMPT_VERSION,
+    HARMONIZED_MERGE_PROMPT_VERSION,
     PROMPT_VERSION,
     SYSTEM_PROMPTS,
 )
@@ -79,6 +79,26 @@ def scalar(value) -> str:
     return json.dumps(value, ensure_ascii=False, allow_nan=False)
 
 
+def label_definitions(feature):
+    """The two-part definitions of a closed variable's current labels, in label order.
+
+    Only labels that are still declared are returned, so a definition whose
+    categories were later revised never shows a stale label.
+    """
+
+    raw = feature.get("label_definitions")
+    if feature.get("value_type") == "continuous" or not isinstance(raw, Mapping):
+        return {}
+    result = {}
+    for category in feature.get("categories_or_unit") or []:
+        item = raw.get(str(category))
+        if isinstance(item, Mapping) and str(item.get("meaning") or "").strip() and str(
+                item.get("established_by") or "").strip():
+            result[str(category)] = {"meaning": str(item["meaning"]).strip(),
+                                     "established_by": str(item["established_by"]).strip()}
+    return result
+
+
 def feature_text(feature, *, include_conflict=True):
     # Quote the complete label so a colon in a split component is part of its
     # name, rather than a delimiter between the variable and its definition.
@@ -93,6 +113,11 @@ def feature_text(feature, *, include_conflict=True):
     if categories:
         title = "Unit" if feature.get("value_type") == "continuous" else "Allowed categories"
         lines.append(f"- {title}: " + "; ".join(map(str, categories)))
+    definitions = label_definitions(feature)
+    if definitions:
+        lines.append("- Label definitions:")
+        lines.extend(f"  - {name}: {item['meaning']} Established by: {item['established_by']}"
+                     for name, item in definitions.items())
     conflict = feature.get("conflict_resolution")
     if include_conflict and isinstance(conflict, Mapping):
         strategy = conflict.get("strategy", "single_or_null")

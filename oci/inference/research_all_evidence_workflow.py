@@ -2356,7 +2356,8 @@ def _heldout_measurement_cache_snapshot(
             f"{source_outer_dir.name} completed held-out extraction has invalid "
             "feature identities"
         )
-    raw_frame = pd.read_csv(raw_path)
+    # Only empty cells are missing: a category label such as None or NA stays a label.
+    raw_frame = pd.read_csv(raw_path, keep_default_na=False, na_values=[""])
     if list(raw_frame.columns) != ["_oci_row_id", *names]:
         raise RuntimeError(
             f"{source_outer_dir.name} completed held-out extraction columns do not "
@@ -2716,7 +2717,7 @@ def prepare_stage2_reselection(
             raise RuntimeError(
                 f"outer fold {outer_fold} has no frozen all-candidate training matrix"
             )
-        matrix = pd.read_csv(matrix_path)
+        matrix = pd.read_csv(matrix_path, keep_default_na=False, na_values=[""])
         if list(matrix.columns) != ["_oci_row_id", *feature_names]:
             raise RuntimeError(
                 f"outer fold {outer_fold} all-candidate matrix columns do not match "

@@ -36,6 +36,7 @@ from .nuisance_diagnostics import (
 )
 from . import stage2_request_audit as request_audit
 from . import stage2_clinical_prompts as clinical_prompts
+from . import stage2_variable_ontology as variable_ontology
 from . import stage2_modeling_pool as modeling
 
 from ..models.causal_forest_head import CausalForestHead
@@ -356,7 +357,8 @@ def _load_frozen_preselection_snapshot(
         raise RuntimeError("frozen preselection matrix_path escapes its outer-fold directory")
     if not matrix_path.is_file():
         raise RuntimeError(f"frozen preselection matrix is missing: {matrix_path}")
-    matrix = pd.read_csv(matrix_path)
+    # Only empty cells are missing: a category label such as None or NA stays a label.
+    matrix = pd.read_csv(matrix_path, keep_default_na=False, na_values=[""])
     if _frame_fingerprint(matrix) != snapshot.get("matrix_snapshot_fingerprint"):
         raise RuntimeError(f"frozen preselection matrix changed after migration: {matrix_path}")
 
@@ -674,6 +676,11 @@ def _prompt_feature_definitions(
         }
         if str(row.get("value_type")) in {"binary", "categorical", "ordinal"}:
             row["categories_or_unit"] = _declared_categories(row)
+            label_definitions = clinical_prompts.label_definitions(
+                {**row, "label_definitions": definition.get("label_definitions")}
+            )
+            if label_definitions:
+                row["label_definitions"] = label_definitions
         if str(row.get("value_type")) == "continuous":
             row["accepted_representations"] = (
                 "one JSON number, or one documented categorical/threshold string when "
@@ -1060,6 +1067,13 @@ def _category_ontology_plan(
                 "prior_extracted_value": issue["prior_extracted_value"],
                 "occurrence_count": 0,
             }
+            label_definitions = clinical_prompts.label_definitions({
+                "value_type": item_by_key[key]["value_type"],
+                "categories_or_unit": item_by_key[key]["allowed_categories"],
+                "label_definitions": definition.get("label_definitions"),
+            })
+            if label_definitions:
+                item_by_key[key]["label_definitions"] = label_definitions
             targets_by_key[key] = []
         item_by_key[key]["occurrence_count"] += 1
         targets_by_key[key].append(
@@ -5856,7 +5870,11 @@ def _validate_ontology_refinement(
     """Validate a clarification or an explicit decomposition into scalar features."""
     if value.get("action") == "revise" and "definition" in value:
         fields = {"description", "value_type", "categories_or_unit", "measurement_definition", "missing_value_rule"}
-        if set(value) != {"action", "reason", "definition"} or not isinstance(value["definition"], Mapping) or set(value["definition"]) != fields:
+        if (
+            set(value) != {"action", "reason", "definition"}
+            or not isinstance(value["definition"], Mapping)
+            or set(value["definition"]) - {"label_definitions"} != fields
+        ):
             raise ValueError("a revision requires reason and a complete clinical definition")
         value = {"action": "revise", "reason": value["reason"], **value["definition"]}
 
@@ -5925,19 +5943,30 @@ def _validate_ontology_refinement(
     missing_value_rule = str(value.get("missing_value_rule") or "").strip()
     if not description:
         raise ValueError("a revised ontology requires description")
-    if value_type not in {"binary", "categorical", "continuous", "ordinal", "ambiguous"}:
-        raise ValueError("a revised ontology requires an operational value_type")
+    if value_type not in {"binary", "categorical", "continuous", "ordinal"}:
+        raise ValueError(
+            "a revised ontology requires a closed value_type: continuous, binary, "
+            "categorical, or ordinal (there is no free-text or ambiguous type)"
+        )
     if not isinstance(categories, list):
         raise ValueError("a revised ontology requires a categories_or_unit array")
     clean_categories = [str(item).strip() for item in categories if str(item).strip()]
+    label_definitions: dict[str, dict[str, str]] = {}
     if value_type in {"binary", "categorical", "ordinal"}:
+        declared = list(clean_categories)
         clean_categories = _validated_closed_category_values(
             value_type=value_type,
             values=clean_categories,
             source=f"refined feature {feature['feature_id']!r}",
         )
-    elif value_type == "ambiguous" and clean_categories:
-        raise ValueError("an ambiguous scalar has no declared categories or unit")
+        label_definitions, problems = variable_ontology.normalize_label_definitions(
+            value.get("label_definitions"),
+            clean_categories,
+            "a revised ontology",
+            ignored_labels=[item for item in declared if item not in clean_categories],
+        )
+        if problems:
+            raise ValueError("; ".join(problems))
     elif value_type == "continuous" and len(clean_categories) > 1:
         raise ValueError("a revised continuous ontology may name at most one unit")
     if not measurement_definition:
@@ -5949,6 +5978,7 @@ def _validate_ontology_refinement(
             "description": description,
             "value_type": value_type,
             "categories_or_unit": clean_categories,
+            "label_definitions": label_definitions,
             "measurement_definition": measurement_definition,
             "missing_value_rule": missing_value_rule,
         }
@@ -5957,8 +5987,8 @@ def _validate_ontology_refinement(
 
 
 ONTOLOGY_DEFINITION_FIELDS = (
-    "description", "value_type", "categories_or_unit", "measurement_definition",
-    "missing_value_rule",
+    "description", "value_type", "categories_or_unit", "label_definitions",
+    "measurement_definition", "missing_value_rule",
 )
 
 
@@ -6022,7 +6052,7 @@ def _request_scalar_ontology_decision(*, messages, feature, request_json, output
         messages = [*original_messages, {"role": "assistant", "content": json.dumps(decision)},
                     {"role": "user", "content": "The proposed definition failed its scalar contract check: "
                      + check["reason"] + " Correct the definition or split it into independent scalar variables. "
-                     "Ambiguous is an allowed type; never invent category labels to satisfy a schema."}]
+                     "Never invent category labels to satisfy a schema."}]
     # Keeping the original measurements is safer than replacing them with a
     # definition known to be incompatible. This is explicit in the audit.
     return {"feature_id": feature["feature_id"], "feature_name": feature["name"],
@@ -8623,7 +8653,7 @@ def _load_reusable_archived_heldout_measurements(
         source_path = (archive_artifacts / source_relative).resolve()
         if archive_artifacts not in source_path.parents:
             raise ValueError("cached held-out artifact escapes its archive")
-        cached_frame = pd.read_csv(source_path)
+        cached_frame = pd.read_csv(source_path, keep_default_na=False, na_values=[""])
         if _frame_fingerprint(cached_frame) != cache.get("raw_frame_fingerprint"):
             raise ValueError("cached held-out artifact fingerprint changed")
         raw_cached_definitions = cache.get("measurement_definitions")

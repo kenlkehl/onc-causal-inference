@@ -10,13 +10,22 @@ from oci.inference.stage2_candidate_consolidation import (
 from oci.inference import plain_handoff_stage2 as workflow
 
 
-def groups(count):
-    return workflow._materialize_exact_name_groups([
-        {"candidate_id": f"candidate_{i:03d}", "name": f"variable_{i:03d}",
-         "description": f"Measurement {i}.", "architecture": "test",
-         "supporting_packet_ids": [], "evidence_axes": ["outcome"]}
-        for i in range(count)
-    ])
+def entries(count):
+    return [
+        {
+            "entry_id": f"d{index:04d}_01",
+            "definition": {
+                "name": f"variable_{index:03d}", "description": f"Measurement {index}.",
+                "value_type": "continuous", "unit": "mg/dL", "categories": [], "label_definitions": {},
+                "measurement_definition": "Use the latest value.", "missing_value_rule": "Null when absent.",
+                "conflict_resolution": {"strategy": "latest", "positive_category": None},
+            },
+            "locked": False, "explicit_feature": None, "origin_variable_ids": [f"d{index:04d}_01"],
+            "origin_candidate_ids": [f"candidate_{index:03d}"], "supporting_packet_ids": [],
+            "supporting_architectures": ["test"], "label_map": {},
+        }
+        for index in range(1, count + 1)
+    ]
 
 
 def encoder(texts, _model, _device):
@@ -28,16 +37,16 @@ def runner(**kwargs):
         config=workflow.PlainHandoffStage2Config(endpoint="http://test/v1", model="test-model",
                                                workers=2, **kwargs),
         clinical_question="Not used for consolidation",
-        completion=lambda *_: json.dumps({"merge_directives": []}),
+        completion=lambda *_: json.dumps({"groups": []}),
     )
 
 
-def test_mixed_workflow_stops_resumes_and_preserves_origins(tmp_path, monkeypatch):
+def test_harmonized_merge_stops_resumes_and_preserves_origins(tmp_path, monkeypatch):
     monkeypatch.setattr(workflow, "_encode_candidate_selection_texts", encoder)
     model = runner()
-    source = groups(45)
-    result = model._consolidate_candidate_pool(outer_fold=1, groups=source, output_dir=tmp_path)
-    assert result == source
+    source = entries(45)
+    result = model._harmonize_variable_pool(outer_fold=1, entries=source, output_dir=tmp_path)
+    assert sorted(entry["entry_id"] for entry in result) == sorted(entry["entry_id"] for entry in source)
     complete = json.loads((tmp_path / "complete.json").read_text())
     assert complete["stopped_reason"] == "diminishing_returns"
     assert complete["rounds_executed"] == 3
@@ -45,7 +54,19 @@ def test_mixed_workflow_stops_resumes_and_preserves_origins(tmp_path, monkeypatc
     model.completion = lambda *_: pytest.fail("A saved LLM request was repeated")
     monkeypatch.setattr(workflow, "_encode_candidate_selection_texts",
                         lambda *_: pytest.fail("Saved embeddings were recomputed"))
-    assert model._consolidate_candidate_pool(outer_fold=1, groups=source, output_dir=tmp_path) == result
+    assert model._harmonize_variable_pool(outer_fold=1, entries=source, output_dir=tmp_path) == result
+
+
+def test_exact_duplicates_merge_without_a_model_review(tmp_path):
+    model = runner()
+    model.completion = lambda *_: pytest.fail("Exact duplicates need no model review")
+    pair = entries(2)
+    pair[1]["definition"] = dict(pair[0]["definition"], description="Another description.")
+    result = model._harmonize_variable_pool(outer_fold=1, entries=pair, output_dir=tmp_path)
+    [merged] = result
+    assert merged["origin_candidate_ids"] == ["candidate_001", "candidate_002"]
+    complete = json.loads((tmp_path / "complete.json").read_text())
+    assert complete["stopped_reason"] == "nothing_to_merge"
 
 
 @pytest.mark.parametrize("settings", [{"unknown": True}])

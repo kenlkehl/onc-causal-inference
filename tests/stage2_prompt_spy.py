@@ -49,12 +49,15 @@ def install(monkeypatch):
             return result
         monkeypatch.setattr(module, name, wrapped)
 
-    spy(workflow, "_global_candidate_pool_prompt", lambda a: {
-        "job": "consolidate_stage2_candidate_pool",
-        "features": [workflow._candidate_pool_feature_view(g) for g in sorted(a["groups"], key=workflow._candidate_group_sort_key)],
-        "configured_feature_names": list(a["configured_feature_names"]), "batch_ordering": a["batch_ordering"]})
-    spy(workflow, "_operationalization_prompt", lambda a: {
-        "candidate_feature_name": a["feature_name"], "supporting_evidence": list(a["supporting_evidence"])})
+    spy(workflow, "_harmonized_merge_prompt", lambda a: {
+        "job": "merge_and_harmonize_stage2_variables",
+        "variables": [{"identifier": identifier, "locked": bool(entry.get("locked")), **entry["definition"]}
+                      for identifier, entry in zip(
+                          workflow.variable_ontology.merge_listing(a["entries"])[1], a["entries"])]})
+    spy(workflow, "_define_or_decompose_prompt", lambda a: {
+        "job": "define_or_decompose_stage2_candidate",
+        "candidate_feature_name": a["feature_name"], "descriptions": list(a["descriptions"]),
+        "supporting_evidence": list(a["supporting_evidence"])})
     spy(workflow, "_rejected_packet_audit_prompt", lambda a: {
         "job": "audit_unmapped_text_evidence_for_missed_clinical_features",
         "evidence_items": [{"item": i, "text": workflow._readable_supporting_text([p])} for i, p in enumerate(a["packets"], 1)]})
