@@ -23,8 +23,8 @@ from typing import Any, Mapping, Sequence
 from . import stage2_clinical_prompts as clinical_prompts
 from .stage2_documented_unknown import DOCUMENTED_UNKNOWN_RULE, is_unknown_like
 
-ONTOLOGY_DEFINITION_SCHEMA_VERSION = "stage2_define_or_decompose_v2_absent_answers_one_scale"
-HARMONIZATION_SCHEMA_VERSION = "stage2_harmonized_merge_v1_label_crosswalk"
+ONTOLOGY_DEFINITION_SCHEMA_VERSION = "stage2_define_or_decompose_v3_compound_unknown_labels"
+HARMONIZATION_SCHEMA_VERSION = "stage2_harmonized_merge_v2_compound_unknown_labels"
 VALUE_TYPES = ("continuous", "binary", "categorical", "ordinal")
 LABELED_VALUE_TYPES = frozenset({"binary", "categorical", "ordinal"})
 STRATEGIES = ("latest", "earliest", "maximum", "minimum", "mode", "any_positive", "single_or_null")
@@ -47,8 +47,13 @@ _MISSING_LABEL = re.compile(
 # words) duplicates the reserved documented_unknown answer.
 _UNKNOWN_WORDS = re.compile(
     r"\b(unknown|undetermined|indeterminate|pending|not assessed|not evaluated|not determined|"
-    r"equivocal|inconclusive|cannot be (determined|assessed)|could not be determined|"
-    r"un(staged|graded|assessed|evaluated|typed|measured))\b", re.I)
+    r"not assessable|not evaluable|equivocal|inconclusive|uninformative|"
+    r"cannot be (determined|assessed)|could not be determined|"
+    r"un(stag|grad|assess|evaluat|typ|measur)(ed|eable|able))\b", re.I)
+# Words that say a value is missing; they may accompany an unknown-type word
+# ("Not assessed/N/A", "unknown_not_stated") without adding an answer.
+_MISSING_WORDS = re.compile(
+    r"\b(n a|na|not applicable|not (stated|documented|mentioned|reported|recorded|specified|available))\b", re.I)
 _FILLER_WORDS = re.compile(
     r"\b(other|unspecified|not specified|not otherwise specified|nos|unclassified|or|and|"
     r"documented|status|value|result|type)\b", re.I)
@@ -141,7 +146,8 @@ def is_unknown_label(label: str) -> bool:
     text = _plain(label)
     if not _UNKNOWN_WORDS.search(text):
         return False
-    return not _FILLER_WORDS.sub(" ", _UNKNOWN_WORDS.sub(" ", text)).strip()
+    rest = _MISSING_WORDS.sub(" ", _UNKNOWN_WORDS.sub(" ", text))
+    return not _FILLER_WORDS.sub(" ", rest).strip()
 
 
 def is_not_done_label(label: str) -> bool:
@@ -322,6 +328,12 @@ def normalize_variable(
         elif _MISSING_LABEL.match(category):
             problems.append(f"{where} has the label {category!r}, which means the value is not documented: "
                             "remove it and answer null in that case")
+    numbered = [c for c in categories if re.match(r"^(grade|stage|class|level|score)\s*\d", c.strip(), re.I)]
+    worded = [c for c in categories if c not in numbered and not re.search(r"\d", c)
+              and not re.match(r"^(none|absent|no\b|not present|normal)", c.strip(), re.I)]
+    if value_type == "ordinal" and len(numbered) >= 2 and len(worded) >= 2:
+        problems.append(f"{where} mixes numbered levels ({'; '.join(numbered[:4])}) with worded levels "
+                        f"({'; '.join(worded[:4])}): the labels of one variable come from one grading system")
     for parent in categories:
         for child in categories:
             if parent != child and is_sublevel(parent, child):

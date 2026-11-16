@@ -301,3 +301,26 @@ def test_repeated_observation_rule_names_are_resolved_or_taken_from_members():
                                                 ("V02", "present", "Present"), ("V02", "absent", "Absent")])
     rule = ontology.validate_merge_response(reply, members=flags)["groups"][0]["definition"]["conflict_resolution"]
     assert rule == {"strategy": "any_positive", "positive_category": "Present"}
+
+
+@pytest.mark.parametrize("label", ["Not assessed/N/A", "Unstageable / Unknown", "uninformative_indeterminate",
+                                   "Not Assessable", "unknown_not_stated"])
+def test_compound_unknown_labels_are_rejected(label):
+    labels = ["Present", "Absent", label]
+    assert "unknown or undetermined state" in problems(define(variable(
+        value_type="categorical", categories=labels, label_definitions=labelled(labels))))
+
+
+@pytest.mark.parametrize("label", ["Unknown primary", "Not applicable", "Other"])
+def test_genuine_answers_that_contain_unknown_type_words_are_kept(label):
+    labels = ["Lung", "Breast", label]
+    assert ontology.validate_definition_response(define(variable(
+        "primary_site", value_type="categorical", categories=labels, label_definitions=labelled(labels))))
+
+
+def test_one_graded_variable_does_not_mix_numbered_and_worded_levels():
+    labels = ["None", "Mild", "Moderate", "Grade 1", "Grade 2"]
+    assert "one grading system" in problems(define(variable(categories=labels, label_definitions=labelled(labels))))
+    numbered = ["Grade 0", "Grade 1", "Grade 2"]
+    assert ontology.validate_definition_response(define(variable(categories=numbered,
+                                                                 label_definitions=labelled(numbered))))
