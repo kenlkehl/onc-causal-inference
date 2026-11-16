@@ -86,6 +86,45 @@ _STOP_WORDS = frozenset({
 })
 
 
+def canonical_strategy(value: Any) -> str | None:
+    """A named repeated-observation rule, from its name or a name it starts with."""
+
+    key = snake_case(value)
+    key = _STRATEGY_ALIASES.get(key, key)
+    if key in STRATEGIES:
+        return key
+    for prefix, strategy in (("latest_", "latest"), ("most_recent", "latest"), ("earliest_", "earliest"),
+                             ("first_", "earliest"), ("maximum_", "maximum"), ("minimum_", "minimum")):
+        if key.startswith(prefix):
+            return strategy
+    return None
+
+
+def _member_rule(raw: Mapping[str, Any], variables: Mapping[str, Mapping[str, Any]]) -> dict[str, Any] | None:
+    """The members' shared repeated-observation rule (positive label mapped), else latest.
+
+    Used when a merge reply names no recognized rule: the prompt asks for the
+    members' rule, and latest when they differ.
+    """
+
+    rules = {(variables[m]["conflict_resolution"]["strategy"]) for m in variables}
+    if len(rules) != 1:
+        return {"strategy": "latest", "positive_category": None}
+    [strategy] = rules
+    if strategy != "any_positive":
+        return {"strategy": strategy, "positive_category": None}
+    targets = set()
+    for row in raw.get("category_crosswalk") or []:
+        if not isinstance(row, Mapping) or row.get("member") not in variables:
+            continue
+        member = variables[row["member"]]
+        if _resolve(row.get("member_label"), member["categories"]) == member["conflict_resolution"]["positive_category"]:
+            targets.add(str(row.get("shared_label")))
+    if len(targets) == 1:
+        return {"strategy": "any_positive", "positive_category": targets.pop()}
+    return {"strategy": "latest", "positive_category": None}
+
+
 def snake_case(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
 
@@ -329,8 +368,7 @@ def normalize_variable(
     if isinstance(raw_rule, str):
         raw_rule = {"strategy": raw_rule}
     rule = raw_rule if isinstance(raw_rule, Mapping) else {}
-    strategy = str(rule.get("strategy") or "").strip().lower().replace("-", "_")
-    strategy = _STRATEGY_ALIASES.get(strategy, strategy)
+    strategy = canonical_strategy(rule.get("strategy")) or str(rule.get("strategy") or "")
     positive = None
     if strategy not in STRATEGIES:
         problems.append(f"{where} conflict_resolution.strategy {rule.get('strategy')!r} is not one of "
@@ -480,7 +518,13 @@ def validate_merge_response(value: Any, *, members: Mapping[str, Mapping[str, An
                 continue
             definition = dict(fixed)
         else:
-            definition, found = normalize_variable(group.get("definition"), f"group {n} definition")
+            raw_definition = group.get("definition")
+            if isinstance(raw_definition, Mapping):
+                raw_rule = raw_definition.get("conflict_resolution")
+                raw_strategy = raw_rule.get("strategy") if isinstance(raw_rule, Mapping) else raw_rule
+                if canonical_strategy(raw_strategy) is None:
+                    raw_definition = {**raw_definition, "conflict_resolution": _member_rule(group, variables)}
+            definition, found = normalize_variable(raw_definition, f"group {n} definition")
             problems += found
             if found:
                 continue

@@ -279,3 +279,25 @@ def test_continuous_variable_must_use_one_scale_unless_a_conversion_is_stated():
                          measurement_definition="Record the number from validated instruments, converted to "
                                                 "the 0-100 scale with the stated conversion.")
     assert ontology.validate_definition_response(define(converted))
+
+
+def test_repeated_observation_rule_names_are_resolved_or_taken_from_members():
+    assert ontology.canonical_strategy("latest observation") == "latest"
+    assert ontology.canonical_strategy("Most recent documentation") == "latest"
+    assert ontology.canonical_strategy("explicit_statement_precedence") is None
+    members = batch(variable(labels=["None", "Mild"]), variable("other_grade", labels=["None", "Mild"]))
+    shared = variable(labels=["None", "Mild"],
+                      conflict_resolution={"strategy": "explicit statement precedence", "positive_category": None})
+    reply = merge(["V01", "V02"], shared, [(m, label, label) for m in ("V01", "V02") for label in ["None", "Mild"]])
+    normalized = ontology.validate_merge_response(reply, members=members)
+    assert normalized["groups"][0]["definition"]["conflict_resolution"]["strategy"] == "latest"
+    flags = batch(variable("flag", value_type="binary", labels=["Yes", "No"],
+                           conflict_resolution={"strategy": "any_positive", "positive_category": "Yes"}),
+                  variable("flag_b", value_type="binary", labels=["present", "absent"],
+                           conflict_resolution={"strategy": "any_positive", "positive_category": "present"}))
+    shared_flag = variable("flag", value_type="binary", labels=["Present", "Absent"],
+                           conflict_resolution={"strategy": "precedence"})
+    reply = merge(["V01", "V02"], shared_flag, [("V01", "Yes", "Present"), ("V01", "No", "Absent"),
+                                                ("V02", "present", "Present"), ("V02", "absent", "Absent")])
+    rule = ontology.validate_merge_response(reply, members=flags)["groups"][0]["definition"]["conflict_resolution"]
+    assert rule == {"strategy": "any_positive", "positive_category": "Present"}
