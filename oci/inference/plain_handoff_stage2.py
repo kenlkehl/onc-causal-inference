@@ -929,6 +929,10 @@ class PlainHandoffStage2Config:
     # One task's response contract, supplied by its validator. It never enters
     # discovery/measurement identities or the persisted scientific config.
     runtime_response_format: Mapping[str, Any] | None = None
+    # Set only for the one resend after a structured-output request returned a
+    # bare {} (constrained decoding can collapse after reasoning); the resend
+    # keeps every other request control and omits response_format.
+    runtime_unformatted_response: bool = False
     # Absolute monotonic deadline and remaining HTTP-call allowance for one
     # transport-retry turn. These are populated only by the request runner so
     # compatibility negotiation cannot create unbounded hidden attempts.
@@ -1317,6 +1321,7 @@ class PlainHandoffStage2Config:
     def public_dict(self) -> dict[str, Any]:
         values = asdict(self)
         values.pop("runtime_response_format", None)
+        values.pop("runtime_unformatted_response", None)
         values["api_key"] = "<redacted>"
         values["extraction_llm"] = (
             self.extraction_llm.public_dict() if self.extraction_llm is not None else None
@@ -2898,6 +2903,14 @@ def _openai_completion(
         request_policy=request_policy,
         model_family=model_family,
     )
+    if config.runtime_unformatted_response:
+        unformatted_variants: dict[str, dict[str, Any]] = {}
+        for variant in variants:
+            unformatted = {k: v for k, v in variant.items() if k != "response_format"}
+            unformatted_variants.setdefault(
+                json.dumps(unformatted, sort_keys=True, default=str), unformatted
+            )
+        variants = list(unformatted_variants.values())
     streaming = request_policy["request_kind"] == "extraction" and config.extraction_stream
     if streaming:
         variants = [dict(variant, stream=True, stream_options={"include_usage": True})
@@ -3036,7 +3049,36 @@ def _openai_completion(
             _RetryableStage2ResponseError("Stage 2 model returned an empty response"),
             attempts_used=attempts_used,
         )
+    if (
+        kwargs.get("response_format") is not None
+        and _is_empty_json_object(content)
+        and attempts_used < attempt_budget
+    ):
+        # No Stage 2 contract accepts {}; with structured output this is the
+        # server's constrained decoding collapsing, not the model's answer.
+        LOGGER.warning(
+            "Stage 2 structured-output request returned {}; resending once without "
+            "response_format request_id=%s",
+            request_audit.request_id(),
+        )
+        request_audit.event("empty_structured_output_resent_unformatted")
+        return _openai_completion(
+            messages,
+            replace(
+                config,
+                runtime_unformatted_response=True,
+                runtime_request_deadline=logical_deadline,
+                runtime_transport_attempt_budget=attempt_budget - attempts_used,
+            ),
+        )
     return content
+
+
+def _is_empty_json_object(text: str) -> bool:
+    try:
+        return json.loads(text.strip()) == {}
+    except (json.JSONDecodeError, ValueError):
+        return False
 
 
 class _RoundRobinOpenAICompletion:

@@ -176,6 +176,12 @@ reasoning or sampling controls fails the request. Beam 1 may move its reasoning
 level from the top-level field to the template variable and may drop the JSON
 hint or rejected sampling controls, but no Beam request omits the level.
 
+Some servers' constrained decoding collapses after reasoning and returns a bare
+`{}` to a request with a JSON response-format hint. No Stage 2 reply contract
+accepts `{}`, so Stage 2 resends that request once without the hint, keeping
+every other control and using one more HTTP attempt from the same budget,
+before treating the reply as a validation failure.
+
 Timeouts, retries, and repairs are listed in
 [Request and recovery defaults](configuration.md#request-and-recovery-defaults).
 

@@ -12,7 +12,7 @@ Inputs, identity assignment, and validation live in the Python callers.
 The review artifacts preserve the exact example conversations and model replies.
 """
 
-PROMPT_VERSION = "stage2_clinical_prompts_v3_closed_ontologies_20261116"
+PROMPT_VERSION = "stage2_clinical_prompts_v4_absent_answers_20261116"
 HARMONIZED_MERGE_PROMPT_VERSION = "stage2_merge_and_harmonize_v1_20261116"
 
 SYSTEM_PROMPTS = {
@@ -130,7 +130,7 @@ Rules for every variable you return
 - Every label needs a definition with two parts, including each label of a binary variable. meaning is the clinical state of the patient that the label stands for, written in clinical terms rather than record wording, so that an extractor can assign the label from a record that describes the patient's state without naming a level. established_by lists the documented statements that assign the label directly: a grade, score, stage, or category from a recognized system, the label's own term, and common equivalent terms. The excerpts show how some records document the variable; other records may use different words, a different scale, or only a description of the finding and its effects.
 - The extractor applies one order of precedence. A documented statement listed in established_by decides the label. meaning is used only when the record describes the patient's state without such a statement. When the levels come from a recognized grading system, meaning follows that system's own definition of each level; do not borrow criteria from a different scale.
 - When labels group the values of a quantity, meaning gives each label's range in a stated unit and says which label takes a value that falls on a boundary; the ranges cover every value without overlapping. When records state the quantity itself, prefer recording it as a continuous variable. Relative words such as high, low, early, or advanced are not definitions unless a stated boundary defines them.
-- When labels grade the severity of a symptom, sign, or condition that records can document as absent, include a lowest label for its absence, established by an explicit negative statement about this patient. Without it, a record that documents the absence has no answer.
+- When records can state that the attribute is absent or does not apply to this patient (no such finding, no such treatment, no change), the labels include that answer, established by an explicit statement about this patient; when labels grade severity, it is the lowest label. Without it, a record that documents the absence has no answer. When records often describe a measured quantity only as absent or normal instead of giving a number, add a binary presence variable beside the continuous one.
 - Name and describe the clinical attribute itself, not the instrument or form that recorded it in the excerpts, unless the variable is a numeric score that only that instrument produces.
 - A grade with a few defined levels is ordinal, even when records write it as a number. A continuous variable measures one quantity on one scale in one unit. Results from different instruments or scales are different variables unless a stated conversion maps one onto the other; define one variable per scale.
 - The labels of one variable come from one classification system. When records classify the same attribute in two systems (for example a detailed system and a summary system that groups its levels), define one variable per system.

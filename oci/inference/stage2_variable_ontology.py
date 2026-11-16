@@ -23,7 +23,7 @@ from typing import Any, Mapping, Sequence
 from . import stage2_clinical_prompts as clinical_prompts
 from .stage2_documented_unknown import DOCUMENTED_UNKNOWN_RULE, is_unknown_like
 
-ONTOLOGY_DEFINITION_SCHEMA_VERSION = "stage2_define_or_decompose_v1_label_definitions"
+ONTOLOGY_DEFINITION_SCHEMA_VERSION = "stage2_define_or_decompose_v2_absent_answers_one_scale"
 HARMONIZATION_SCHEMA_VERSION = "stage2_harmonized_merge_v1_label_crosswalk"
 VALUE_TYPES = ("continuous", "binary", "categorical", "ordinal")
 LABELED_VALUE_TYPES = frozenset({"binary", "categorical", "ordinal"})
@@ -46,18 +46,26 @@ _MISSING_LABEL = re.compile(
 # A label made only of unknown-type words (optionally with residual or filler
 # words) duplicates the reserved documented_unknown answer.
 _UNKNOWN_WORDS = re.compile(
-    r"\b(unknown|undetermined|indeterminate|pending|not assessed|not evaluated|equivocal|"
-    r"inconclusive|cannot be (determined|assessed)|could not be determined)\b", re.I)
+    r"\b(unknown|undetermined|indeterminate|pending|not assessed|not evaluated|not determined|"
+    r"equivocal|inconclusive|cannot be (determined|assessed)|could not be determined|"
+    r"un(staged|graded|assessed|evaluated|typed|measured))\b", re.I)
 _FILLER_WORDS = re.compile(
     r"\b(other|unspecified|not specified|not otherwise specified|nos|unclassified|or|and|"
     r"documented|status|value|result|type)\b", re.I)
 # "Not tested" in a result variable is an unknown-type answer; a binary
 # performed/not-performed variable may use it as its negative label.
 _NOT_DONE = re.compile(
-    r"\bnot\s+(tested|performed|done|measured|obtained|checked|sent|analy[sz]ed|available)\b", re.I)
+    r"\bnot\s+(tested|performed|done|measured|obtained|checked|sent|analy[sz]ed|available|staged|"
+    r"graded|typed)\b|\buntested\b", re.I)
 _TEST_WORDS = re.compile(r"\b(test|testing|tests|assessment|evaluation|analysis|sample|specimen|yet)\b", re.I)
 # A continuous unit that names several scales.
 _COMPOSITE_UNIT = re.compile(r"\bor\b|\beither\b|instrument|specific|varies|various|depend", re.I)
+# A continuous variable whose number comes from any of several instruments or
+# scales measures different quantities, unless a stated conversion maps them.
+_SEVERAL_SCALES = re.compile(
+    r"\b(any|various|multiple|several|different|other|validated|standardized|available)\b"
+    r"(?:\W+\w+){0,4}?\W+(instruments|scales|scoring systems|questionnaires|tools)\b", re.I)
+_CONVERSION = re.compile(r"\bconver(t|ts|ted|sion)\b", re.I)
 _SCORE_WORDS = re.compile(r"\b(score|grade|scale|rating|severity|class)\b", re.I)
 # A stated range with at most six levels (0-4, 1-5, 2/4) marks a graded score;
 # units, decimals, and durations exclude measured quantities.
@@ -290,6 +298,13 @@ def normalize_variable(
         if unit and _COMPOSITE_UNIT.search(unit):
             problems.append(f"{where} unit {unit!r} names more than one scale: a continuous variable "
                             "measures one quantity on one scale in one unit; define one variable per scale")
+        scale_text = f"{descriptions['description']} {descriptions['measurement_definition']}"
+        several = _SEVERAL_SCALES.search(scale_text)
+        if several and not _CONVERSION.search(scale_text):
+            problems.append(f"{where} takes its number from several instruments or scales "
+                            f"({several.group(0).strip()!r}): a continuous variable measures one quantity "
+                            "on one scale; define one variable per scale, or state the conversion that "
+                            "maps the others onto it")
         if re.search(r"\bgrade\b", f"{name} {unit or ''}".replace("_", " "), re.I):
             problems.append(f"{where} is a grade: give it ordinal labels rather than a number")
         else:

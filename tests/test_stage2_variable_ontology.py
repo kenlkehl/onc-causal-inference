@@ -258,3 +258,24 @@ def test_absent_level_labels_survive_measurement_csv_round_trips(tmp_path):
     assert frame["finding_severity"].tolist()[0] == "None"
     assert pd.isna(frame["finding_severity"].tolist()[1])
     assert frame["finding_severity"].tolist()[2] == "NA"
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"categories": ["Stage I", "Stage II", "Unstaged"],
+      "label_definitions": labelled(["Stage I", "Stage II", "Unstaged"])}, "unknown or undetermined state"),
+    ({"categories": ["Low", "High", "Not graded"],
+      "label_definitions": labelled(["Low", "High", "Not graded"])}, "not done"),
+])
+def test_unstaged_and_ungraded_labels_are_unknown_type(change, message):
+    assert message in problems(define(variable(**change)))
+
+
+def test_continuous_variable_must_use_one_scale_unless_a_conversion_is_stated():
+    several = variable("symptom_score", value_type="continuous", unit="points",
+                       measurement_definition="Record the number from validated patient-reported outcome "
+                                              "instruments or clinical scales.")
+    assert "several instruments or scales" in problems(define(several))
+    converted = variable("symptom_score", value_type="continuous", unit="points",
+                         measurement_definition="Record the number from validated instruments, converted to "
+                                                "the 0-100 scale with the stated conversion.")
+    assert ontology.validate_definition_response(define(converted))

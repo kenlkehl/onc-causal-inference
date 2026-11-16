@@ -212,17 +212,21 @@ range in a stated unit) and the documented statements that establish it (a
 grade or category from a recognized system, the label's own term, and common
 equivalents). A documented statement listed for a label decides it; the meaning
 is used only when the record describes the patient's state without such a
-statement. A severity grade for a finding that records can document as absent
-starts with an absent level. Each definition also states its missing-value rule
+statement. When records can state that the attribute is absent or does not
+apply (no such finding, no such treatment, no change), the labels include that
+answer; for a severity grade it is the lowest level. A quantity that records
+often describe only as absent or normal also gets a binary presence variable.
+Each definition also states its missing-value rule
 and its rule for repeated or conflicting mentions (latest value, maximum, most
 frequent value, any positive mention, and so on). These rules define different
 measurements, so they are part of the variable.
 
 Python checks every reply and asks for a repair when, for example, a label only
-says that the value is unknown or that a test was not done (the reserved
-documented-unknown answer and null cover those states), a level is listed with
-its own sublevels (M1 with M1a), a grade with a few levels is recorded as a
-number, or a continuous unit names several scales. A candidate whose reply is
+says that the value is unknown, unstaged, or that a test was not done (the
+reserved documented-unknown answer and null cover those states), a level is
+listed with its own sublevels (M1 with M1a), a grade with a few levels is
+recorded as a number, or a continuous variable takes its number from several
+instruments or scales without a stated conversion. A candidate whose reply is
 still invalid after the bounded repairs is dropped; `candidate_dispositions` in
 `feature_definitions.json` records it, and every other candidate as retained,
 merged, or decomposed.

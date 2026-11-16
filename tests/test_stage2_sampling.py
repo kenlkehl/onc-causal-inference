@@ -112,3 +112,30 @@ def test_qwen_3_6_35b_a3b_request_policy():
 )
 def test_is_qwen_3_6_35b_a3b(model, expected):
     assert is_qwen_3_6_35b_a3b(model) is expected
+
+
+def test_bare_empty_object_from_structured_output_is_resent_without_response_format(monkeypatch):
+    calls = []
+    replies = iter(["{}", '{"ok": true}'])
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content=next(replies)), finish_reason="stop")])
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("openai.OpenAI", Client)
+    text = stage2._openai_completion([{"role": "user", "content": "Test"}],
+                                     config(model="Qwen/Qwen3.6-35B-A3B-FP8"))
+    assert text == '{"ok": true}'
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in calls[1]
+    assert calls[1]["extra_body"] == calls[0]["extra_body"]
+    assert calls[1]["temperature"] == calls[0]["temperature"]
+    assert "runtime_unformatted_response" not in config().public_dict()

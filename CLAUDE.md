@@ -276,7 +276,9 @@ Configuration rules:
   identity holds a live verification of the same served model on the same
   URLs; the runner is configured from that verification, and the check fails
   the request as exhausted while the endpoint is still down, or stops the run
-  if the live identity would configure it differently. Selection or
+  if the live identity would configure it differently. A bare `{}` reply to a
+  request with a JSON response-format hint is resent once without the hint
+  (`runtime_unformatted_response`), within the same deadline and HTTP budget. Selection or
   estimation policy changes on a completed run go through
   `--stage2-only --stage2-reselect`; under `orthogonal_tests`,
   `estimation_trees` is not part of the selection identity, so changing it
