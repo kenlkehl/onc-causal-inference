@@ -12,7 +12,7 @@ Inputs, identity assignment, and validation live in the Python callers.
 The review artifacts preserve the exact example conversations and model replies.
 """
 
-PROMPT_VERSION = "stage2_clinical_prompts_v4_absent_answers_20261116"
+PROMPT_VERSION = "stage2_clinical_prompts_v5_zero_counts_20261117"
 HARMONIZED_MERGE_PROMPT_VERSION = "stage2_merge_and_harmonize_v1_20261116"
 
 SYSTEM_PROMPTS = {
@@ -135,7 +135,7 @@ Rules for every variable you return
 - A grade with a few defined levels is ordinal, even when records write it as a number. A continuous variable measures one quantity on one scale in one unit. Results from different instruments or scales are different variables unless a stated conversion maps one onto the other; define one variable per scale.
 - The labels of one variable come from one classification system. When records classify the same attribute in two systems (for example a detailed system and a summary system that groups its levels), define one variable per system.
 - A binary presence variable states what documentation counts as its positive label and what explicit statement counts as its negative label.
-- A continuous variable states its unit (null when unitless), the conversion for any other unit records commonly use, and which documented number to record. It has no categories. It may accept a directly reported threshold string such as <1.0; say so in its measurement rule.
+- A continuous variable states its unit (null when unitless), the conversion for any other unit records commonly use, and which documented number to record. A count of findings, lesions, or events is 0 when the record explicitly states that none are present. It has no categories. It may accept a directly reported threshold string such as <1.0; say so in its measurement rule.
 - Use null when the record does not mention the variable or its value cannot be resolved. A negative answer, such as Absent or Not detected, requires an explicit statement about this patient. Every variable also has the reserved answer documented_unknown for a record that explicitly states that the value is unknown, indeterminate, pending, not assessed, or equivocal; do not add categories such as Unknown, Indeterminate, Pending, or Not assessed. State in missing_value_rule when to answer null and when to answer documented_unknown.
 - Choose one rule for repeated observations: latest (the usual choice for ordinary measurements), earliest, maximum, minimum, mode (most frequent value), any_positive (positive if any observation is positive), or single_or_null (use a value only when observations agree). Maximum and minimum apply to numbers; any_positive applies to a binary variable and names its positive label.
 - Give each variable a short, readable snake_case name that states what it measures, following the pattern <test>_result or <finding>_on_examination. When you define the candidate without decomposing it, you may keep its name.

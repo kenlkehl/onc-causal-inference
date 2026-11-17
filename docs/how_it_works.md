@@ -38,17 +38,16 @@ create nested folds and hold the declared definitions and roles fixed.
 >   `science.inner_folds`).
 > - No Stage 1 architecture selector, so the eight default architectures run.
 > - Stage 2 settings at their code defaults, which is what
->   `./run_synthetic.sh` uses: no propensity eligibility bounds, the optional
->   pre-selection measurement consolidation off, matched-batch evidence off,
+>   `./run_synthetic.sh` uses: no propensity eligibility bounds,
+>   pre-selection measurement consolidation on, matched-batch evidence off,
 >   estimand-informed ontology search off, and modifier-concept review off.
 >   Effect modifiers are selected by the default `orthogonal_tests` rule, and
 >   all three final effect models (causal forest, penalized interaction model,
 >   DINA) are fitted and averaged.
 > - The example configuration
->   `example_configs/research_all_evidence_multi_model.json` differs in three
->   scientific settings: it sets propensity eligibility bounds of 0.1 to 0.9,
->   enables pre-selection measurement consolidation, and enables matched-batch
->   evidence. See [Optional extensions](optional_extensions.md) and
+>   `example_configs/research_all_evidence_multi_model.json` differs in two
+>   scientific settings: it sets propensity eligibility bounds of 0.1 to 0.9
+>   and enables matched-batch evidence. See [Optional extensions](optional_extensions.md) and
 >   [Configuration](configuration.md).
 >
 > All patient counts below come from an **illustrative** cohort of 1,000
@@ -214,8 +213,9 @@ equivalents). A documented statement listed for a label decides it; the meaning
 is used only when the record describes the patient's state without such a
 statement. When records can state that the attribute is absent or does not
 apply (no such finding, no such treatment, no change), the labels include that
-answer; for a severity grade it is the lowest level. A quantity that records
-often describe only as absent or normal also gets a binary presence variable.
+answer; for a severity grade it is the lowest level. A count is 0 when the
+record states that none are present. A quantity that records often describe
+only as absent or normal also gets a binary presence variable.
 Each definition also states its missing-value rule
 and its rule for repeated or conflicting mentions (latest value, maximum, most
 frequent value, any positive mention, and so on). These rules define different
@@ -232,7 +232,8 @@ still invalid after the bounded repairs is dropped; `candidate_dispositions` in
 merged, or decomposed.
 
 Variables defined from different cards overlap. The interpretation LLM reviews
-them in bounded batches (20 variables per batch by default), grouped partly by
+them in bounded batches (20 variables per batch by default, at most 3 repairs
+per batch), grouped partly by
 semantic similarity and partly alphabetically, over repeated rounds that stop
 when merges become rare. Each merge writes one shared definition and maps every
 member label to exactly one shared label (a label crosswalk). Python rejects a
@@ -318,9 +319,10 @@ following hold:
 With the illustrative 800 outer-training patients, a candidate observed in 19
 patients is removed and one observed in 20 is kept. The surviving candidates are
 the fold's [catalog](glossary.md#candidate-variable-and-catalog). The full
-extraction remains on disk for audit. If enabled, the optional estimand-informed
-ontology search and the pre-selection measurement consolidation run at this
-point; see [Optional extensions](optional_extensions.md).
+extraction remains on disk for audit. The pre-selection measurement
+consolidation then merges extracted variables that record the same measurement
+(on by default for all-evidence runs), and the optional estimand-informed
+ontology search runs if enabled; see [Optional extensions](optional_extensions.md).
 
 ### 7. Build statistical evidence about every candidate
 

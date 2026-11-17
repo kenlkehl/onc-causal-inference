@@ -73,3 +73,41 @@ def test_exact_duplicates_merge_without_a_model_review(tmp_path):
 def test_invalid_policy_is_rejected(settings):
     with pytest.raises(ValueError):
         policy_from_mapping(settings)
+
+
+def test_merge_batches_use_the_consolidation_repair_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "_encode_candidate_selection_texts", encoder)
+    calls = []
+
+    def invalid(messages, _config):
+        calls.append(1)
+        return json.dumps({"groups": "not an array"})
+
+    model = runner(max_response_repairs=15, consolidation_max_response_repairs=2)
+    model.completion = invalid
+    source = entries(3)
+    result = model._harmonize_variable_pool(outer_fold=1, entries=source, output_dir=tmp_path)
+    # One request and two repairs, then the batch keeps its variables unchanged.
+    assert len(calls) == 3
+    assert sorted(entry["entry_id"] for entry in result) == sorted(entry["entry_id"] for entry in source)
+    assert next(tmp_path.rglob("fallback.json")).is_file()
+
+
+@pytest.mark.parametrize("source, expected", [
+    ({}, True),
+    ({"feature_source": "explicit_only"}, False),
+    ({"selection_consolidation": {"enabled": False}}, False),
+    ({"selection_consolidation": {"neighbor_count": 6}}, True),
+])
+def test_post_extraction_merging_defaults_on_for_all_evidence_runs(source, expected):
+    mapping = {"endpoint": "http://test/v1", "model": "test-model", **source}
+    if mapping.get("feature_source") == "explicit_only":
+        mapping["explicit_features"] = [{
+            "name": "ecog", "description": "ECOG", "value_type": "ordinal",
+            "categories_or_unit": ["0", "1"], "measurement_definition": "Latest ECOG.",
+            "missing_value_rule": "Null when absent.", "roles": ["confounder"]}]
+    config = workflow.plain_stage2_config_from_mapping(mapping, default_workers=1)
+    assert config.selection_consolidation.enabled is expected
+    with pytest.raises(ValueError, match="consolidation_max_response_repairs"):
+        workflow.plain_stage2_config_from_mapping(
+            {**mapping, "consolidation_max_response_repairs": -1}, default_workers=1)

@@ -71,8 +71,8 @@ _ENCODING_LOCK = threading.Lock()
 class Stage2SequentialConsolidationConfig:
     """Policy for the pre-selection sequential consolidation pass."""
 
-    # Off by default for backward compatibility with direct programmatic
-    # callers.  The researcher-facing example configuration enables it.
+    # Off for direct programmatic callers; configuration mappings enable it for
+    # all-evidence runs (plain_handoff_stage2._selection_consolidation_mapping).
     enabled: bool = False
     neighbor_count: int = DEFAULT_NEIGHBOR_COUNT
     embedding_model: str = DEFAULT_EMBEDDING_MODEL

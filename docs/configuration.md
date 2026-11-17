@@ -307,6 +307,7 @@ Configure exactly one of `endpoint`, `endpoints`, or `vllm`.
 | `max_prompt_chars` | 100000 | Character limit for interpretation prompts |
 | `consolidation_batch_size` | 20 | Defined variables per merge-and-harmonize request (minimum 2) |
 | `consolidation_max_rounds` | 55 | Maximum merge-and-harmonize rounds |
+| `consolidation_max_response_repairs` | 3 | Repair requests per merge-and-harmonize batch (capped by `max_response_repairs`); a batch still invalid keeps its variables unchanged |
 | `consolidation_max_prompt_chars` | 640000 | Character limit for merge-and-harmonize prompts |
 | `consolidation_policy` | see below | How merging batches are formed and when merging stops |
 | `operationalization_max_prompt_chars` | 640000 | Character limit for the prompts that define or decompose each candidate into [extraction definitions](glossary.md#extraction-definition-ontology) |
@@ -358,7 +359,7 @@ defaults the input budget per extraction request is
 | `estimation_trees` | 200 | Trees in the final causal forest and, under `balanced_evidence`, in the forests used for modifier-budget selection (minimum 10). Under `orthogonal_tests` selection does not depend on it, so a change refits only the final estimation |
 | `modeling_workers` | 1 | CPU processes shared by numerical selection, modifier testing, and final estimation across all outer folds (see [Parallelism](#parallelism)) |
 | `estimand_ontology` | disabled | Outcome-informed search over alternative definitions ([Optional extensions](optional_extensions.md#estimand-informed-ontology-search)) |
-| `selection_consolidation` | disabled | Merging of equivalent extracted variables before selection ([Optional extensions](optional_extensions.md#pre-selection-measurement-consolidation)) |
+| `selection_consolidation` | enabled for all-evidence runs; disabled for explicit-only and tabular runs | Merging of equivalent extracted variables before selection ([Optional extensions](optional_extensions.md#pre-selection-measurement-consolidation)) |
 | `statistical_selection` | see below | Variable selection and final-model choice |
 | `role_adjudication` | see below | Truncation limits for variable definitions shown in clinical-review prompts |
 

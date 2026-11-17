@@ -151,6 +151,10 @@ DEFAULT_CONSOLIDATION_MAX_PROMPT_CHARS = 640_000
 DEFAULT_OPERATIONALIZATION_MAX_PROMPT_CHARS = 640_000
 DEFAULT_CONSOLIDATION_BATCH_SIZE = 20
 DEFAULT_CONSOLIDATION_MAX_ROUNDS = 55
+# A merge batch whose reply stays invalid keeps its variables unchanged, so a
+# small repair budget loses nothing and keeps one stubborn batch from holding
+# every server idle at the end of a round.
+DEFAULT_CONSOLIDATION_MAX_RESPONSE_REPAIRS = 3
 DEFAULT_ONTOLOGY_REFINEMENT_MIN_FAILURE_PATIENTS = 3
 DEFAULT_MAX_ONTOLOGY_REFINEMENT_ROUNDS = 2
 DEFAULT_EXTRACTION_VLLM_BASE_PORT = 8110
@@ -829,6 +833,7 @@ class PlainHandoffStage2Config:
     operationalization_max_prompt_chars: int = DEFAULT_OPERATIONALIZATION_MAX_PROMPT_CHARS
     consolidation_batch_size: int = DEFAULT_CONSOLIDATION_BATCH_SIZE
     consolidation_max_rounds: int = DEFAULT_CONSOLIDATION_MAX_ROUNDS
+    consolidation_max_response_repairs: int = DEFAULT_CONSOLIDATION_MAX_RESPONSE_REPAIRS
     consolidation_policy: CandidateConsolidationPolicy = field(default_factory=CandidateConsolidationPolicy)
     # Extraction keeps patients isolated and slices the frozen ontology across
     # independently checkpointed prompts. Keep its context allowance separate
@@ -1123,6 +1128,12 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.consolidation_batch_size must be at least 2")
         if self.consolidation_max_rounds < 1:
             raise ValueError("stage2.consolidation_max_rounds must be positive")
+        if (
+            isinstance(self.consolidation_max_response_repairs, bool)
+            or not isinstance(self.consolidation_max_response_repairs, int)
+            or self.consolidation_max_response_repairs < 0
+        ):
+            raise ValueError("stage2.consolidation_max_response_repairs must be a nonnegative integer")
         if not isinstance(self.consolidation_policy, CandidateConsolidationPolicy):
             raise ValueError("stage2.consolidation_policy must be a CandidateConsolidationPolicy")
         if self.extraction_max_prompt_chars < 4_000:
@@ -1374,6 +1385,23 @@ def _reject_unknown_stage2_keys(
         )
 
 
+def _selection_consolidation_mapping(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Post-extraction merging defaults to on for all-evidence runs only.
+
+    Discovered variables repeat concepts the definition merge kept apart;
+    explicit-only and tabular inputs are investigator-specified, so they keep
+    the merge off unless a configuration enables it.
+    """
+
+    value = raw.get("selection_consolidation")
+    mapping = dict(value) if isinstance(value, Mapping) else value
+    if mapping is None:
+        mapping = {}
+    if isinstance(mapping, dict) and "enabled" not in mapping:
+        mapping["enabled"] = str(raw.get("feature_source", "all_evidence")) == "all_evidence"
+    return mapping
+
+
 def plain_stage2_config_from_mapping(
     raw: Mapping[str, Any],
     *,
@@ -1560,6 +1588,9 @@ def plain_stage2_config_from_mapping(
         consolidation_max_rounds=int(
             raw.get("consolidation_max_rounds", DEFAULT_CONSOLIDATION_MAX_ROUNDS)
         ),
+        consolidation_max_response_repairs=raw.get(
+            "consolidation_max_response_repairs", DEFAULT_CONSOLIDATION_MAX_RESPONSE_REPAIRS
+        ),
         consolidation_policy=consolidation_policy_from_mapping(raw.get("consolidation_policy")),
         extraction_max_prompt_chars=int(
             raw.get(
@@ -1619,7 +1650,7 @@ def plain_stage2_config_from_mapping(
             )
         ),
         selection_consolidation=sequential_consolidation_config_from_mapping(
-            raw.get("selection_consolidation")
+            _selection_consolidation_mapping(raw)
         ),
         estimand_ontology=estimand_ontology_config_from_mapping(raw.get("estimand_ontology")),
         statistical_selection=statistical_selection_config_from_mapping(
@@ -5548,7 +5579,14 @@ class PlainHandoffStage2:
         policy = self.config.consolidation_policy
         batch_size = int(self.config.consolidation_batch_size)
         prompt_limit = int(self.config.consolidation_max_prompt_chars)
-        request_config = replace(self.config, max_prompt_chars=prompt_limit)
+        request_config = replace(
+            self.config,
+            max_prompt_chars=prompt_limit,
+            max_response_repairs=min(
+                int(self.config.max_response_repairs),
+                int(self.config.consolidation_max_response_repairs),
+            ),
+        )
         process_input = {
             "phase": "harmonized_variable_merge",
             "harmonized_merge_prompt_version": clinical_prompts.HARMONIZED_MERGE_PROMPT_VERSION,

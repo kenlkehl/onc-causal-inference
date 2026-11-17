@@ -214,14 +214,18 @@ label with a meaning and the statements that establish it; no free-text type;
 still invalid after repairs is dropped) → harmonized merging in mixed batches
 (`03_merge_and_harmonize`: one shared definition per group and a label
 crosswalk mapping every member label; investigator-specified features are
-locked members) →
+locked members; at most `consolidation_max_response_repairs`, default 3,
+repairs per batch) →
 outer-training extraction with aggregate review and failure-driven definition
 refinement (each cell is a value, not documented (null), the reserved
 `documented_unknown`, or an extraction failure; every encoder keeps the three
 non-value states as separate grouped indicators) → informativeness and
 extraction-failure filter
 (`min_informative_patients`, `max_extraction_failure_fraction`) → optional
-estimand search and selection consolidation → resampled evidence families and
+estimand search → selection consolidation (post-extraction merging of
+equivalent measurements; on by default for all-evidence runs through
+`_selection_consolidation_mapping`, off for explicit-only and tabular) →
+resampled evidence families and
 predictive nuisance selection (under `orthogonal_tests` only the nuisance
 models and the univariable treatment/outcome associations run; the effect-only
 families are skipped) → modifier selection by `orthogonal_tests` (the

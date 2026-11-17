@@ -1,8 +1,9 @@
 # Optional extensions
 
-This page describes features that are not part of the default Stage 2
-procedure, and the standalone `oci run` workflows for investigator-specified
-variables. Each entry covers what the feature does, when to use it, how to
+This page describes optional Stage 2 features, and the standalone `oci run`
+workflows for investigator-specified variables. Pre-selection measurement
+consolidation is on by default for all-evidence runs; the other Stage 2
+features are off by default. Each entry covers what the feature does, when to use it, how to
 configure it, and its caveats. The default procedure is described in
 [How OCI works](how_it_works.md) and [Stage 2 selection](stage2_selection.md);
 terms are defined in the [glossary](glossary.md).
@@ -12,7 +13,7 @@ terms are defined in the [glossary](glossary.md).
 | [Estimand-informed ontology search](#estimand-informed-ontology-search) | `stage2.estimand_ontology.enabled` | off | off | yes, plus extraction | yes, to choose definitions |
 | [Modifier-concept review](#modifier-concept-review) | `stage2.statistical_selection.multi_model.modifier_count.concept_review`, with `modifier_selection.rule` set to `balanced_evidence` | off | off | yes | aggregate statistics only |
 | [Matched-batch contrast evidence](#matched-batch-contrast-evidence) | `stage2.statistical_selection.multi_model.matched_batch.enabled` | off | on | no | yes, in reported evidence only |
-| [Pre-selection measurement consolidation](#pre-selection-measurement-consolidation) | `stage2.selection_consolidation.enabled` | off | on | yes | no |
+| [Pre-selection measurement consolidation](#pre-selection-measurement-consolidation) | `stage2.selection_consolidation.enabled` | on for all-evidence runs; off for explicit-only and tabular runs | on | yes | no |
 | [Standalone `oci run` workflows](#standalone-explicit-feature-workflows-oci-run) | separate command and configuration | — | — | — | — |
 
 All four Stage 2 features run within each outer fold on outer-training patients
@@ -281,13 +282,17 @@ between duplicates. Merged variables are represented as derived variables
    of derived variables are computed from the original measurements.
 
 **When to use it.** When extraction produces aliases or duplicates of the same
-measurement. The example configuration enables it.
+measurement. Discovered variables often repeat one concept with slightly
+different label sets (for example several histology variables) that the
+definition merge keeps apart, so all-evidence runs enable it by default; set
+`enabled` to `false` to turn it off. Explicit-only and tabular runs leave it off
+unless a configuration enables it (tabular runs do not accept it).
 
 **Configuration** (`stage2.selection_consolidation`):
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `false` | Run the step |
+| `enabled` | `true` for all-evidence runs, `false` otherwise | Run the step |
 | `neighbor_count` | 10 | Similar candidates compared with each visited candidate |
 | `embedding_model`, `embedding_device` | `Qwen/Qwen3-Embedding-0.6B`, `cpu` | Sentence embedding model for retrieval (`auto` device allowed) |
 | `max_latents_per_cluster` | 2 | Maximum derived variables per merge decision |

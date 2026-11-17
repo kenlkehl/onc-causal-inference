@@ -128,9 +128,10 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 uv run python scripts/run_all_evidence.py --config example_configs/my_run.json
 ```
 
-The example sets propensity eligibility bounds of 0.1 to 0.9 and enables two
-optional Stage 2 steps (pre-selection measurement consolidation and
-matched-batch evidence); review these before adapting it. Useful options:
+The example sets propensity eligibility bounds of 0.1 to 0.9 and enables
+matched-batch evidence; review these before adapting it. Pre-selection
+measurement consolidation, which merges extracted variables that record the
+same measurement, is on by default for all-evidence runs. Useful options:
 
 | Option | Effect |
 |---|---|
