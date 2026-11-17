@@ -324,3 +324,18 @@ def test_one_graded_variable_does_not_mix_numbered_and_worded_levels():
     numbered = ["Grade 0", "Grade 1", "Grade 2"]
     assert ontology.validate_definition_response(define(variable(categories=numbered,
                                                                  label_definitions=labelled(numbered))))
+
+
+def test_enumerated_few_level_scores_and_underscored_missing_labels_are_rejected():
+    spelled = variable("symptom_severity_score", value_type="continuous", unit=None,
+                       measurement_definition="Record the integer grade: 0 for absent, 1 for mild, 2 for moderate, "
+                                              "3 for severe, 4 for very severe.")
+    assert "few defined levels" in problems(define(spelled))
+    hyphenated = variable("symptom_score", value_type="continuous", unit=None,
+                          measurement_definition="Record the value on the 0-to-4 scale.")
+    assert "few defined levels" in problems(define(hyphenated))
+    pain = variable("pain_score", value_type="continuous", unit="points",
+                    measurement_definition="Record the numeric rating from 0 (no pain) to 10 (worst pain).")
+    assert ontology.validate_definition_response(define(pain))
+    labels = ["Low", "High", "not_reported"]
+    assert "not documented" in problems(define(variable(categories=labels, label_definitions=labelled(labels))))

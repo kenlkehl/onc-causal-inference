@@ -75,8 +75,10 @@ _SCORE_WORDS = re.compile(r"\b(score|grade|scale|rating|severity|class)\b", re.I
 # A stated range with at most six levels (0-4, 1-5, 2/4) marks a graded score;
 # units, decimals, and durations exclude measured quantities.
 _SMALL_RANGE = re.compile(
-    r"\b[01]\s*(?:-|–|—|to)\s*[2-5]\b(?!\s*(?:\.\d|%|mg|g/|cm|mm|kg|decimals?|digits?|days?|weeks?|"
+    r"\b[01]\s*(?:-to-|-|–|—|to)\s*[2-5]\b(?!\s*(?:\.\d|%|mg|g/|cm|mm|kg|decimals?|digits?|days?|weeks?|"
     r"months?|years?|hours?))|(?<![\d.])[0-5]\s*/\s*[2-5]\b(?![\d.])")
+# Integer levels each given a meaning ("0 for absent, 1 for mild", "2 = moderate").
+_DEFINED_LEVEL = re.compile(r"(?<![\d./])([0-5])\s*(?:for|=|indicates|means|:|\(|-\s+[a-z])", re.I)
 # The widest stated range decides: a 0-100 score that mentions raw 0-4 responses stays continuous.
 _WIDE_RANGE = re.compile(r"\b\d+\s*(?:-|–|—|to)\s*(\d{2,})\b|/\s*(\d{2,})\b")
 _RESIDUAL = re.compile(r"\bother\b|unspecified|not otherwise specified|\bnos\b|unclassified", re.I)
@@ -325,7 +327,7 @@ def normalize_variable(
                 f"{where} has the label {category!r}, which says the test or assessment was not done: "
                 "remove it; a record without a result answers null, or documented_unknown when it states "
                 "the value is not assessed (whether a test was done is a separate binary variable)")
-        elif _MISSING_LABEL.match(category):
+        elif _MISSING_LABEL.match(category.replace("_", " ").strip()):
             problems.append(f"{where} has the label {category!r}, which means the value is not documented: "
                             "remove it and answer null in that case")
     numbered = [c for c in categories if re.match(r"^(grade|stage|class|level|score)\s*\d", c.strip(), re.I)]
@@ -362,6 +364,9 @@ def normalize_variable(
             text = " ".join([name, unit or "", descriptions["description"],
                              descriptions["measurement_definition"]])
             small = _SMALL_RANGE.search(text)
+            levels = sorted({int(level) for level in _DEFINED_LEVEL.findall(text)})
+            if small is None and len(levels) >= 3:
+                small = re.search(r".+", f"{levels[0]}-{levels[-1]} with defined levels")
             if _SCORE_WORDS.search(text.replace("_", " ")) and small and not any(
                     int(number) > 10 for pair in _WIDE_RANGE.findall(text) for number in pair if number):
                 problems.append(f"{where} records a score with a few defined levels "
