@@ -130,6 +130,11 @@ def feature_text(feature, *, include_conflict=True):
             "single_or_null": "Use the value when observations agree; use null for unresolved conflicts.",
             "any_positive": f"Use {conflict.get('positive_category')} when any observation supports that category.",
         }
+        if feature.get("value_type") == "ordinal" and strategy in {"maximum", "minimum"}:
+            rules[strategy] = (
+                f"Use the {'highest' if strategy == 'maximum' else 'lowest'} documented category; "
+                "categories are listed from lowest to highest."
+            )
         lines.append("- Choose among repeated observations using this rule: " + rules[strategy])
     return "\n".join(lines)
 

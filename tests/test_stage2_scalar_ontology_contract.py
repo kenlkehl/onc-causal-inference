@@ -92,3 +92,29 @@ def test_revisions_need_closed_types_and_label_definitions():
                                             "categories_or_unit": [], "label_definitions": {}}}
     with pytest.raises(ValueError, match="no free-text or ambiguous type"):
         analysis._validate_ontology_refinement(free_text, feature=original)
+
+
+def test_ordinal_maximum_selects_the_highest_documented_grade():
+    definition = {
+        "feature_id": "f_toxicity", "name": "toxicity_grade", "description": "Worst toxicity grade.",
+        "value_type": "ordinal", "categories_or_unit": ["None", "Mild", "Severe"],
+        "measurement_definition": "Record the worst documented grade.",
+        "missing_value_rule": "Null when undocumented.",
+        "conflict_resolution": {"strategy": "maximum", "positive_category": None},
+    }
+    policy = analysis._resolved_conflict_resolution(definition)
+    assert policy["strategy"] == "maximum"
+    observations = [
+        {"observation_id": "a", "value": "Severe", "page_index": 0, "observation_index": 0},
+        {"observation_id": "b", "value": "mild", "page_index": 0, "observation_index": 1},
+    ]
+    value, decision = analysis._resolve_feature_observations(definition=definition, observations=observations)
+    assert value == "Severe"
+    assert decision["selection_basis"].startswith("maximum_ordinal_rank")
+    lowest, _ = analysis._resolve_feature_observations(
+        definition={**definition, "conflict_resolution": {"strategy": "minimum"}}, observations=observations)
+    assert lowest == "mild"
+    from oci.inference import stage2_clinical_prompts as clinical_prompts
+    assert "highest documented category" in clinical_prompts.feature_text(definition)
+    with pytest.raises(ValueError, match="continuous or ordinal"):
+        analysis._resolved_conflict_resolution({**definition, "value_type": "categorical"})

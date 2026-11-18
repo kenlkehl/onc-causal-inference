@@ -786,10 +786,13 @@ def _resolved_conflict_resolution(definition: Mapping[str, Any]) -> dict[str, An
             "conflict_resolution.strategy must be one of "
             f"{sorted(CONFLICT_RESOLUTION_STRATEGIES)}; received {strategy!r}"
         )
-    if strategy in {"maximum", "minimum"} and value_type != "continuous":
+    # Ordinal labels are listed from lowest to highest, so the highest or lowest
+    # documented grade (for example the worst toxicity grade) is well defined.
+    if strategy in {"maximum", "minimum"} and value_type not in {"continuous", "ordinal"}:
         if raw is not None:
             raise ValueError(
-                f"conflict_resolution strategy {strategy!r} requires a continuous feature"
+                f"conflict_resolution strategy {strategy!r} requires a continuous or "
+                "ordinal feature"
             )
         strategy = "latest"
         strategy_source = "compatibility_default_latest_incompatible_inference"
@@ -2648,6 +2651,21 @@ def _resolve_feature_observations(
             ordered,
             latest=strategy == "latest",
         )
+    elif strategy in {"maximum", "minimum"} and str(definition.get("value_type")) == "ordinal":
+        rank = {category: index for index, category in enumerate(_declared_categories(definition))}
+        ranked = [
+            observation
+            for observation in ordered
+            if _canonical_category(observation.get("value"), list(rank)) is not None
+        ]
+        if ranked:
+            position = lambda observation: rank[  # noqa: E731
+                _canonical_category(observation.get("value"), list(rank))
+            ]
+            target = (max if strategy == "maximum" else min)(position(o) for o in ranked)
+            extrema = [observation for observation in ranked if position(observation) == target]
+            selected, temporal_basis = _select_temporal_observation(extrema, latest=True)
+            basis = f"{strategy}_ordinal_rank_then_{temporal_basis}"
     elif strategy in {"maximum", "minimum"}:
         numeric = [
             observation
