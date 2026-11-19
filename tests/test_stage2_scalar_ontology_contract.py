@@ -118,25 +118,3 @@ def test_ordinal_maximum_selects_the_highest_documented_grade():
     assert "highest documented category" in clinical_prompts.feature_text(definition)
     with pytest.raises(ValueError, match="continuous or ordinal"):
         analysis._resolved_conflict_resolution({**definition, "value_type": "categorical"})
-
-
-def test_extraction_prompts_put_the_patient_text_before_the_definitions():
-    from oci.inference import stage2_clinical_prompts as clinical_prompts
-
-    definitions = [feature(name=f"site_{index}") for index in range(3)]
-    record = "Record text: frontal lesion noted."
-    prompts = {
-        "single": analysis._extraction_prompt(definitions=definitions, rows=[{"row_id": 0, "text": record}]),
-        "serial": analysis._serial_extraction_prompt(
-            definitions=definitions, row_id=0, chunk_text=record, prior_values={}, prior_feature_state={},
-            chunk_index=0, char_start=0, char_end=len(record), document_chars=len(record)),
-        "page": analysis._page_extraction_prompt(definitions=definitions, row={"row_id": 0, "text": record}),
-    }
-    for kind, messages in prompts.items():
-        user = messages[1]["content"]
-        assert user.index(record) < user.index(clinical_prompts.label(definitions[0])), kind
-    # Two feature batches of one patient share everything up to the end of the record.
-    other = analysis._extraction_prompt(definitions=[feature(name="other")], rows=[{"row_id": 0, "text": record}])
-    shared = prompts["single"][1]["content"].split("End of patient record.")[0]
-    assert other[1]["content"].startswith(shared) and other[0] == prompts["single"][0]
-    assert clinical_prompts.EXTRACTION_PROMPT_VERSION in analysis.EXTRACTION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION

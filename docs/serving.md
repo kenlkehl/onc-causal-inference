@@ -185,12 +185,6 @@ before treating the reply as a validation failure.
 Timeouts, retries, and repairs are listed in
 [Request and recovery defaults](configuration.md#request-and-recovery-defaults).
 
-**Prefix caching.** Extraction requests for one patient share everything up to
-the end of the patient's text (the system prompt and the record), and only the
-variable definitions after it differ. With prefix caching on (the vLLM default)
-the server processes each record once per patient instead of once per request,
-which roughly halves extraction prompt processing for typical records.
-
 ## Context budgeting
 
 Stage 2 never truncates clinical text or evidence to fit a context window.
