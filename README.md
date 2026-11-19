@@ -615,6 +615,7 @@ an independent confirmation. See
 | [Serving](docs/serving.md) | LLM endpoints, managed vLLM pools, and hardware presets |
 | [Optional extensions](docs/optional_extensions.md) | Optional Stage 2 steps and the standalone `oci run` workflows |
 | [Synthetic data](docs/synthetic_data.md) | The synthetic cohort generator, causal roles, generation-time factors, re-equation, bundled cohorts, and oracle columns |
+| [Longitudinal causal model](docs/longitudinal_model.md) | End-to-end training and inference with note, lab, encounter, and vital-sign histories across synthetic studies |
 | [Benchmarks](docs/benchmarks.md) | The scenario registry, seeds and the confirmatory rule, the benchmark commands, metrics, and caveats |
 | [Sample-size calculator](docs/sample_size_calculator.md) | Simulation-based sample sizes for discovering effect modifiers with a binary outcome, with Stage 2's orthogonal tests or a lasso: the dashboard, inputs, mechanism, selectors, and outputs |
 | [R-learner weighting](docs/design_notes/r_learner_weighting.md) | Design note on weighted and unweighted effect objectives |

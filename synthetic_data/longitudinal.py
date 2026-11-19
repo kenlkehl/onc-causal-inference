@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import re
+from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, closing
 from functools import partial
@@ -22,7 +23,7 @@ from .generator import _compute_logit, oracle_dataset_statistics
 from .llm_client import LLMClient
 from .longitudinal_history import DAYS_PER_YEAR, STREAMS, history_features, simulate_history
 from .prompts import CLINICAL_SYSTEM_PROMPT
-from .reequation import draw_equations, resolve_scenario
+from .reequation import _features_with_roles, draw_equations, resolve_scenario
 from .saved_dgp import NOTE_OUTPUT_FORMAT, _clinical_document, _request
 
 # Fixed reference means and scales let new patient samples share the exact same DGP.
@@ -158,23 +159,41 @@ def _render_llm_note(client, cache_dir, patient_id, note):
     note["text"] = f"{text.strip()} ECOG performance status: {ecog}"
 
 
-def _equations(dgp_seed):
-    scenario = resolve_scenario(
-        {"name": "longitudinal", "modifier_strength": 3.0, "modifier_main_effects": True},
-        FEATURES,
-        seed=dgp_seed,
-    )
+@dataclass
+class LongitudinalDGP:
+    features: list
+    treatment: dict
+    outcome: dict
+
+
+def draw_longitudinal_dgp(dgp_seed, prior="fixed_roles"):
+    """One reproducible study, shared by its context and query patients."""
+    settings = {"name": "longitudinal", "modifier_strength": 3.0, "modifier_main_effects": True}
+    if prior == "mixed":
+        rng = np.random.default_rng([dgp_seed, 923])
+        settings.update(
+            roles={"confounder": 1, "dual_role": 1, "effect_modifier": 1, "prognostic": 1},
+            nonlinearity=str(rng.choice(["none", "threshold", "quadratic"])),
+            treatment_effect=float(rng.uniform(-1, 1)),
+            modifier_strength=float(rng.uniform(0.5, 4)),
+        )
+    elif prior != "fixed_roles":
+        raise ValueError(f"Unknown longitudinal prior: {prior}")
+    scenario = resolve_scenario(settings, FEATURES, seed=dgp_seed)
+    features = _features_with_roles(FEATURES, scenario["roles"])
     treatment, outcome, _, _ = draw_equations(
-        FEATURES,
+        features,
         scenario,
         dgp_seed,
         main_coefficient_scale=0.85,
         interaction_coefficient_scale=0.30,
     )
-    return treatment, outcome
+    if prior == "mixed":
+        treatment["intercept"], outcome["intercept"] = map(float, rng.uniform(-1, 1, 2))
+    return LongitudinalDGP(features, treatment, outcome)
 
 
-def _patient(patient_id, *, seed, treatment_eq, outcome_eq, note_client, cache_dir):
+def sample_longitudinal_patient(patient_id, *, seed, dgp, note_client=None, cache_dir=None):
     streams = simulate_history(seed, patient_id)
     features = history_features(streams)
     if note_client is not None:
@@ -182,9 +201,10 @@ def _patient(patient_id, *, seed, treatment_eq, outcome_eq, note_client, cache_d
             _render_llm_note(note_client, cache_dir, patient_id, note)
     # The label-draw stream is independent of every history and its renderer.
     rng = np.random.default_rng([seed, patient_id, 2])
-    propensity = float(expit(_compute_logit(features, FEATURES, REFERENCE, treatment_eq)))
+    propensity = float(expit(_compute_logit(features, dgp.features, REFERENCE, dgp.treatment)))
     p0, p1 = [
-        float(expit(_compute_logit(features, FEATURES, REFERENCE, outcome_eq, t))) for t in (0, 1)
+        float(expit(_compute_logit(features, dgp.features, REFERENCE, dgp.outcome, t)))
+        for t in (0, 1)
     ]
     treatment = int(rng.random() < propensity)
     observed_p = p1 if treatment else p0
@@ -207,7 +227,14 @@ def _patient(patient_id, *, seed, treatment_eq, outcome_eq, note_client, cache_d
 
 
 def generate_longitudinal_cohort(
-    output_dir, *, dataset_size=500, seed=42, dgp_seed=101, llm_config=None, num_workers=4
+    output_dir,
+    *,
+    dataset_size=500,
+    seed=42,
+    dgp_seed=101,
+    llm_config=None,
+    num_workers=4,
+    prior="fixed_roles",
 ):
     """Publish a Parquet cohort with four list-of-struct columns and the exact DGP."""
     if dataset_size < 1 or num_workers < 1 or seed < 0 or dgp_seed < 0:
@@ -216,7 +243,7 @@ def generate_longitudinal_cohort(
     if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
         raise FileExistsError(f"Output directory already contains data: {output_dir}")
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    treatment_eq, outcome_eq = _equations(dgp_seed)
+    dgp = draw_longitudinal_dgp(dgp_seed, prior)
     config = dict(
         generation_mode="longitudinal",
         version=1,
@@ -224,6 +251,7 @@ def generate_longitudinal_cohort(
         outcome_type="binary",
         seed=seed,
         dgp_seed=dgp_seed,
+        prior=prior,
         note_style="llm" if llm_config else "offline",
         clinical_question="Risk of progression by six months under oncology regimens A and B.",
         note_model=llm_config.model_name if llm_config else None,
@@ -249,10 +277,9 @@ def generate_longitudinal_cohort(
                 pq.ParquetWriter(staging / "dataset.parquet", schema, compression="zstd")
             )
             make_row = partial(
-                _patient,
+                sample_longitudinal_patient,
                 seed=seed,
-                treatment_eq=treatment_eq,
-                outcome_eq=outcome_eq,
+                dgp=dgp,
                 note_client=writer,
                 cache_dir=cache_dir,
             )
@@ -270,11 +297,11 @@ def generate_longitudinal_cohort(
         stats = {k: (v if np.isfinite(v) else None) for k, v in stats.items()}
         metadata = dict(
             config=config,
-            features=FEATURES,
-            **role_lists(FEATURES),
+            features=dgp.features,
+            **role_lists(dgp.features),
             summary_statistics=REFERENCE,
-            treatment_equation=treatment_eq,
-            outcome_equation=outcome_eq,
+            treatment_equation=dgp.treatment,
+            outcome_equation=dgp.outcome,
             dataset_statistics=stats,
             longitudinal=dict(
                 streams=list(STREAMS),
@@ -301,6 +328,7 @@ def longitudinal_main(argv):
         "--dgp-seed", type=int, default=101, help="Treatment and outcome equation draw."
     )
     parser.add_argument("--note-style", choices=("offline", "llm"), default="offline")
+    parser.add_argument("--prior", choices=("fixed_roles", "mixed"), default="fixed_roles")
     parser.add_argument("--num-workers", type=int, default=4, help="Parallel LLM note writers.")
     llm = LLMConfig()
     parser.add_argument("--api-url", default=llm.api_base_url)
@@ -326,6 +354,7 @@ def longitudinal_main(argv):
         dataset_size=args.dataset_size,
         seed=args.seed,
         dgp_seed=args.dgp_seed,
+        prior=args.prior,
         llm_config=llm_config,
         num_workers=args.num_workers,
     )

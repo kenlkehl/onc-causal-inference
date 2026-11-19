@@ -72,6 +72,10 @@ histories to different treatment policies and response functions. Change only
 `reequation` command can also vary roles and equations on the saved dataset,
 carrying the nested observations and the exact note wording forward.
 
+Use `--prior mixed` to draw new role assignments, intercepts, treatment
+effects and outcome equation shapes for each DGP seed. This is the prior
+used for on-the-fly training of the [longitudinal causal model](longitudinal_model.md).
+
 To use the repository’s OpenAI-compatible note writer, supply an endpoint
 and model. The writer receives the pretreatment facts from a single visit.
 The simulator appends the recorded ECOG score and generates the same
