@@ -129,6 +129,8 @@ def test_patient_and_equation_seeds_are_independent(cohort, tmp_path):
 
 
 def test_llm_renderer_uses_pretreatment_facts_and_resumes(tmp_path, monkeypatch):
+    with pytest.raises(ValueError, match="undocumented patient demographic"):
+        sim._validate_note("A 41-year-old male with lung cancer.")
     prompts = []
 
     class StubClient:

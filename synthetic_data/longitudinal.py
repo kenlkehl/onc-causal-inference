@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, closing
 from functools import partial
@@ -20,8 +21,9 @@ from .dgp_terms import role_lists
 from .generator import _compute_logit, oracle_dataset_statistics
 from .llm_client import LLMClient
 from .longitudinal_history import DAYS_PER_YEAR, STREAMS, history_features, simulate_history
+from .prompts import CLINICAL_SYSTEM_PROMPT
 from .reequation import draw_equations, resolve_scenario
-from .saved_dgp import _clinical_document, _request
+from .saved_dgp import NOTE_OUTPUT_FORMAT, _clinical_document, _request
 
 # Fixed reference means and scales let new patient samples share the exact same DGP.
 # Age, weight, etc. appearing elsewhere in a record are not additional oracle inputs.
@@ -125,12 +127,20 @@ def _schema():
     )
 
 
+def _validate_note(text):
+    _clinical_document(text)
+    # The simulated visit has no sex or gender field for a writer to infer.
+    if re.search(r"\b(male|female|man|woman|he|she|his|her|him|hers)\b", text, re.IGNORECASE):
+        raise ValueError("Clinical note introduced an undocumented patient demographic")
+
+
 def _render_llm_note(client, cache_dir, patient_id, note):
     # Only the current visit goes to the writer. Keep the numeric ECOG field exact.
     draft, ecog = note["text"].rsplit(" ECOG performance status: ", 1)
     prompt = (
         "Write one short pretreatment clinical note from the visit facts below. "
-        "Use natural clinical prose and preserve the findings and their polarity. "
+        "Use only the supplied facts and preserve the findings and their polarity. "
+        "Use 'the patient' throughout because sex and gender are undocumented. "
         "Do not invent test results, treatments, outcomes, or a numeric performance score. "
         "Return just the clinical note.\n\n" + draft
     )
@@ -142,7 +152,8 @@ def _render_llm_note(client, cache_dir, patient_id, note):
         prompt,
         0.5,
         client.config.max_tokens,
-        _clinical_document,
+        _validate_note,
+        system_prompt=CLINICAL_SYSTEM_PROMPT + NOTE_OUTPUT_FORMAT,
     )
     note["text"] = f"{text.strip()} ECOG performance status: {ecog}"
 
