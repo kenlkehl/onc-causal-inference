@@ -120,6 +120,12 @@ def main(argv=None):
     )
     train.add_argument("--note-lr", type=float, default=1e-5)
     train.add_argument("--lr", type=float, default=3e-4)
+    train.add_argument(
+        "--lr-scheduler",
+        choices=("constant", "linear"),
+        default="constant",
+        help="Keep both rates constant (default) or decay them linearly to zero over --steps.",
+    )
     prior = train.add_mutually_exclusive_group()
     prior.add_argument(
         "--design-bank", type=Path, help="LLM-designed study prior (default: bundled bank)."
@@ -150,7 +156,15 @@ def main(argv=None):
         cfg = ModelConfig(**{k: getattr(args, k) for k in vars(defaults)})
         settings = {
             k: getattr(args, k)
-            for k in ("note_model", "note_lr", "lr", "context_size", "query_size", "seed")
+            for k in (
+                "note_model",
+                "note_lr",
+                "lr",
+                "lr_scheduler",
+                "context_size",
+                "query_size",
+                "seed",
+            )
         }
         settings["cohorts"] = [str(p.resolve()) for p in args.train_cohort]
         if args.design_bank:

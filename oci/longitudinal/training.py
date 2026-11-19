@@ -10,7 +10,7 @@ import tempfile
 
 import numpy as np
 import torch
-from transformers import AutoConfig, AutoModel, AutoTokenizer
+from transformers import AutoConfig, AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
 
 from synthetic_data.longitudinal import draw_longitudinal_dgp, sample_longitudinal_patient
 from synthetic_data.study_designs import DEFAULT_BANK, load_bank
@@ -188,6 +188,14 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
         tables.append(table)
     if not fresh and fingerprints != settings.get("cohort_sha256", {}):
         raise ValueError("Training cohort contents have changed since the checkpoint")
+    scheduler = None
+    if settings.get("lr_scheduler", "constant") == "linear":
+        settings["lr_schedule_steps"] = steps
+        # LambdaLR sets the rate for the next update during construction.
+        # The optimizer checkpoint carries each group's original base rate.
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer, num_warmup_steps=0, num_training_steps=steps, last_epoch=start - 1
+        )
     if fresh:
         settings["cohort_sha256"] = fingerprints
         model.patient.tokenizer.save_pretrained(directory / "tokenizer")
@@ -212,8 +220,16 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
         loss, _, _ = fit_episode(model, rows, n_context)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
+        note_lr, lr = (group["lr"] for group in optimizer.param_groups)
         optimizer.step()
-        print(json.dumps({"step": step, "loss": loss.item(), **provenance}), flush=True)
+        if scheduler is not None:
+            scheduler.step()
+        print(
+            json.dumps(
+                {"step": step, "loss": loss.item(), "note_lr": note_lr, "lr": lr, **provenance}
+            ),
+            flush=True,
+        )
         if step == 1 or step % save_every == 0 or step == steps:
             _save(directory, model, optimizer, settings, step)
 

@@ -1,4 +1,6 @@
 import copy
+import json
+import shutil
 
 import pyarrow.parquet as pq
 import pytest
@@ -292,8 +294,65 @@ def test_prior_checkpoint_keeps_its_four_stream_architecture(note_model, tmp_pat
         )
 
 
+def test_linear_lr_resume_reproduces_uninterrupted_updates(
+    tmp_path, note_model, monkeypatch, capsys
+):
+    from oci.longitudinal import training
+
+    run = tmp_path / "linear"
+    mid_checkpoint = tmp_path / "step2.pt"
+    save = training._save
+
+    def save_with_midpoint(directory, model, optimizer, settings, step):
+        save(directory, model, optimizer, settings, step)
+        if step == 2:
+            shutil.copyfile(directory / "checkpoint.pt", mid_checkpoint)
+
+    monkeypatch.setattr(training, "_save", save_with_midpoint)
+    main(
+        [
+            "train",
+            "--run-dir",
+            str(run),
+            "--mixed-prior",
+            "--note-model",
+            str(note_model),
+            "--device",
+            "cpu",
+            "--context-size",
+            "3",
+            "--query-size",
+            "2",
+            "--steps",
+            "4",
+            "--save-every",
+            "2",
+            "--lr-scheduler",
+            "linear",
+            "--note-lr",
+            "0.00002",
+            "--lr",
+            "0.0004",
+        ]
+    )
+    full_log = [json.loads(s) for s in capsys.readouterr().out.splitlines() if s.startswith("{")]
+    for row, factor in zip(full_log, [1, 0.75, 0.5, 0.25], strict=True):
+        assert row["note_lr"] == pytest.approx(2e-5 * factor)
+        assert row["lr"] == pytest.approx(4e-4 * factor)
+    full, saved = load_run(run, "cpu")
+    assert saved["settings"]["lr_schedule_steps"] == 4
+    assert all(group["lr"] == 0 for group in saved["optimizer"]["param_groups"])
+
+    mid_checkpoint.replace(run / "checkpoint.pt")
+    main(["resume", "--run-dir", str(run), "--device", "cpu", "--steps", "4"])
+    resumed_log = [json.loads(s) for s in capsys.readouterr().out.splitlines() if s.startswith("{")]
+    assert resumed_log == full_log[2:]
+    resumed, _ = load_run(run, "cpu")
+    for first, second in zip(full.parameters(), resumed.parameters(), strict=True):
+        torch.testing.assert_close(first, second, rtol=0, atol=0)
+
+
 def test_design_bank_train_resume_and_held_out_evaluation(tmp_path, note_model, capsys):
-    import json
     from synthetic_data.study_designs import DEFAULT_BANK, load_bank
     from oci.longitudinal.training import split_designs
 
@@ -313,6 +372,8 @@ def test_design_bank_train_resume_and_held_out_evaluation(tmp_path, note_model, 
             str(run),
             "--steps",
             "1",
+            "--lr-scheduler",
+            "linear",
             "--context-size",
             "3",
             "--query-size",
@@ -336,6 +397,7 @@ def test_design_bank_train_resume_and_held_out_evaluation(tmp_path, note_model, 
         json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")
     ]
     assert [d["step"] for d in logs] == [1, 2]
+    assert [d["lr"] for d in logs] == pytest.approx([3e-4, 1.5e-4])
     assert all(d["design_id"] in {v["id"] for v in train} for d in logs)
     main(
         [

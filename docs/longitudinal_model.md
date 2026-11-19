@@ -81,16 +81,24 @@ From the repository root, with the project dependencies installed, run:
 
 ```bash
 python -m oci.longitudinal.cli train --run-dir artifacts/longitudinal_run \
-  --steps 1000 --context-size 32 --query-size 8 --device cuda
-python -m oci.longitudinal.cli resume --run-dir artifacts/longitudinal_run \
-  --steps 2000 --device cuda
+  --steps 1000 --lr-scheduler linear --context-size 32 --query-size 8 --device cuda
 python -m oci.longitudinal.cli evaluate --run-dir artifacts/longitudinal_run \
-  --studies 32 --context-size 32 --query-size 8 --device cuda
+  --studies 1000 --context-size 32 --query-size 8 --seed 42 --device cuda
 ```
 
-The step counts are examples. The base encoder and new layers use separate
-AdamW learning rates (defaults 0.00001 and 0.0003). The periodic checkpoint
-includes the backbone, other model weights, configuration, optimizer state,
+AdamW starts the note encoder at `--note-lr 1e-5` and the other layers at
+`--lr 3e-4`. The default schedule is constant. With `--lr-scheduler linear`,
+both rates decay without warmup. Update 1 uses the full rates, update 501 of
+1,000 uses half, and the rates reach zero immediately after update 1,000.
+Each step logs the two rates actually used as `note_lr` and `lr`.
+
+Resume restores the schedule choice from the checkpoint. To continue the example
+after an interruption, run `python -m oci.longitudinal.cli resume --run-dir artifacts/longitudinal_run --steps 1000 --device cuda`.
+Passing a larger total recalculates the remaining rates against that
+longer horizon and can raise the next learning rate. Older checkpoints resume
+with constant rates.
+
+The periodic checkpoint includes the backbone, other model weights, configuration, optimizer state,
 and completed step count. The tokenizer lives beside it. Resume and inference
 load these local files. Evaluation reports arm-risk RMSE, risk-difference RMSE
 and the context-only empirical arm-rate baseline on the probability scale.
