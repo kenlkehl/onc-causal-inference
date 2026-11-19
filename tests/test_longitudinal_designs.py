@@ -163,3 +163,56 @@ def test_studies_share_one_equation_and_replay_from_the_cli(tmp_path):
                     )
                 )
             )
+
+
+def test_wide_design_calibration_deduplication_and_llm_rendering_order(tmp_path):
+    from synthetic_data.longitudinal import generate_longitudinal_cohort
+    from synthetic_data.study_designs import DEFAULT_BANK
+
+    bank = load_bank(DEFAULT_BANK)
+    # bladder_q02_v001 has two findings with the exact same 'present' sentence in the frozen bank.
+    colliding = next(d for d in bank["designs"] if d["id"] == "bladder_q02_v001")
+    dgp_col = draw_longitudinal_dgp(17, "design", design=colliding)
+    names = [f["name"] for f in dgp_col.features]
+    assert not ("hypertension_history" in names and "history_of_hypertension" in names)
+
+    # Wide design (100 candidates): active causal features and tx interactions are bounded,
+    # and propensities/risks stay calibrated instead of saturating to 0/1.
+    wide = next(
+        d
+        for d in bank["designs"]
+        if len(d["candidates"]["measurements"]) + len(d["candidates"]["note_findings"]) == 100
+    )
+    dgp_wide = draw_longitudinal_dgp(42, "design", design=wide)
+    active = [f for f in dgp_wide.features if f["roles"]]
+    assert 1 <= len(active) <= 16
+    assert len(dgp_wide.treatment["interactions"]) <= 15
+    rows = [sample_longitudinal_patient(i, seed=7, dgp=dgp_wide) for i in range(60)]
+    props = np.array([r["true_treatment_prob"] for r in rows])
+    y0 = np.array([r["true_y0"] for r in rows])
+    assert 0.15 < float(props.mean()) < 0.85
+    assert 0.05 < float(y0.mean()) < 0.95
+    assert float(((props < 0.01) | (props > 0.99)).mean()) < 0.25
+
+    # LLM note rendering runs AFTER document_findings so causal chart findings enter the prompt,
+    # and sex-specific cancers (e.g. prostate) do not fail _validate_note on pronouns.
+    prostate = next(d for d in bank["designs"] if d["question"]["cancer"] == "prostate cancer")
+    prompts = []
+
+    class StubClient:
+        config = SimpleNamespace(model_name="stub", max_tokens=512)
+
+        def generate(self, prompt, **kwargs):
+            prompts.append(prompt)
+            return "He presents for oncology evaluation. " + prompt.split("\n\n")[-1]
+
+        def close(self):
+            pass
+
+    dgp_p = draw_longitudinal_dgp(3, "design", design=prostate)
+    row = sample_longitudinal_patient(
+        0, seed=5, dgp=dgp_p, note_client=StubClient(), cache_dir=tmp_path / "cache"
+    )
+    finding = prostate["candidates"]["note_findings"][0]
+    expected_stmt = finding[row["true_" + finding["name"]]]
+    assert any(expected_stmt in p for p in prompts)

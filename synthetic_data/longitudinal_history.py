@@ -137,23 +137,52 @@ def _note(rng, age, performance, previous_performance, emergency, hemoglobin, po
     return text
 
 
+# Realistic baseline oncology comorbidities / metastatic codes paired with
+# baseline log-odds and frailty coupling so encounter embeddings train broadly.
+_COMORBIDITY_CODES = (
+    ("I10", -0.1, 0.35),      # Essential hypertension
+    ("E11.9", -1.4, 0.35),    # Type 2 diabetes mellitus
+    ("E78.5", -0.6, 0.20),    # Hyperlipidemia
+    ("J44.9", -1.7, 0.55),    # COPD
+    ("N18.3", -2.1, 0.50),    # Chronic kidney disease stage 3
+    ("I48.91", -2.2, 0.45),   # Atrial fibrillation
+    ("I50.9", -2.5, 0.65),    # Heart failure
+    ("F32.9", -1.5, 0.30),    # Depressive disorder
+    ("K21.9", -1.0, 0.15),    # GERD
+    ("G62.9", -1.8, 0.35),    # Peripheral neuropathy
+    ("I82.409", -2.3, 0.45),  # Deep vein thrombosis
+    ("C79.51", -1.6, 0.55),   # Secondary malignant neoplasm of bone
+    ("C78.7", -1.8, 0.55),    # Secondary malignant neoplasm of liver
+    ("C78.00", -1.7, 0.50),   # Secondary malignant neoplasm of lung
+    ("C79.31", -2.4, 0.60),   # Secondary malignant neoplasm of brain
+    ("C78.6", -2.3, 0.55),    # Secondary malignant neoplasm of retroperitoneum/peritoneum
+)
+
+
 def simulate_history(seed, patient_id, *, include_pros=True, question=None):
     """Return observations up to the treatment decision for one synthetic patient."""
     rng = np.random.default_rng([seed, patient_id, 1])
     population = question["population"] if question else "lung cancer"
     diagnosis = question["icd10cm"] if question else "C34.90"
     clinic = "Medical oncology" if question else "Thoracic oncology"
-    n_visits = int(rng.integers(4, 13))
-    # Build backwards from the last pretreatment visit, then emit forwards.
-    gaps = rng.integers(10, 85, n_visits - 1)
+    age_at_index = float(rng.uniform(40, 86))
+    frailty, renal, drift = rng.normal(size=3)
+    # Sicker patients have modestly more frequent pretreatment visits.
+    mean_visits = float(np.clip(7.5 + 1.1 * frailty, 4.5, 11.5))
+    n_visits = int(np.clip(np.rint(rng.normal(mean_visits, 2.0)), 4, 12))
+    gap_scale = float(np.clip(1.0 - 0.12 * frailty, 0.65, 1.35))
+    gaps = np.clip(np.rint(rng.integers(10, 85, n_visits - 1) * gap_scale), 7, 110).astype(int)
     days = -int(rng.integers(1, 22)) - np.r_[np.cumsum(gaps)[::-1], 0]
     streams = {name: [] for name in (STREAMS if include_pros else LEGACY_STREAMS)}
     visit_burden = []
-    age_at_index = float(rng.uniform(40, 86))
-    frailty, renal, drift = rng.normal(size=3)
     base_weight = float(rng.uniform(52, 112))
     weight_slope = rng.normal(-2.5 - 1.7 * drift, 3)
     baseline_bp = rng.normal(77, 7)
+    comorbidities = [
+        code
+        for code, base_logit, slope in _COMORBIDITY_CODES
+        if rng.random() < expit(base_logit + slope * frailty + 0.015 * (age_at_index - 63.0))
+    ]
     fluctuation = 0.0
     previous_performance = None
     for i, visit_day in enumerate(days):
@@ -172,32 +201,40 @@ def simulate_history(seed, patient_id, *, include_pros=True, question=None):
         weight = float(np.clip(base_weight + weight_slope * years + rng.normal(0, 0.7), 38, 155))
         performance = int(np.clip(np.rint(1.1 + 0.75 * burden), 0, 3))
         emergency = rng.random() < expit(-1.85 + 0.8 * burden)
-        diagnoses = [diagnosis]
+        inpatient = (not emergency) and (rng.random() < expit(-3.1 + 0.9 * burden))
         if emergency:
-            diagnoses.append("R06.02" if burden > 0 else "R53.83")
-        _append(
-            streams["encounters"],
-            day,
-            setting="emergency" if emergency else "outpatient",
-            icd10cm=diagnoses,
-            cpt=["99284" if emergency else "99214"],
-        )
+            setting = "emergency"
+        elif inpatient:
+            setting = "inpatient"
+        elif rng.random() < 0.16:
+            setting = "infusion"
+        elif rng.random() < 0.10:
+            setting = "telehealth"
+        else:
+            setting = "outpatient"
 
-        # The endpoints anchor change over time; intermediate visits have distinct
-        # documentation and ordering patterns.
+        # The endpoints anchor change over time; intermediate visits have
+        # severity-informed documentation and ordering patterns.
         anchor = i == 0 or i == n_visits - 1
+        cbc_prob = float(expit(0.95 + 0.35 * burden))
+        chem_prob = float(expit(0.65 + 0.35 * burden))
+        vital_prob = float(expit(1.65 + 0.25 * burden)) if setting != "telehealth" else 0.15
+        note_prob = float(expit(1.10 + 0.25 * burden))
         hemoglobin = None
-        if anchor or rng.random() < 0.72:
+        cbc = None
+        chem = None
+        comprehensive = False
+        if anchor or rng.random() < cbc_prob:
             cbc = _cbc(rng, burden)
             _panel(streams["labs"], day, "CBC_DIFF", cbc)
             hemoglobin = cbc["hemoglobin"]
-        if anchor or rng.random() < 0.66:
+        if anchor or rng.random() < chem_prob:
             comprehensive = rng.random() < 0.55
-            values = _chemistry(rng, burden, creatinine, comprehensive)
-            _panel(streams["labs"], day, "CMP" if comprehensive else "BMP", values)
-        if anchor or rng.random() < 0.84:
+            chem = _chemistry(rng, burden, creatinine, comprehensive)
+            _panel(streams["labs"], day, "CMP" if comprehensive else "BMP", chem)
+        if anchor or rng.random() < vital_prob:
             _append(streams["vitals"], day, **_vitals(rng, weight, burden, baseline_bp))
-        if anchor or rng.random() < 0.75:
+        if anchor or rng.random() < note_prob:
             text = _note(
                 rng,
                 int(age_at_index + day / DAYS_PER_YEAR),
@@ -210,6 +247,56 @@ def simulate_history(seed, patient_id, *, include_pros=True, question=None):
             )
             _append(streams["notes"], day, text=f"{text} ECOG performance status: {performance}.")
             previous_performance = performance
+
+        diagnoses = [diagnosis]
+        if emergency or inpatient:
+            diagnoses.append("R06.02" if burden > 0 else "R53.83")
+        if burden > 0.6 and rng.random() < 0.45:
+            diagnoses.append(str(rng.choice(["R53.83", "G89.3", "R11.0", "R63.4"])))
+        if cbc is not None:
+            if cbc["hemoglobin"] < 11.2:
+                diagnoses.append("D64.9")
+            if cbc["neutrophils_abs"] < 1.5:
+                diagnoses.append("D70.9")
+            if cbc["platelets"] < 140:
+                diagnoses.append("D69.6")
+        if chem is not None:
+            if chem["creatinine"] > 1.5:
+                diagnoses.append("N17.9" if burden > 0.8 else "N18.3")
+            if chem["sodium"] < 135:
+                diagnoses.append("E87.1")
+        for code in comorbidities:
+            if rng.random() < (0.65 if anchor or inpatient else 0.30):
+                diagnoses.append(code)
+        diagnoses = list(dict.fromkeys(diagnoses))
+
+        if emergency:
+            cpts = ["99284"]
+            if burden > 0.8:
+                cpts.append("99285")
+        elif inpatient:
+            cpts = ["99223"]
+        elif setting == "infusion":
+            cpts = ["96413", "96365"]
+        elif setting == "telehealth":
+            cpts = ["99213"]
+        else:
+            cpts = ["99215" if burden > 0.9 else ("99214" if burden > -0.6 else "99213")]
+        if cbc is not None:
+            cpts.extend(["36415", "85025"])
+        if chem is not None:
+            cpts.append("80053" if comprehensive else "80048")
+        if (anchor or emergency or inpatient) and rng.random() < 0.35:
+            cpts.append(str(rng.choice(["71260", "74177", "70553", "78815"])))
+        cpts = list(dict.fromkeys(cpts))
+
+        _append(
+            streams["encounters"],
+            day,
+            setting=setting,
+            icd10cm=diagnoses,
+            cpt=cpts,
+        )
     if include_pros:
         survey_rng = np.random.default_rng([seed, patient_id, 3])
         for day, form in weekly_assessments(survey_rng, days, visit_burden):

@@ -36,12 +36,45 @@ LAB_REFERENCE = {
     "bun": (17, 3),
     "glucose": (99, 13),
 }
+# Within-patient first-to-last change scales (distinct from cross-sectional SDs).
+LAB_CHANGE_SCALES = {
+    "platelets": 42.0,
+    "hemoglobin": 0.85,
+    "wbc": 1.4,
+    "neutrophils_abs": 1.1,
+    "lymphocytes_abs": 0.45,
+    "creatinine": 0.14,
+    "sodium": 2.5,
+    "potassium": 0.37,
+    "bun": 3.0,
+    "glucose": 18.0,
+}
 VITAL_REFERENCE = {
     "weight_kg": (80, 18),
     "systolic_mmhg": (124, 10),
     "pulse_bpm": (78, 8),
     "spo2_pct": (97, 1.8),
     "respirations_per_min": (16, 2),
+}
+VITAL_CHANGE_SCALES = {
+    "weight_kg": 3.5,
+    "systolic_mmhg": 8.2,
+    "pulse_bpm": 7.2,
+    "spo2_pct": 1.5,
+    "respirations_per_min": 1.6,
+}
+PRO_REFERENCE = {
+    ("fatigue", "severity"): (1.7, 1.0),
+    ("fatigue", "interference"): (1.35, 1.0),
+    ("shortness_of_breath", "severity"): (1.2, 1.0),
+    ("shortness_of_breath", "interference"): (0.9, 0.95),
+    ("nausea", "frequency"): (0.7, 0.85),
+    ("nausea", "severity"): (0.65, 0.85),
+    ("general_pain", "frequency"): (1.25, 1.0),
+    ("general_pain", "severity"): (1.15, 1.0),
+    ("general_pain", "interference"): (0.9, 0.95),
+    ("decreased_appetite", "severity"): (1.0, 0.95),
+    ("decreased_appetite", "interference"): (0.75, 0.9),
 }
 MEASUREMENTS = {
     "latest_ecog": (1.1, 0.85),
@@ -50,15 +83,18 @@ MEASUREMENTS = {
     "creatinine_slope": (0.03, 0.19),
     "weight_loss_per_year": (3.2, 5.5),
 }
-for source, fields in (("lab", LAB_REFERENCE), ("vital", VITAL_REFERENCE)):
+for source, fields, change_scales in (
+    ("lab", LAB_REFERENCE, LAB_CHANGE_SCALES),
+    ("vital", VITAL_REFERENCE, VITAL_CHANGE_SCALES),
+):
     for field, (center, scale) in fields.items():
         for summary in ("last", "mean", "change"):
             MEASUREMENTS[f"{source}.{field}.{summary}"] = (
                 0 if summary == "change" else center,
-                scale,
+                change_scales[field] if summary == "change" else scale,
             )
 for symptom, attribute in PRO_ITEMS:
-    MEASUREMENTS[f"pro.{symptom}.{attribute}.mean"] = (1.25, 1)
+    MEASUREMENTS[f"pro.{symptom}.{attribute}.mean"] = PRO_REFERENCE[(symptom, attribute)]
 
 SPLITS = ("train", "held_out")
 ROLES = (*ROLE_GROUPS, "unused")
@@ -72,11 +108,44 @@ MEASURED_IN_NOTE = re.compile(
     r"sodium|potassium|bilirubin|albumin|ast|alt|wbc|bun|glucose|pro[- ]ctcae)\b",
     re.I,
 )
+# Broader overlap filter for newly authored banks and for coupling legacy bank
+# findings coherently to simulated physiology.
+MEASURED_IN_NOTE_STRICT = re.compile(
+    r"\b(anemia|anaemia|neutropenia|thrombocytopenia|leukopenia|leukocytosis|"
+    r"lymphopenia|cytopenia|pancytopenia|weight loss|cachexia|fever|febrile|"
+    r"hypoxia|hypoxic|dyspnea|shortness of breath|fatigue|nausea|anorexia|"
+    r"hypertension|hypotension|tachycardia|bradycardia|tachypnea|"
+    r"chronic kidney|renal insufficiency|hyponatremia|hyperkalemia|hypokalemia|"
+    r"hyperglycemia|hypoglycemia|jaundice|transaminitis|egfr)\b",
+    re.I,
+)
 STUDY_LABEL_IN_NOTE = re.compile(
     r"\b(confounder|effect modifier|study arm|assigned to|randomized to|will receive|"
     r"counterfactual|treatment_indicator|outcome_indicator|true_y[01])\b",
     re.I,
 )
+
+
+def sanitize_note_findings(note_findings):
+    """Deduplicate findings whose chart statements collide within the same design."""
+    deduped = []
+    by_present = {}
+    by_absent = {}
+    for spec in note_findings:
+        present_key = spec["present"].strip().casefold()
+        absent_key = spec["absent"].strip().casefold()
+        existing = by_present.get(present_key)
+        if existing is None:
+            existing = by_absent.get(absent_key)
+        if existing is not None:
+            merged_roles = list(dict.fromkeys([*existing["roles"], *spec["roles"]]))
+            existing["roles"] = merged_roles
+            continue
+        copy_spec = {**spec, "roles": list(spec["roles"])}
+        by_present[present_key] = copy_spec
+        by_absent[absent_key] = copy_spec
+        deduped.append(copy_spec)
+    return deduped
 QUESTION_KEYS = (
     "id",
     "split",

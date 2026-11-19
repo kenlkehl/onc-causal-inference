@@ -42,7 +42,7 @@ coordinate lets a reader align a note, blood draw, and vital signs from one visi
 | --- | --- |
 | `notes` | Timestamped narrative notes with activity, symptoms or visit findings, and ECOG performance status. `clinical_text` also provides the joined notes for existing text workflows. |
 | `labs` | One panel per event. `CBC_DIFF` includes red cell indices, platelets, WBC, and a five-part differential with absolute counts and percentages. `BMP` has eight chemistry components. `CMP` adds albumin, total protein, bilirubin, ALP, AST, and ALT. Each result has a component name, numeric value, and unit. |
-| `encounters` | One encounter per visit with a setting, an ICD-10-CM diagnosis code list, and a CPT code list. This simulator uses a small outpatient oncology and emergency department code vocabulary. |
+| `encounters` | One encounter per visit with a setting (`outpatient`, `emergency`, `inpatient`, `infusion`, `telehealth`), an ICD-10-CM diagnosis code list (primary cancer plus physiology- and comorbidity-linked codes), and a CPT code list (E/M, labs, infusion, and imaging procedures). |
 | `vitals` | Weight in kg, systolic and diastolic pressure in mmHg, pulse, respiratory rate, temperature in Celsius, and oxygen saturation in percent. |
 | `pros` | One submitted adult PRO-CTCAE questionnaire per event. Each carries `instrument`, `recall_days`, and a list of `{symptom, attribute, score}` responses. A score is an ordinal integer from 0 to 4, or null for an unanswered item. |
 
@@ -51,11 +51,11 @@ The chemistry component lists follow the National Library of Medicine’s
 [CMP](https://medlineplus.gov/lab-tests/comprehensive-metabolic-panel-cmp/) descriptions.
 
 Patients have 4–12 irregularly spaced visits. A patient-specific course of
-illness influences function, kidney measures, blood counts, weight, vitals,
-and emergency attendance. The first and last visits include notes, labs,
-encounters and vitals. Intermediate visits can have
-different combinations of notes, panels, and vitals. The distributions are
-stylized simulation assumptions.
+illness influences visit frequency, ordering intensity, function, kidney measures,
+blood counts, weight, vitals, comorbidities, and emergency or inpatient attendance.
+The first and last visits include notes, labs, encounters and vitals. Intermediate
+visits have severity-dependent combinations of notes, panels, and vitals. The
+distributions are stylized simulation assumptions.
 
 The simulated questionnaire selects 11 items from the NCI adult English
 PRO-CTCAE v1.0 item library. Fatigue, shortness of breath, and decreased
@@ -144,7 +144,7 @@ python -m synthetic_data.cli longitudinal \
 
 Changing only the DGP seed varies roles and equations while preserving those patients' histories. Changing only the patient seed samples a new cohort under exactly the same equations. The Parquet contains the five histories, sampled treatment and outcome, measured and charted covariates, and oracle risks. The metadata contains the full design and the two study equations. Training can instead sample studies directly in memory. [Model training](longitudinal_model.md#studies-used-for-training)
 
-The bank describes hypothetical studies. Numerical effects, note-finding prevalence and response curves are simulation assumptions. Across designs the background visit, physiology and questionnaire processes are shared. Within a design, additional binary note findings are sampled independently and use fixed authored sentences for their two states.
+The bank describes hypothetical studies. Numerical effects, note-finding prevalence and response curves are simulation assumptions. Across designs the background visit, physiology and questionnaire processes are shared. Within a design, colliding chart statements are deduplicated, wide designs cap active causal variables to a sparse subset (retaining the rest as distractors), equations are rescaled and intercept-calibrated across widths 3–100, and binary note findings couple to matching physiology or patient burden. When `--note-style llm` is enabled with a design, chart findings are injected before LLM note rendering so the writer integrates them into clinical prose.
 
 ## How a cohort is generated
 

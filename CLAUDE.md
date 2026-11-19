@@ -20,7 +20,8 @@ with a two-stage, science-first workflow:
 User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 `how_it_works.md`, `stage1_architectures.md`, `stage2_selection.md`,
 `configuration.md`, `serving.md`, `optional_extensions.md`,
-`synthetic_data.md`, `benchmarks.md`, `standalone_htr.md`,
+`synthetic_data.md`, `longitudinal_model.md`, `nemotron_design_bank.md`,
+`benchmarks.md`, `standalone_htr.md`,
 `sample_size_calculator.md`, and `design_notes/`.
 
 ## Entry points
@@ -39,6 +40,8 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 | `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
 | `python -m synthetic_data.cli` | `synthetic_data/` (`generator.py`, `generation_factors.py`, `dgp_terms.py`) | Synthetic cohort generator: confounder, effect-modifier, instrument, and prognostic roles; generation-time factors (covariate correlation, MCAR/MNAR documentation, post-treatment dated notes, proxies) |
 | `python -m synthetic_data.cli reequation` | `synthetic_data/reequation.py` (`reequation_cohort`) | Recompute treatment and outcome over an existing synthetic cohort's true characteristics for a scenario (no LLM; text copied unchanged; refuses cohorts with post-treatment notes) |
+| `python -m synthetic_data.cli longitudinal` | `synthetic_data/` (`longitudinal.py`, `longitudinal_history.py`, `designed_history.py`, `pro_ctcae.py`, `study_designs.py`, `nemotron_bank.py`) | Generate five-stream longitudinal oncology cohorts (`notes`, `labs`, `encounters`, `vitals`, `pros`) with calibrated study-specific causal mechanisms (offline or LLM-rendered notes; bundled 5,000-design Nemotron bank in `synthetic_data/designs/nemotron_5000.json.gz`, plus `design-bank` authoring) |
+| `python -m oci.longitudinal.cli` | `oci/longitudinal/` (`events.py`, `model.py`, `training.py`, `cli.py`) | `train`, `resume`, `evaluate`, and `predict` for the cross-modal longitudinal patient encoder and two-way CausalPFN study model (LFM2.5-230M note backbone, open-vocabulary lab/PRO/encounter inputs, sinh-warped logit histogram outcome head, direct CATE loss, propensity head, and real-EHR-compatible prediction outputs) |
 | `./run_sample_size_calculator.sh` | `sample_size_calculator/` (`app.py`, `population.py`, `orthogonal_tests.py`, `engine.R`, `run.R`, `binary_selection_methods.R`, `index.html`, `app.js`) | Modifier-selection sample-size calculator: a loopback web dashboard (`--port`, `--runs-dir`; runs in `artifacts/sample_size_calculator/`) or one run with `--config CONFIG.json --output NEW_DIR`; simulates binary-outcome studies from a tabular DGP and reports how often a selector meets sensitivity and false-positive-rate targets per sample size: `selector: "lasso"` (Gao DINA lasso for log OR, Zhao residual lasso for RD) or `"orthogonal_tests"` (Stage 2's `candidate_tests` and `combine_and_select` with Stage 2's defaults, BH at `modifier_q`); standard-library Python plus R (`glmnet`, `jsonlite`); the orthogonal tests need the OCI environment (`PYTHON=.venv/bin/python`) |
 
 Helper scripts: `scripts/detect_all_evidence_hardware.py` (GPU and worker
@@ -71,6 +74,11 @@ oci/
 │   ├── htr_number_summary.py         # Per-chunk number summaries for HTR (template default)
 │   ├── concept_embedding_cache.py    # Chunk embedding cache (Stage 1)
 │   └── explicit_feature_featurizer.py          # `oci run` featurization
+├── longitudinal/
+│   ├── events.py                     # Self-contained five-stream real-EHR/simulator featurization
+│   ├── model.py                      # Cross-modal PatientEncoder + two-way CausalPFN CausalStudyModel
+│   ├── training.py                   # Episode simulation, mixed-precision/grad-accum training, baselines
+│   └── cli.py                        # `python -m oci.longitudinal.cli` (train, resume, evaluate, predict)
 ├── utils/calibration.py              # Platt calibration of nuisance predictions
 └── inference/
     │ # Workflow and Stage 1

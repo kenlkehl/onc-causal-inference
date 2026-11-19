@@ -15,12 +15,18 @@ from tempfile import TemporaryDirectory
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+from scipy.optimize import brentq
 from scipy.special import expit
 
 from .config import LLMConfig
-from .designed_history import candidate_features, document_findings, measured_values
-from .dgp_terms import role_lists
-from .generator import _compute_logit, oracle_dataset_statistics
+from .designed_history import (
+    candidate_features,
+    document_findings,
+    measured_values,
+    sanitized_design_candidates,
+)
+from .dgp_terms import nonlinear_value, role_lists
+from .generator import oracle_dataset_statistics
 from .llm_client import LLMClient
 from .longitudinal_history import (
     DAYS_PER_YEAR,
@@ -154,20 +160,222 @@ def _schema(features, include_pros):
     )
 
 
-def _validate_note(text):
+_SEX_SPECIFIC_CANCERS = re.compile(
+    r"\b(prostate|testicular|ovarian|cervical|endometrial|uterine|vulvar|vaginal|penile)\b",
+    re.IGNORECASE,
+)
+_MAX_TX_INTERACTIONS = 15
+_MAX_OUTCOME_INTERACTIONS = 6
+_CALIBRATION_DRAWS = 512
+
+
+def _fast_compute_logit(characteristics, features, summary_stats, equation, treatment=None):
+    """O(1)-lookup equivalent of ``synthetic_data.generator._compute_logit``."""
+    logit = float(equation.get("intercept", 0.0))
+    coefficients = equation.get("coefficients", {})
+    nonlinearity = equation.get("nonlinearity", "none")
+    nonlinear_terms = (
+        set(equation.get("nonlinear_terms") or []) if nonlinearity != "none" else set()
+    )
+
+    z_values = {}
+    cat_values = {}
+    for feature in features:
+        name = feature["name"]
+        if feature["type"] == "continuous":
+            stats = summary_stats.get(name, {})
+            mean = stats.get("mean", 0.0)
+            std = stats.get("std", 1.0) or 1.0
+            z_values[name] = (characteristics[name] - mean) / std
+        else:
+            val = characteristics.get(name)
+            for cat in feature["categories"][1:]:
+                cat_values.setdefault(f"{name}_{cat}", 1.0 if val == cat else 0.0)
+
+    for coef_name, coef_value in coefficients.items():
+        if coef_name in z_values:
+            z = z_values[coef_name]
+            if coef_name in nonlinear_terms:
+                z = nonlinear_value(z, nonlinearity)
+            logit += coef_value * z
+        elif coef_name in cat_values and cat_values[coef_name]:
+            logit += coef_value
+
+    for interaction in equation.get("interactions", ()):
+        terms = interaction.get("terms", ())
+        coef = interaction.get("coefficient", 0.0)
+        product = 1.0
+        for term in terms:
+            if term in z_values:
+                value = z_values[term]
+            elif term in cat_values:
+                value = cat_values[term]
+            else:
+                product = 0.0
+                break
+            product *= value
+        logit += coef * product
+
+    if treatment is not None:
+        logit += equation.get("treatment_coefficient", 0.0) * treatment
+        for interaction in equation.get("treatment_interactions", ()):
+            term = interaction.get("term", "")
+            coef = interaction.get("coefficient", 0.0)
+            if term in z_values:
+                value = z_values[term]
+                if term in nonlinear_terms:
+                    value = nonlinear_value(value, nonlinearity)
+                logit += coef * treatment * value
+            elif term in cat_values:
+                logit += coef * treatment * cat_values[term]
+
+    return logit
+
+
+def _calibration_samples(features, reference, rng, n_draws=_CALIBRATION_DRAWS):
+    """Lightweight correlated draws from the feature reference moments for calibration."""
+    common = rng.normal(size=n_draws)
+    rho = 0.35
+    sqrt_rho = float(np.sqrt(rho))
+    sqrt_rem = float(np.sqrt(1.0 - rho))
+    columns = {}
+    for feature in features:
+        name = feature["name"]
+        stats = reference.get(name, {})
+        if feature["type"] == "continuous":
+            mean = float(stats.get("mean", 0.0))
+            std = float(stats.get("std", 1.0) or 1.0)
+            z = sqrt_rho * common + sqrt_rem * rng.normal(size=n_draws)
+            columns[name] = mean + std * z
+        else:
+            probs = stats.get("proportions", {})
+            p_present = float(probs.get("present", 0.25))
+            p_present = float(np.clip(p_present, 1e-4, 1.0 - 1e-4))
+            base_l = float(np.log(p_present / (1.0 - p_present)))
+            ps = expit(base_l + 0.25 * common)
+            draws = rng.random(n_draws) < ps
+            columns[name] = ["present" if flag else "absent" for flag in draws]
+    names = [f["name"] for f in features]
+    return [{name: columns[name][i] for name in names} for i in range(n_draws)]
+
+
+def _scale_equation(equation, scale):
+    eq = dict(equation)
+    if "coefficients" in eq:
+        eq["coefficients"] = {k: float(v * scale) for k, v in eq["coefficients"].items()}
+    if "interactions" in eq:
+        eq["interactions"] = [
+            {**inter, "coefficient": float(inter.get("coefficient", 0.0) * scale)}
+            for inter in eq["interactions"]
+        ]
+    if "treatment_interactions" in eq:
+        eq["treatment_interactions"] = [
+            {**inter, "coefficient": float(inter.get("coefficient", 0.0) * scale)}
+            for inter in eq["treatment_interactions"]
+        ]
+    return eq
+
+
+def _calibrate_intercept(lps, target_rate):
+    def error(intercept):
+        return float(expit(intercept + lps).mean() - target_rate)
+
+    try:
+        return float(brentq(error, -12.0, 12.0))
+    except ValueError:
+        return -12.0 if error(-12.0) > 0 else 12.0
+
+
+def _calibrate_longitudinal_equations(features, reference, treatment, outcome, rng):
+    """Rescale linear predictors and calibrate intercepts across arbitrary design widths."""
+    if len(treatment.get("interactions", ())) > _MAX_TX_INTERACTIONS:
+        keep = rng.choice(len(treatment["interactions"]), size=_MAX_TX_INTERACTIONS, replace=False)
+        treatment = {
+            **treatment,
+            "interactions": [treatment["interactions"][int(i)] for i in sorted(keep)],
+        }
+
+    # Add modest covariate-by-covariate interactions to outcome_eq for richer SCMs.
+    owner_of = {}
+    for feature in features:
+        if feature["type"] == "continuous":
+            owner_of[feature["name"]] = feature["name"]
+        else:
+            for cat in feature["categories"][1:]:
+                owner_of[f"{feature['name']}_{cat}"] = feature["name"]
+    out_terms = [t for t in outcome.get("coefficients", {}) if t in owner_of]
+    candidate_pairs = [
+        (out_terms[i], out_terms[j])
+        for i in range(len(out_terms))
+        for j in range(i + 1, len(out_terms))
+        if owner_of[out_terms[i]] != owner_of[out_terms[j]]
+    ]
+    if candidate_pairs and rng.random() < 0.65:
+        n_pairs = int(rng.integers(1, min(_MAX_OUTCOME_INTERACTIONS, len(candidate_pairs)) + 1))
+        chosen = rng.choice(len(candidate_pairs), size=n_pairs, replace=False)
+        outcome = {
+            **outcome,
+            "interactions": [
+                {
+                    "terms": list(candidate_pairs[int(idx)]),
+                    "coefficient": float(rng.uniform(-0.35, 0.35)),
+                }
+                for idx in sorted(chosen)
+            ],
+        }
+
+    samples = _calibration_samples(features, reference, rng)
+    tx_no_int = {**treatment, "intercept": 0.0}
+    out_no_int = {**outcome, "intercept": 0.0}
+    tx_lps = np.array(
+        [_fast_compute_logit(s, features, reference, tx_no_int, None) for s in samples]
+    )
+    lp0 = np.array([_fast_compute_logit(s, features, reference, out_no_int, 0) for s in samples])
+    lp1 = np.array([_fast_compute_logit(s, features, reference, out_no_int, 1) for s in samples])
+
+    # Occasional unconfounded / RCT-like studies alongside confounded observational ones.
+    target_tx_std = 0.0 if rng.random() < 0.08 else float(rng.uniform(0.6, 1.8))
+    target_out_std = float(rng.uniform(0.9, 2.0))
+    tx_std = float(np.std(tx_lps))
+    out_std = max(float(np.std(lp0)), float(np.std(lp1)))
+    if tx_std > 1e-8:
+        scale = target_tx_std / tx_std
+        treatment = _scale_equation(treatment, scale)
+        tx_lps = tx_lps * scale
+    if out_std > 1e-8:
+        scale = target_out_std / out_std
+        outcome = _scale_equation(outcome, scale)
+        lp0 = lp0 * scale
+
+    target_tx_rate = float(rng.uniform(0.25, 0.75))
+    target_ctrl_rate = float(rng.uniform(0.12, 0.82))
+    treatment["intercept"] = _calibrate_intercept(tx_lps, target_tx_rate)
+    outcome["intercept"] = _calibrate_intercept(lp0, target_ctrl_rate)
+    return treatment, outcome
+
+
+def _validate_note(text, *, allow_sex_terms=False):
     _clinical_document(text)
-    # The simulated visit has no sex or gender field for a writer to infer.
-    if re.search(r"\b(male|female|man|woman|he|she|his|her|him|hers)\b", text, re.IGNORECASE):
+    # The simulated visit has no sex or gender field for a writer to infer unless
+    # the study question itself defines a sex-specific malignancy.
+    if not allow_sex_terms and re.search(
+        r"\b(male|female|man|woman|he|she|his|her|him|hers)\b", text, re.IGNORECASE
+    ):
         raise ValueError("Clinical note introduced an undocumented patient demographic")
 
 
-def _render_llm_note(client, cache_dir, patient_id, note):
+def _render_llm_note(client, cache_dir, patient_id, note, *, allow_sex_terms=False):
     # Only the current visit goes to the writer. Keep the numeric ECOG field exact.
     draft, ecog = note["text"].rsplit(" ECOG performance status: ", 1)
+    pronoun_rule = (
+        ""
+        if allow_sex_terms
+        else "Use 'the patient' throughout because sex and gender are undocumented. "
+    )
     prompt = (
         "Write one short pretreatment clinical note from the visit facts below. "
         "Use only the supplied facts and preserve the findings and their polarity. "
-        "Use 'the patient' throughout because sex and gender are undocumented. "
+        f"{pronoun_rule}"
         "Do not invent test results, treatments, outcomes, or a numeric performance score. "
         "Return just the clinical note.\n\n" + draft
     )
@@ -179,7 +387,7 @@ def _render_llm_note(client, cache_dir, patient_id, note):
         prompt,
         0.5,
         client.config.max_tokens,
-        _validate_note,
+        lambda t: _validate_note(t, allow_sex_terms=allow_sex_terms),
         system_prompt=CLINICAL_SYSTEM_PROMPT + NOTE_OUTPUT_FORMAT,
     )
     note["text"] = f"{text.strip()} ECOG performance status: {ecog}"
@@ -239,11 +447,22 @@ def draw_longitudinal_dgp(dgp_seed, prior=None, *, schema_version=2, design=None
         interaction_coefficient_scale=0.30,
     )
     if prior in ("mixed", "design"):
-        treatment["intercept"], outcome["intercept"] = map(float, rng.uniform(-1, 1, 2))
+        treatment, outcome = _calibrate_longitudinal_equations(
+            features, reference, treatment, outcome, rng
+        )
     return LongitudinalDGP(features, treatment, outcome, schema_version, reference, design)
 
 
-def sample_longitudinal_patient(patient_id, *, seed, dgp, note_client=None, cache_dir=None):
+def sample_longitudinal_patient(
+    patient_id,
+    *,
+    seed,
+    dgp,
+    note_client=None,
+    cache_dir=None,
+    omit_absent_prob=0.0,
+    style_variation=False,
+):
     design = dgp.design
     streams = simulate_history(
         seed,
@@ -251,27 +470,38 @@ def sample_longitudinal_patient(patient_id, *, seed, dgp, note_client=None, cach
         include_pros=dgp.schema_version == 2,
         question=design["question"] if design else None,
     )
-    features = (
-        measured_values(streams, design["candidates"]["measurements"])
-        if design
-        else history_features(streams)
-    )
-    if note_client is not None:
-        for note in streams["notes"]:
-            _render_llm_note(note_client, cache_dir, patient_id, note)
     if design:
+        measurements, note_findings = sanitized_design_candidates(design)
+        features = measured_values(streams, measurements)
+        # Document design-specific findings before any LLM note rendering so
+        # the LLM weaves the actual causal chart facts into realistic prose.
         features.update(
             document_findings(
                 streams["notes"],
-                design["candidates"]["note_findings"],
+                note_findings,
                 np.random.default_rng([seed, patient_id, 4]),
+                streams=streams,
+                omit_absent_prob=omit_absent_prob,
+                style_variation=style_variation,
             )
         )
+    else:
+        features = history_features(streams)
+    if note_client is not None:
+        allow_sex = bool(
+            design and _SEX_SPECIFIC_CANCERS.search(design["question"].get("cancer", ""))
+        )
+        for note in streams["notes"]:
+            _render_llm_note(
+                note_client, cache_dir, patient_id, note, allow_sex_terms=allow_sex
+            )
     # The label-draw stream is independent of every history and its renderer.
     rng = np.random.default_rng([seed, patient_id, 2])
-    propensity = float(expit(_compute_logit(features, dgp.features, dgp.reference, dgp.treatment)))
+    propensity = float(
+        expit(_fast_compute_logit(features, dgp.features, dgp.reference, dgp.treatment))
+    )
     p0, p1 = [
-        float(expit(_compute_logit(features, dgp.features, dgp.reference, dgp.outcome, t)))
+        float(expit(_fast_compute_logit(features, dgp.features, dgp.reference, dgp.outcome, t)))
         for t in (0, 1)
     ]
     treatment = int(rng.random() < propensity)
