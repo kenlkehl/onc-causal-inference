@@ -253,7 +253,10 @@ onto its labels.
 ### 4. Extract every candidate from the outer-training records
 
 The [extraction LLM](glossary.md#interpretation-llm-and-extraction-llm) reads one
-patient's record per request and returns up to 10 variables per request.
+patient's record per request and returns up to 10 variables per request. Each
+request gives the record first and the variable definitions after it, so a
+server with prefix caching processes the record once and reuses it for that
+patient's other requests.
 Records longer than the context budget are processed in ordered, lossless
 chunks, with the current values carried forward from chunk to chunk; a request
 that cannot fit fails rather than truncating text. Variables defined by the most

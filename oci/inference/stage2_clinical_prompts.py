@@ -5,6 +5,7 @@ import json
 from collections.abc import Mapping
 
 from .stage2_prompt_catalog import (  # noqa: F401 - versions are read as module attributes
+    EXTRACTION_PROMPT_VERSION,
     HARMONIZED_MERGE_PROMPT_VERSION,
     PROMPT_VERSION,
     SYSTEM_PROMPTS,

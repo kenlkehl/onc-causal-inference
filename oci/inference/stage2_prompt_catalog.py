@@ -14,6 +14,11 @@ The review artifacts preserve the exact example conversations and model replies.
 
 PROMPT_VERSION = "stage2_clinical_prompts_v5_zero_counts_20261117"
 HARMONIZED_MERGE_PROMPT_VERSION = "stage2_merge_and_harmonize_v1_20261116"
+# Revision of the extraction prompts (05, 06, 07) only. Extraction checkpoints
+# carry it in their schema versions, so a change re-extracts without touching
+# discovery or feature definitions. The patient text comes first in each
+# request, so a server's prefix cache reuses it across the patient's requests.
+EXTRACTION_PROMPT_VERSION = "stage2_extraction_record_first_v1_20261119"
 
 SYSTEM_PROMPTS = {
     '01_discover': """You identify clinical variables that could be measured from individual patients' medical records. Read all supplied excerpts and name each distinct clinical attribute they support.
@@ -147,7 +152,7 @@ Return one JSON object with action (define or decompose), reason (one or two sen
 
 What you receive
 
-The clinical variable definitions and the text from one patient's record.
+The text from one patient's record, followed by the clinical variable definitions.
 
 How to decide
 
@@ -162,7 +167,7 @@ Return one JSON object whose top-level keys are exactly the supplied clinical va
 
 What you receive
 
-The measurement definitions, the values found so far, notes about those values, and the next section of clinical text. The notes may include the date of an earlier observation or an unresolved conflict.
+The next section of clinical text, followed by the measurement definitions, the values found so far, and notes about those values. The notes may include the date of an earlier observation or an unresolved conflict.
 
 How to decide
 
@@ -179,7 +184,7 @@ Return one JSON object with values and decision_notes. Each is an object keyed b
 
 What you receive
 
-Clinical variable definitions and one section of a patient's record.
+One section of a patient's record, followed by the clinical variable definitions.
 
 How to decide
 
