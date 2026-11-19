@@ -44,6 +44,7 @@ coordinate lets a reader align a note, blood draw, and vital signs from one visi
 | `labs` | One panel per event. `CBC_DIFF` includes red cell indices, platelets, WBC, and a five-part differential with absolute counts and percentages. `BMP` has eight chemistry components. `CMP` adds albumin, total protein, bilirubin, ALP, AST, and ALT. Each result has a component name, numeric value, and unit. |
 | `encounters` | One encounter per visit with a setting, an ICD-10-CM diagnosis code list, and a CPT code list. This simulator uses a small outpatient oncology and emergency department code vocabulary. |
 | `vitals` | Weight in kg, systolic and diastolic pressure in mmHg, pulse, respiratory rate, temperature in Celsius, and oxygen saturation in percent. |
+| `pros` | One submitted adult PRO-CTCAE questionnaire per event. Each carries `instrument`, `recall_days`, and a list of `{symptom, attribute, score}` responses. A score is an ordinal integer from 0 to 4, or null for an unanswered item. |
 
 The chemistry component lists follow the National Library of Medicine’s
 [BMP](https://medlineplus.gov/lab-tests/basic-metabolic-panel-bmp/) and
@@ -51,19 +52,39 @@ The chemistry component lists follow the National Library of Medicine’s
 
 Patients have 4–12 irregularly spaced visits. A patient-specific course of
 illness influences function, kidney measures, blood counts, weight, vitals,
-and emergency attendance. The first and last visits include all four streams
-so that within-patient changes are defined. Intermediate visits can have
+and emergency attendance. The first and last visits include notes, labs,
+encounters and vitals. Intermediate visits can have
 different combinations of notes, panels, and vitals. The distributions are
 stylized simulation assumptions.
 
+The simulated questionnaire selects 11 items from the NCI adult English
+PRO-CTCAE v1.0 item library. Fatigue, shortness of breath, and decreased
+appetite each use severity and interference. Nausea uses frequency and severity.
+General pain uses frequency, severity, and interference. Each response describes
+the preceding seven days. The adult instrument specifies the response options
+for each attribute. When electronic branching skips a follow-up after a zero,
+the generator records zero. An unanswered question and its dependent follow-ups
+have null scores. [NCI item library](https://healthcaredelivery.cancer.gov/pro-ctcae/instruments/pro-ctcae/pro-ctcae_english.pdf)
+and [NCI scoring guidance](https://healthcaredelivery.cancer.gov/pro-ctcae/faqs.html).
+
+Surveys are scheduled weekly for up to 12 weeks ending at the last pretreatment
+visit, including between visits. Earlier weeks have a 20% chance of a missed
+form. Illness during the recall week, patient-specific symptom levels, and
+correlated weekly fluctuations drive the responses. The final form always
+includes both fatigue scores so that every simulated patient has an observed
+fatigue history. These collection and response distributions are simulator choices.
+
 The equation inputs are the latest documented ECOG score, latest log
 neutrophil-to-lymphocyte ratio, annualized creatinine change, annualized
-percent weight loss, and emergency visit count in the preceding 180 days.
+percent weight loss, emergency visit count in the preceding 180 days, and the
+mean of the patient's recorded fatigue-interference responses. This last
+quantity is a simulation covariate. The default DGP uses it as both a
+confounder and an effect modifier.
 `metadata.json` records their roles, standardization constants, equation
 coefficients, and stream counts. `treatment_indicator` and `outcome_indicator`
 are the observed assignment and outcome. For evaluation or supervised
 simulation tasks, `true_y0` and `true_y1` are the exact arm-specific risks
-and `true_ite` is their difference. Read the four stream columns explicitly
+and `true_ite` is their difference. Read the five stream columns explicitly
 when constructing patient inputs to keep the `true_*` fields out of them.
 
 Keep `--seed` fixed and change `--dgp-seed` to expose identical offline
@@ -71,6 +92,8 @@ histories to different treatment policies and response functions. Change only
 `--seed` to sample different patients under the same equations. The existing
 `reequation` command can also vary roles and equations on the saved dataset,
 carrying the nested observations and the exact note wording forward.
+The default schema version is 2. Use `--schema-version 1` with the original
+seeds and prior to replay a four-stream cohort and its original equations.
 
 Use `--prior mixed` to draw new role assignments, intercepts, treatment
 effects and outcome equation shapes for each DGP seed. This is the prior

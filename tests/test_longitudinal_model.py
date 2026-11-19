@@ -9,7 +9,7 @@ from tokenizers.pre_tokenizers import Whitespace
 from transformers import AutoModel, AutoTokenizer, Lfm2Config, PreTrainedTokenizerFast
 
 from oci.longitudinal.cli import main, predict
-from oci.longitudinal.events import STREAMS, binary_observations, event_times
+from oci.longitudinal.events import PRO_INDEX, STREAMS, binary_observations, event_times, pro_vector
 from oci.longitudinal.model import ArmScale, CausalStudyModel, ModelConfig
 from oci.longitudinal.training import fit_episode, load_run, simulate_episode
 from synthetic_data.longitudinal import generate_longitudinal_cohort
@@ -67,6 +67,7 @@ def test_gradients_time_and_last_nonpadding_token(model):
         model.patient.labs,
         model.patient.vitals,
         model.patient.notes,
+        model.patient.pros,
         *model.patient.streams.values(),
         model.layers,
         model.head,
@@ -94,6 +95,55 @@ def test_gradients_time_and_last_nonpadding_token(model):
         assert torch.isfinite(model.patient([empty, rows[0]])).all()
     with pytest.raises(ValueError, match="before the index"):
         event_times([{"day_from_index": 1, "delta_years": None}])
+
+
+def test_pro_scores_timing_and_empty_history(model):
+    def form(score):
+        return dict(
+            instrument="PRO-CTCAE",
+            recall_days=7,
+            day_from_index=-12,
+            delta_years=None,
+            responses=[dict(symptom="fatigue", attribute="interference", score=score)],
+        )
+
+    offset = 5 * PRO_INDEX["fatigue", "interference"]
+    for score, expected in [(None, [0, 0, 0, 0, 0]), (0, [1, 0, 0, 0, 0]), (2, [1, 1, 1, 0, 0])]:
+        assert pro_vector(form(score))[offset : offset + 5] == expected
+    for score in (-1, 5, 2.5, True):
+        with pytest.raises(ValueError, match="ordinal"):
+            pro_vector(form(score))
+    with pytest.raises(ValueError, match="duplicate"):
+        pro_vector({**form(None), "responses": form(None)["responses"] + form(1)["responses"]})
+    with pytest.raises(ValueError, match="Unknown"):
+        pro_vector(
+            {**form(1), "responses": [dict(symptom="nausea", attribute="interference", score=1)]}
+        )
+    with pytest.raises(ValueError, match="seven-day"):
+        pro_vector({**form(1), "recall_days": 30})
+
+    row = {s: [] for s in STREAMS if s != "pros"}
+    rows = [
+        row,
+        {**row, "pros": []},
+        {**row, "pros": [form(0)]},
+        {**row, "pros": [form(4)]},
+        {**row, "pros": [{**form(4), "day_from_index": -70}]},
+    ]
+    model.eval()
+    with torch.no_grad():
+        embeddings = model.patient(rows)
+        width = model.cfg.event_width
+        assert model.row.in_features == 5 * width + 1
+        torch.testing.assert_close(embeddings[0], embeddings[1])
+        torch.testing.assert_close(
+            embeddings[:, :-width], embeddings[0, :-width].expand(len(rows), -1)
+        )
+        for first, second in [(1, 2), (2, 3), (3, 4)]:
+            assert not torch.allclose(embeddings[first, -width:], embeddings[second, -width:])
+        context, _ = simulate_episode(8, 2, False, 3)
+        logits, _ = model(context, rows[2:])
+        assert not torch.allclose(logits[0], logits[1])
 
 
 def test_context_and_query_information_boundaries(model):
@@ -171,7 +221,7 @@ def test_train_resume_and_unlabeled_inference(note_model, tmp_path):
     main(args)
     main(["resume", "--run-dir", str(run), "--device", "cpu", "--steps", "2"])
     model, saved = load_run(run, "cpu")
-    assert saved["step"] == 2
+    assert saved["step"] == 2 and saved["format_version"] == 2
     args[args.index("--steps") + 1] = "2"
     args[args.index(str(run))] = str(tmp_path / "uninterrupted")
     main(args)
@@ -211,3 +261,32 @@ def test_train_resume_and_unlabeled_inference(note_model, tmp_path):
     assert predict(model, data, None, tmp_path / "split.parquet", context_size=4) == 6
     with pytest.raises(ValueError, match="disjoint"):
         predict(model, data, qpath, tmp_path / "bad.parquet")
+    legacy_query = tmp_path / "old_queries.parquet"
+    pq.write_table(pq.read_table(qpath).drop(["pros"]), legacy_query)
+    assert predict(model, cpath, legacy_query, tmp_path / "old_out.parquet") == 5
+
+
+def test_prior_checkpoint_keeps_its_four_stream_architecture(note_model, tmp_path):
+    legacy = CausalStudyModel(
+        AutoModel.from_pretrained(note_model),
+        AutoTokenizer.from_pretrained(note_model),
+        ModelConfig(event_width=8, event_layers=1, study_width=16, study_layers=1, bins=17),
+        include_pros=False,
+    ).eval()
+    legacy.patient.tokenizer.save_pretrained(tmp_path / "tokenizer")
+    torch.save(
+        dict(
+            format_version=1,
+            model=vars(legacy.cfg),
+            backbone=legacy.patient.backbone.config.to_dict(),
+            weights=legacy.state_dict(),
+        ),
+        tmp_path / "checkpoint.pt",
+    )
+    restored, _ = load_run(tmp_path, "cpu")
+    rows, _ = simulate_episode(7, 1, False, 4, schema_version=1)
+    assert "pros" not in rows[0] and restored.row.in_features == 33
+    with torch.no_grad():
+        torch.testing.assert_close(
+            restored.eval()(rows[:2], rows[2:])[0], legacy(rows[:2], rows[2:])[0]
+        )

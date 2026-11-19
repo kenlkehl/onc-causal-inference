@@ -24,15 +24,21 @@ transform. An encounter combines learned embeddings of its setting, ICD-10-CM
 codes, and CPT codes. Codes use 4,096 deterministic hash buckets with separate
 namespaces for each system. Collisions are possible.
 
-Four independently initialized transformers summarize the four event streams.
+Each submitted PRO-CTCAE form becomes one event. For each of the form's
+11 symptom–attribute pairs, a learned projection reads a response-present
+indicator and four ordinal thresholds. For example, fatigue interference of
+zero sets only the presence indicator. A score of two also sets the first two
+thresholds. An unanswered item leaves all five indicators clear.
+
+Five independently initialized transformers summarize the five event streams.
 Each adds a learned embedding of log-days before the index decision, log-days
 since the previous event of that modality (both use log1p), and a first-event
 indicator. Each returns its learned summary token and masks padding. Empty
 streams have a learned representation. The default is two layers, four heads,
 and a 64-value summary per modality.
 
-The four summaries are concatenated into a 256-value patient vector. Appending
-the treatment indicator gives 257 inputs to the study projection. Observed
+The five summaries are concatenated into a 320-value patient vector. Appending
+the treatment indicator gives 321 inputs to the study projection. Observed
 context patients also receive an embedding of their standardized outcome.
 The four-layer, 128-wide study transformer attends across patients. At every
 layer, only context patients supply keys and values, so predictions for a
@@ -60,9 +66,9 @@ is the probability-weighted mean of those risks for each arm and their differenc
 ## Studies used for training
 
 By default each optimizer step independently simulates one offline study from
-the `mixed` prior. It randomly assigns the five history summaries to one
-confounder-only, one dual-role, one modifier-only, one prognostic, and one
-unused position. It draws treatment and outcome coefficients and intercepts,
+the `mixed` prior. It randomly assigns the six history summaries, including
+mean reported fatigue interference, to one confounder-only, one dual-role, one
+modifier-only, one prognostic, and two unused positions. It draws treatment and outcome coefficients and intercepts,
 a treatment main effect, treatment interactions, and either linear, threshold,
 or quadratic outcome terms. The patient-history simulator is shared across
 studies. Context and query patients are disjoint and use the same equations.
@@ -111,7 +117,12 @@ python -m oci.longitudinal.cli predict --run-dir artifacts/longitudinal_run \
   --output predictions.parquet
 ```
 
-Both input files use the simulator's patient ID and four sequence columns.
+Both input files use the simulator's patient ID and sequence columns for
+notes, labs, encounters, vitals, and PROs. For a patient without surveys,
+use an empty `pros` list. Training and inference also accept older Parquets
+without that column and treat their PRO history as empty.
+Version 1 checkpoints load with their four trained encoders and original study
+prior for resume, evaluation and prediction. Start a new run to train the fifth encoder.
 Context also requires `treatment_indicator` and `outcome_indicator`. Patient IDs
 must be unique and disjoint across files. Output columns are `patient_id`,
 `risk_control`, `risk_treated`, and `risk_difference` (treated minus control).

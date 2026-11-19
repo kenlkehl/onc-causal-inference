@@ -3,10 +3,13 @@
 import hashlib
 import math
 from functools import lru_cache
+from numbers import Integral
 
+import pyarrow.dataset as ds
 import torch
 
 from synthetic_data.longitudinal_history import DAYS_PER_YEAR, DIFFERENTIAL, LAB_UNITS, STREAMS
+from synthetic_data.pro_ctcae import PRO_INSTRUMENT, PRO_ITEMS, RECALL_DAYS
 from synthetic_data.structured_data import LAB_REFERENCE_RANGES
 
 # Fixed reference coordinates, independent of the context and query samples.
@@ -30,6 +33,36 @@ VITAL_SCALES = {
     "spo2_pct": (96, 4),
 }
 CODE_BUCKETS = 4096
+PRO_INDEX = {item: i for i, item in enumerate(PRO_ITEMS)}
+# Per item: score observed, then four cumulative ordinal thresholds.
+PRO_INPUT_SIZE = 5 * len(PRO_ITEMS)
+
+
+def read_patient_table(path, streams=STREAMS, labels=()):
+    """Project input fields explicitly, allowing pre-PRO cohorts to omit the new column."""
+    dataset = ds.dataset(path, format="parquet", partitioning="hive")
+    fields = [s for s in streams if s != "pros" or s in dataset.schema.names]
+    return dataset.to_table(columns=["patient_id", *fields, *labels])
+
+
+def pro_vector(event):
+    if event["instrument"] != PRO_INSTRUMENT or event["recall_days"] != RECALL_DAYS:
+        raise ValueError("Expected an adult PRO-CTCAE assessment with seven-day recall")
+    values = [0.0] * PRO_INPUT_SIZE
+    seen = set()
+    for item in event["responses"]:
+        key = (item["symptom"], item["attribute"])
+        if key not in PRO_INDEX or key in seen:
+            raise ValueError(f"Unknown or duplicate PRO-CTCAE item: {key}")
+        seen.add(key)
+        score = item["score"]
+        if score is None:
+            continue
+        if isinstance(score, bool) or not isinstance(score, Integral) or not 0 <= score <= 4:
+            raise ValueError(f"Expected an ordinal PRO-CTCAE score from 0 to 4 for {key}")
+        offset = 5 * PRO_INDEX[key]
+        values[offset : offset + 5] = [float(score >= threshold) for threshold in range(5)]
+    return values
 
 
 def _numeric(value, mean, scale):

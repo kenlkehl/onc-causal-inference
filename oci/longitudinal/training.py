@@ -9,23 +9,22 @@ import os
 import tempfile
 
 import numpy as np
-import pyarrow.parquet as pq
 import torch
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 from synthetic_data.longitudinal import draw_longitudinal_dgp, sample_longitudinal_patient
-from .events import STREAMS, binary_observations
+from .events import binary_observations, read_patient_table
 from .model import BASE_MODEL, BASE_REVISION, ArmScale, CausalStudyModel, ModelConfig
 
 OBSERVED = ["treatment_indicator", "outcome_indicator"]
 TARGETS = ["true_y0", "true_y1"]
 
 
-def simulate_episode(seed, step, held_out, size):
+def simulate_episode(seed, step, held_out, size, *, schema_version=2):
     state = np.random.SeedSequence([seed, step]).generate_state(2, dtype=np.uint64)
     # Even seeds for training; odd seeds for validation, for both DGPs and patients.
     dgp_seed, patient_seed = [2 * int(s) + int(held_out) for s in state]
-    dgp = draw_longitudinal_dgp(dgp_seed, "mixed")
+    dgp = draw_longitudinal_dgp(dgp_seed, "mixed", schema_version=schema_version)
     rows = [sample_longitudinal_patient(i, seed=patient_seed, dgp=dgp) for i in range(size)]
     return rows, {"dgp_seed": dgp_seed, "patient_seed": patient_seed}
 
@@ -49,11 +48,14 @@ def load_run(directory, device):
     saved = torch.load(
         directory / "checkpoint.pt", map_location="cpu", mmap=True, weights_only=True
     )
-    if saved["format_version"] != 1:
+    if saved["format_version"] not in (1, 2):
         raise ValueError("Unknown longitudinal checkpoint format")
     tokenizer = AutoTokenizer.from_pretrained(directory / "tokenizer", local_files_only=True)
     model = CausalStudyModel(
-        _load_backbone(saved["backbone"]), tokenizer, ModelConfig(**saved["model"])
+        _load_backbone(saved["backbone"]),
+        tokenizer,
+        ModelConfig(**saved["model"]),
+        include_pros=saved["format_version"] == 2,
     )
     model.load_state_dict(saved["weights"])
     return model.to(device), saved
@@ -61,7 +63,7 @@ def load_run(directory, device):
 
 def _save(directory, model, optimizer, settings, step):
     payload = dict(
-        format_version=1,
+        format_version=model.schema_version,
         backbone=model.patient.backbone.config.to_dict(),
         model=asdict(model.cfg),
         settings=settings,
@@ -148,7 +150,7 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
     for path in settings["cohorts"]:
         with open(path, "rb") as source:
             fingerprints[path] = hashlib.file_digest(source, "sha256").hexdigest()
-        table = pq.read_table(path, columns=["patient_id", *STREAMS, *OBSERVED, *TARGETS])
+        table = read_patient_table(path, model.patient.streams, [*OBSERVED, *TARGETS])
         ids = table["patient_id"]
         if table.num_rows < size or ids.null_count or len(set(ids.to_pylist())) != table.num_rows:
             raise ValueError(
@@ -169,7 +171,9 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
             rows = tables[idx].take(rng.choice(len(tables[idx]), size, replace=False)).to_pylist()
             provenance = {"cohort": settings["cohorts"][idx]}
         else:
-            rows, provenance = simulate_episode(settings["seed"], step, False, size)
+            rows, provenance = simulate_episode(
+                settings["seed"], step, False, size, schema_version=model.schema_version
+            )
         optimizer.zero_grad(set_to_none=True)
         loss, _, _ = fit_episode(model, rows, n_context)
         loss.backward()
@@ -187,7 +191,9 @@ def evaluate(model, seed, studies, context_size, query_size):
     model.eval()
     errors, constant_errors, arm_errors = [], [], []
     for step in range(1, studies + 1):
-        rows, _ = simulate_episode(seed, step, True, context_size + query_size)
+        rows, _ = simulate_episode(
+            seed, step, True, context_size + query_size, schema_version=model.schema_version
+        )
         _, pred, truth = fit_episode(model, rows, context_size)
         t, y = binary_observations(rows[:context_size], model.centers.device)
         rates = ArmScale.from_context(t, y).rate

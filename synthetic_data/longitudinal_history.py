@@ -1,12 +1,14 @@
-"""Irregular pretreatment oncology visits and four synchronized observation streams."""
+"""Pretreatment oncology visits and patient-reported symptom histories."""
 
 import numpy as np
 from scipy.special import expit
 
+from .pro_ctcae import weekly_assessments
 from .structured_data import LAB_REFERENCE_RANGES
 
 DAYS_PER_YEAR = 365.25
-STREAMS = ("notes", "labs", "encounters", "vitals")
+LEGACY_STREAMS = ("notes", "labs", "encounters", "vitals")
+STREAMS = (*LEGACY_STREAMS, "pros")
 DIFFERENTIAL = ("neutrophils", "lymphocytes", "monocytes", "eosinophils", "basophils")
 LAB_UNITS = {name: info[0] for name, info in LAB_REFERENCE_RANGES.items()}
 LAB_UNITS.update(mcv="fL", mch="pg", mchc="g/dL", rdw="%", total_protein="g/dL")
@@ -135,14 +137,15 @@ def _note(rng, age, performance, previous_performance, emergency, hemoglobin):
     return text
 
 
-def simulate_history(seed, patient_id):
+def simulate_history(seed, patient_id, *, include_pros=True):
     """Return observations up to the treatment decision for one synthetic patient."""
     rng = np.random.default_rng([seed, patient_id, 1])
     n_visits = int(rng.integers(4, 13))
     # Build backwards from the last pretreatment visit, then emit forwards.
     gaps = rng.integers(10, 85, n_visits - 1)
     days = -int(rng.integers(1, 22)) - np.r_[np.cumsum(gaps)[::-1], 0]
-    streams = {name: [] for name in STREAMS}
+    streams = {name: [] for name in (STREAMS if include_pros else LEGACY_STREAMS)}
+    visit_burden = []
     age_at_index = float(rng.uniform(40, 86))
     frailty, renal, drift = rng.normal(size=3)
     base_weight = float(rng.uniform(52, 112))
@@ -155,6 +158,7 @@ def simulate_history(seed, patient_id):
         years = (day - int(days[0])) / DAYS_PER_YEAR
         fluctuation = 0.65 * fluctuation + rng.normal(0, 0.32)
         burden = float(np.clip(frailty + drift * years + fluctuation, -3, 3))
+        visit_burden.append(burden)
         creatinine = float(
             np.clip(
                 1.02 + 0.22 * renal + (0.03 + 0.13 * drift) * years + rng.normal(0, 0.045),
@@ -177,7 +181,7 @@ def simulate_history(seed, patient_id):
         )
 
         # The endpoints anchor change over time; intermediate visits have distinct
-        # documentation and ordering patterns in the four modalities.
+        # documentation and ordering patterns.
         anchor = i == 0 or i == n_visits - 1
         hemoglobin = None
         if anchor or rng.random() < 0.72:
@@ -201,6 +205,10 @@ def simulate_history(seed, patient_id):
             )
             _append(streams["notes"], day, text=f"{text} ECOG performance status: {performance}.")
             previous_performance = performance
+    if include_pros:
+        survey_rng = np.random.default_rng([seed, patient_id, 3])
+        for day, form in weekly_assessments(survey_rng, days, visit_burden):
+            _append(streams["pros"], day, **form)
     return streams
 
 
@@ -219,7 +227,7 @@ def history_features(streams):
     span = (last["day_from_index"] - first["day_from_index"]) / DAYS_PER_YEAR
     (d0, cr0), (d1, cr1) = creatinine[0], creatinine[-1]
     recorded_ecog = streams["notes"][-1]["text"].rsplit(" ECOG performance status: ", 1)[1]
-    return dict(
+    features = dict(
         latest_ecog=float(recorded_ecog.rstrip(".")),
         log_nlr=float(np.log(diff["neutrophils_abs"] / diff["lymphocytes_abs"])),
         creatinine_slope=(cr1 - cr0) * DAYS_PER_YEAR / (d1 - d0),
@@ -234,3 +242,15 @@ def history_features(streams):
             )
         ),
     )
+    if "pros" in streams:
+        # The simulator collects fatigue at the final assessment for every enrollee.
+        scores = [
+            item["score"]
+            for form in streams["pros"]
+            for item in form["responses"]
+            if item["symptom"] == "fatigue"
+            and item["attribute"] == "interference"
+            and item["score"] is not None
+        ]
+        features["mean_fatigue_interference"] = float(np.mean(scores))
+    return features

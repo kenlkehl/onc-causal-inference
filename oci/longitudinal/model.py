@@ -9,16 +9,18 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.checkpoint import checkpoint
 
 from oci.models.lossless_tokenization import SemanticTruncationError
+from synthetic_data.longitudinal_history import LEGACY_STREAMS, STREAMS
 from .events import (
     CODE_BUCKETS,
     LAB_NAMES,
     PANELS,
-    STREAMS,
+    PRO_INPUT_SIZE,
     VITAL_SCALES,
     binary_observations,
     encounter_codes,
     event_times,
     lab_vector,
+    pro_vector,
     vital_vector,
 )
 
@@ -89,7 +91,7 @@ class EventTransformer(nn.Module):
 
 
 class PatientEncoder(nn.Module):
-    def __init__(self, backbone, tokenizer, cfg):
+    def __init__(self, backbone, tokenizer, cfg, *, include_pros=True):
         super().__init__()
         self.backbone, self.tokenizer = backbone, tokenizer
         self.tokenizer.padding_side = "right"
@@ -99,7 +101,10 @@ class PatientEncoder(nn.Module):
         self.labs = nn.Linear(2 * len(LAB_NAMES) + len(PANELS), width)
         self.vitals = nn.Linear(2 * len(VITAL_SCALES), width)
         self.codes = nn.EmbeddingBag(CODE_BUCKETS, width, mode="sum")
-        self.streams = nn.ModuleDict({name: EventTransformer(cfg) for name in STREAMS})
+        if include_pros:
+            self.pros = nn.Linear(PRO_INPUT_SIZE, width)
+        names = STREAMS if include_pros else LEGACY_STREAMS
+        self.streams = nn.ModuleDict({name: EventTransformer(cfg) for name in names})
 
     def _last_token(self, ids, mask):
         hidden = self.backbone(
@@ -143,8 +148,8 @@ class PatientEncoder(nn.Module):
             ids = torch.tensor([i for bag in codes for i in bag], device=device)
             offsets = torch.tensor([0] + [len(bag) for bag in codes[:-1]], device=device).cumsum(0)
             return self.codes(ids, offsets)
-        vector = lab_vector if name == "labs" else vital_vector
-        layer = self.labs if name == "labs" else self.vitals
+        vector = {"labs": lab_vector, "vitals": vital_vector, "pros": pro_vector}[name]
+        layer = getattr(self, name)
         return layer(layer.weight.new_tensor([vector(e) for e in events]))
 
     def forward(self, rows):
@@ -152,7 +157,9 @@ class PatientEncoder(nn.Module):
             raise ValueError("Expected at least one patient")
         summaries = []
         for name, encoder in self.streams.items():
-            streams = [row[name] for row in rows]
+            streams = [
+                [] if name == "pros" and row.get(name) is None else row[name] for row in rows
+            ]
             times = [time for stream in streams for time in event_times(stream)]
             values = self._values(name, [event for stream in streams for event in stream])
             summaries.append(encoder(values, times, [len(s) for s in streams]))
@@ -199,11 +206,12 @@ class ArmScale:
 
 
 class CausalStudyModel(nn.Module):
-    def __init__(self, backbone, tokenizer, cfg):
+    def __init__(self, backbone, tokenizer, cfg, *, include_pros=True):
         super().__init__()
         self.cfg = cfg
-        self.patient = PatientEncoder(backbone, tokenizer, cfg)
-        self.row = nn.Linear(4 * cfg.event_width + 1, cfg.study_width)
+        self.schema_version = 2 if include_pros else 1
+        self.patient = PatientEncoder(backbone, tokenizer, cfg, include_pros=include_pros)
+        self.row = nn.Linear(len(self.patient.streams) * cfg.event_width + 1, cfg.study_width)
         self.observed_y = nn.Linear(1, cfg.study_width)
         self.layers = nn.ModuleList(StudyLayer(cfg) for _ in range(cfg.study_layers))
         self.head = nn.Sequential(

@@ -9,7 +9,8 @@ from scipy.special import expit
 
 from synthetic_data import cli, longitudinal as sim, reequation
 from synthetic_data.generator import _compute_logit
-from synthetic_data.longitudinal_history import DIFFERENTIAL, STREAMS
+from synthetic_data.longitudinal_history import DIFFERENTIAL, LEGACY_STREAMS, STREAMS
+from synthetic_data.pro_ctcae import PRO_ATTRIBUTES
 
 
 @pytest.fixture
@@ -27,6 +28,9 @@ def test_observed_streams_and_oracle(cohort):
     rows = read(cohort)
     meta = json.loads((cohort / "metadata.json").read_text())
     seen_panels = set()
+    saw_between_visits = saw_missing_score = saw_missed_week = False
+    assert meta["config"]["version"] == 2
+    assert meta["longitudinal"]["event_counts"]["pros"] == sum(len(r["pros"]) for r in rows)
     assert [r["patient_id"] for r in rows] == list(range(24))
     for row in rows:
         encounters = row["encounters"]
@@ -34,8 +38,9 @@ def test_observed_streams_and_oracle(cohort):
         for stream in STREAMS:
             events = row[stream]
             days = [e["day_from_index"] for e in events]
-            assert len(events) >= 2 and days == sorted(days) and max(days) < 0
-            assert set(days) <= set(visit_days)
+            assert days and days == sorted(days) and max(days) < 0
+            if stream != "pros":
+                assert len(events) >= 2 and set(days) <= set(visit_days)
             assert events[0]["delta_years"] is None
             np.testing.assert_allclose(
                 [e["delta_years"] for e in events[1:]], np.diff(days) / 365.25
@@ -46,6 +51,25 @@ def test_observed_streams_and_oracle(cohort):
             for v in row["vitals"]
         )
         assert all(e["icd10cm"] and e["cpt"] for e in encounters)
+        fatigue = []
+        days = [form["day_from_index"] for form in row["pros"]]
+        saw_between_visits |= bool(set(days) - set(visit_days))
+        assert days[0] - 6 >= visit_days[0] and days[-1] == visit_days[-1]
+        assert np.all(np.diff(days) % 7 == 0) and len(days) <= 12
+        saw_missed_week |= bool(np.any(np.diff(days) > 7))
+        for form in row["pros"]:
+            assert form["instrument"] == "PRO-CTCAE" and form["recall_days"] == 7
+            items = {(i["symptom"], i["attribute"]): i["score"] for i in form["responses"]}
+            assert len(items) == len(form["responses"]) == 11
+            for symptom, attributes in PRO_ATTRIBUTES.items():
+                scores = [items[symptom, a] for a in attributes]
+                assert all(s is None or s in range(5) for s in scores)
+                saw_missing_score |= None in scores
+                for earlier, later in zip(scores, scores[1:]):
+                    if earlier in (None, 0):
+                        assert later == earlier
+            if items["fatigue", "interference"] is not None:
+                fatigue.append(items["fatigue", "interference"])
         creatinines = []
         for panel in row["labs"]:
             seen_panels.add(panel["panel"])
@@ -78,6 +102,7 @@ def test_observed_streams_and_oracle(cohort):
         v0, v1 = row["vitals"][0], row["vitals"][-1]
         years = (v1["day_from_index"] - v0["day_from_index"]) / 365.25
         observed = dict(
+            mean_fatigue_interference=np.mean(fatigue),
             latest_ecog=float(row["notes"][-1]["text"].split()[-1].strip(".")),
             recent_ed_visits=sum(
                 e["day_from_index"] >= -180 and "99284" in e["cpt"] for e in encounters
@@ -110,6 +135,17 @@ def test_observed_streams_and_oracle(cohort):
             )
         )
     assert seen_panels == {"CBC_DIFF", "BMP", "CMP"}
+    assert saw_between_visits and saw_missing_score and saw_missed_week
+
+
+def test_previous_schema_is_replayable(cohort, tmp_path):
+    path = sim.generate_longitudinal_cohort(tmp_path / "legacy", schema_version=1, dataset_size=2)
+    meta = json.loads((path / "metadata.json").read_text())
+    assert meta["longitudinal"]["streams"] == list(LEGACY_STREAMS)
+    assert "mean_fatigue_interference" not in meta["summary_statistics"]
+    for old, new in zip(read(path), read(cohort)):
+        assert "pros" not in old
+        assert all(old[key] == new[key] for key in LEGACY_STREAMS)
 
 
 def test_patient_and_equation_seeds_are_independent(cohort, tmp_path):

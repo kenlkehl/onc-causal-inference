@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
-from .events import STREAMS, binary_observations
+from .events import binary_observations, read_patient_table
 from .model import BASE_MODEL, ModelConfig
 from .training import OBSERVED, evaluate, load_run, run_training
 
@@ -32,18 +32,17 @@ def _unique_ids(table):
 def predict(model, context_file, query_file, output, *, batch_size=16, context_size=None, seed=42):
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
-    fields = ["patient_id", *STREAMS]
-    context = pq.read_table(context_file, columns=[*fields, *OBSERVED])
+    context = read_patient_table(context_file, model.patient.streams, OBSERVED)
     context_ids = _unique_ids(context)
     if query_file is None:
         if context_size is None or not 0 < context_size < len(context):
             raise ValueError("For a single cohort, set context_size between 1 and N-1")
         chosen = np.zeros(len(context), dtype=bool)
         chosen[np.random.default_rng(seed).choice(len(chosen), context_size, replace=False)] = True
-        queries = context.select(fields).filter(~chosen)
+        queries = context.drop(OBSERVED).filter(~chosen)
         context = context.filter(chosen)
     else:
-        queries = pq.read_table(query_file, columns=fields)
+        queries = read_patient_table(query_file, model.patient.streams)
         if context_size is not None:
             raise ValueError("Explicit context and query files already define the split")
         if context_ids & _unique_ids(queries):
@@ -52,7 +51,7 @@ def predict(model, context_file, query_file, output, *, batch_size=16, context_s
         raise ValueError("Need at least one context and one query patient")
     model.eval()
     embeddings = torch.cat(
-        [model.patient(rows) for rows in _chunks(context.select(fields), batch_size)]
+        [model.patient(rows) for rows in _chunks(context.drop(OBSERVED), batch_size)]
     )
     t, y = binary_observations(context.select(OBSERVED).to_pylist(), model.centers.device)
     memories, scale = model.condition(embeddings, t, y)
