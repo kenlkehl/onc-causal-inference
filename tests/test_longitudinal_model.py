@@ -299,6 +299,10 @@ def test_design_bank_train_resume_and_held_out_evaluation(tmp_path, note_model, 
 
     bank = load_bank(DEFAULT_BANK)
     train, held = [split_designs(bank, s) for s in ("train", "held_out")]
+    assert (len(train), len(held)) == (4000, 1000)
+    assert {
+        sum(len(items) for items in design["candidates"].values()) for design in bank["designs"]
+    } == set(range(3, 101))
     assert {d["question"]["id"] for d in train}.isdisjoint(d["question"]["id"] for d in held)
     assert {d["question"]["cancer"] for d in held} - {d["question"]["cancer"] for d in train}
     run = tmp_path / "designed"
@@ -341,7 +345,7 @@ def test_design_bank_train_resume_and_held_out_evaluation(tmp_path, note_model, 
             "--device",
             "cpu",
             "--studies",
-            str(len(held)),
+            "4",
             "--context-size",
             "3",
             "--query-size",
@@ -349,5 +353,5 @@ def test_design_bank_train_resume_and_held_out_evaluation(tmp_path, note_model, 
         ]
     )
     metrics = json.loads(capsys.readouterr().out)
-    assert set(metrics["held_out_designs"]) == {d["id"] for d in held}
+    assert set(metrics["held_out_designs"]) == {d["id"] for d in held[:4]}
     assert all(v["studies"] == 1 for v in metrics["held_out_designs"].values())

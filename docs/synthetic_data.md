@@ -119,16 +119,18 @@ reasoning tokens.
 
 ## Generating a bank of study designs
 
-The longitudinal model ships with a frozen bank of synthetic comparative-effectiveness designs. To author more, start with the seed-question file. Each entry specifies a cancer, population, ICD-10-CM code, control regimen, treatment regimen, binary event, horizon in days and a split (`train` or `held_out`). The control regimen maps to 0 and the treatment regimen maps to 1. Keep each clinical question and all its variants together. To test transfer to a new cancer type, put every question for that cancer in the held-out split. [Seed questions](../synthetic_data/designs/questions.json) · [Bundled designs](../synthetic_data/designs/starter.json)
+The longitudinal model uses the 5,000-design Nemotron bank by default. The generation record documents the cancer seeds, generated questions, feature counts, sampling settings, split assignment and exact offline replay. [Nemotron bank generation record](nemotron_design_bank.md) · [Frozen bank](../synthetic_data/designs/nemotron_5000.json.gz)
+
+The smaller `design-bank` authoring command also supports custom question lists and compact designs. Each input question specifies a cancer, population, ICD-10-CM code, control regimen, treatment regimen, binary event, horizon in days and a split (`train` or `held_out`). Control maps to 0 and treatment to 1. Keep each question and all its variants in one split. [Example custom question list](../synthetic_data/designs/questions.json)
 
 ```bash
 python -m synthetic_data.cli design-bank \
   --questions synthetic_data/designs/questions.json --variants-per-question 10 \
-  --api-url http://127.0.0.1:11434/v1 --model qwen3-coder:30b \
-  --output artifacts/designs/bank.json
+  --api-url http://172.24.216.113:8002/v1 --model RedHatAI/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-FP8 \
+  --output artifacts/designs/custom_bank.json
 ```
 
-The generator uses the repository's JSON LLM client once per design, with retries for invalid responses. It caches completed designs beside the output and resumes an interrupted build with the same arguments. The final bank is published after validation. Increasing `--variants-per-question` at the same output path keeps completed designs and adds variants. Use `--workers` for parallel design requests. Additional variants receive different measurement menus and clinical emphases. The second variant for each question includes a longitudinal change and a PRO item. The seed distinguishes design prompts. Archive the resulting JSON to replay an LLM design exactly.
+This custom authoring command caches completed requests beside its output. Increasing `--variants-per-question` at the same output path preserves existing designs. Use `--workers` for parallel requests.
 
 The LLM chooses executable measurements from the observed history, invents binary chart findings specific to the clinical question, supplies a prevalence and a dated-note sentence for each possible state, and lists the permitted causal roles for each candidate. Measurement names encode their meaning. For example, `lab.platelets.change` is last minus first recorded platelet count and `pro.fatigue.interference.mean` averages recorded responses, including zeros. A completely unanswered PRO item uses its fixed simulation reference mean in the equation. The existing dated notes, encounters, labs, vitals and PROs provide the background patient history. Notes and diagnosis codes reflect the study population. The simulator places each authored finding in a pretreatment note independent of its role.
 
@@ -136,7 +138,7 @@ Materialize a study directly from a bank using the IDs and seeds printed by trai
 
 ```bash
 python -m synthetic_data.cli longitudinal \
-  --design-bank synthetic_data/designs/starter.json --design-id colon_doublet_v1 \
+  --design-bank synthetic_data/designs/nemotron_5000.json.gz --design-id colon_q01_v001 \
   --dgp-seed 17 --seed 42 --dataset-size 64 --output-dir artifacts/designs/colon_example
 ```
 

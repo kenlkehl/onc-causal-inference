@@ -4,6 +4,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import fcntl
+import gzip
 import json
 import math
 import os
@@ -21,7 +22,7 @@ from .pro_ctcae import PRO_ITEMS
 from .saved_dgp import _checkpoint, _digest, _read_checkpoint, _write_json
 
 DESIGN_DIR = Path(__file__).with_name("designs")
-DEFAULT_BANK = DESIGN_DIR / "starter.json"
+DEFAULT_BANK = DESIGN_DIR / "nemotron_5000.json.gz"
 # Fixed simulation units for z-scoring across studies, independent of query patients.
 LAB_REFERENCE = {
     "platelets": (250, 35),
@@ -214,7 +215,11 @@ def validate_bank(bank):
 
 
 def load_bank(path):
-    return validate_bank(json.loads(Path(path).read_text()))
+    with Path(path).open("rb") as source:
+        if source.peek(2).startswith(b"\x1f\x8b"):
+            with gzip.GzipFile(fileobj=source) as decoded:
+                return validate_bank(json.load(decoded))
+        return validate_bank(json.load(source))
 
 
 def design_prompt(q, variant_seed, measurements=MEASUREMENTS):

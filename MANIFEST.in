@@ -5,9 +5,10 @@ include run_synthetic.sh
 include run_sample_size_calculator.sh
 recursive-include example_configs *.json
 recursive-include docs *.md
+include docs/nemotron_5000_receipts.json.gz
 recursive-include scripts *.py *.env
 recursive-include synthetic_data *.py
-recursive-include synthetic_data/designs *.json
+recursive-include synthetic_data/designs *.json *.json.gz
 recursive-include sample_size_calculator *.py *.R *.html *.js *.json *.md
 include tests/test_sample_size_calculator_engine.R
 prune synthetic_data/example_synthetic_datasets/*/.oci_cache
