@@ -209,6 +209,45 @@ def main(argv=None):
         help="Vary note section framing and positive-only charting on design-bank training episodes.",
     )
     train.add_argument(
+        "--note-grad-patients",
+        type=int,
+        default=None,
+        help=(
+            "Backprop through the note LLM on at most this many random context patients "
+            "(plus all query patients); remaining context notes encode under no_grad."
+        ),
+    )
+    train.add_argument(
+        "--freeze-note-backbone",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Keep the note LLM frozen during training (unfreeze later on resume).",
+    )
+    train.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="Background CPU worker processes for prefetching simulated studies (0 = synchronous).",
+    )
+    resume.add_argument(
+        "--note-grad-patients",
+        type=int,
+        default=None,
+        help="Override the checkpoint's --note-grad-patients on resume.",
+    )
+    resume.add_argument(
+        "--freeze-note-backbone",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Freeze or unfreeze the note LLM when resuming (e.g. Phase 1 -> Phase 2).",
+    )
+    resume.add_argument(
+        "--num-workers",
+        type=int,
+        default=None,
+        help="Override background CPU episode-prefetch worker count on resume.",
+    )
+    train.add_argument(
         "--eval-every",
         type=int,
         default=0,
@@ -253,6 +292,12 @@ def main(argv=None):
         default=None,
         help="Override the checkpoint's note microbatch size for evaluation.",
     )
+    scoring.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="Background CPU worker processes for prefetching held-out studies.",
+    )
     inference.add_argument("--context", type=Path, required=True)
     inference.add_argument("--queries", type=Path, help="Separate Parquet of query histories.")
     inference.add_argument(
@@ -285,6 +330,9 @@ def main(argv=None):
                 "grad_accum_steps",
                 "precision",
                 "augment_notes",
+                "note_grad_patients",
+                "freeze_note_backbone",
+                "num_workers",
                 "eval_every",
                 "eval_studies",
                 "seed",
@@ -300,7 +348,18 @@ def main(argv=None):
             args.run_dir, args.steps, args.device, args.save_every, settings=settings, cfg=cfg
         )
     elif args.command == "resume":
-        run_training(args.run_dir, args.steps, args.device, args.save_every)
+        resume_overrides = {
+            k: getattr(args, k)
+            for k in ("note_grad_patients", "freeze_note_backbone", "num_workers")
+            if getattr(args, k) is not None
+        }
+        run_training(
+            args.run_dir,
+            args.steps,
+            args.device,
+            args.save_every,
+            resume_overrides=resume_overrides or None,
+        )
     else:
         model, saved = load_run(
             args.run_dir, args.device, note_batch_size=args.note_batch_size
@@ -332,6 +391,7 @@ def main(argv=None):
                     args.query_size,
                     bank=bank,
                     precision=args.precision,
+                    num_workers=args.num_workers,
                 )
             print(json.dumps(metrics, indent=2))
         else:

@@ -195,7 +195,30 @@ class PatientEncoder(nn.Module):
         last = mask.sum(dim=1) - 1
         return hidden[torch.arange(len(ids), device=ids.device), last].to(self.notes.weight.dtype)
 
-    def _note_vectors(self, events):
+    def _encode_note_subset(self, ids, indices, *, with_grad):
+        device = self.notes.weight.device
+        batch_size = self.note_batch_size if with_grad else max(self.note_batch_size * 4, 32)
+        chunks = []
+        ctx = torch.enable_grad() if with_grad else torch.no_grad()
+        use_ckpt = with_grad and self.training and torch.is_grad_enabled()
+        with ctx:
+            for start in range(0, len(indices), batch_size):
+                sub_ids = [ids[i] for i in indices[start : start + batch_size]]
+                batch = self.tokenizer.pad(
+                    {"input_ids": sub_ids},
+                    padding=True,
+                    return_tensors="pt",
+                    return_attention_mask=True,
+                ).to(device)
+                args = batch["input_ids"], batch["attention_mask"]
+                if use_ckpt:
+                    last = checkpoint(self._last_token, *args, use_reentrant=False)
+                else:
+                    last = self._last_token(*args)
+                chunks.append(last)
+        return torch.cat(chunks, dim=0)
+
+    def _note_vectors(self, events, grad_flags=None):
         device = self.notes.weight.device
         ids = self.tokenizer(
             [e["text"] for e in events], truncation=False, return_attention_mask=False
@@ -203,21 +226,27 @@ class PatientEncoder(nn.Module):
         limit = self.backbone.config.max_position_embeddings
         if any(len(seq) > limit or not seq for seq in ids):
             raise SemanticTruncationError(f"Expected 1 to {limit} tokens in every clinical note")
-        vectors = []
-        for start in range(0, len(ids), self.note_batch_size):
-            batch = self.tokenizer.pad(
-                {"input_ids": ids[start : start + self.note_batch_size]},
-                padding=True,
-                return_tensors="pt",
-                return_attention_mask=True,
-            ).to(device)
-            args = batch["input_ids"], batch["attention_mask"]
-            if self.training and torch.is_grad_enabled():
-                last = checkpoint(self._last_token, *args, use_reentrant=False)
-            else:
-                last = self._last_token(*args)
-            vectors.append(self.notes(last))
-        return torch.cat(vectors)
+
+        if grad_flags is None or not (self.training and torch.is_grad_enabled()):
+            with_grad = self.training and torch.is_grad_enabled()
+            last = self._encode_note_subset(ids, list(range(len(ids))), with_grad=with_grad)
+            return self.notes(last)
+
+        grad_idx = [i for i, flag in enumerate(grad_flags) if flag]
+        nograd_idx = [i for i, flag in enumerate(grad_flags) if not flag]
+        if not nograd_idx:
+            last = self._encode_note_subset(ids, grad_idx, with_grad=True)
+            return self.notes(last)
+        if not grad_idx:
+            last = self._encode_note_subset(ids, nograd_idx, with_grad=False)
+            return self.notes(last)
+
+        grad_last = self._encode_note_subset(ids, grad_idx, with_grad=True)
+        nograd_last = self._encode_note_subset(ids, nograd_idx, with_grad=False)
+        combined = grad_last.new_empty((len(ids), grad_last.shape[-1]))
+        combined[torch.tensor(grad_idx, device=device, dtype=torch.long)] = grad_last
+        combined[torch.tensor(nograd_idx, device=device, dtype=torch.long)] = nograd_last
+        return self.notes(combined)
 
     def _extra_bag(self, extra_lists, embedding, value_proj):
         device = embedding.weight.device
@@ -243,11 +272,11 @@ class PatientEncoder(nn.Module):
             out[row_idx] = chunk.mean(dim=0)
         return out
 
-    def _values(self, name, events):
+    def _values(self, name, events, *, note_grad_flags=None):
         if not events:
             return self.notes.weight.new_empty(0, self.notes.out_features)
         if name == "notes":
-            return self._note_vectors(events)
+            return self._note_vectors(events, grad_flags=note_grad_flags)
         if name == "encounters":
             codes = [encounter_codes(e) for e in events]
             device = self.codes.weight.device
@@ -273,9 +302,11 @@ class PatientEncoder(nn.Module):
             return dense + extra
         return self.vitals(self.vitals.weight.new_tensor([vital_vector(e) for e in events]))
 
-    def forward(self, rows):
+    def forward(self, rows, *, backbone_grad_mask=None):
         if not rows:
             raise ValueError("Expected at least one patient")
+        if backbone_grad_mask is not None and len(backbone_grad_mask) != len(rows):
+            raise ValueError("backbone_grad_mask length must match number of patients")
         n_patients = len(rows)
         stream_summaries = []
         per_patient_tokens = [[] for _ in range(n_patients)]
@@ -288,7 +319,14 @@ class PatientEncoder(nn.Module):
             lengths = [len(s) for s in streams]
             times = [time for stream in streams for time in event_times(stream)]
             flat_events = [event for stream in streams for event in stream]
-            values = self._values(name, flat_events)
+            note_grad_flags = None
+            if name == "notes" and backbone_grad_mask is not None:
+                note_grad_flags = [
+                    flag
+                    for flag, length in zip(backbone_grad_mask, lengths, strict=True)
+                    for _ in range(length)
+                ]
+            values = self._values(name, flat_events, note_grad_flags=note_grad_flags)
             stream_summaries.append(encoder(values, times, lengths))
 
             if flat_events:
@@ -464,13 +502,33 @@ class CausalStudyModel(nn.Module):
         pooled = self._attend_queries(queries, memories)
         return self.propensity_head(pooled).squeeze(-1)
 
-    def forward(self, context, queries):
+    def forward(
+        self, context, queries, *, note_grad_patients=None, freeze_note_backbone=False
+    ):
         if not queries:
             raise ValueError("Expected at least one query patient")
+        n_ctx = len(context)
+        n_q = len(queries)
+        backbone_grad_mask = None
+        if freeze_note_backbone:
+            backbone_grad_mask = [False] * (n_ctx + n_q)
+        elif (
+            note_grad_patients is not None
+            and self.training
+            and torch.is_grad_enabled()
+            and n_ctx > note_grad_patients
+        ):
+            if note_grad_patients < 0:
+                raise ValueError("note_grad_patients must be nonnegative")
+            ctx_mask = [False] * n_ctx
+            if note_grad_patients > 0:
+                for idx in torch.randperm(n_ctx)[:note_grad_patients].tolist():
+                    ctx_mask[idx] = True
+            backbone_grad_mask = ctx_mask + [True] * n_q
         t, y = binary_observations(context, self.centers.device)
-        embeddings = self.patient([*context, *queries])
-        memories, scale = self.condition(embeddings[: len(context)], t, y)
-        q_emb = embeddings[len(context) :]
+        embeddings = self.patient([*context, *queries], backbone_grad_mask=backbone_grad_mask)
+        memories, scale = self.condition(embeddings[:n_ctx], t, y)
+        q_emb = embeddings[n_ctx:]
         outcome_logits = self.query_logits(q_emb, memories, scale)
         prop_logits = self.query_propensity_logits(q_emb, memories, scale)
         return outcome_logits, prop_logits, scale

@@ -1,5 +1,7 @@
 """Study sampling, oracle-supervised training, evaluation baselines, and portable checkpoints."""
 
+from collections import deque
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
 from dataclasses import asdict
 import fcntl
@@ -7,6 +9,7 @@ import gzip
 import hashlib
 import json
 import math
+import multiprocessing
 import os
 from pathlib import Path
 import tempfile
@@ -40,32 +43,30 @@ PROPENSITY_COL = "true_treatment_prob"
 DESIGN_BANK_FILENAME = "design_bank.json.gz"
 
 
-def simulate_episode(
-    seed,
-    step,
-    held_out,
-    size,
-    *,
-    schema_version=CHECKPOINT_FORMAT_VERSION,
-    designs=None,
-    micro_step=0,
-    augment=False,
+def _select_episode_design(seed, step, held_out, designs, micro_step=0):
+    if designs is None:
+        return None
+    if not designs:
+        raise ValueError("The requested study-design split is empty")
+    seed_parts = [seed, step] if micro_step == 0 else [seed, step, micro_step]
+    index = (
+        (step - 1) % len(designs)
+        if held_out
+        else int(np.random.default_rng([*seed_parts, 721]).integers(len(designs)))
+    )
+    return designs[index]
+
+
+def _simulate_for_design(
+    design, seed, step, held_out, size, schema_version, micro_step, augment
 ):
+    """Top-level picklable worker for ProcessPoolExecutor episode prefetching."""
     seed_parts = [seed, step] if micro_step == 0 else [seed, step, micro_step]
     state = np.random.SeedSequence(seed_parts).generate_state(2, dtype=np.uint64)
     # Even seeds for training; odd seeds for validation, for both DGPs and patients.
     dgp_seed, patient_seed = [2 * int(s) + int(held_out) for s in state]
     provenance = {"dgp_seed": dgp_seed, "patient_seed": patient_seed}
-    design = None
-    if designs is not None:
-        if not designs:
-            raise ValueError("The requested study-design split is empty")
-        index = (
-            (step - 1) % len(designs)
-            if held_out
-            else int(np.random.default_rng([*seed_parts, 721]).integers(len(designs)))
-        )
-        design = designs[index]
+    if design is not None:
         provenance.update(
             design_id=design["id"],
             question_id=design["question"]["id"],
@@ -97,6 +98,65 @@ def simulate_episode(
     return rows, provenance
 
 
+def simulate_episode(
+    seed,
+    step,
+    held_out,
+    size,
+    *,
+    schema_version=CHECKPOINT_FORMAT_VERSION,
+    designs=None,
+    micro_step=0,
+    augment=False,
+):
+    design = _select_episode_design(seed, step, held_out, designs, micro_step=micro_step)
+    return _simulate_for_design(
+        design, seed, step, held_out, size, schema_version, micro_step, augment
+    )
+
+
+class _EpisodePrefetcher:
+    """Overlap CPU episode simulation with GPU compute in exact deterministic order."""
+
+    def __init__(self, jobs, *, num_workers=0):
+        self._jobs = iter(jobs)
+        self._num_workers = int(num_workers)
+        self._executor = None
+        self._pending = deque()
+        self._max_inflight = max(2 * self._num_workers, 4) if self._num_workers > 0 else 0
+
+    def __enter__(self):
+        if self._num_workers > 0:
+            ctx = multiprocessing.get_context("spawn")
+            self._executor = ProcessPoolExecutor(max_workers=self._num_workers, mp_context=ctx)
+            self._fill()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._executor is not None:
+            self._executor.shutdown(wait=True, cancel_futures=True)
+            self._executor = None
+        self._pending.clear()
+
+    def _fill(self):
+        while len(self._pending) < self._max_inflight:
+            try:
+                meta, args = next(self._jobs)
+            except StopIteration:
+                break
+            self._pending.append((meta, self._executor.submit(_simulate_for_design, *args)))
+
+    def next_item(self):
+        if self._executor is None:
+            meta, args = next(self._jobs)
+            rows, provenance = _simulate_for_design(*args)
+            return meta, rows, provenance
+        meta, future = self._pending.popleft()
+        self._fill()
+        rows, provenance = future.result()
+        return meta, rows, provenance
+
+
 def split_designs(bank, split):
     if bank is None:
         return None
@@ -113,7 +173,15 @@ def _autocast(device, precision):
     return nullcontext()
 
 
-def fit_episode(model, rows, context_size, *, precision="fp32"):
+def fit_episode(
+    model,
+    rows,
+    context_size,
+    *,
+    precision="fp32",
+    note_grad_patients=None,
+    freeze_note_backbone=False,
+):
     device = model.centers.device
     query_rows = rows[context_size:]
     oracle = torch.tensor(
@@ -125,7 +193,12 @@ def fit_episode(model, rows, context_size, *, precision="fp32"):
             [r[PROPENSITY_COL] for r in query_rows], device=device, dtype=torch.float32
         )
     with _autocast(device, precision):
-        outcome_logits, prop_logits, scale = model(rows[:context_size], query_rows)
+        outcome_logits, prop_logits, scale = model(
+            rows[:context_size],
+            query_rows,
+            note_grad_patients=note_grad_patients,
+            freeze_note_backbone=freeze_note_backbone,
+        )
         loss, parts = model.loss_components(
             outcome_logits,
             scale,
@@ -269,14 +342,16 @@ def _build_scheduler(optimizer, settings, steps, start):
     raise ValueError(f"Unknown lr_scheduler: {kind}")
 
 
-def run_training(directory, steps, device, save_every, *, settings=None, cfg=None):
+def run_training(
+    directory, steps, device, save_every, *, settings=None, cfg=None, resume_overrides=None
+):
     directory = Path(directory)
     if settings is not None:
         directory.mkdir(parents=True, exist_ok=True)
     directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
     try:
         fcntl.flock(directory_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _train_locked(directory, steps, device, save_every, settings, cfg)
+        _train_locked(directory, steps, device, save_every, settings, cfg, resume_overrides)
     finally:
         os.close(directory_fd)
 
@@ -301,7 +376,7 @@ def _load_cohort_tables(paths, streams, min_rows):
     return tables, fingerprints
 
 
-def _train_locked(directory, steps, device, save_every, settings, cfg):
+def _train_locked(directory, steps, device, save_every, settings, cfg, resume_overrides=None):
     if min(steps, save_every) < 1:
         raise ValueError("steps and save_every must be positive")
     fresh = settings is not None
@@ -309,6 +384,10 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
     if not fresh:
         model, saved = load_run(directory, device)
         settings, start = dict(saved["settings"]), saved["step"]
+        if resume_overrides:
+            for key, value in resume_overrides.items():
+                if value is not None:
+                    settings[key] = value
         bank = load_run_design_bank(directory, saved)
         # Never re-embed large bank dictionaries inside checkpoint.pt.
         settings.pop("design_bank", None)
@@ -342,8 +421,15 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
             <= 0
             or min_ctx > settings["context_size"]
             or settings.get("warmup_steps", 0) < 0
+            or settings.get("num_workers", 0) < 0
+            or (
+                settings.get("note_grad_patients") is not None
+                and settings["note_grad_patients"] < 0
+            )
         ):
-            raise ValueError("Invalid training sizes, accumulation, warmup, or learning rates")
+            raise ValueError(
+                "Invalid training sizes, accumulation, warmup, workers, note_grad_patients, or LRs"
+            )
         if directory.exists() and any(directory.iterdir()):
             raise FileExistsError(f"Use a fresh run directory or resume: {directory}")
         torch.manual_seed(settings["seed"])
@@ -365,6 +451,11 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
     eval_every = int(settings.get("eval_every", 0))
     eval_studies = int(settings.get("eval_studies", 16))
     best_eval_rmse = settings.get("best_eval_cate_rmse")
+    note_grad_patients = settings.get("note_grad_patients")
+    freeze_note_backbone = bool(settings.get("freeze_note_backbone", False))
+    num_workers = int(settings.get("num_workers", 0))
+    if num_workers < 0 or (note_grad_patients is not None and note_grad_patients < 0):
+        raise ValueError("num_workers and note_grad_patients must be nonnegative")
 
     designs = split_designs(bank, "train")
     if designs and settings["cohorts"]:
@@ -388,92 +479,134 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
         model.patient.tokenizer.save_pretrained(directory / "tokenizer")
         _save(directory, model, optimizer, settings, step=0)
 
+    def _set_train_modes():
+        model.train()
+        if freeze_note_backbone:
+            model.patient.backbone.eval()
+
+    def _episode_jobs():
+        for step in range(start + 1, steps + 1):
+            for micro in range(grad_accum):
+                if min_context < max_context:
+                    ctx_rng = np.random.default_rng([settings["seed"], step, micro, 313])
+                    n_context = int(ctx_rng.integers(min_context, max_context + 1))
+                else:
+                    n_context = max_context
+                design = _select_episode_design(
+                    settings["seed"], step, False, designs, micro_step=micro
+                )
+                yield (
+                    (step, micro, n_context),
+                    (
+                        design,
+                        settings["seed"],
+                        step,
+                        False,
+                        n_context + query_size,
+                        model.schema_version,
+                        micro,
+                        augment,
+                    ),
+                )
+
     metrics_path = directory / "metrics.jsonl"
-    model.train()
-    for step in range(start + 1, steps + 1):
-        optimizer.zero_grad(set_to_none=True)
-        total_loss = 0.0
-        outcome_sum = cate_sum = prop_sum = 0.0
-        last_provenance = {}
-        last_ctx = max_context
-        for micro in range(grad_accum):
-            if min_context < max_context:
-                ctx_rng = np.random.default_rng([settings["seed"], step, micro, 313])
-                n_context = int(ctx_rng.integers(min_context, max_context + 1))
-            else:
-                n_context = max_context
-            last_ctx = n_context
-            size = n_context + query_size
-            if tables:
-                seed_parts = [settings["seed"], step] if micro == 0 else [settings["seed"], step, micro]
-                rng = np.random.default_rng(seed_parts)
-                idx = int(rng.integers(len(tables)))
-                rows = (
-                    tables[idx].take(rng.choice(len(tables[idx]), size, replace=False)).to_pylist()
+    _set_train_modes()
+    prefetch_cm = (
+        _EpisodePrefetcher(_episode_jobs(), num_workers=num_workers)
+        if not tables
+        else nullcontext(None)
+    )
+    with prefetch_cm as prefetcher:
+        for step in range(start + 1, steps + 1):
+            optimizer.zero_grad(set_to_none=True)
+            total_loss = 0.0
+            outcome_sum = cate_sum = prop_sum = 0.0
+            last_provenance = {}
+            last_ctx = max_context
+            for micro in range(grad_accum):
+                if tables:
+                    if min_context < max_context:
+                        ctx_rng = np.random.default_rng([settings["seed"], step, micro, 313])
+                        n_context = int(ctx_rng.integers(min_context, max_context + 1))
+                    else:
+                        n_context = max_context
+                    size = n_context + query_size
+                    seed_parts = (
+                        [settings["seed"], step] if micro == 0 else [settings["seed"], step, micro]
+                    )
+                    rng = np.random.default_rng(seed_parts)
+                    idx = int(rng.integers(len(tables)))
+                    rows = (
+                        tables[idx]
+                        .take(rng.choice(len(tables[idx]), size, replace=False))
+                        .to_pylist()
+                    )
+                    provenance = {"cohort": settings["cohorts"][idx]}
+                else:
+                    (_, _, n_context), rows, provenance = prefetcher.next_item()
+                last_ctx = n_context
+                last_provenance = provenance
+                loss, _, _, _, _, parts = fit_episode(
+                    model,
+                    rows,
+                    n_context,
+                    precision=precision,
+                    note_grad_patients=note_grad_patients,
+                    freeze_note_backbone=freeze_note_backbone,
                 )
-                provenance = {"cohort": settings["cohorts"][idx]}
-            else:
-                rows, provenance = simulate_episode(
+                (loss / grad_accum).backward()
+                total_loss += loss.item() / grad_accum
+                outcome_sum += parts["outcome_loss"].item() / grad_accum
+                cate_sum += parts["cate_loss"].item() / grad_accum
+                prop_sum += parts["propensity_loss"].item() / grad_accum
+
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
+            note_lr = optimizer.param_groups[0]["lr"]
+            lr = optimizer.param_groups[2]["lr"]
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+
+            record = {
+                "step": step,
+                "loss": total_loss,
+                "outcome_loss": outcome_sum,
+                "cate_loss": cate_sum,
+                "propensity_loss": prop_sum,
+                "context_size": last_ctx,
+                "note_lr": 0.0 if freeze_note_backbone else note_lr,
+                "lr": lr,
+                "freeze_note_backbone": freeze_note_backbone,
+                **last_provenance,
+            }
+            if eval_every > 0 and (step % eval_every == 0 or step == steps) and not tables:
+                val = evaluate(
+                    model,
                     settings["seed"],
-                    step,
-                    False,
-                    size,
-                    schema_version=model.schema_version,
-                    designs=designs,
-                    micro_step=micro,
-                    augment=augment,
+                    eval_studies,
+                    max_context,
+                    query_size,
+                    bank=bank,
+                    precision=precision,
+                    num_workers=num_workers,
                 )
-            last_provenance = provenance
-            loss, _, _, _, _, parts = fit_episode(model, rows, n_context, precision=precision)
-            (loss / grad_accum).backward()
-            total_loss += loss.item() / grad_accum
-            outcome_sum += parts["outcome_loss"].item() / grad_accum
-            cate_sum += parts["cate_loss"].item() / grad_accum
-            prop_sum += parts["propensity_loss"].item() / grad_accum
+                _set_train_modes()
+                record["eval_cate_rmse"] = val["cate_rmse"]
+                record["eval_risk_rmse"] = val["risk_rmse"]
+                record["eval_cate_pearson"] = val["cate_pearson"]
+                if best_eval_rmse is None or val["cate_rmse"] < best_eval_rmse:
+                    best_eval_rmse = val["cate_rmse"]
+                    settings["best_eval_cate_rmse"] = best_eval_rmse
+                    _save(
+                        directory, model, optimizer, settings, step, filename="best_checkpoint.pt"
+                    )
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
-        note_lr = optimizer.param_groups[0]["lr"]
-        lr = optimizer.param_groups[2]["lr"]
-        optimizer.step()
-        if scheduler is not None:
-            scheduler.step()
-
-        record = {
-            "step": step,
-            "loss": total_loss,
-            "outcome_loss": outcome_sum,
-            "cate_loss": cate_sum,
-            "propensity_loss": prop_sum,
-            "context_size": last_ctx,
-            "note_lr": note_lr,
-            "lr": lr,
-            **last_provenance,
-        }
-        if eval_every > 0 and (step % eval_every == 0 or step == steps) and not tables:
-            val = evaluate(
-                model,
-                settings["seed"],
-                eval_studies,
-                max_context,
-                query_size,
-                bank=bank,
-                precision=precision,
-            )
-            model.train()
-            record["eval_cate_rmse"] = val["cate_rmse"]
-            record["eval_risk_rmse"] = val["risk_rmse"]
-            record["eval_cate_pearson"] = val["cate_pearson"]
-            if best_eval_rmse is None or val["cate_rmse"] < best_eval_rmse:
-                best_eval_rmse = val["cate_rmse"]
-                settings["best_eval_cate_rmse"] = best_eval_rmse
-                _save(directory, model, optimizer, settings, step, filename="best_checkpoint.pt")
-
-        line = json.dumps(record)
-        with metrics_path.open("a", encoding="utf-8") as log_file:
-            log_file.write(line + "\n")
-        print(line, flush=True)
-        if step == 1 or step % save_every == 0 or step == steps:
-            _save(directory, model, optimizer, settings, step)
+            line = json.dumps(record)
+            with metrics_path.open("a", encoding="utf-8") as log_file:
+                log_file.write(line + "\n")
+            print(line, flush=True)
+            if step == 1 or step % save_every == 0 or step == steps:
+                _save(directory, model, optimizer, settings, step)
 
 
 def _ridge_t_learner_cate(context_rows, query_rows, *, alpha=10.0):
@@ -586,9 +719,11 @@ def _score_episode(model, rows, context_size, *, precision="auto"):
 
 
 @torch.inference_mode()
-def evaluate(model, seed, studies, context_size, query_size, *, bank=None, precision="auto"):
-    if min(studies, context_size, query_size) < 1:
-        raise ValueError("Evaluation study and patient counts must be positive")
+def evaluate(
+    model, seed, studies, context_size, query_size, *, bank=None, precision="auto", num_workers=0
+):
+    if min(studies, context_size, query_size) < 1 or num_workers < 0:
+        raise ValueError("Evaluation study/patient counts must be positive and workers nonnegative")
     model.eval()
     designs = split_designs(bank, "held_out")
     train_cancers = (
@@ -600,26 +735,38 @@ def evaluate(model, seed, studies, context_size, query_size, *, bank=None, preci
     by_design = {}
     by_width = {}
     by_gen = {}
-    for step in range(1, studies + 1):
-        rows, provenance = simulate_episode(
-            seed,
-            step,
-            True,
-            context_size + query_size,
-            schema_version=model.schema_version,
-            designs=designs,
-        )
-        rec = _score_episode(model, rows, context_size, precision=precision)
-        records.append(rec)
-        if designs:
-            by_design.setdefault(provenance["design_id"], []).append(rec)
-            by_width.setdefault(_width_bucket(provenance["width"]), []).append(rec)
-            gen_key = (
-                "seen_cancer_new_question"
-                if provenance["cancer"] in train_cancers
-                else "unseen_cancer"
+
+    def _eval_jobs():
+        for step in range(1, studies + 1):
+            design = _select_episode_design(seed, step, True, designs)
+            yield (
+                step,
+                (
+                    design,
+                    seed,
+                    step,
+                    True,
+                    context_size + query_size,
+                    model.schema_version,
+                    0,
+                    False,
+                ),
             )
-            by_gen.setdefault(gen_key, []).append(rec)
+
+    with _EpisodePrefetcher(_eval_jobs(), num_workers=num_workers) as prefetcher:
+        for _ in range(studies):
+            _, rows, provenance = prefetcher.next_item()
+            rec = _score_episode(model, rows, context_size, precision=precision)
+            records.append(rec)
+            if designs:
+                by_design.setdefault(provenance["design_id"], []).append(rec)
+                by_width.setdefault(_width_bucket(provenance["width"]), []).append(rec)
+                gen_key = (
+                    "seen_cancer_new_question"
+                    if provenance["cancer"] in train_cancers
+                    else "unseen_cancer"
+                )
+                by_gen.setdefault(gen_key, []).append(rec)
     result = _aggregate_eval(records)
     if designs:
         result["by_width"] = {k: _aggregate_eval(v) for k, v in sorted(by_width.items())}

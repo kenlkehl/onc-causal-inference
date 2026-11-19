@@ -113,13 +113,34 @@ checkpoint.
 From the repository root, with the project dependencies installed, run:
 
 ```bash
+# Phase 1: train downstream cross-modal and CausalPFN layers across large contexts (N=128..512)
 python -m oci.longitudinal.cli train --run-dir artifacts/longitudinal_run \
-  --steps 2000 --grad-accum-steps 8 --min-context-size 32 --context-size 128 \
-  --query-size 16 --lr-scheduler cosine --warmup-steps 100 --eval-every 200 \
+  --steps 1000 --grad-accum-steps 8 --min-context-size 128 --context-size 512 \
+  --query-size 32 --freeze-note-backbone --num-workers 8 --lr-scheduler cosine \
+  --warmup-steps 100 --eval-every 200 --device cuda
+
+# Phase 2: unfreeze the note LLM with partial-gradient context encoding
+python -m oci.longitudinal.cli resume --run-dir artifacts/longitudinal_run \
+  --steps 2500 --no-freeze-note-backbone --note-grad-patients 64 --num-workers 8 \
   --device cuda
+
 python -m oci.longitudinal.cli evaluate --run-dir artifacts/longitudinal_run \
-  --studies 1000 --context-size 64 --query-size 16 --seed 42 --device cuda
+  --studies 1000 --context-size 512 --query-size 32 --num-workers 8 --seed 42 --device cuda
 ```
+
+To scale to large contexts (`N = 256–1,024+`) without backpropagating through `LFM2.5-230M`
+on thousands of context notes per step:
+
+- `--freeze-note-backbone` runs the note LLM in fast `no_grad` mode (4× larger note
+  microbatches, no activation checkpointing) while training all downstream modality and
+  study layers; `resume --no-freeze-note-backbone` unfreezes it cleanly with the saved
+  optimizer groups intact.
+- `--note-grad-patients K` backpropagates through the note LLM on all query patients
+  plus `K` randomly sampled context patients per episode while encoding the remaining
+  context notes under `no_grad` (all downstream modality and study layers still receive
+  full gradients across every patient).
+- `--num-workers W` runs CPU study simulation in a spawned background process pool,
+  overlapping episode generation with GPU compute in exact deterministic order.
 
 AdamW starts the note encoder at `--note-lr 1e-5` (default `--backbone-weight-decay 0.0`)
 and the downstream layers at `--lr 3e-4` (`--weight-decay 0.01` on 2D+ weight matrices

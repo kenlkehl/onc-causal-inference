@@ -603,3 +603,103 @@ def test_design_bank_externalized_grad_accum_var_ctx_and_rich_evaluation(
         "by_width",
         "by_generalization",
     } <= set(metrics)
+
+
+def test_freeze_backbone_partial_note_grads_and_worker_prefetch_determinism(
+    tmp_path, note_model
+):
+    # Phase 1: frozen backbone must keep backbone weights untouched while updating heads.
+    run = tmp_path / "two_phase"
+    base_args = [
+        "train",
+        "--run-dir",
+        str(run),
+        "--mixed-prior",
+        "--note-model",
+        str(note_model),
+        "--device",
+        "cpu",
+        "--context-size",
+        "6",
+        "--query-size",
+        "2",
+        "--steps",
+        "1",
+        "--freeze-note-backbone",
+        "--event-width",
+        "8",
+        "--event-layers",
+        "1",
+        "--study-width",
+        "16",
+        "--study-layers",
+        "1",
+        "--note-slots",
+        "2",
+    ]
+    main(base_args)
+    m1, s1 = load_run(run, "cpu")
+    assert s1["settings"]["freeze_note_backbone"] is True
+    init_backbone = AutoModel.from_pretrained(note_model)
+    for trained, orig in zip(m1.patient.backbone.parameters(), init_backbone.parameters(), strict=True):
+        torch.testing.assert_close(trained, orig, rtol=0, atol=0)
+
+    # Phase 2: resume with --no-freeze-note-backbone and --note-grad-patients 2 updates backbone.
+    main(
+        [
+            "resume",
+            "--run-dir",
+            str(run),
+            "--device",
+            "cpu",
+            "--steps",
+            "2",
+            "--no-freeze-note-backbone",
+            "--note-grad-patients",
+            "2",
+        ]
+    )
+    m2, s2 = load_run(run, "cpu")
+    assert s2["settings"]["freeze_note_backbone"] is False
+    assert s2["settings"]["note_grad_patients"] == 2
+    assert any(
+        not torch.allclose(a, b)
+        for a, b in zip(m2.patient.backbone.parameters(), init_backbone.parameters(), strict=True)
+    )
+
+    # Background CPU prefetching (--num-workers 2) matches synchronous (--num-workers 0) exactly.
+    sync_dir, async_dir = tmp_path / "sync", tmp_path / "async"
+    common = [
+        "train",
+        "--mixed-prior",
+        "--note-model",
+        str(note_model),
+        "--device",
+        "cpu",
+        "--context-size",
+        "5",
+        "--query-size",
+        "2",
+        "--steps",
+        "2",
+        "--grad-accum-steps",
+        "2",
+        "--note-grad-patients",
+        "2",
+        "--event-width",
+        "8",
+        "--event-layers",
+        "1",
+        "--study-width",
+        "16",
+        "--study-layers",
+        "1",
+        "--note-slots",
+        "2",
+    ]
+    main([*common, "--run-dir", str(sync_dir), "--num-workers", "0"])
+    main([*common, "--run-dir", str(async_dir), "--num-workers", "2"])
+    m_sync, _ = load_run(sync_dir, "cpu")
+    m_async, _ = load_run(async_dir, "cpu")
+    for p_sync, p_async in zip(m_sync.parameters(), m_async.parameters(), strict=True):
+        torch.testing.assert_close(p_sync, p_async, rtol=0, atol=0)
