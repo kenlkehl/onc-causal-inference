@@ -73,23 +73,10 @@ LOGGER = logging.getLogger(__name__)
 # to use separate cores. Small selectors stay in-process to avoid spawn cost.
 STATISTICAL_SELECTION_PROCESS_ISOLATION_MIN_CANDIDATES = 64
 
-# The extraction prompt revision is part of every extraction checkpoint schema,
-# so a prompt change re-extracts while discovery and definitions stay reusable.
-EXTRACTION_CHECKPOINT_SCHEMA_VERSION = (
-    'stage2_single_patient_extraction_v7_documented_unknown_20261016+'
-    + clinical_prompts.EXTRACTION_PROMPT_VERSION
-)
-EXTRACTION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = (
-    'stage2_single_patient_feature_batch_extraction_v6_documented_unknown_20261016+'
-    + clinical_prompts.EXTRACTION_PROMPT_VERSION
-)
-PAGE_EXTRACTION_CHECKPOINT_SCHEMA_VERSION = (
-    'stage2_mode_observations_v7_documented_unknown+' + clinical_prompts.EXTRACTION_PROMPT_VERSION
-)
-PAGE_OBSERVATION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = (
-    'stage2_mode_observation_feature_batch_v3_documented_unknown+'
-    + clinical_prompts.EXTRACTION_PROMPT_VERSION
-)
+EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_extraction_v7_documented_unknown_20261016'
+EXTRACTION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_feature_batch_extraction_v6_documented_unknown_20261016'
+PAGE_EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_observations_v7_documented_unknown'
+PAGE_OBSERVATION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_observation_feature_batch_v3_documented_unknown'
 PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_reconciliation_v8_documented_unknown'
 EXTRACTION_ROUTING_SCHEMA_VERSION = 'stage2_extraction_mode_split_v1'
 REVIEW_CHECKPOINT_SCHEMA_VERSION = 'stage2_aggregate_ontology_supervisor_v3_documented_unknown_20261016'
@@ -117,14 +104,8 @@ DEFAULT_EXTRACTION_CHUNK_SIZE_TOKENS = 50_000
 DEFAULT_EXTRACTION_CONTEXT_WINDOW_TOKENS = 131_072
 DEFAULT_EXTRACTION_MAX_TOKENS = 75_000
 DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS = 1_024
-SERIAL_EXTRACTION_CHUNK_CHECKPOINT_SCHEMA_VERSION = (
-    'stage2_serial_patient_feature_chunk_v2_documented_unknown_20261016+'
-    + clinical_prompts.EXTRACTION_PROMPT_VERSION
-)
-SERIAL_EXTRACTION_MANIFEST_SCHEMA_VERSION = (
-    'stage2_serial_patient_feature_extraction_v2_documented_unknown_20261016+'
-    + clinical_prompts.EXTRACTION_PROMPT_VERSION
-)
+SERIAL_EXTRACTION_CHUNK_CHECKPOINT_SCHEMA_VERSION = 'stage2_serial_patient_feature_chunk_v2_documented_unknown_20261016'
+SERIAL_EXTRACTION_MANIFEST_SCHEMA_VERSION = 'stage2_serial_patient_feature_extraction_v2_documented_unknown_20261016'
 MAX_SERIAL_FEATURE_STATE_CHARS = 2_048
 
 
@@ -1594,13 +1575,10 @@ def _request_validated_extraction(
 def _extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     if len(rows) != 1:
         raise ValueError("Stage 2 extraction prompts must contain exactly one patient's record")
-    # The record comes first: a server's prefix cache then reuses it across
-    # every feature batch of this patient, and only the definitions differ.
     return clinical_prompts.messages("05_extract_patient",
-        "Patient record\n" + str(rows[0].get("text") or "")
-        + "\n\nEnd of patient record.\n\n"
-        + clinical_prompts.definitions_text(_prompt_feature_definitions(definitions))
-        + "\n\n" + _extraction_output_instructions(definitions))
+        clinical_prompts.definitions_text(_prompt_feature_definitions(definitions))
+        + "\n\nPatient record\n" + str(rows[0].get("text") or "")
+        + "\n\nEnd of patient record.\n" + _extraction_output_instructions(definitions))
 
 
 def _extraction_response_schema(definitions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -1680,17 +1658,18 @@ def _serial_extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], row_i
     prior = "\n".join(f"- {clinical_prompts.label(d)}: {clinical_prompts.scalar(prior_values.get(d['name']))}; "
         f"decision note: {clinical_prompts.scalar(prior_feature_state.get(d['name']))}" for d in definitions)
     return clinical_prompts.messages("06_serial_chunk",
-        "Next section of the record\n" + chunk_text + "\n\nEnd of record section.\n\n"
-        + clinical_prompts.definitions_text(_prompt_feature_definitions(definitions))
-        + "\n\nValues found so far\n" + prior + "\n\n" + _serial_output_instructions(definitions))
+        clinical_prompts.definitions_text(_prompt_feature_definitions(definitions))
+        + "\n\nValues found so far\n" + prior + "\n\nNext section of the record\n" + chunk_text
+        + "\n\nEnd of record section.\n" + _serial_output_instructions(definitions))
 
 
 def _page_extraction_prompt_template(*, definitions: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     messages = clinical_prompts.messages("07_page_observations", "")
-    # The template holds the definitions that follow the record section; the
-    # section itself comes first so a prefix cache can reuse it across batches.
-    messages[-1]["content"] = clinical_prompts.definitions_text(
-        _page_prompt_feature_definitions(definitions), include_conflict=False)
+    # Preserve the separator here; messages() normally strips trailing whitespace
+    # after the patient text has been appended.
+    messages[-1]["content"] = (
+        clinical_prompts.definitions_text(_page_prompt_feature_definitions(definitions), include_conflict=False)
+        + "\n\nRecord section\n")
     return messages
 
 
@@ -1728,8 +1707,8 @@ def _page_response_schema(definitions: Sequence[Mapping[str, Any]]) -> dict[str,
 
 def _render_page_extraction_prompt(template: Sequence[Mapping[str, str]], text: str) -> list[dict[str, str]]:
     messages = [dict(message) for message in template]
-    messages[-1]["content"] = ("Record section\n" + text + "\n\nEnd of record section.\n\n"
-        + messages[-1]["content"] + "\n\n" + _page_output_instructions()).strip()
+    messages[-1]["content"] = (messages[-1]["content"] + text
+        + "\n\nEnd of record section.\n" + _page_output_instructions()).strip()
     return messages
 
 

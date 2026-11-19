@@ -216,10 +216,7 @@ still invalid after repairs is dropped) → harmonized merging in mixed batches
 crosswalk mapping every member label; investigator-specified features are
 locked members; at most `consolidation_max_response_repairs`, default 3,
 repairs per batch) →
-outer-training extraction (patient text first, definitions after it, so a
-server's prefix cache reuses the record across the patient's requests; the
-extraction checkpoint schemas carry `EXTRACTION_PROMPT_VERSION`) with aggregate
-review and failure-driven definition
+outer-training extraction with aggregate review and failure-driven definition
 refinement (each cell is a value, not documented (null), the reserved
 `documented_unknown`, or an extraction failure; every encoder keeps the three
 non-value states as separate grouped indicators) → informativeness and
