@@ -17,6 +17,80 @@ over an existing cohort in Python, without an LLM. Factors that change the text
 itself ([generation-time factors](#generation-time-factors)) are chosen when a
 corpus is generated.
 
+## Longitudinal multimodal cohorts
+
+The `longitudinal` subcommand simulates an oncology cohort with a binary
+six-month progression outcome under two hypothetical regimens. It generates
+the pretreatment histories first, then uses measurements from those histories
+to assign treatment and compute both potential-outcome probabilities. The
+default note renderer runs offline.
+
+```bash
+python -m synthetic_data.cli longitudinal --dataset-size 5000 --seed 42 \
+  --dgp-seed 101 --output-dir ./synthetic_output_longitudinal
+```
+
+`dataset.parquet` has one row per patient. Each stream is a Parquet list of
+records in chronological order. Every event carries an integer
+`day_from_index`, with negative days before the treatment decision at day zero.
+`delta_years` measures time since the previous event **in the same stream**,
+using 365.25 days per year. The first event has a null interval. Panels
+collected on the same day have a zero interval between them. The shared day
+coordinate lets a reader align a note, blood draw, and vital signs from one visit.
+
+| Column | Contents |
+| --- | --- |
+| `notes` | Timestamped narrative notes with activity, symptoms or visit findings, and ECOG performance status. `clinical_text` also provides the joined notes for existing text workflows. |
+| `labs` | One panel per event. `CBC_DIFF` includes red cell indices, platelets, WBC, and a five-part differential with absolute counts and percentages. `BMP` has eight chemistry components. `CMP` adds albumin, total protein, bilirubin, ALP, AST, and ALT. Each result has a component name, numeric value, and unit. |
+| `encounters` | One encounter per visit with a setting, an ICD-10-CM diagnosis code list, and a CPT code list. This simulator uses a small outpatient oncology and emergency department code vocabulary. |
+| `vitals` | Weight in kg, systolic and diastolic pressure in mmHg, pulse, respiratory rate, temperature in Celsius, and oxygen saturation in percent. |
+
+The chemistry component lists follow the National Library of Medicine’s
+[BMP](https://medlineplus.gov/lab-tests/basic-metabolic-panel-bmp/) and
+[CMP](https://medlineplus.gov/lab-tests/comprehensive-metabolic-panel-cmp/) descriptions.
+
+Patients have 4–12 irregularly spaced visits. A patient-specific course of
+illness influences function, kidney measures, blood counts, weight, vitals,
+and emergency attendance. The first and last visits include all four streams
+so that within-patient changes are defined. Intermediate visits can have
+different combinations of notes, panels, and vitals. The distributions are
+stylized simulation assumptions.
+
+The equation inputs are the latest documented ECOG score, latest log
+neutrophil-to-lymphocyte ratio, annualized creatinine change, annualized
+percent weight loss, and emergency visit count in the preceding 180 days.
+`metadata.json` records their roles, standardization constants, equation
+coefficients, and stream counts. `treatment_indicator` and `outcome_indicator`
+are the observed assignment and outcome. For evaluation or supervised
+simulation tasks, `true_y0` and `true_y1` are the exact arm-specific risks
+and `true_ite` is their difference. Read the four stream columns explicitly
+when constructing patient inputs to keep the `true_*` fields out of them.
+
+Keep `--seed` fixed and change `--dgp-seed` to expose identical offline
+histories to different treatment policies and response functions. Change only
+`--seed` to sample different patients under the same equations. The existing
+`reequation` command can also vary roles and equations on the saved dataset,
+carrying the nested observations and the exact note wording forward.
+
+To use the repository’s OpenAI-compatible note writer, supply an endpoint
+and model. The writer receives the pretreatment facts from a single visit.
+The simulator appends the recorded ECOG score and generates the same
+structured observations and oracle labels as the offline path. LLM wording
+can vary across independent generations.
+
+```bash
+python -m synthetic_data.cli longitudinal --dataset-size 100 --note-style llm \
+  --api-url http://127.0.0.1:8000/v1 --model MODEL --num-workers 4 \
+  --output-dir ./synthetic_output_longitudinal_llm
+```
+
+Use a fresh or empty output directory. A complete cohort is published together
+with its configuration and metadata. LLM runs keep completed requests in a
+sibling directory named `<output-dir>.note-cache` so an interrupted run can
+reuse them when the same command is repeated. For reasoning models,
+`--max-tokens` controls the total completion budget per note, including
+reasoning tokens.
+
 ## How a cohort is generated
 
 The generator (`python -m synthetic_data.cli`) asks an LLM, served through any

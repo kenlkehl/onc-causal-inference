@@ -839,6 +839,14 @@ def reequation_cohort(
         },
         "dataset_statistics": g.oracle_dataset_statistics(output),
     }
+    if "longitudinal" in metadata:
+        longitudinal = metadata["longitudinal"]
+        out_metadata["longitudinal"] = {
+            **longitudinal,
+            "event_counts": {
+                name: int(output[name].map(len).sum()) for name in longitudinal["streams"]
+            },
+        }
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_atomic(

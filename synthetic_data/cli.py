@@ -731,10 +731,13 @@ def _apply_dgp_factor_arguments(config: SyntheticDataConfig, args: argparse.Name
 def main(argv: Optional[List[str]] = None):
     """Main entry point for CLI.
 
-    ``reequation`` as the first argument runs the re-equation command
-    (``synthetic_data.reequation``); any other arguments run the generator.
+    Dispatch the longitudinal simulator and re-equation commands, or run the
+    existing LLM-based generator.
     """
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "longitudinal":
+        from .longitudinal import longitudinal_main
+        return longitudinal_main(argv[1:])
     if argv and argv[0] == "reequation":
         from .reequation import reequation_main
         return reequation_main(argv[1:])
@@ -744,6 +747,9 @@ def main(argv: Optional[List[str]] = None):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Generate four pretreatment streams and oracle potential outcomes offline
+  python -m synthetic_data.cli longitudinal --dataset-size 500 --output-dir ./synthetic_output_longitudinal
+
   # Generate with local vLLM server
   python -m synthetic_data.cli --api-url http://localhost:8000/v1 --dataset-size 100
 
