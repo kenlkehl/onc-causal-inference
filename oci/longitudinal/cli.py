@@ -10,6 +10,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
+from synthetic_data.study_designs import load_bank
 
 from .events import binary_observations, read_patient_table
 from .model import BASE_MODEL, ModelConfig
@@ -119,7 +120,14 @@ def main(argv=None):
     )
     train.add_argument("--note-lr", type=float, default=1e-5)
     train.add_argument("--lr", type=float, default=3e-4)
-    train.add_argument(
+    prior = train.add_mutually_exclusive_group()
+    prior.add_argument(
+        "--design-bank", type=Path, help="LLM-designed study prior (default: bundled bank)."
+    )
+    prior.add_argument(
+        "--mixed-prior", action="store_true", help="Use the original six-variable study prior."
+    )
+    prior.add_argument(
         "--train-cohort",
         type=Path,
         action="append",
@@ -145,6 +153,10 @@ def main(argv=None):
             for k in ("note_model", "note_lr", "lr", "context_size", "query_size", "seed")
         }
         settings["cohorts"] = [str(p.resolve()) for p in args.train_cohort]
+        if args.design_bank:
+            settings["design_bank"] = load_bank(args.design_bank)
+        elif args.mixed_prior:
+            settings["design_bank"] = None
         run_training(
             args.run_dir, args.steps, args.device, args.save_every, settings=settings, cfg=cfg
         )
@@ -152,11 +164,19 @@ def main(argv=None):
         run_training(args.run_dir, args.steps, args.device, args.save_every)
     else:
         model, saved = load_run(args.run_dir, args.device)
+        bank = saved.get("settings", {}).get("design_bank")
         del saved
         if args.command == "evaluate":
             print(
                 json.dumps(
-                    evaluate(model, args.seed, args.studies, args.context_size, args.query_size),
+                    evaluate(
+                        model,
+                        args.seed,
+                        args.studies,
+                        args.context_size,
+                        args.query_size,
+                        bank=bank,
+                    ),
                     indent=2,
                 )
             )

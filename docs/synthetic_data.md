@@ -96,8 +96,7 @@ The default schema version is 2. Use `--schema-version 1` with the original
 seeds and prior to replay a four-stream cohort and its original equations.
 
 Use `--prior mixed` to draw new role assignments, intercepts, treatment
-effects and outcome equation shapes for each DGP seed. This is the prior
-used for on-the-fly training of the [longitudinal causal model](longitudinal_model.md).
+effects and outcome equation shapes for each DGP seed. This is the original six-variable training prior. New model runs use the study-design bank described below.
 
 To use the repository’s OpenAI-compatible note writer, supply an endpoint
 and model. The writer receives the pretreatment facts from a single visit.
@@ -117,6 +116,33 @@ sibling directory named `<output-dir>.note-cache` so an interrupted run can
 reuse them when the same command is repeated. For reasoning models,
 `--max-tokens` controls the total completion budget per note, including
 reasoning tokens.
+
+## Generating a bank of study designs
+
+The longitudinal model ships with a frozen bank of synthetic comparative-effectiveness designs. To author more, start with the seed-question file. Each entry specifies a cancer, population, ICD-10-CM code, control regimen, treatment regimen, binary event, horizon in days and a split (`train` or `held_out`). The control regimen maps to 0 and the treatment regimen maps to 1. Keep each clinical question and all its variants together. To test transfer to a new cancer type, put every question for that cancer in the held-out split. [Seed questions](../synthetic_data/designs/questions.json) · [Bundled designs](../synthetic_data/designs/starter.json)
+
+```bash
+python -m synthetic_data.cli design-bank \
+  --questions synthetic_data/designs/questions.json --variants-per-question 10 \
+  --api-url http://127.0.0.1:11434/v1 --model qwen3-coder:30b \
+  --output artifacts/designs/bank.json
+```
+
+The generator uses the repository's JSON LLM client once per design, with retries for invalid responses. It caches completed designs beside the output and resumes an interrupted build with the same arguments. The final bank is published after validation. Increasing `--variants-per-question` at the same output path keeps completed designs and adds variants. Use `--workers` for parallel design requests. Additional variants receive different measurement menus and clinical emphases. The second variant for each question includes a longitudinal change and a PRO item. The seed distinguishes design prompts. Archive the resulting JSON to replay an LLM design exactly.
+
+The LLM chooses executable measurements from the observed history, invents binary chart findings specific to the clinical question, supplies a prevalence and a dated-note sentence for each possible state, and lists the permitted causal roles for each candidate. Measurement names encode their meaning. For example, `lab.platelets.change` is last minus first recorded platelet count and `pro.fatigue.interference.mean` averages recorded responses, including zeros. A completely unanswered PRO item uses its fixed simulation reference mean in the equation. The existing dated notes, encounters, labs, vitals and PROs provide the background patient history. Notes and diagnosis codes reflect the study population. The simulator places each authored finding in a pretreatment note independent of its role.
+
+Materialize a study directly from a bank using the IDs and seeds printed by training:
+
+```bash
+python -m synthetic_data.cli longitudinal \
+  --design-bank synthetic_data/designs/starter.json --design-id colon_doublet_v1 \
+  --dgp-seed 17 --seed 42 --dataset-size 64 --output-dir artifacts/designs/colon_example
+```
+
+Changing only the DGP seed varies roles and equations while preserving those patients' histories. Changing only the patient seed samples a new cohort under exactly the same equations. The Parquet contains the five histories, sampled treatment and outcome, measured and charted covariates, and oracle risks. The metadata contains the full design and the two study equations. Training can instead sample studies directly in memory. [Model training](longitudinal_model.md#studies-used-for-training)
+
+The bank describes hypothetical studies. Numerical effects, note-finding prevalence and response curves are simulation assumptions. Across designs the background visit, physiology and questionnaire processes are shared. Within a design, additional binary note findings are sampled independently and use fixed authored sentences for their two states.
 
 ## How a cohort is generated
 

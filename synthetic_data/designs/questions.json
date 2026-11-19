@@ -1,0 +1,10 @@
+[
+  {"id":"lung_platinum","split":"train","cancer":"lung cancer","population":"advanced nonsquamous non-small-cell lung cancer","icd10cm":"C34.90","control":"carboplatin plus pemetrexed","treatment":"cisplatin plus pemetrexed","outcome":"hospitalization","horizon_days":90},
+  {"id":"colon_doublet","split":"train","cancer":"colorectal cancer","population":"metastatic colon cancer","icd10cm":"C18.9","control":"FOLFIRI","treatment":"FOLFOX","outcome":"disease progression","horizon_days":180},
+  {"id":"pancreas_first_line","split":"train","cancer":"pancreatic cancer","population":"metastatic pancreatic adenocarcinoma","icd10cm":"C25.9","control":"gemcitabine plus nab-paclitaxel","treatment":"modified FOLFIRINOX","outcome":"hospitalization","horizon_days":90},
+  {"id":"ovary_schedule","split":"train","cancer":"ovarian cancer","population":"advanced epithelial ovarian cancer","icd10cm":"C56.9","control":"three-weekly paclitaxel with carboplatin","treatment":"weekly paclitaxel with carboplatin","outcome":"treatment discontinuation","horizon_days":120},
+  {"id":"prostate_arpi","split":"train","cancer":"prostate cancer","population":"metastatic castration-resistant prostate cancer","icd10cm":"C61","control":"abiraterone plus prednisone","treatment":"enzalutamide","outcome":"disease progression","horizon_days":180},
+  {"id":"melanoma_io","split":"train","cancer":"melanoma","population":"unresectable cutaneous melanoma","icd10cm":"C43.9","control":"nivolumab","treatment":"nivolumab plus ipilimumab","outcome":"hospitalization","horizon_days":90},
+  {"id":"colon_duration","split":"held_out","cancer":"colorectal cancer","population":"resected stage III colon cancer","icd10cm":"C18.9","control":"six months of adjuvant CAPOX","treatment":"three months of adjuvant CAPOX","outcome":"persistent sensory neuropathy","horizon_days":365},
+  {"id":"kidney_io","split":"held_out","cancer":"kidney cancer","population":"metastatic clear-cell renal cell carcinoma","icd10cm":"C64.9","control":"nivolumab plus ipilimumab","treatment":"pembrolizumab plus axitinib","outcome":"disease progression","horizon_days":180}
+]

@@ -13,6 +13,7 @@ import torch
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 from synthetic_data.longitudinal import draw_longitudinal_dgp, sample_longitudinal_patient
+from synthetic_data.study_designs import DEFAULT_BANK, load_bank
 from .events import binary_observations, read_patient_table
 from .model import BASE_MODEL, BASE_REVISION, ArmScale, CausalStudyModel, ModelConfig
 
@@ -20,13 +21,36 @@ OBSERVED = ["treatment_indicator", "outcome_indicator"]
 TARGETS = ["true_y0", "true_y1"]
 
 
-def simulate_episode(seed, step, held_out, size, *, schema_version=2):
+def simulate_episode(seed, step, held_out, size, *, schema_version=2, designs=None):
     state = np.random.SeedSequence([seed, step]).generate_state(2, dtype=np.uint64)
     # Even seeds for training; odd seeds for validation, for both DGPs and patients.
     dgp_seed, patient_seed = [2 * int(s) + int(held_out) for s in state]
-    dgp = draw_longitudinal_dgp(dgp_seed, "mixed", schema_version=schema_version)
+    provenance = {"dgp_seed": dgp_seed, "patient_seed": patient_seed}
+    design = None
+    if designs is not None:
+        if not designs:
+            raise ValueError("The requested study-design split is empty")
+        index = (
+            (step - 1) % len(designs)
+            if held_out
+            else int(np.random.default_rng([seed, step, 721]).integers(len(designs)))
+        )
+        design = designs[index]
+        provenance.update(design_id=design["id"], question_id=design["question"]["id"])
+    dgp = draw_longitudinal_dgp(
+        dgp_seed, "design" if design else "mixed", schema_version=schema_version, design=design
+    )
     rows = [sample_longitudinal_patient(i, seed=patient_seed, dgp=dgp) for i in range(size)]
-    return rows, {"dgp_seed": dgp_seed, "patient_seed": patient_seed}
+    return rows, provenance
+
+
+def split_designs(bank, split):
+    if bank is None:
+        return None
+    selected = [d for d in bank["designs"] if d["question"]["split"] == split]
+    if not selected:
+        raise ValueError(f"Design bank has no {split} designs")
+    return selected
 
 
 def fit_episode(model, rows, context_size):
@@ -122,6 +146,8 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
         if steps <= start:
             raise ValueError(f"Requested total steps must exceed completed step {start}")
     else:
+        if not settings["cohorts"] and "design_bank" not in settings:
+            settings["design_bank"] = load_bank(DEFAULT_BANK)
         if (
             min(
                 settings["context_size"],
@@ -145,6 +171,9 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
         start = 0
     n_context = settings["context_size"]
     size = n_context + settings["query_size"]
+    designs = split_designs(settings.get("design_bank"), "train")
+    if designs and settings["cohorts"]:
+        raise ValueError("Choose a design bank or materialized training cohorts")
     tables = []
     fingerprints = {}
     for path in settings["cohorts"]:
@@ -172,7 +201,12 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
             provenance = {"cohort": settings["cohorts"][idx]}
         else:
             rows, provenance = simulate_episode(
-                settings["seed"], step, False, size, schema_version=model.schema_version
+                settings["seed"],
+                step,
+                False,
+                size,
+                schema_version=model.schema_version,
+                designs=designs,
             )
         optimizer.zero_grad(set_to_none=True)
         loss, _, _ = fit_episode(model, rows, n_context)
@@ -185,14 +219,21 @@ def _train_locked(directory, steps, device, save_every, settings, cfg):
 
 
 @torch.inference_mode()
-def evaluate(model, seed, studies, context_size, query_size):
+def evaluate(model, seed, studies, context_size, query_size, *, bank=None):
     if min(studies, context_size, query_size) < 1:
         raise ValueError("Evaluation study and patient counts must be positive")
     model.eval()
     errors, constant_errors, arm_errors = [], [], []
+    designs = split_designs(bank, "held_out")
+    by_design = {}
     for step in range(1, studies + 1):
-        rows, _ = simulate_episode(
-            seed, step, True, context_size + query_size, schema_version=model.schema_version
+        rows, provenance = simulate_episode(
+            seed,
+            step,
+            True,
+            context_size + query_size,
+            schema_version=model.schema_version,
+            designs=designs,
         )
         _, pred, truth = fit_episode(model, rows, context_size)
         t, y = binary_observations(rows[:context_size], model.centers.device)
@@ -201,10 +242,20 @@ def evaluate(model, seed, studies, context_size, query_size):
         errors.append(pred[:, 1] - pred[:, 0] - true_effect)
         constant_errors.append(rates[1] - rates[0] - true_effect)
         arm_errors.append(pred - truth)
-    return dict(
+        if designs:
+            by_design.setdefault(provenance["design_id"], []).append(errors[-1])
+    result = dict(
         studies=studies,
         query_patients=studies * query_size,
         risk_rmse=torch.cat(arm_errors).square().mean().sqrt().item(),
         cate_rmse=torch.cat(errors).square().mean().sqrt().item(),
         arm_mean_cate_rmse=torch.cat(constant_errors).square().mean().sqrt().item(),
     )
+    if designs:
+        result["held_out_designs"] = {
+            key: dict(
+                studies=len(values), cate_rmse=torch.cat(values).square().mean().sqrt().item()
+            )
+            for key, values in by_design.items()
+        }
+    return result

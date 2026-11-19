@@ -1,0 +1,1434 @@
+{
+  "version": 1,
+  "generation": {
+    "model": "qwen3-coder:30b",
+    "seed": 42,
+    "variants": 2,
+    "prompt_version": 2,
+    "questions_sha256": "6e980d49a41ea5c53e49fcb00b5da488c28c345bdaea548bbfac600ac502c8d7"
+  },
+  "designs": [
+    {
+      "id": "lung_platinum_v1",
+      "question": {
+        "id": "lung_platinum",
+        "split": "train",
+        "cancer": "lung cancer",
+        "population": "advanced nonsquamous non-small-cell lung cancer",
+        "icd10cm": "C34.90",
+        "control": "carboplatin plus pemetrexed",
+        "treatment": "cisplatin plus pemetrexed",
+        "outcome": "hospitalization",
+        "horizon_days": 90
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.creatinine.last",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.hemoglobin.last",
+            "roles": [
+              "confounder",
+              "prognostic",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "log_nlr",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "recent_ed_visits",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "egfr_mutation_status",
+            "prevalence": 0.45,
+            "present": "The tumor was found to have an activating EGFR mutation.",
+            "absent": "No activating EGFR mutation was identified in the tumor tissue.",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "pleural_effusion_involvement",
+            "prevalence": 0.3,
+            "present": "There was extensive pleural effusion involving the right lung base.",
+            "absent": "No significant pleural effusion was observed on imaging.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "prior_radiation_exposure",
+            "prevalence": 0.25,
+            "present": "The patient had received prior thoracic radiation therapy.",
+            "absent": "There was no history of prior radiation therapy to the thorax.",
+            "roles": [
+              "confounder",
+              "instrument"
+            ]
+          },
+          {
+            "name": "bilateral_lung_involvement",
+            "prevalence": 0.35,
+            "present": "Imaging demonstrated diffuse bilateral pulmonary nodules.",
+            "absent": "Only unifocal lung lesion was identified on imaging.",
+            "roles": [
+              "prognostic",
+              "effect_modifier"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "lung_platinum_v2",
+      "question": {
+        "id": "lung_platinum",
+        "split": "train",
+        "cancer": "lung cancer",
+        "population": "advanced nonsquamous non-small-cell lung cancer",
+        "icd10cm": "C34.90",
+        "control": "carboplatin plus pemetrexed",
+        "treatment": "cisplatin plus pemetrexed",
+        "outcome": "hospitalization",
+        "horizon_days": 90
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.creatinine.change",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "pro.nausea.severity.mean",
+            "roles": [
+              "effect_modifier",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "recent_ed_visits",
+            "roles": [
+              "prognostic",
+              "unused"
+            ]
+          },
+          {
+            "name": "lab.glucose.change",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "pleural_effusion_present",
+            "prevalence": 0.35,
+            "present": "The patient had evidence of right-sided pleural effusion on chest imaging.",
+            "absent": "Chest imaging revealed no evidence of pleural effusion.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "ercc1_high_expression",
+            "prevalence": 0.25,
+            "present": "Tumor tissue showed high expression of ERCC1 on immunohistochemistry.",
+            "absent": "Tumor tissue did not demonstrate high ERCC1 expression on immunohistochemistry.",
+            "roles": [
+              "effect_modifier",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "prior_radiation_history",
+            "prevalence": 0.15,
+            "present": "Patient had received prior thoracic radiation therapy for another malignancy.",
+            "absent": "Patient had no history of prior thoracic radiation therapy.",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          },
+          {
+            "name": "lymph_node_metastasis",
+            "prevalence": 0.55,
+            "present": "Pathology report indicated metastatic involvement of regional lymph nodes.",
+            "absent": "No regional lymph node metastasis was identified on pathology review.",
+            "roles": [
+              "prognostic",
+              "effect_modifier"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "colon_doublet_v1",
+      "question": {
+        "id": "colon_doublet",
+        "split": "train",
+        "cancer": "colorectal cancer",
+        "population": "metastatic colon cancer",
+        "icd10cm": "C18.9",
+        "control": "FOLFIRI",
+        "treatment": "FOLFOX",
+        "outcome": "disease progression",
+        "horizon_days": 180
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "log_nlr",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.hemoglobin.last",
+            "roles": [
+              "confounder",
+              "prognostic",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "lab.creatinine.last",
+            "roles": [
+              "confounder",
+              "effect_modifier",
+              "unused"
+            ]
+          },
+          {
+            "name": "vital.weight_kg.last",
+            "roles": [
+              "prognostic",
+              "unused"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "bowel_obstruction",
+            "prevalence": 0.25,
+            "present": "The patient had a history of bowel obstruction noted on prior CT scan.",
+            "absent": "No evidence of bowel obstruction was identified on the most recent imaging study.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "rural_location",
+            "prevalence": 0.35,
+            "present": "Patient resides in a rural area with limited access to specialized cancer care.",
+            "absent": "Patient lives in an urban area with proximity to major cancer treatment centers.",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "liver_metastasis",
+            "prevalence": 0.4,
+            "present": "Liver metastases were identified on baseline MRI with involvement of two or more segments.",
+            "absent": "No liver metastases were detected on baseline imaging studies.",
+            "roles": [
+              "prognostic",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "prior_surgical_resection",
+            "prevalence": 0.3,
+            "present": "The patient underwent prior surgical resection of primary tumor with negative margins.",
+            "absent": "The patient has not undergone prior surgical resection of primary tumor.",
+            "roles": [
+              "prognostic",
+              "effect_modifier"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "colon_doublet_v2",
+      "question": {
+        "id": "colon_doublet",
+        "split": "train",
+        "cancer": "colorectal cancer",
+        "population": "metastatic colon cancer",
+        "icd10cm": "C18.9",
+        "control": "FOLFIRI",
+        "treatment": "FOLFOX",
+        "outcome": "disease progression",
+        "horizon_days": 180
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.hemoglobin.change",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "pro.general_pain.interference.mean",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.wbc.change",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          },
+          {
+            "name": "pro.nausea.severity.mean",
+            "roles": [
+              "effect_modifier",
+              "dual_role"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "tumor_lung_metastasis",
+            "prevalence": 0.35,
+            "present": "The patient has evidence of lung metastases on chest CT scan.",
+            "absent": "No lung metastases identified on chest CT scan.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "prior_bowel_resection",
+            "prevalence": 0.28,
+            "present": "Patient underwent prior right hemicolectomy for colorectal cancer.",
+            "absent": "No history of prior bowel resection noted.",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "microsatellite_instability_high",
+            "prevalence": 0.15,
+            "present": "Tumor tissue demonstrates MSI-high status on immunohistochemistry.",
+            "absent": "Microsatellite instability is not detected in tumor tissue.",
+            "roles": [
+              "dual_role",
+              "unused"
+            ]
+          },
+          {
+            "name": "hepatic_involvement",
+            "prevalence": 0.42,
+            "present": "Liver MRI shows multifocal hepatic lesions consistent with metastatic disease.",
+            "absent": "No evidence of liver metastasis on imaging studies.",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "pancreas_first_line_v1",
+      "question": {
+        "id": "pancreas_first_line",
+        "split": "train",
+        "cancer": "pancreatic cancer",
+        "population": "metastatic pancreatic adenocarcinoma",
+        "icd10cm": "C25.9",
+        "control": "gemcitabine plus nab-paclitaxel",
+        "treatment": "modified FOLFIRINOX",
+        "outcome": "hospitalization",
+        "horizon_days": 90
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "log_nlr",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.creatinine.last",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "recent_ed_visits",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "latest_ecog",
+            "roles": [
+              "confounder",
+              "effect_modifier",
+              "prognostic"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "tumor_invasion_into_major_vessels",
+            "prevalence": 0.35,
+            "present": "The primary tumor demonstrates close proximity to the superior mesenteric artery with focal encasement.",
+            "absent": "No evidence of tumor involvement or encasement of the superior mesenteric artery is identified on imaging.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "presence_of_lymph_node_metastases",
+            "prevalence": 0.7,
+            "present": "Multiple regional lymph nodes are identified with nodal metastases confirmed on biopsy.",
+            "absent": "No pathological evidence of lymph node involvement is noted on imaging or surgical exploration.",
+            "roles": [
+              "confounder",
+              "prognostic",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "prior_chemotherapy_exposure",
+            "prevalence": 0.25,
+            "present": "Prior treatment with gemcitabine-based regimens is documented in the medical record.",
+            "absent": "There is no documentation of prior systemic chemotherapy received for metastatic disease.",
+            "roles": [
+              "confounder",
+              "effect_modifier",
+              "unused"
+            ]
+          },
+          {
+            "name": "mutational_status_brca1_or_brca2",
+            "prevalence": 0.05,
+            "present": "Germline sequencing reveals a pathogenic variant in BRCA1 associated with increased risk of pancreatic malignancy.",
+            "absent": "No pathogenic variants in BRCA1 or BRCA2 genes were identified on genetic testing.",
+            "roles": [
+              "effect_modifier",
+              "unused"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "pancreas_first_line_v2",
+      "question": {
+        "id": "pancreas_first_line",
+        "split": "train",
+        "cancer": "pancreatic cancer",
+        "population": "metastatic pancreatic adenocarcinoma",
+        "icd10cm": "C25.9",
+        "control": "gemcitabine plus nab-paclitaxel",
+        "treatment": "modified FOLFIRINOX",
+        "outcome": "hospitalization",
+        "horizon_days": 90
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.bun.change",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "pro.fatigue.severity.mean",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "vital.weight_kg.change",
+            "roles": [
+              "confounder",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "lab.wbc.mean",
+            "roles": [
+              "prognostic",
+              "unused"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "prior_cholecystectomy",
+            "prevalence": 0.35,
+            "present": "Patient underwent cholecystectomy two years prior to enrollment, with no evidence of recurrent biliary obstruction.",
+            "absent": "Patient has no history of cholecystectomy and presents with intact gallbladder on imaging.",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "tumor_located_in_head",
+            "prevalence": 0.62,
+            "present": "Imaging demonstrates tumor arising from the head of the pancreas with involvement of the portal vein.",
+            "absent": "Tumor is located in the body and tail of the pancreas, without evidence of vascular involvement.",
+            "roles": [
+              "prognostic",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "hypoattenuating_on_ct",
+            "prevalence": 0.48,
+            "present": "CT imaging shows hypoattenuating mass within the pancreatic parenchyma with no contrast enhancement.",
+            "absent": "CT imaging reveals isoattenuating or hyperattenuating tumor with marked contrast enhancement.",
+            "roles": [
+              "prognostic",
+              "unused"
+            ]
+          },
+          {
+            "name": "adenopathy_present",
+            "prevalence": 0.55,
+            "present": "Findings on PET-CT show regional lymphadenopathy with SUVmax greater than 2.5.",
+            "absent": "No evidence of regional or distant lymphadenopathy on PET-CT imaging.",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "ovary_schedule_v1",
+      "question": {
+        "id": "ovary_schedule",
+        "split": "train",
+        "cancer": "ovarian cancer",
+        "population": "advanced epithelial ovarian cancer",
+        "icd10cm": "C56.9",
+        "control": "three-weekly paclitaxel with carboplatin",
+        "treatment": "weekly paclitaxel with carboplatin",
+        "outcome": "treatment discontinuation",
+        "horizon_days": 120
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.hemoglobin.last",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.creatinine.last",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "log_nlr",
+            "roles": [
+              "prognostic",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "recent_ed_visits",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "prior_hysterectomy",
+            "prevalence": 0.35,
+            "present": "The patient underwent a total hysterectomy with bilateral salpingo-oophorectomy 2 years prior to enrollment.",
+            "absent": "The patient has never undergone a hysterectomy or any prior pelvic surgical intervention.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "pleural_effusion",
+            "prevalence": 0.42,
+            "present": "Imaging revealed moderate left-sided pleural effusion without evidence of loculation.",
+            "absent": "No pleural effusion was identified on chest imaging at baseline.",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "brca_mutation",
+            "prevalence": 0.18,
+            "present": "Germline BRCA1 mutation was identified through genetic testing.",
+            "absent": "Germline BRCA1 and BRCA2 testing showed no pathogenic variants.",
+            "roles": [
+              "effect_modifier",
+              "instrument"
+            ]
+          },
+          {
+            "name": "residual_tumor",
+            "prevalence": 0.29,
+            "present": "At the time of diagnosis, there was no macroscopic residual tumor following debulking surgery.",
+            "absent": "Macroscopic residual disease measuring 1 cm was identified after initial cytoreductive surgery.",
+            "roles": [
+              "prognostic",
+              "confounder"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "ovary_schedule_v2",
+      "question": {
+        "id": "ovary_schedule",
+        "split": "train",
+        "cancer": "ovarian cancer",
+        "population": "advanced epithelial ovarian cancer",
+        "icd10cm": "C56.9",
+        "control": "three-weekly paclitaxel with carboplatin",
+        "treatment": "weekly paclitaxel with carboplatin",
+        "outcome": "treatment discontinuation",
+        "horizon_days": 120
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.lymphocytes_abs.change",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "pro.nausea.severity.mean",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.creatinine.last",
+            "roles": [
+              "confounder",
+              "instrument"
+            ]
+          },
+          {
+            "name": "vital.respirations_per_min.change",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "prior_hysterectomy",
+            "prevalence": 0.6,
+            "present": "The patient had a prior total hysterectomy with bilateral salpingo-oophorectomy performed three years prior to enrollment.",
+            "absent": "The patient had no prior hysterectomy or salpingo-oophorectomy.",
+            "roles": [
+              "confounder",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "residual_tumor_greater_than_1cm",
+            "prevalence": 0.4,
+            "present": "At the time of diagnosis, imaging revealed residual tumor burden greater than 1 centimeter in the pelvic cavity.",
+            "absent": "Imaging demonstrated no residual tumor mass greater than 1 centimeter in the pelvic cavity.",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "brca_mutation_status",
+            "prevalence": 0.25,
+            "present": "Germline BRCA1 mutation was identified through genetic testing prior to enrollment.",
+            "absent": "No germline BRCA1 or BRCA2 mutations were detected in the patient's tumor tissue.",
+            "roles": [
+              "effect_modifier",
+              "instrument"
+            ]
+          },
+          {
+            "name": "pleural_effusion",
+            "prevalence": 0.35,
+            "present": "A large left-sided pleural effusion was documented on baseline CT scan.",
+            "absent": "No pleural effusion was seen on baseline imaging studies.",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "prostate_arpi_v1",
+      "question": {
+        "id": "prostate_arpi",
+        "split": "train",
+        "cancer": "prostate cancer",
+        "population": "metastatic castration-resistant prostate cancer",
+        "icd10cm": "C61",
+        "control": "abiraterone plus prednisone",
+        "treatment": "enzalutamide",
+        "outcome": "disease progression",
+        "horizon_days": 180
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.creatinine.last",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.hemoglobin.last",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "log_nlr",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "recent_ed_visits",
+            "roles": [
+              "confounder",
+              "dual_role"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "prior_radical_prostatectomy",
+            "prevalence": 0.35,
+            "present": "Patient underwent radical prostatectomy prior to enrollment.",
+            "absent": "Patient had no prior history of radical prostatectomy.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "bone_metastases_present",
+            "prevalence": 0.72,
+            "present": "Imaging demonstrated active bone metastases at baseline.",
+            "absent": "No imaging evidence of bone metastases was identified at baseline.",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "hiv_positive",
+            "prevalence": 0.02,
+            "present": "Patient tested positive for HIV at screening.",
+            "absent": "Patient tested negative for HIV at screening.",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          },
+          {
+            "name": "lymph_node_involvement",
+            "prevalence": 0.45,
+            "present": "Pathologic report confirmed lymph node involvement.",
+            "absent": "Pathologic report showed no evidence of lymph node involvement.",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "prostate_arpi_v2",
+      "question": {
+        "id": "prostate_arpi",
+        "split": "train",
+        "cancer": "prostate cancer",
+        "population": "metastatic castration-resistant prostate cancer",
+        "icd10cm": "C61",
+        "control": "abiraterone plus prednisone",
+        "treatment": "enzalutamide",
+        "outcome": "disease progression",
+        "horizon_days": 180
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.wbc.change",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "pro.general_pain.frequency.mean",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.hemoglobin.last",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          },
+          {
+            "name": "vital.respirations_per_min.change",
+            "roles": [
+              "dual_role",
+              "instrument"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "prior_radiotherapy_exposure",
+            "prevalence": 0.35,
+            "present": "The patient received external beam radiation therapy to the pelvis prior to enrollment.",
+            "absent": "There is no record of prior radiation therapy to the pelvis or any other site.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "bone_mets_at_diagnosis",
+            "prevalence": 0.6,
+            "present": "Bone scan at diagnosis revealed multiple lytic lesions in the lumbar spine and pelvis.",
+            "absent": "No evidence of bone metastases was identified on the skeletal survey at baseline.",
+            "roles": [
+              "prognostic",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "lymph_node_involvement",
+            "prevalence": 0.25,
+            "present": "CT imaging showed bilateral inguinal lymphadenopathy with maximum diameter of 1.8 cm.",
+            "absent": "Computed tomography of the abdomen and pelvis showed no abnormal lymph nodes.",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          },
+          {
+            "name": "prior_orthopaedic_surgery",
+            "prevalence": 0.15,
+            "present": "The patient underwent bilateral hip replacement surgery due to pathological fractures six months prior.",
+            "absent": "There is no documented history of orthopaedic surgery related to skeletal complications.",
+            "roles": [
+              "effect_modifier",
+              "instrument"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "melanoma_io_v1",
+      "question": {
+        "id": "melanoma_io",
+        "split": "train",
+        "cancer": "melanoma",
+        "population": "unresectable cutaneous melanoma",
+        "icd10cm": "C43.9",
+        "control": "nivolumab",
+        "treatment": "nivolumab plus ipilimumab",
+        "outcome": "hospitalization",
+        "horizon_days": 90
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "log_nlr",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.creatinine.last",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "recent_ed_visits",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "latest_ecog",
+            "roles": [
+              "confounder",
+              "prognostic",
+              "dual_role"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "breslow_thickness",
+            "prevalence": 0.65,
+            "present": "The primary tumor exhibited a Breslow thickness of 4.2 mm.",
+            "absent": "The primary tumor showed a Breslow thickness of 1.8 mm.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "ulceration",
+            "prevalence": 0.32,
+            "present": "Histologic evaluation revealed tumor ulceration at the site of primary melanoma.",
+            "absent": "No evidence of ulceration was identified in the primary melanoma sample.",
+            "roles": [
+              "confounder",
+              "prognostic",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "prior_surgery_history",
+            "prevalence": 0.28,
+            "present": "The patient had undergone prior excision of a regional lymph node.",
+            "absent": "There was no documented history of prior surgical intervention for melanoma.",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "m1c_metastasis",
+            "prevalence": 0.19,
+            "present": "Imaging demonstrated distant metastasis involving the lung parenchyma.",
+            "absent": "No radiologic evidence of distant metastasis was observed.",
+            "roles": [
+              "prognostic",
+              "confounder",
+              "unused"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "melanoma_io_v2",
+      "question": {
+        "id": "melanoma_io",
+        "split": "train",
+        "cancer": "melanoma",
+        "population": "unresectable cutaneous melanoma",
+        "icd10cm": "C43.9",
+        "control": "nivolumab",
+        "treatment": "nivolumab plus ipilimumab",
+        "outcome": "hospitalization",
+        "horizon_days": 90
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.potassium.change",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "pro.fatigue.severity.mean",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.creatinine.change",
+            "roles": [
+              "confounder",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "vital.respirations_per_min.change",
+            "roles": [
+              "unused",
+              "effect_modifier"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "prior_radiation_exposure",
+            "prevalence": 0.35,
+            "present": "The patient received adjuvant radiation therapy to the regional lymph nodes following initial surgical resection.",
+            "absent": "There was no history of prior radiation therapy to the primary tumor or regional nodes.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "breslow_thickness_greater_than_4mm",
+            "prevalence": 0.52,
+            "present": "Histopathologic evaluation revealed tumor thickness greater than 4 mm on initial excision.",
+            "absent": "The primary tumor measured less than 4 mm in thickness on histologic review.",
+            "roles": [
+              "confounder",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "brain_metastasis_present",
+            "prevalence": 0.18,
+            "present": "Contrast-enhanced MRI demonstrated enhancing lesions within the frontal lobe consistent with metastatic disease.",
+            "absent": "No evidence of central nervous system metastasis was identified on neuroimaging.",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lymph_node_involvement",
+            "prevalence": 0.67,
+            "present": "Sentinel lymph node biopsy showed micrometastatic disease involving one or more nodes.",
+            "absent": "Sentinel lymph node biopsy was negative for metastatic involvement.",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "colon_duration_v1",
+      "question": {
+        "id": "colon_duration",
+        "split": "held_out",
+        "cancer": "colorectal cancer",
+        "population": "resected stage III colon cancer",
+        "icd10cm": "C18.9",
+        "control": "six months of adjuvant CAPOX",
+        "treatment": "three months of adjuvant CAPOX",
+        "outcome": "persistent sensory neuropathy",
+        "horizon_days": 365
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.hemoglobin.last",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.creatinine.last",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "log_nlr",
+            "roles": [
+              "prognostic",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "recent_ed_visits",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "tumor_location_right_colon",
+            "prevalence": 0.35,
+            "present": "The primary tumor was located in the right side of the colon, involving the cecum and ascending colon.",
+            "absent": "The primary tumor was located in the left side of the colon, involving the sigmoid and rectum.",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "lymph_node_ratio",
+            "prevalence": 0.6,
+            "present": "The pathological report showed a lymph node ratio of 0.45, indicating extensive nodal involvement.",
+            "absent": "The pathological report showed a lymph node ratio of 0.12, indicating minimal nodal involvement.",
+            "roles": [
+              "prognostic",
+              "confounder"
+            ]
+          },
+          {
+            "name": "microsatellite_instability",
+            "prevalence": 0.15,
+            "present": "Immunohistochemical staining revealed loss of MLH1 expression, consistent with microsatellite instability.",
+            "absent": "Immunohistochemical staining showed preserved expression of MLH1, indicating stable microsatellite status.",
+            "roles": [
+              "prognostic",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "prior_chemotherapy",
+            "prevalence": 0.2,
+            "present": "The patient had received preoperative chemotherapy with capecitabine and oxaliplatin prior to surgical resection.",
+            "absent": "The patient did not receive any preoperative chemotherapy before undergoing surgical resection.",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "colon_duration_v2",
+      "question": {
+        "id": "colon_duration",
+        "split": "held_out",
+        "cancer": "colorectal cancer",
+        "population": "resected stage III colon cancer",
+        "icd10cm": "C18.9",
+        "control": "six months of adjuvant CAPOX",
+        "treatment": "three months of adjuvant CAPOX",
+        "outcome": "persistent sensory neuropathy",
+        "horizon_days": 365
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.wbc.change",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "pro.fatigue.severity.mean",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.creatinine.mean",
+            "roles": [
+              "confounder",
+              "instrument"
+            ]
+          },
+          {
+            "name": "lab.neutrophils_abs.mean",
+            "roles": [
+              "confounder",
+              "dual_role"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "tumor_laterality",
+            "prevalence": 0.6,
+            "present": "The primary tumor was located in the right colon.",
+            "absent": "The primary tumor was located in the left colon.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lymph_node_density",
+            "prevalence": 0.4,
+            "present": "Histologic examination revealed high lymph node density with 12 positive nodes out of 24 examined.",
+            "absent": "Histologic examination revealed low lymph node density with 3 positive nodes out of 18 examined.",
+            "roles": [
+              "confounder",
+              "prognostic",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "prior_chemotherapy",
+            "prevalence": 0.3,
+            "present": "The patient had received neoadjuvant chemotherapy prior to surgical resection.",
+            "absent": "The patient had not received any prior chemotherapy before surgery.",
+            "roles": [
+              "confounder",
+              "effect_modifier",
+              "unused"
+            ]
+          },
+          {
+            "name": "surgical_margin_status",
+            "prevalence": 0.25,
+            "present": "The resected specimen showed positive surgical margins.",
+            "absent": "The resected specimen showed clear surgical margins.",
+            "roles": [
+              "prognostic",
+              "instrument",
+              "dual_role"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "kidney_io_v1",
+      "question": {
+        "id": "kidney_io",
+        "split": "held_out",
+        "cancer": "kidney cancer",
+        "population": "metastatic clear-cell renal cell carcinoma",
+        "icd10cm": "C64.9",
+        "control": "nivolumab plus ipilimumab",
+        "treatment": "pembrolizumab plus axitinib",
+        "outcome": "disease progression",
+        "horizon_days": 180
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "log_nlr",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "lab.creatinine.last",
+            "roles": [
+              "confounder",
+              "prognostic",
+              "instrument"
+            ]
+          },
+          {
+            "name": "lab.hemoglobin.last",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "vital.weight_kg.last",
+            "roles": [
+              "confounder",
+              "prognostic",
+              "dual_role"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "prior_nephrectomy",
+            "prevalence": 0.6,
+            "present": "Patient underwent partial nephrectomy prior to enrollment.",
+            "absent": "Patient had no prior nephrectomy.",
+            "roles": [
+              "confounder",
+              "effect_modifier"
+            ]
+          },
+          {
+            "name": "tumor_invasion_lymph_nodes",
+            "prevalence": 0.3,
+            "present": "Pathology report showed tumor invasion into regional lymph nodes.",
+            "absent": "No evidence of lymph node involvement on imaging and pathology.",
+            "roles": [
+              "prognostic",
+              "confounder"
+            ]
+          },
+          {
+            "name": "microscopic_hematuria",
+            "prevalence": 0.4,
+            "present": "Microscopic hematuria was noted on urine dipstick at baseline.",
+            "absent": "Urinalysis showed no microscopic hematuria at baseline.",
+            "roles": [
+              "prognostic",
+              "unused"
+            ]
+          },
+          {
+            "name": "bilateral_kidney_tumors",
+            "prevalence": 0.2,
+            "present": "Imaging revealed synchronous tumors in both kidneys.",
+            "absent": "Single kidney tumor identified on initial imaging.",
+            "roles": [
+              "effect_modifier",
+              "prognostic"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "kidney_io_v2",
+      "question": {
+        "id": "kidney_io",
+        "split": "held_out",
+        "cancer": "kidney cancer",
+        "population": "metastatic clear-cell renal cell carcinoma",
+        "icd10cm": "C64.9",
+        "control": "nivolumab plus ipilimumab",
+        "treatment": "pembrolizumab plus axitinib",
+        "outcome": "disease progression",
+        "horizon_days": 180
+      },
+      "candidates": {
+        "measurements": [
+          {
+            "name": "lab.hemoglobin.change",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "pro.fatigue.interference.mean",
+            "roles": [
+              "effect_modifier",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "lab.creatinine.change",
+            "roles": [
+              "confounder",
+              "unused"
+            ]
+          },
+          {
+            "name": "creatinine_slope",
+            "roles": [
+              "prognostic",
+              "instrument"
+            ]
+          }
+        ],
+        "note_findings": [
+          {
+            "name": "prior_nephrectomy_history",
+            "prevalence": 0.65,
+            "present": "Patient underwent radical nephrectomy prior to enrollment, with complete removal of the primary tumor mass.",
+            "absent": "Patient had no prior nephrectomy and presented with metastatic disease at initial diagnosis.",
+            "roles": [
+              "confounder",
+              "prognostic"
+            ]
+          },
+          {
+            "name": "tumor_lymph_node_involvement",
+            "prevalence": 0.42,
+            "present": "Imaging demonstrated lymph node involvement with multiple metastatic nodes identified on CT scan.",
+            "absent": "No evidence of lymph node metastasis was found on pre-treatment imaging studies.",
+            "roles": [
+              "effect_modifier",
+              "dual_role"
+            ]
+          },
+          {
+            "name": "microscopic_hematuria",
+            "prevalence": 0.38,
+            "present": "Microscopic hematuria was present on urine analysis at baseline, with >5 RBCs per high-power field.",
+            "absent": "Urinalysis revealed no microscopic hematuria at baseline with <3 RBCs per high-power field.",
+            "roles": [
+              "prognostic",
+              "unused"
+            ]
+          },
+          {
+            "name": "bone_metastasis_present",
+            "prevalence": 0.31,
+            "present": "Bone scan revealed multiple bone metastases in the spine and pelvis.",
+            "absent": "No bone metastases were detected on skeletal imaging studies performed prior to treatment initiation.",
+            "roles": [
+              "confounder",
+              "instrument"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

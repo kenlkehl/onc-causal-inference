@@ -115,8 +115,8 @@ def _vitals(rng, weight, burden, baseline_bp):
     )
 
 
-def _note(rng, age, performance, previous_performance, emergency, hemoglobin):
-    setting = "Emergency department" if emergency else "Thoracic oncology"
+def _note(rng, age, performance, previous_performance, emergency, hemoglobin, population, clinic):
+    setting = "Emergency department" if emergency else clinic
     activity = rng.choice(FUNCTION[performance])
     common = rng.choice(
         (
@@ -126,7 +126,7 @@ def _note(rng, age, performance, previous_performance, emergency, hemoglobin):
             "No new pain reported.",
         )
     )
-    text = f"{setting} visit. {age}-year-old with lung cancer. {activity} {common}"
+    text = f"{setting} visit. {age}-year-old with {population}. {activity} {common}"
     if previous_performance is not None:
         if performance > previous_performance:
             text += " Activity tolerance has declined since the previous assessment."
@@ -137,9 +137,12 @@ def _note(rng, age, performance, previous_performance, emergency, hemoglobin):
     return text
 
 
-def simulate_history(seed, patient_id, *, include_pros=True):
+def simulate_history(seed, patient_id, *, include_pros=True, question=None):
     """Return observations up to the treatment decision for one synthetic patient."""
     rng = np.random.default_rng([seed, patient_id, 1])
+    population = question["population"] if question else "lung cancer"
+    diagnosis = question["icd10cm"] if question else "C34.90"
+    clinic = "Medical oncology" if question else "Thoracic oncology"
     n_visits = int(rng.integers(4, 13))
     # Build backwards from the last pretreatment visit, then emit forwards.
     gaps = rng.integers(10, 85, n_visits - 1)
@@ -169,7 +172,7 @@ def simulate_history(seed, patient_id, *, include_pros=True):
         weight = float(np.clip(base_weight + weight_slope * years + rng.normal(0, 0.7), 38, 155))
         performance = int(np.clip(np.rint(1.1 + 0.75 * burden), 0, 3))
         emergency = rng.random() < expit(-1.85 + 0.8 * burden)
-        diagnoses = ["C34.90"]
+        diagnoses = [diagnosis]
         if emergency:
             diagnoses.append("R06.02" if burden > 0 else "R53.83")
         _append(
@@ -202,6 +205,8 @@ def simulate_history(seed, patient_id, *, include_pros=True):
                 previous_performance,
                 emergency,
                 hemoglobin,
+                population,
+                clinic,
             )
             _append(streams["notes"], day, text=f"{text} ECOG performance status: {performance}.")
             previous_performance = performance

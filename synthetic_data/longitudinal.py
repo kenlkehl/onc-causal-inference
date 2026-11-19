@@ -5,7 +5,7 @@ import fcntl
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, closing
 from functools import partial
@@ -18,6 +18,7 @@ import pyarrow.parquet as pq
 from scipy.special import expit
 
 from .config import LLMConfig
+from .designed_history import candidate_features, document_findings, measured_values
 from .dgp_terms import role_lists
 from .generator import _compute_logit, oracle_dataset_statistics
 from .llm_client import LLMClient
@@ -32,6 +33,7 @@ from .pro_ctcae import PRO_ATTRIBUTES, PRO_INSTRUMENT, PRO_SOURCE, RECALL_DAYS
 from .prompts import CLINICAL_SYSTEM_PROMPT
 from .reequation import _features_with_roles, draw_equations, resolve_scenario
 from .saved_dgp import NOTE_OUTPUT_FORMAT, _clinical_document, _request
+from .study_designs import load_bank, question_text
 
 # Fixed reference means and scales let new patient samples share the exact same DGP.
 # Age, weight, etc. appearing elsewhere in a record are not additional oracle inputs.
@@ -143,7 +145,10 @@ def _schema(features, include_pros):
             ("clinical_text", pa.string()),
             ("treatment_indicator", pa.int8()),
             ("outcome_indicator", pa.int8()),
-            *((f"true_{feature['name']}", pa.float64()) for feature in features),
+            *(
+                (f"true_{f['name']}", pa.string() if f["type"] == "categorical" else pa.float64())
+                for f in features
+            ),
             *((name, pa.float64()) for name in PROBABILITY_COLUMNS),
         ]
     )
@@ -186,24 +191,42 @@ class LongitudinalDGP:
     treatment: dict
     outcome: dict
     schema_version: int = 2
+    reference: dict = field(default_factory=lambda: REFERENCE)
+    design: dict | None = None
 
 
-def draw_longitudinal_dgp(dgp_seed, prior="fixed_roles", *, schema_version=2):
+def draw_longitudinal_dgp(dgp_seed, prior=None, *, schema_version=2, design=None):
     """One reproducible study, shared by its context and query patients."""
     if schema_version not in (1, 2):
         raise ValueError(f"Unknown longitudinal schema version: {schema_version}")
+    if prior is None:
+        prior = "design" if design is not None else "fixed_roles"
+    if prior == "design" and design is None:
+        raise ValueError("The design prior needs a study design")
     available = [
         f for f in FEATURES if schema_version == 2 or f["name"] != "mean_fatigue_interference"
     ]
     settings = {"name": "longitudinal", "modifier_strength": 3.0, "modifier_main_effects": True}
-    if prior == "mixed":
+    reference = REFERENCE
+    if design is not None:
+        if prior != "design" or schema_version != 2:
+            raise ValueError("A study design requires the design prior and five-stream schema")
+        roles_rng = np.random.default_rng([dgp_seed, 981])
+        available, reference = candidate_features(design, roles_rng)
+    if prior in ("mixed", "design"):
         rng = np.random.default_rng([dgp_seed, 923])
         settings.update(
-            roles={"confounder": 1, "dual_role": 1, "effect_modifier": 1, "prognostic": 1},
             nonlinearity=str(rng.choice(["none", "threshold", "quadratic"])),
             treatment_effect=float(rng.uniform(-1, 1)),
             modifier_strength=float(rng.uniform(0.5, 4)),
         )
+        if prior == "mixed":
+            settings["roles"] = {
+                "confounder": 1,
+                "dual_role": 1,
+                "effect_modifier": 1,
+                "prognostic": 1,
+            }
     elif prior != "fixed_roles":
         raise ValueError(f"Unknown longitudinal prior: {prior}")
     scenario = resolve_scenario(settings, available, seed=dgp_seed)
@@ -215,22 +238,40 @@ def draw_longitudinal_dgp(dgp_seed, prior="fixed_roles", *, schema_version=2):
         main_coefficient_scale=0.85,
         interaction_coefficient_scale=0.30,
     )
-    if prior == "mixed":
+    if prior in ("mixed", "design"):
         treatment["intercept"], outcome["intercept"] = map(float, rng.uniform(-1, 1, 2))
-    return LongitudinalDGP(features, treatment, outcome, schema_version)
+    return LongitudinalDGP(features, treatment, outcome, schema_version, reference, design)
 
 
 def sample_longitudinal_patient(patient_id, *, seed, dgp, note_client=None, cache_dir=None):
-    streams = simulate_history(seed, patient_id, include_pros=dgp.schema_version == 2)
-    features = history_features(streams)
+    design = dgp.design
+    streams = simulate_history(
+        seed,
+        patient_id,
+        include_pros=dgp.schema_version == 2,
+        question=design["question"] if design else None,
+    )
+    features = (
+        measured_values(streams, design["candidates"]["measurements"])
+        if design
+        else history_features(streams)
+    )
     if note_client is not None:
         for note in streams["notes"]:
             _render_llm_note(note_client, cache_dir, patient_id, note)
+    if design:
+        features.update(
+            document_findings(
+                streams["notes"],
+                design["candidates"]["note_findings"],
+                np.random.default_rng([seed, patient_id, 4]),
+            )
+        )
     # The label-draw stream is independent of every history and its renderer.
     rng = np.random.default_rng([seed, patient_id, 2])
-    propensity = float(expit(_compute_logit(features, dgp.features, REFERENCE, dgp.treatment)))
+    propensity = float(expit(_compute_logit(features, dgp.features, dgp.reference, dgp.treatment)))
     p0, p1 = [
-        float(expit(_compute_logit(features, dgp.features, REFERENCE, dgp.outcome, t)))
+        float(expit(_compute_logit(features, dgp.features, dgp.reference, dgp.outcome, t)))
         for t in (0, 1)
     ]
     treatment = int(rng.random() < propensity)
@@ -261,8 +302,9 @@ def generate_longitudinal_cohort(
     dgp_seed=101,
     llm_config=None,
     num_workers=4,
-    prior="fixed_roles",
+    prior=None,
     schema_version=2,
+    design=None,
 ):
     """Publish a Parquet cohort with longitudinal observations and the exact DGP."""
     if dataset_size < 1 or num_workers < 1 or seed < 0 or dgp_seed < 0:
@@ -271,7 +313,9 @@ def generate_longitudinal_cohort(
     if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
         raise FileExistsError(f"Output directory already contains data: {output_dir}")
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    dgp = draw_longitudinal_dgp(dgp_seed, prior, schema_version=schema_version)
+    if prior is None:
+        prior = "design" if design is not None else "fixed_roles"
+    dgp = draw_longitudinal_dgp(dgp_seed, prior, schema_version=schema_version, design=design)
     streams = STREAMS if schema_version == 2 else LEGACY_STREAMS
     config = dict(
         generation_mode="longitudinal",
@@ -282,11 +326,17 @@ def generate_longitudinal_cohort(
         dgp_seed=dgp_seed,
         prior=prior,
         note_style="llm" if llm_config else "offline",
-        clinical_question="Risk of progression by six months under oncology regimens A and B.",
+        clinical_question=(
+            question_text(design["question"])
+            if design
+            else "Risk of progression by six months under oncology regimens A and B."
+        ),
         note_model=llm_config.model_name if llm_config else None,
     )
     if llm_config:
         config["note_max_tokens"] = llm_config.max_tokens
+    if design:
+        config["design_id"] = design["id"]
     counts = dict.fromkeys(streams, 0)
     schema = _schema(dgp.features, "pros" in streams)
     with TemporaryDirectory(dir=output_dir.parent, prefix=".longitudinal-") as temporary:
@@ -328,7 +378,7 @@ def generate_longitudinal_cohort(
             config=config,
             features=dgp.features,
             **role_lists(dgp.features),
-            summary_statistics={f["name"]: REFERENCE[f["name"]] for f in dgp.features},
+            summary_statistics={f["name"]: dgp.reference[f["name"]] for f in dgp.features},
             treatment_equation=dgp.treatment,
             outcome_equation=dgp.outcome,
             dataset_statistics=stats,
@@ -340,6 +390,8 @@ def generate_longitudinal_cohort(
                 first_delta_years=None,
             ),
         )
+        if design:
+            metadata["design"] = design
         if "pros" in streams:
             metadata["longitudinal"]["pros"] = dict(
                 instrument=PRO_INSTRUMENT,
@@ -365,7 +417,12 @@ def longitudinal_main(argv):
         "--dgp-seed", type=int, default=101, help="Treatment and outcome equation draw."
     )
     parser.add_argument("--note-style", choices=("offline", "llm"), default="offline")
-    parser.add_argument("--prior", choices=("fixed_roles", "mixed"), default="fixed_roles")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--prior", choices=("fixed_roles", "mixed"), default="fixed_roles")
+    source.add_argument(
+        "--design-bank", type=Path, help="Materialize one study from this design bank."
+    )
+    parser.add_argument("--design-id", help="Design to use from the supplied bank.")
     parser.add_argument(
         "--schema-version",
         type=int,
@@ -384,6 +441,14 @@ def longitudinal_main(argv):
         help="LLM completion budget per note, including reasoning tokens.",
     )
     args = parser.parse_args(argv)
+    if bool(args.design_bank) != bool(args.design_id):
+        parser.error("--design-bank and --design-id must be supplied together")
+    design = None
+    if args.design_bank:
+        designs = load_bank(args.design_bank)["designs"]
+        design = next((d for d in designs if d["id"] == args.design_id), None)
+        if design is None:
+            parser.error(f"Unknown design ID: {args.design_id}")
     llm_config = None
     if args.note_style == "llm":
         llm_config = LLMConfig(
@@ -398,7 +463,8 @@ def longitudinal_main(argv):
         dataset_size=args.dataset_size,
         seed=args.seed,
         dgp_seed=args.dgp_seed,
-        prior=args.prior,
+        prior="design" if design else args.prior,
+        design=design,
         schema_version=args.schema_version,
         llm_config=llm_config,
         num_workers=args.num_workers,

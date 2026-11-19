@@ -290,3 +290,64 @@ def test_prior_checkpoint_keeps_its_four_stream_architecture(note_model, tmp_pat
         torch.testing.assert_close(
             restored.eval()(rows[:2], rows[2:])[0], legacy(rows[:2], rows[2:])[0]
         )
+
+
+def test_design_bank_train_resume_and_held_out_evaluation(tmp_path, note_model, capsys):
+    import json
+    from synthetic_data.study_designs import DEFAULT_BANK, load_bank
+    from oci.longitudinal.training import split_designs
+
+    bank = load_bank(DEFAULT_BANK)
+    train, held = [split_designs(bank, s) for s in ("train", "held_out")]
+    assert {d["question"]["id"] for d in train}.isdisjoint(d["question"]["id"] for d in held)
+    assert {d["question"]["cancer"] for d in held} - {d["question"]["cancer"] for d in train}
+    run = tmp_path / "designed"
+    main(
+        [
+            "train",
+            "--run-dir",
+            str(run),
+            "--steps",
+            "1",
+            "--context-size",
+            "3",
+            "--query-size",
+            "2",
+            "--device",
+            "cpu",
+            "--note-model",
+            str(note_model),
+            "--event-width",
+            "8",
+            "--event-layers",
+            "1",
+            "--study-width",
+            "16",
+            "--study-layers",
+            "1",
+        ]
+    )
+    main(["resume", "--run-dir", str(run), "--steps", "2", "--device", "cpu"])
+    logs = [
+        json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")
+    ]
+    assert [d["step"] for d in logs] == [1, 2]
+    assert all(d["design_id"] in {v["id"] for v in train} for d in logs)
+    main(
+        [
+            "evaluate",
+            "--run-dir",
+            str(run),
+            "--device",
+            "cpu",
+            "--studies",
+            str(len(held)),
+            "--context-size",
+            "3",
+            "--query-size",
+            "2",
+        ]
+    )
+    metrics = json.loads(capsys.readouterr().out)
+    assert set(metrics["held_out_designs"]) == {d["id"] for d in held}
+    assert all(v["studies"] == 1 for v in metrics["held_out_designs"].values())

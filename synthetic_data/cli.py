@@ -735,6 +735,9 @@ def main(argv: Optional[List[str]] = None):
     existing LLM-based generator.
     """
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "design-bank":
+        from .study_designs import designs_main
+        return designs_main(argv[1:])
     if argv and argv[0] == "longitudinal":
         from .longitudinal import longitudinal_main
         return longitudinal_main(argv[1:])
@@ -747,7 +750,10 @@ def main(argv: Optional[List[str]] = None):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Generate four pretreatment streams and oracle potential outcomes offline
+  # Author reusable study designs using an OpenAI-compatible endpoint
+  python -m synthetic_data.cli design-bank --output ./design_bank.json --variants-per-question 2
+
+  # Generate pretreatment streams and oracle potential outcomes offline
   python -m synthetic_data.cli longitudinal --dataset-size 500 --output-dir ./synthetic_output_longitudinal
 
   # Generate with local vLLM server

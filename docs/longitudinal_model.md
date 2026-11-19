@@ -1,6 +1,6 @@
 # Longitudinal causal model
 
-The model estimates six-month binary outcome risks for the same patient under
+The model estimates the study-defined binary outcome risk for the same patient under
 control and treatment. It conditions both estimates on an observational cohort
 from the same study. Training examples supply the known risks under both arms
 for query patients. Inference takes observed treatment and outcome for context
@@ -65,21 +65,15 @@ is the probability-weighted mean of those risks for each arm and their differenc
 
 ## Studies used for training
 
-By default each optimizer step independently simulates one offline study from
-the `mixed` prior. It randomly assigns the six history summaries, including
-mean reported fatigue interference, to one confounder-only, one dual-role, one
-modifier-only, one prognostic, and two unused positions. It draws treatment and outcome coefficients and intercepts,
-a treatment main effect, treatment interactions, and either linear, threshold,
-or quadratic outcome terms. The patient-history simulator is shared across
-studies. Context and query patients are disjoint and use the same equations.
-The study equations and oracle columns stay outside the patient encoders.
+A training episode has three levels.
 
-The training log prints the DGP and patient seeds for each simulated study.
-Recreate any such study through the simulator by passing the logged seeds as
-`--dgp-seed` and `--seed` with `--prior mixed`. The first context-size patients
-form the context. Evaluation reserves odd DGP and patient seeds, while training
-uses even ones. The generator's existing default remains `fixed_roles`.
-[Simulator schema and generation options](synthetic_data.md#longitudinal-multimodal-cohorts)
+1. **Design.** A frozen LLM-authored design lists the cancer population, treatment comparison, binary endpoint and time horizon from its seed question, plus candidate variables and their allowed causal roles. Each clinical question and all its design variants belong to one split. The bundled bank includes two designs for each of eight questions. Six questions are available for training. A colorectal cancer question and the kidney cancer population are held out.
+2. **Study.** At each optimizer step Python samples a training design uniformly and draws a fresh treatment-assignment equation and outcome equation. Each candidate takes one of its design's allowed roles. The draw also varies coefficient sizes and signs, baseline event and treatment rates via their intercepts, treatment interactions, and linear, threshold or quadratic outcome terms. An unused candidate still appears in patient records. Some draws can have no effect modifiers.
+3. **Patient.** Python samples disjoint context and query patients under the same study equations. The two oracle risks for each query supervise the causal head. At inference the model infers the relationships from observed context patients. Its inputs contain the five histories and treatment indicator. Question text, roles, equations and oracle values are excluded from the patient encoder.
+
+The standard training command uses the bundled bank offline. Pass `--design-bank path/to/bank.json` to train on a larger bank. The checkpoint embeds the complete bank so resume and evaluation use the same authored designs. Evaluation cycles through the held-out designs, draws new equations and patients for each episode, and reports pooled and per-design risk-difference RMSE. Set `--studies` at least as large as the number of held-out designs to cover all of them.
+
+Training logs include the design ID, DGP seed and patient seed. Pass these to the longitudinal simulator to materialize exactly that study. The first context-size rows formed the context. To reproduce the original six-variable prior in a new run, use `--mixed-prior`. Existing checkpoints retain the prior they were trained with. [Design generation and study replay](synthetic_data.md#generating-a-bank-of-study-designs)
 
 ## Train, resume, and evaluate
 
