@@ -7,6 +7,7 @@ panels, lab components, diagnosis/procedure codes, and PRO instruments.
 
 import hashlib
 import math
+import re
 from functools import lru_cache
 from numbers import Integral
 
@@ -74,6 +75,8 @@ VITAL_INPUT_SIZE = 2 * len(VITAL_SCALES)
 CODE_BUCKETS = 4096
 EXTRA_LAB_BUCKETS = 1024
 EXTRA_PRO_BUCKETS = 512
+LEXICAL_BUCKETS = 2048
+_LEXICAL_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 PRO_INSTRUMENT = "PRO-CTCAE"
 RECALL_DAYS = 7
@@ -111,6 +114,25 @@ def _hash_bucket(name, buckets=CODE_BUCKETS):
 
 def _code_id(name):
     return _hash_bucket(name, CODE_BUCKETS)
+
+
+def note_lexical_vector(notes):
+    """Deterministic hashed 1-3gram log-count vector across a patient's pretreatment notes."""
+    counts = [0.0] * LEXICAL_BUCKETS
+    for note in notes or ():
+        text = note.get("text")
+        if not text:
+            continue
+        tokens = _LEXICAL_TOKEN_RE.findall(str(text).lower())
+        n_tok = len(tokens)
+        for i, tok in enumerate(tokens):
+            counts[_hash_bucket(tok, LEXICAL_BUCKETS)] += 1.0
+            if i + 1 < n_tok:
+                bi = f"{tok}_{tokens[i + 1]}"
+                counts[_hash_bucket(bi, LEXICAL_BUCKETS)] += 1.0
+                if i + 2 < n_tok:
+                    counts[_hash_bucket(f"{bi}_{tokens[i + 2]}", LEXICAL_BUCKETS)] += 1.0
+    return [math.log1p(c) if c else 0.0 for c in counts]
 
 
 def _numeric(value, mean, scale):

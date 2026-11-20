@@ -882,3 +882,120 @@ def test_longitudinal_trajectory_slopes_and_observational_loocv_ridge_baseline()
     true_ite = [r["true_y1"] - r["true_y0"] for r in rows[64:]]
     rmse = float(torch.tensor(pred_ite - torch.tensor(true_ite).numpy()).square().mean().sqrt())
     assert rmse < 0.25
+
+
+def test_study_adaptive_lexical_svd_channel_and_v4_checkpoint_compat(note_model, tmp_path):
+    # 1. lexical_dim > 0: gradients, context permutation invariance, and train/resume/predict.
+    lex_model = CausalStudyModel(
+        AutoModel.from_pretrained(note_model),
+        AutoTokenizer.from_pretrained(note_model),
+        ModelConfig(
+            event_width=8,
+            event_layers=1,
+            study_width=16,
+            study_layers=1,
+            bins=17,
+            note_slots=2,
+            solver_dim=8,
+            lexical_dim=4,
+        ),
+    )
+    rows, _ = simulate_episode(13, 1, False, 8)
+    loss, _, _, _, _, parts = fit_episode(lex_model, rows, 5)
+    assert all(torch.isfinite(v) for v in parts.values())
+    loss.backward()
+    assert lex_model.lexical_log_weight.grad is not None
+    assert lex_model.lexical_log_weight.grad.abs().sum() > 0
+
+    lex_model.eval()
+    with torch.no_grad():
+        logits_a, prop_a, scale_a = lex_model(rows[:5], rows[5:])
+        logits_b, prop_b, scale_b = lex_model(list(reversed(rows[:5])), [rows[6]])
+        torch.testing.assert_close(
+            lex_model.risks(logits_a, scale_a)[1:2],
+            lex_model.risks(logits_b, scale_b),
+            atol=1e-4,
+            rtol=1e-4,
+        )
+        torch.testing.assert_close(prop_a[1:2], prop_b, atol=1e-4, rtol=1e-4)
+        # Empty notes remain finite.
+        empty_rows = [{**r, "notes": []} for r in rows]
+        logits_e, prop_e, _ = lex_model(empty_rows[:5], empty_rows[5:])
+        assert torch.isfinite(logits_e).all() and torch.isfinite(prop_e).all()
+
+    data = generate_longitudinal_cohort(tmp_path / "lex_data", dataset_size=10) / "dataset.parquet"
+    run = tmp_path / "lex_run"
+    main(
+        [
+            "train",
+            "--run-dir",
+            str(run),
+            "--train-cohort",
+            str(data),
+            "--note-model",
+            str(note_model),
+            "--device",
+            "cpu",
+            "--steps",
+            "1",
+            "--context-size",
+            "5",
+            "--query-size",
+            "2",
+            "--event-width",
+            "8",
+            "--event-layers",
+            "1",
+            "--study-width",
+            "16",
+            "--study-layers",
+            "1",
+            "--note-slots",
+            "2",
+            "--solver-dim",
+            "8",
+            "--lexical-dim",
+            "4",
+            "--bins",
+            "17",
+        ]
+    )
+    restored, _ = load_run(run, "cpu")
+    assert restored.cfg.lexical_dim == 4
+    assert predict(restored, data, None, tmp_path / "lex_out.parquet", context_size=5) == 5
+
+    # 2. Backward compatibility: v4 checkpoints saved without lexical_dim load identically.
+    compat_dir = tmp_path / "v4_without_lexical"
+    compat_dir.mkdir()
+    base = CausalStudyModel(
+        AutoModel.from_pretrained(note_model),
+        AutoTokenizer.from_pretrained(note_model),
+        ModelConfig(
+            event_width=8,
+            event_layers=1,
+            study_width=16,
+            study_layers=1,
+            bins=17,
+            note_slots=2,
+            solver_dim=8,
+        ),
+    ).eval()
+    assert base.lexical_log_weight is None
+    assert "lexical_log_weight" not in base.state_dict()
+    base.patient.tokenizer.save_pretrained(compat_dir / "tokenizer")
+    old_cfg = {k: v for k, v in vars(base.cfg).items() if k != "lexical_dim"}
+    torch.save(
+        dict(
+            format_version=CHECKPOINT_FORMAT_VERSION,
+            model=old_cfg,
+            backbone=base.patient.backbone.config.to_dict(),
+            weights=base.state_dict(),
+        ),
+        compat_dir / "checkpoint.pt",
+    )
+    loaded, _ = load_run(compat_dir, "cpu")
+    assert loaded.cfg.lexical_dim == 0
+    with torch.no_grad():
+        torch.testing.assert_close(
+            loaded.eval()(rows[:4], rows[4:])[0], base(rows[:4], rows[4:])[0]
+        )

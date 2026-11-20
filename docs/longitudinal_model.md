@@ -58,11 +58,15 @@ To avoid the zero-gradient cohort-mean plateau of pure attention PFNs, `CausalSt
 uses a **hybrid differentiable in-context orthogonalized R-learner plus residual two-way
 CausalPFN head**:
 
-1. **Differentiable in-context LOO-CV R-learner.** Patient slots project into a compact
-   representation (`--solver-dim`, default 64) standardized over the context cohort. Inside
-   `condition()`, exact closed-form Cholesky leave-one-out cross-validated Ridge fits
-   estimate propensity $\hat{e}(x)$ and marginal outcome $\hat{m}(x)$ (strictly in
-   `float32`), then fit the orthogonalized Robinson R-learner
+1. **Differentiable in-context LOO-CV R-learner.** Patient slots project into dedicated
+   note and structured subspaces (`--solver-dim`, default 64) standardized over the context
+   cohort. Optionally, `--lexical-dim K` (default 0; e.g. `128`) appends the top-$K$
+   unsupervised study-adaptive SVD components of each patient's hashed pretreatment note
+   1–3grams (fitted strictly on the context cohort in `float32` and weighted by a learned
+   scalar) so wide note designs and unseen cancer vocabularies do not bottleneck on fixed
+   slot capacity. Inside `condition()`, exact closed-form Cholesky leave-one-out
+   cross-validated Ridge fits estimate propensity $\hat{e}(x)$ and marginal outcome
+   $\hat{m}(x)$ (strictly in `float32`), then fit the orthogonalized Robinson R-learner
    $(Y - \hat{m}^{(-i)}(X)) \sim (T - \hat{e}^{(-i)}(X)) \cdot [1, \phi(X)]$ for
    $\hat{\tau}(x)$ with separate learnable penalty grids. Query patients receive point
    estimates $(\hat{y}_0, \hat{y}_1, \hat{e})$ together with exact Bayesian query leverages

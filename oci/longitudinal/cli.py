@@ -73,12 +73,18 @@ def predict(
         raise ValueError("Need at least one context and one query patient")
     model.eval()
     device = model.centers.device
+    use_lexical = model.cfg.lexical_dim > 0
     with _autocast(device, precision):
-        embeddings = torch.cat(
-            [model.patient(rows) for rows in _chunks(context.drop(OBSERVED), batch_size)]
-        )
+        ctx_embs = []
+        ctx_lexs = []
+        for rows in _chunks(context.drop(OBSERVED), batch_size):
+            ctx_embs.append(model.patient(rows))
+            if use_lexical:
+                ctx_lexs.append(model.patient.lexical_features(rows))
+        embeddings = torch.cat(ctx_embs)
+        ctx_lex = torch.cat(ctx_lexs) if use_lexical else None
         t, y = binary_observations(context.select(OBSERVED).to_pylist(), device)
-        memories, scale = model.condition(embeddings, t, y)
+        memories, scale = model.condition(embeddings, t, y, lexical=ctx_lex)
     n0, n1 = int(scale.counts[0].item()), int(scale.counts[1].item())
     if min(n0, n1) < 5:
         print(
@@ -110,8 +116,11 @@ def predict(
             for rows in _chunks(queries, batch_size):
                 with _autocast(device, precision):
                     q_emb = model.patient(rows)
-                    logits = model.query_logits(q_emb, memories, scale)
-                    prop_logits = model.query_propensity_logits(q_emb, memories, scale)
+                    q_lex = model.patient.lexical_features(rows) if use_lexical else None
+                    logits = model.query_logits(q_emb, memories, scale, lexical=q_lex)
+                    prop_logits = model.query_propensity_logits(
+                        q_emb, memories, scale, lexical=q_lex
+                    )
                 mean, sd = model.risk_stats(logits, scale)
                 p0, p1 = mean.cpu().unbind(dim=1)
                 s0, s1 = sd.cpu().unbind(dim=1)

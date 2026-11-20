@@ -30,6 +30,7 @@ from .events import (
     event_times,
     lab_features,
     lab_stream_summary,
+    note_lexical_vector,
     pro_features,
     pro_stream_summary,
     vital_stream_summary,
@@ -71,6 +72,7 @@ class ModelConfig:
     note_batch_size: int = 64
     note_slots: int = 8
     solver_dim: int = 64
+    lexical_dim: int = 0
     cate_loss_weight: float = 2.0
     propensity_loss_weight: float = 0.5
 
@@ -87,6 +89,7 @@ class ModelConfig:
                 self.solver_dim,
             )
             < 1
+            or self.lexical_dim < 0
             or self.bins < 3
             or self.cate_loss_weight < 0
             or self.propensity_loss_weight < 0
@@ -454,6 +457,17 @@ class PatientEncoder(nn.Module):
         note_attn, note_max, note_mean = self._encode_notes(events, grad_flags=grad_flags)
         return note_attn.mean(dim=1) + note_max + note_mean
 
+    def lexical_features(self, rows):
+        """Hashed 1-3gram log-count matrix over each patient's pretreatment notes."""
+        if not rows:
+            raise ValueError("Expected at least one patient")
+        device = self.notes.weight.device
+        return torch.tensor(
+            [note_lexical_vector(row.get("notes")) for row in rows],
+            device=device,
+            dtype=torch.float32,
+        )
+
     def _extra_bag(self, extra_lists, embedding, value_proj):
         device = embedding.weight.device
         dtype = embedding.weight.dtype
@@ -672,6 +686,9 @@ class SolverMemory:
     outcome_fit: RidgeFit
     cate_fit: RidgeFit
     n_ctx: int
+    lex_mu: torch.Tensor | None = None
+    lex_basis: torch.Tensor | None = None
+    lex_rms: torch.Tensor | None = None
 
 
 @dataclass
@@ -680,6 +697,30 @@ class StudyMemory:
 
     solver: SolverMemory
     attn_memories: list
+
+
+@torch.no_grad()
+def _fit_lexical_basis(lex_ctx, max_dim):
+    """Unsupervised, permutation-invariant top-k SVD basis on context note 1-3grams."""
+    mu = lex_ctx.mean(dim=0, keepdim=True)
+    xc = lex_ctx - mu
+    n, b = xc.shape
+    k = min(max_dim, n, b)
+    if n <= b:
+        evals, evecs = torch.linalg.eigh(xc @ xc.T)
+        top_vals = evals[-k:].flip(0)
+        top_u = evecs[:, -k:].flip(1)
+        valid = top_vals > 1e-6
+        inv_s = torch.where(valid, top_vals.clamp_min(1e-6).rsqrt(), torch.zeros_like(top_vals))
+        basis = (xc.T @ top_u) * inv_s.unsqueeze(0)
+    else:
+        evals, evecs = torch.linalg.eigh(xc.T @ xc)
+        top_vals = evals[-k:].flip(0)
+        top_v = evecs[:, -k:].flip(1)
+        basis = top_v * (top_vals > 1e-6).to(top_v.dtype).unsqueeze(0)
+    proj = xc @ basis
+    rms = proj.square().mean().sqrt().clamp_min(1e-4)
+    return mu, basis, rms
 
 
 def _fit_loo_cv_ridge(A_ctx, y_ctx, lambdas, cv_temp, *, intercept_reg=1e-4):
@@ -757,6 +798,10 @@ class CausalStudyModel(nn.Module):
         self.log_lam_m = nn.Parameter(torch.tensor([0.5, 2.0, 3.5, 5.0, 6.5]))
         self.log_lam_tau = nn.Parameter(torch.tensor([1.0, 2.5, 4.0, 5.5, 7.0]))
         self.log_cv_temp = nn.Parameter(torch.tensor(1.5))
+        if cfg.lexical_dim > 0:
+            self.lexical_log_weight = nn.Parameter(torch.tensor(0.0))
+        else:
+            self.lexical_log_weight = None
 
         # Calibration and epistemic-uncertainty heads on solver predictions + query leverages.
         self.arm_cal = nn.Sequential(nn.Linear(8, 32), nn.GELU(), nn.Linear(32, 4))
@@ -839,7 +884,7 @@ class CausalStudyModel(nn.Module):
         tok = self.outcome_token(token_in).unsqueeze(1)
         return torch.cat([self._patient_slots(embeddings), tok], dim=1)
 
-    def _fit_solver(self, embeddings, t, y):
+    def _fit_solver(self, embeddings, t, y, *, lexical=None):
         device_type = embeddings.device.type
         with torch.amp.autocast(device_type=device_type, enabled=False):
             phi_ctx = self._solver_features(embeddings).float()
@@ -849,6 +894,13 @@ class CausalStudyModel(nn.Module):
             mu = phi_ctx.mean(dim=0, keepdim=True)
             sd = phi_ctx.std(dim=0, unbiased=False, keepdim=True).clamp_min(1e-4)
             z_ctx = (phi_ctx - mu) / sd
+            lex_mu = lex_basis = lex_rms = None
+            if self.cfg.lexical_dim > 0 and lexical is not None:
+                lex_f = lexical.float()
+                lex_mu, lex_basis, lex_rms = _fit_lexical_basis(lex_f, self.cfg.lexical_dim)
+                w_lex = F.softplus(self.lexical_log_weight.float())
+                z_lex = w_lex * ((lex_f - lex_mu) @ lex_basis) / lex_rms
+                z_ctx = torch.cat([z_ctx, z_lex], dim=1)
             ones = torch.ones((n_ctx, 1), device=phi_ctx.device, dtype=torch.float32)
             A_ctx = torch.cat([ones, z_ctx], dim=1)
             cv_temp = F.softplus(self.log_cv_temp.float()) + 0.1
@@ -873,13 +925,25 @@ class CausalStudyModel(nn.Module):
                 outcome_fit=out_fit,
                 cate_fit=cate_fit,
                 n_ctx=n_ctx,
+                lex_mu=lex_mu,
+                lex_basis=lex_basis,
+                lex_rms=lex_rms,
             )
 
-    def _solver_query_stats(self, embeddings, solver_mem):
+    def _solver_query_stats(self, embeddings, solver_mem, *, lexical=None):
         device_type = embeddings.device.type
         with torch.amp.autocast(device_type=device_type, enabled=False):
             phi_q = self._solver_features(embeddings).float()
             z_q = (phi_q - solver_mem.mu) / solver_mem.sd
+            if solver_mem.lex_basis is not None:
+                if lexical is None:
+                    raise ValueError("Expected query lexical features for lexical_dim > 0")
+                w_lex = F.softplus(self.lexical_log_weight.float())
+                z_lex_q = (
+                    w_lex * ((lexical.float() - solver_mem.lex_mu) @ solver_mem.lex_basis)
+                    / solver_mem.lex_rms
+                )
+                z_q = torch.cat([z_q, z_lex_q], dim=1)
             ones_q = torch.ones((len(z_q), 1), device=z_q.device, dtype=torch.float32)
             A_q = torch.cat([ones_q, z_q], dim=1)
             e_q, h_e = _predict_ridge(solver_mem.propensity_fit, A_q)
@@ -890,9 +954,9 @@ class CausalStudyModel(nn.Module):
             y1_raw = (m_q + (1.0 - e_prob) * tau_q).clamp(0.01, 0.99)
             return y0_raw, y1_raw, m_q, e_prob, tau_q, h_m, h_tau, h_e
 
-    def condition(self, embeddings, t, y):
+    def condition(self, embeddings, t, y, *, lexical=None):
         scale = ArmScale.from_context(t, y)
-        solver_mem = self._fit_solver(embeddings, t, y)
+        solver_mem = self._fit_solver(embeddings, t, y, lexical=lexical)
         context = self._assemble_context(embeddings, t, y, scale)
         attn_memories = []
         for i, layer in enumerate(self.layers):
@@ -909,9 +973,9 @@ class CausalStudyModel(nn.Module):
             queries = layer.sample_mix(queries, memory)
         return queries[:, -1, :]
 
-    def query_logits(self, embeddings, memories, scale):
+    def query_logits(self, embeddings, memories, scale, *, lexical=None):
         y0_raw, y1_raw, m_q, e_prob, tau_q, h_m, h_tau, _ = self._solver_query_stats(
-            embeddings, memories.solver
+            embeddings, memories.solver, lexical=lexical
         )
         device_type = embeddings.device.type
         with torch.amp.autocast(device_type=device_type, enabled=False):
@@ -935,8 +999,10 @@ class CausalStudyModel(nn.Module):
         attn_logits = self.head(pooled).reshape(len(embeddings), 2, -1).float()
         return solver_bin_logits + self.attn_residual_scale.float() * attn_logits
 
-    def query_propensity_logits(self, embeddings, memories, scale):
-        _, _, _, e_prob, _, _, _, h_e = self._solver_query_stats(embeddings, memories.solver)
+    def query_propensity_logits(self, embeddings, memories, scale, *, lexical=None):
+        _, _, _, e_prob, _, _, _, h_e = self._solver_query_stats(
+            embeddings, memories.solver, lexical=lexical
+        )
         device_type = embeddings.device.type
         with torch.amp.autocast(device_type=device_type, enabled=False):
             n_q = len(embeddings)
@@ -977,11 +1043,15 @@ class CausalStudyModel(nn.Module):
                     ctx_mask[idx] = True
             backbone_grad_mask = ctx_mask + [True] * n_q
         t, y = binary_observations(context, self.centers.device)
-        embeddings = self.patient([*context, *queries], backbone_grad_mask=backbone_grad_mask)
-        memories, scale = self.condition(embeddings[:n_ctx], t, y)
+        all_rows = [*context, *queries]
+        embeddings = self.patient(all_rows, backbone_grad_mask=backbone_grad_mask)
+        lex = self.patient.lexical_features(all_rows) if self.cfg.lexical_dim > 0 else None
+        ctx_lex = lex[:n_ctx] if lex is not None else None
+        q_lex = lex[n_ctx:] if lex is not None else None
+        memories, scale = self.condition(embeddings[:n_ctx], t, y, lexical=ctx_lex)
         q_emb = embeddings[n_ctx:]
-        outcome_logits = self.query_logits(q_emb, memories, scale)
-        prop_logits = self.query_propensity_logits(q_emb, memories, scale)
+        outcome_logits = self.query_logits(q_emb, memories, scale, lexical=q_lex)
+        prop_logits = self.query_propensity_logits(q_emb, memories, scale, lexical=q_lex)
         return outcome_logits, prop_logits, scale
 
     def risk_stats(self, logits, scale):
