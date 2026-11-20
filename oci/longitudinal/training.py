@@ -384,15 +384,34 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
     if not fresh:
         model, saved = load_run(directory, device)
         settings, start = dict(saved["settings"]), saved["step"]
+        lr_overridden = False
         if resume_overrides:
+            old_ctx = settings["context_size"]
             for key, value in resume_overrides.items():
                 if value is not None:
+                    if key in ("lr", "note_lr"):
+                        lr_overridden = True
                     settings[key] = value
+            # Keep min_context_size aligned if context_size changed without an explicit lower bound.
+            if (
+                resume_overrides.get("context_size") is not None
+                and resume_overrides.get("min_context_size") is None
+                and (
+                    settings.get("min_context_size") is None
+                    or settings.get("min_context_size") == old_ctx
+                )
+            ):
+                settings["min_context_size"] = settings["context_size"]
         bank = load_run_design_bank(directory, saved)
         # Never re-embed large bank dictionaries inside checkpoint.pt.
         settings.pop("design_bank", None)
         optimizer = _optimizer(model, settings)
         optimizer.load_state_dict(saved["optimizer"])
+        if lr_overridden:
+            for idx, group in enumerate(optimizer.param_groups):
+                target_lr = settings["note_lr"] if idx < 2 else settings["lr"]
+                group["lr"] = target_lr
+                group["initial_lr"] = target_lr
         if "rng_state" in saved:
             torch.set_rng_state(saved["rng_state"])
         if model.centers.is_cuda and saved.get("cuda_rng_state") is not None:
@@ -454,8 +473,18 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
     note_grad_patients = settings.get("note_grad_patients")
     freeze_note_backbone = bool(settings.get("freeze_note_backbone", False))
     num_workers = int(settings.get("num_workers", 0))
-    if num_workers < 0 or (note_grad_patients is not None and note_grad_patients < 0):
-        raise ValueError("num_workers and note_grad_patients must be nonnegative")
+    if (
+        min(max_context, min_context, query_size, grad_accum, settings["lr"], settings["note_lr"])
+        <= 0
+        or min_context > max_context
+        or eval_every < 0
+        or eval_studies < 1
+        or num_workers < 0
+        or (note_grad_patients is not None and note_grad_patients < 0)
+    ):
+        raise ValueError(
+            "Invalid context/query sizes, grad_accum_steps, eval settings, LRs, or workers"
+        )
 
     designs = split_designs(bank, "train")
     if designs and settings["cohorts"]:

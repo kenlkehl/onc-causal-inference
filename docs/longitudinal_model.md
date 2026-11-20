@@ -117,23 +117,30 @@ checkpoint.
 From the repository root, with the project dependencies installed, run:
 
 ```bash
-# Phase 1: train downstream cross-modal and CausalPFN layers across large contexts (N=128..512)
+# Stage 1: escape the cohort-mean plateau with sharp small/moderate contexts and meta-batch=32
 python -m oci.longitudinal.cli train --run-dir artifacts/longitudinal_run \
-  --steps 1000 --grad-accum-steps 8 --min-context-size 128 --context-size 512 \
-  --query-size 32 --freeze-note-backbone --num-workers 8 --lr-scheduler cosine \
-  --warmup-steps 100 --eval-every 200 --device cuda
+  --steps 600 --grad-accum-steps 32 --min-context-size 64 --context-size 256 \
+  --query-size 32 --note-batch-size 256 --note-grad-patients 64 --num-workers 16 \
+  --lr 6e-4 --note-lr 3e-5 --lr-scheduler cosine --warmup-steps 30 \
+  --eval-every 50 --eval-studies 32 --device cuda
 
-# Phase 2: unfreeze the note LLM with partial-gradient context encoding
+# Stage 2: scale context size to N=500..5,000 once cross-patient attention heads are sharp
 python -m oci.longitudinal.cli resume --run-dir artifacts/longitudinal_run \
-  --steps 2500 --no-freeze-note-backbone --note-grad-patients 64 --num-workers 8 \
-  --device cuda
+  --steps 1200 --min-context-size 500 --context-size 5000 --query-size 64 \
+  --grad-accum-steps 8 --note-grad-patients 128 --lr 2e-4 --note-lr 1e-5 \
+  --eval-every 100 --eval-studies 32 --num-workers 16 --device cuda
 
 python -m oci.longitudinal.cli evaluate --run-dir artifacts/longitudinal_run \
-  --studies 1000 --context-size 512 --query-size 32 --num-workers 8 --seed 42 --device cuda
+  --studies 1000 --context-size 5000 --query-size 64 --note-batch-size 512 \
+  --num-workers 16 --seed 42 --device cuda
 ```
 
-To scale to large contexts (`N = 256–1,024+`) without backpropagating through `LFM2.5-230M`
-on thousands of context notes per step:
+`resume` accepts curriculum overrides (`--min-context-size`, `--context-size`,
+`--query-size`, `--grad-accum-steps`, `--lr`, `--note-lr`, `--eval-every`,
+`--eval-studies`, `--freeze-note-backbone` / `--no-freeze-note-backbone`,
+`--note-grad-patients`, and `--num-workers`). To scale to large contexts
+(`N = 500–5,000`) without backpropagating through the note backbone on tens of
+thousands of context notes per step:
 
 - `--freeze-note-backbone` runs the note LLM in fast `no_grad` mode (4× larger note
   microbatches, no activation checkpointing) while training all downstream modality and

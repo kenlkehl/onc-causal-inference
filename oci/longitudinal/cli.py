@@ -230,6 +230,54 @@ def main(argv=None):
         help="Background CPU worker processes for prefetching simulated studies (0 = synchronous).",
     )
     resume.add_argument(
+        "--context-size",
+        type=int,
+        default=None,
+        help="Override maximum context size on resume (enables small-N -> large-N curriculum).",
+    )
+    resume.add_argument(
+        "--min-context-size",
+        type=int,
+        default=None,
+        help="Override minimum context size on resume.",
+    )
+    resume.add_argument(
+        "--query-size",
+        type=int,
+        default=None,
+        help="Override query patient count per study on resume.",
+    )
+    resume.add_argument(
+        "--grad-accum-steps",
+        type=int,
+        default=None,
+        help="Override studies accumulated per optimizer update on resume.",
+    )
+    resume.add_argument(
+        "--lr",
+        type=float,
+        default=None,
+        help="Override downstream base learning rate on resume.",
+    )
+    resume.add_argument(
+        "--note-lr",
+        type=float,
+        default=None,
+        help="Override note encoder base learning rate on resume.",
+    )
+    resume.add_argument(
+        "--eval-every",
+        type=int,
+        default=None,
+        help="Override held-out evaluation cadence on resume.",
+    )
+    resume.add_argument(
+        "--eval-studies",
+        type=int,
+        default=None,
+        help="Override held-out evaluation study count on resume.",
+    )
+    resume.add_argument(
         "--note-grad-patients",
         type=int,
         default=None,
@@ -350,7 +398,19 @@ def main(argv=None):
     elif args.command == "resume":
         resume_overrides = {
             k: getattr(args, k)
-            for k in ("note_grad_patients", "freeze_note_backbone", "num_workers")
+            for k in (
+                "context_size",
+                "min_context_size",
+                "query_size",
+                "grad_accum_steps",
+                "lr",
+                "note_lr",
+                "eval_every",
+                "eval_studies",
+                "note_grad_patients",
+                "freeze_note_backbone",
+                "num_workers",
+            )
             if getattr(args, k) is not None
         }
         run_training(
