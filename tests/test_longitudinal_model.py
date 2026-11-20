@@ -11,7 +11,15 @@ import torch
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import Whitespace
-from transformers import AutoModel, AutoTokenizer, Lfm2Config, PreTrainedTokenizerFast
+from transformers import (
+    AutoModel,
+    AutoTokenizer,
+    BertConfig,
+    Lfm2Config,
+    PreTrainedTokenizerFast,
+)
+
+from oci.models.lossless_tokenization import SemanticTruncationError
 
 from oci.longitudinal.cli import main, predict
 from oci.longitudinal.events import (
@@ -570,7 +578,8 @@ def test_design_bank_externalized_grad_accum_var_ctx_and_rich_evaluation(
     assert [d["step"] for d in logs] == [1, 2]
     assert [d["lr"] for d in logs] == pytest.approx([3e-4, 1.5e-4])
     assert all(d["design_id"] in {v["id"] for v in train} for d in logs)
-    assert all("eval_cate_rmse" in d for d in logs)
+    assert all("eval_cate_rmse" in d and "eval_within_study_cate_pearson" in d for d in logs)
+    assert all("eval_linear_t_learner_cate_rmse" in d and "eval_ate_rmse" in d for d in logs)
 
     main(
         [
@@ -703,3 +712,66 @@ def test_freeze_backbone_partial_note_grads_and_worker_prefetch_determinism(
     m_async, _ = load_run(async_dir, "cpu")
     for p_sync, p_async in zip(m_sync.parameters(), m_async.parameters(), strict=True):
         torch.testing.assert_close(p_sync, p_async, rtol=0, atol=0)
+
+
+def test_tinybert_encoder_mean_pooling_and_lossless_long_note_windowing(tmp_path):
+    bert_dir = tmp_path / "tiny-bert"
+    vocab = {"[PAD]": 0, "[UNK]": 1, "[CLS]": 2, "[SEP]": 3, "visit": 4, "ECOG": 5, "anemia": 6}
+    tokens = Tokenizer(WordLevel(vocab, unk_token="[UNK]"))
+    tokens.pre_tokenizer = Whitespace()
+    PreTrainedTokenizerFast(
+        tokenizer_object=tokens,
+        pad_token="[PAD]",
+        unk_token="[UNK]",
+        cls_token="[CLS]",
+        sep_token="[SEP]",
+    ).save_pretrained(bert_dir)
+    config = BertConfig(
+        vocab_size=len(vocab),
+        hidden_size=16,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        intermediate_size=32,
+        max_position_embeddings=16,
+    )
+    AutoModel.from_config(config).save_pretrained(bert_dir)
+
+    bert_model = CausalStudyModel(
+        AutoModel.from_pretrained(bert_dir),
+        AutoTokenizer.from_pretrained(bert_dir),
+        ModelConfig(
+            event_width=8, event_layers=1, study_width=16, study_layers=1, bins=17, note_slots=2
+        ),
+    )
+    assert bert_model.patient._is_bidirectional is True
+
+    # Verify gradients flow through BertModel cleanly.
+    rows, _ = simulate_episode(11, 1, False, 6)
+    loss, _, _, _, _, _ = fit_episode(bert_model, rows, 4)
+    loss.backward()
+    assert any(
+        p.grad is not None and p.grad.abs().sum() > 0
+        for p in bert_model.patient.backbone.parameters()
+    )
+
+    # Verify masked mean pooling & right-padding invariance on short notes.
+    bert_model.eval()
+    docs = [{"text": "visit"}, {"text": "visit ECOG visit ECOG"}]
+    with torch.no_grad():
+        torch.testing.assert_close(
+            bert_model.patient._note_vectors(docs)[:1],
+            bert_model.patient._note_vectors(docs[:1]),
+            atol=1e-5,
+            rtol=1e-5,
+        )
+        # Verify lossless windowing for notes longer than max_position_embeddings (16):
+        # changing a token past token 30 must change the resulting note representation.
+        long_a = {"text": " ".join(["visit"] * 35 + ["ECOG"])}
+        long_b = {"text": " ".join(["visit"] * 35 + ["anemia"])}
+        va = bert_model.patient._note_vectors([long_a])
+        vb = bert_model.patient._note_vectors([long_b])
+        assert torch.isfinite(va).all() and torch.isfinite(vb).all()
+        assert not torch.allclose(va, vb)
+
+    with pytest.raises(SemanticTruncationError):
+        bert_model.patient._note_vectors([{"text": ""}])

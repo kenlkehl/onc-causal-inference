@@ -23,6 +23,7 @@ from .designed_history import (
     candidate_features,
     document_findings,
     measured_values,
+    prepare_note_findings,
     sanitized_design_candidates,
 )
 from .dgp_terms import nonlinear_value, role_lists
@@ -401,6 +402,14 @@ class LongitudinalDGP:
     schema_version: int = 2
     reference: dict = field(default_factory=lambda: REFERENCE)
     design: dict | None = None
+    prepared_findings: tuple | None = field(default=None, repr=False, compare=False)
+    design_measurements: list | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        if self.design is not None and self.prepared_findings is None:
+            measurements, note_findings = sanitized_design_candidates(self.design)
+            self.design_measurements = measurements
+            self.prepared_findings = prepare_note_findings(note_findings)
 
 
 def draw_longitudinal_dgp(dgp_seed, prior=None, *, schema_version=2, design=None):
@@ -471,18 +480,23 @@ def sample_longitudinal_patient(
         question=design["question"] if design else None,
     )
     if design:
-        measurements, note_findings = sanitized_design_candidates(design)
+        measurements = (
+            dgp.design_measurements
+            if dgp.design_measurements is not None
+            else design["candidates"]["measurements"]
+        )
         features = measured_values(streams, measurements)
         # Document design-specific findings before any LLM note rendering so
         # the LLM weaves the actual causal chart facts into realistic prose.
         features.update(
             document_findings(
                 streams["notes"],
-                note_findings,
+                design["candidates"]["note_findings"],
                 np.random.default_rng([seed, patient_id, 4]),
                 streams=streams,
                 omit_absent_prob=omit_absent_prob,
                 style_variation=style_variation,
+                prepared=dgp.prepared_findings,
             )
         )
     else:

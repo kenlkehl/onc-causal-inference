@@ -9,15 +9,19 @@ pretreatment (or index-day) histories for query patients.
 
 ## Patient and study encoders
 
-Each note passes through the pretrained LiquidAI LFM2.5-230M-Base backbone.
-The last non-padding token in its final hidden layer supplies a 1,024-dimensional
-note vector. The implementation uses the published base checkpoint at revision
-`9d2be5519834990d30996f878b6771cccbd24f2c`, right-pads notes within a batch,
-and computes gradients through all its layers. Activation checkpointing trades
-computation for memory. `--note-batch-size` controls the number of notes per LFM
-forward pass (and can be overridden at `evaluate` and `predict` time). Notes longer
-than the backbone's configured capacity raise `SemanticTruncationError`.
-[LiquidAI model card](https://huggingface.co/LiquidAI/LFM2.5-230M-Base)
+Each note passes through a pretrained Hugging Face text encoder — by default
+**TinyBERT** (`huawei-noah/TinyBERT_General_4L_312D`, 4 layers, 312 hidden dim,
+14.5M parameters), enabling studies up to 5,000 context patients on a single H200.
+Pass `--note-model` to swap in another bidirectional encoder (e.g., `prajjwal1/bert-tiny`
+or `emilyalsentzer/Bio_ClinicalBERT`) or a causal decoder (e.g.,
+`LiquidAI/LFM2.5-230M-Base`, pinned at revision
+`9d2be5519834990d30996f878b6771cccbd24f2c`). Bidirectional encoders use masked mean
+pooling across non-padding tokens; causal models use the last non-padding token. Notes
+longer than the backbone's `max_position_embeddings` (512 for TinyBERT) are split into
+lossless non-overlapping windows and averaged across windows rather than silently
+truncated; empty notes raise `SemanticTruncationError`. Activation checkpointing
+trades computation for memory, and `--note-batch-size` (default 64; overridable at
+`evaluate` and `predict` time) controls the microbatch size.
 
 Each lab panel encodes canonical CBC/BMP/CMP components with fixed reference scales,
 an `asinh` transform, and presence indicators. Additional real-EHR panels, components,

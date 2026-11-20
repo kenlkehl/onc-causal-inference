@@ -1,6 +1,7 @@
 """A cross-modal longitudinal patient encoder and two-way CausalPFN study model."""
 
 from dataclasses import dataclass
+import inspect
 import math
 
 import torch
@@ -27,8 +28,27 @@ from .events import (
     vital_vector,
 )
 
-BASE_MODEL = "LiquidAI/LFM2.5-230M-Base"
-BASE_REVISION = "9d2be5519834990d30996f878b6771cccbd24f2c"
+BASE_MODEL = "huawei-noah/TinyBERT_General_4L_312D"
+BASE_REVISION = None
+PINNED_REVISIONS = {
+    "LiquidAI/LFM2.5-230M-Base": "9d2be5519834990d30996f878b6771cccbd24f2c",
+}
+_BIDIRECTIONAL_MODELS = frozenset(
+    {
+        "albert",
+        "bert",
+        "camembert",
+        "deberta",
+        "deberta-v2",
+        "distilbert",
+        "electra",
+        "mobilebert",
+        "modernbert",
+        "mpnet",
+        "roberta",
+        "xlm-roberta",
+    }
+)
 CHECKPOINT_FORMAT_VERSION = 3
 
 
@@ -40,7 +60,7 @@ class ModelConfig:
     study_layers: int = 4
     heads: int = 4
     bins: int = 129
-    note_batch_size: int = 8
+    note_batch_size: int = 64
     note_slots: int = 4
     cate_loss_weight: float = 2.0
     propensity_loss_weight: float = 0.5
@@ -165,6 +185,12 @@ class PatientEncoder(nn.Module):
                 raise ValueError("Note tokenizer must define a pad_token or eos_token")
         self.note_batch_size = cfg.note_batch_size
         self.note_slots = cfg.note_slots
+        self._accepts_use_cache = (
+            "use_cache" in inspect.signature(self.backbone.forward).parameters
+        )
+        self._is_bidirectional = (
+            getattr(self.backbone.config, "model_type", "") in _BIDIRECTIONAL_MODELS
+        )
         width = cfg.event_width
         self.notes = nn.Linear(backbone.config.hidden_size, width)
         self.labs = nn.Linear(LAB_INPUT_SIZE, width)
@@ -189,11 +215,51 @@ class PatientEncoder(nn.Module):
         self.num_slots = cfg.note_slots + (len(names) - 1) + 1
 
     def _last_token(self, ids, mask):
-        hidden = self.backbone(
-            input_ids=ids, attention_mask=mask, use_cache=False
-        ).last_hidden_state
-        last = mask.sum(dim=1) - 1
-        return hidden[torch.arange(len(ids), device=ids.device), last].to(self.notes.weight.dtype)
+        kwargs = {"input_ids": ids, "attention_mask": mask}
+        if self._accepts_use_cache:
+            kwargs["use_cache"] = False
+        hidden = self.backbone(**kwargs).last_hidden_state
+        if self._is_bidirectional:
+            weights = mask.to(hidden.dtype).unsqueeze(-1)
+            pooled = (hidden * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
+        else:
+            last = mask.sum(dim=1) - 1
+            pooled = hidden[torch.arange(len(ids), device=ids.device), last]
+        return pooled.to(self.notes.weight.dtype)
+
+    def _window_note_ids(self, ids, limit):
+        """Split notes longer than ``limit`` into lossless non-overlapping windows."""
+        cls_id = self.tokenizer.cls_token_id
+        if cls_id is None:
+            cls_id = self.tokenizer.bos_token_id
+        sep_id = self.tokenizer.sep_token_id
+        if sep_id is None:
+            sep_id = self.tokenizer.eos_token_id
+
+        windows = []
+        counts = []
+        for seq in ids:
+            if not seq:
+                raise SemanticTruncationError("Expected at least 1 token in every clinical note")
+            if len(seq) <= limit:
+                windows.append(seq)
+                counts.append(1)
+                continue
+            prefix = [cls_id] if cls_id is not None and seq[0] == cls_id else []
+            suffix = [sep_id] if sep_id is not None and seq[-1] == sep_id else []
+            body = seq[len(prefix) : len(seq) - len(suffix) if suffix else len(seq)]
+            body_limit = limit - len(prefix) - len(suffix)
+            if body_limit < 1:
+                raise SemanticTruncationError(
+                    f"Backbone max_position_embeddings ({limit}) is too small for windowing"
+                )
+            note_windows = [
+                [*prefix, *body[pos : pos + body_limit], *suffix]
+                for pos in range(0, len(body), body_limit)
+            ]
+            windows.extend(note_windows)
+            counts.append(len(note_windows))
+        return windows, counts
 
     def _encode_note_subset(self, ids, indices, *, with_grad):
         device = self.notes.weight.device
@@ -218,35 +284,44 @@ class PatientEncoder(nn.Module):
                 chunks.append(last)
         return torch.cat(chunks, dim=0)
 
+    def _pool_windows(self, encoded, counts):
+        if all(c == 1 for c in counts):
+            return encoded
+        return torch.stack([chunk.mean(dim=0) for chunk in encoded.split(counts)], dim=0)
+
     def _note_vectors(self, events, grad_flags=None):
         device = self.notes.weight.device
         ids = self.tokenizer(
             [e["text"] for e in events], truncation=False, return_attention_mask=False
         )["input_ids"]
         limit = self.backbone.config.max_position_embeddings
-        if any(len(seq) > limit or not seq for seq in ids):
-            raise SemanticTruncationError(f"Expected 1 to {limit} tokens in every clinical note")
+        windows, counts = self._window_note_ids(ids, limit)
 
         if grad_flags is None or not (self.training and torch.is_grad_enabled()):
             with_grad = self.training and torch.is_grad_enabled()
-            last = self._encode_note_subset(ids, list(range(len(ids))), with_grad=with_grad)
-            return self.notes(last)
+            encoded = self._encode_note_subset(
+                windows, list(range(len(windows))), with_grad=with_grad
+            )
+            return self.notes(self._pool_windows(encoded, counts))
 
-        grad_idx = [i for i, flag in enumerate(grad_flags) if flag]
-        nograd_idx = [i for i, flag in enumerate(grad_flags) if not flag]
+        win_grad_flags = [
+            flag for flag, count in zip(grad_flags, counts, strict=True) for _ in range(count)
+        ]
+        grad_idx = [i for i, flag in enumerate(win_grad_flags) if flag]
+        nograd_idx = [i for i, flag in enumerate(win_grad_flags) if not flag]
         if not nograd_idx:
-            last = self._encode_note_subset(ids, grad_idx, with_grad=True)
-            return self.notes(last)
+            encoded = self._encode_note_subset(windows, grad_idx, with_grad=True)
+            return self.notes(self._pool_windows(encoded, counts))
         if not grad_idx:
-            last = self._encode_note_subset(ids, nograd_idx, with_grad=False)
-            return self.notes(last)
+            encoded = self._encode_note_subset(windows, nograd_idx, with_grad=False)
+            return self.notes(self._pool_windows(encoded, counts))
 
-        grad_last = self._encode_note_subset(ids, grad_idx, with_grad=True)
-        nograd_last = self._encode_note_subset(ids, nograd_idx, with_grad=False)
-        combined = grad_last.new_empty((len(ids), grad_last.shape[-1]))
+        grad_last = self._encode_note_subset(windows, grad_idx, with_grad=True)
+        nograd_last = self._encode_note_subset(windows, nograd_idx, with_grad=False)
+        combined = grad_last.new_empty((len(windows), grad_last.shape[-1]))
         combined[torch.tensor(grad_idx, device=device, dtype=torch.long)] = grad_last
         combined[torch.tensor(nograd_idx, device=device, dtype=torch.long)] = nograd_last
-        return self.notes(combined)
+        return self.notes(self._pool_windows(combined, counts))
 
     def _extra_bag(self, extra_lists, embedding, value_proj):
         device = embedding.weight.device

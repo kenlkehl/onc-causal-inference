@@ -46,7 +46,8 @@ def weekly_assessments(rng, visit_days, visit_burden):
                     score = None
                 else:
                     shift = -0.35 if attribute == "interference" else 0.0
-                    score = int(np.clip(np.rint(level + shift + rng.normal(0, 0.55)), 0, 4))
+                    raw = round(float(level) + shift + float(rng.normal(0.0, 0.55)))
+                    score = 0 if raw < 0 else (4 if raw > 4 else int(raw))
                 responses.append(dict(symptom=symptom, attribute=attribute, score=score))
                 previous = score
         yield day, dict(instrument=PRO_INSTRUMENT, recall_days=RECALL_DAYS, responses=responses)

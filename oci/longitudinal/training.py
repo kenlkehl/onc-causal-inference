@@ -30,8 +30,8 @@ from synthetic_data.study_designs import DEFAULT_BANK, load_bank
 from .events import binary_observations, patient_summary_vector, read_patient_table
 from .model import (
     BASE_MODEL,
-    BASE_REVISION,
     CHECKPOINT_FORMAT_VERSION,
+    PINNED_REVISIONS,
     ArmScale,
     CausalStudyModel,
     ModelConfig,
@@ -433,7 +433,7 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
         if directory.exists() and any(directory.iterdir()):
             raise FileExistsError(f"Use a fresh run directory or resume: {directory}")
         torch.manual_seed(settings["seed"])
-        revision = BASE_REVISION if settings["note_model"] == BASE_MODEL else None
+        revision = PINNED_REVISIONS.get(settings["note_model"])
         tokenizer = AutoTokenizer.from_pretrained(settings["note_model"], revision=revision)
         backbone = AutoModel.from_pretrained(
             settings["note_model"], revision=revision, dtype=torch.float32
@@ -593,7 +593,13 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                 _set_train_modes()
                 record["eval_cate_rmse"] = val["cate_rmse"]
                 record["eval_risk_rmse"] = val["risk_rmse"]
+                record["eval_ate_rmse"] = val["ate_rmse"]
                 record["eval_cate_pearson"] = val["cate_pearson"]
+                record["eval_within_study_cate_pearson"] = val["mean_within_study_cate_pearson"]
+                record["eval_propensity_rmse"] = val.get("propensity_rmse")
+                record["eval_arm_mean_cate_rmse"] = val["arm_mean_cate_rmse"]
+                record["eval_zero_cate_rmse"] = val["zero_cate_rmse"]
+                record["eval_linear_t_learner_cate_rmse"] = val["linear_t_learner_cate_rmse"]
                 if best_eval_rmse is None or val["cate_rmse"] < best_eval_rmse:
                     best_eval_rmse = val["cate_rmse"]
                     settings["best_eval_cate_rmse"] = best_eval_rmse

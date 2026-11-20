@@ -1,10 +1,22 @@
 """Pretreatment oncology visits and patient-reported symptom histories."""
 
+import math
+
 import numpy as np
-from scipy.special import expit
 
 from .pro_ctcae import weekly_assessments
 from .structured_data import LAB_REFERENCE_RANGES
+
+
+def _expit(x):
+    if x >= 0.0:
+        return 1.0 / (1.0 + math.exp(-x))
+    e = math.exp(x)
+    return e / (1.0 + e)
+
+
+def _clip(x, lo, hi):
+    return lo if x < lo else (hi if x > hi else x)
 
 DAYS_PER_YEAR = 365.25
 LEGACY_STREAMS = ("notes", "labs", "encounters", "vitals")
@@ -45,53 +57,54 @@ def _append(stream, day, **observation):
 
 
 def _cbc(rng, burden):
-    wbc = round(float(np.clip(rng.normal(7.2 + 1.1 * burden, 0.9), 2.5, 22)), 2)
+    wbc = round(_clip(float(rng.normal(7.2 + 1.1 * burden, 0.9)), 2.5, 22.0), 2)
     # Correlated, compositional five-part differential. Each draw totals 100%.
-    fractions = np.array([3.8 * np.exp(0.34 * burden), 1.8, 0.53, 0.18, 0.05])
+    fractions = np.array([3.8 * math.exp(0.34 * burden), 1.8, 0.53, 0.18, 0.05])
     fractions = rng.dirichlet(20 * fractions)
-    hgb = float(np.clip(rng.normal(12.9 - 0.8 * burden, 0.55), 7, 18))
-    mcv = float(np.clip(rng.normal(89, 3.0), 72, 108))
-    hct = hgb * rng.normal(3.0, 0.05)
-    rbc = hct * 10 / mcv
+    hgb = _clip(float(rng.normal(12.9 - 0.8 * burden, 0.55)), 7.0, 18.0)
+    mcv = _clip(float(rng.normal(89.0, 3.0)), 72.0, 108.0)
+    hct = hgb * float(rng.normal(3.0, 0.05))
+    rbc = hct * 10.0 / mcv
     values = dict(
         wbc=wbc,
         hemoglobin=round(hgb, 1),
         hematocrit=round(hct, 1),
         rbc=round(rbc, 2),
         mcv=round(mcv, 1),
-        mch=round(10 * hgb / rbc, 1),
-        mchc=round(100 * hgb / hct, 1),
-        rdw=round(float(rng.normal(14, 0.8)), 1),
-        platelets=round(float(np.clip(rng.normal(250 + 15 * burden, 30), 80, 650))),
+        mch=round(10.0 * hgb / rbc, 1),
+        mchc=round(100.0 * hgb / hct, 1),
+        rdw=round(float(rng.normal(14.0, 0.8)), 1),
+        platelets=round(_clip(float(rng.normal(250.0 + 15.0 * burden, 30.0)), 80.0, 650.0)),
     )
     for cell, fraction in zip(DIFFERENTIAL, fractions):
-        values[f"{cell}_abs"] = round(wbc * fraction, 3)
-        values[f"{cell}_pct"] = round(100 * fraction, 2)
+        f = float(fraction)
+        values[f"{cell}_abs"] = round(wbc * f, 3)
+        values[f"{cell}_pct"] = round(100.0 * f, 2)
     return values
 
 
 def _chemistry(rng, burden, creatinine, comprehensive):
     values = dict(
-        sodium=rng.normal(139 - 0.6 * burden, 1.8),
-        potassium=rng.normal(4.2, 0.26),
-        chloride=rng.normal(103, 2.1),
-        co2=rng.normal(25, 1.6),
-        bun=max(4, rng.normal(8 + 9 * creatinine, 2)),
+        sodium=float(rng.normal(139.0 - 0.6 * burden, 1.8)),
+        potassium=float(rng.normal(4.2, 0.26)),
+        chloride=float(rng.normal(103.0, 2.1)),
+        co2=float(rng.normal(25.0, 1.6)),
+        bun=max(4.0, float(rng.normal(8.0 + 9.0 * creatinine, 2.0))),
         creatinine=creatinine,
-        glucose=max(55, rng.normal(99, 13)),
-        calcium=rng.normal(9.3, 0.35),
+        glucose=max(55.0, float(rng.normal(99.0, 13.0))),
+        calcium=float(rng.normal(9.3, 0.35)),
     )
     if comprehensive:
-        albumin = float(np.clip(rng.normal(3.9 - 0.22 * burden, 0.2), 2, 5.4))
+        albumin = _clip(float(rng.normal(3.9 - 0.22 * burden, 0.2)), 2.0, 5.4)
         values.update(
             albumin=albumin,
-            total_protein=albumin + rng.normal(2.9, 0.2),
-            bilirubin=rng.lognormal(-0.45, 0.28),
-            alp=rng.lognormal(4.45, 0.23),
-            ast=rng.lognormal(3.23, 0.24),
-            alt=rng.lognormal(3.19, 0.29),
+            total_protein=albumin + float(rng.normal(2.9, 0.2)),
+            bilirubin=float(rng.lognormal(-0.45, 0.28)),
+            alp=float(rng.lognormal(4.45, 0.23)),
+            ast=float(rng.lognormal(3.23, 0.24)),
+            alt=float(rng.lognormal(3.19, 0.29)),
         )
-    return {name: round(float(value), 2) for name, value in values.items()}
+    return {name: round(value, 2) for name, value in values.items()}
 
 
 def _panel(stream, day, panel, values):
@@ -103,15 +116,15 @@ def _panel(stream, day, panel, values):
 
 
 def _vitals(rng, weight, burden, baseline_bp):
-    diastolic = round(float(rng.normal(baseline_bp, 3)))
+    diastolic = round(float(rng.normal(baseline_bp, 3.0)))
     return dict(
         weight_kg=round(weight, 1),
-        systolic_mmhg=diastolic + round(float(rng.normal(47, 5))),
+        systolic_mmhg=diastolic + round(float(rng.normal(47.0, 5.0))),
         diastolic_mmhg=diastolic,
-        pulse_bpm=round(float(rng.normal(78 + 4 * burden, 5))),
-        respirations_per_min=round(float(np.clip(rng.normal(16 + burden, 1.1), 10, 30))),
+        pulse_bpm=round(float(rng.normal(78.0 + 4.0 * burden, 5.0))),
+        respirations_per_min=round(_clip(float(rng.normal(16.0 + burden, 1.1)), 10.0, 30.0)),
         temperature_c=round(float(rng.normal(36.8, 0.25)), 1),
-        spo2_pct=round(float(np.clip(rng.normal(96.7 - burden, 1), 85, 100))),
+        spo2_pct=round(_clip(float(rng.normal(96.7 - burden, 1.0)), 85.0, 100.0)),
     )
 
 
@@ -168,40 +181,39 @@ def simulate_history(seed, patient_id, *, include_pros=True, question=None):
     age_at_index = float(rng.uniform(40, 86))
     frailty, renal, drift = rng.normal(size=3)
     # Sicker patients have modestly more frequent pretreatment visits.
-    mean_visits = float(np.clip(7.5 + 1.1 * frailty, 4.5, 11.5))
-    n_visits = int(np.clip(np.rint(rng.normal(mean_visits, 2.0)), 4, 12))
-    gap_scale = float(np.clip(1.0 - 0.12 * frailty, 0.65, 1.35))
+    mean_visits = _clip(7.5 + 1.1 * frailty, 4.5, 11.5)
+    n_visits = int(_clip(round(float(rng.normal(mean_visits, 2.0))), 4, 12))
+    gap_scale = _clip(1.0 - 0.12 * frailty, 0.65, 1.35)
     gaps = np.clip(np.rint(rng.integers(10, 85, n_visits - 1) * gap_scale), 7, 110).astype(int)
     days = -int(rng.integers(1, 22)) - np.r_[np.cumsum(gaps)[::-1], 0]
     streams = {name: [] for name in (STREAMS if include_pros else LEGACY_STREAMS)}
     visit_burden = []
     base_weight = float(rng.uniform(52, 112))
-    weight_slope = rng.normal(-2.5 - 1.7 * drift, 3)
-    baseline_bp = rng.normal(77, 7)
+    weight_slope = float(rng.normal(-2.5 - 1.7 * drift, 3.0))
+    baseline_bp = float(rng.normal(77.0, 7.0))
     comorbidities = [
         code
         for code, base_logit, slope in _COMORBIDITY_CODES
-        if rng.random() < expit(base_logit + slope * frailty + 0.015 * (age_at_index - 63.0))
+        if rng.random() < _expit(base_logit + slope * frailty + 0.015 * (age_at_index - 63.0))
     ]
     fluctuation = 0.0
     previous_performance = None
+    first_day = int(days[0])
     for i, visit_day in enumerate(days):
         day = int(visit_day)
-        years = (day - int(days[0])) / DAYS_PER_YEAR
-        fluctuation = 0.65 * fluctuation + rng.normal(0, 0.32)
-        burden = float(np.clip(frailty + drift * years + fluctuation, -3, 3))
+        years = (day - first_day) / DAYS_PER_YEAR
+        fluctuation = 0.65 * fluctuation + float(rng.normal(0.0, 0.32))
+        burden = _clip(frailty + drift * years + fluctuation, -3.0, 3.0)
         visit_burden.append(burden)
-        creatinine = float(
-            np.clip(
-                1.02 + 0.22 * renal + (0.03 + 0.13 * drift) * years + rng.normal(0, 0.045),
-                0.35,
-                4.5,
-            )
+        creatinine = _clip(
+            1.02 + 0.22 * renal + (0.03 + 0.13 * drift) * years + float(rng.normal(0.0, 0.045)),
+            0.35,
+            4.5,
         )
-        weight = float(np.clip(base_weight + weight_slope * years + rng.normal(0, 0.7), 38, 155))
-        performance = int(np.clip(np.rint(1.1 + 0.75 * burden), 0, 3))
-        emergency = rng.random() < expit(-1.85 + 0.8 * burden)
-        inpatient = (not emergency) and (rng.random() < expit(-3.1 + 0.9 * burden))
+        weight = _clip(base_weight + weight_slope * years + float(rng.normal(0.0, 0.7)), 38.0, 155.0)
+        performance = int(_clip(round(1.1 + 0.75 * burden), 0, 3))
+        emergency = rng.random() < _expit(-1.85 + 0.8 * burden)
+        inpatient = (not emergency) and (rng.random() < _expit(-3.1 + 0.9 * burden))
         if emergency:
             setting = "emergency"
         elif inpatient:
@@ -216,10 +228,10 @@ def simulate_history(seed, patient_id, *, include_pros=True, question=None):
         # The endpoints anchor change over time; intermediate visits have
         # severity-informed documentation and ordering patterns.
         anchor = i == 0 or i == n_visits - 1
-        cbc_prob = float(expit(0.95 + 0.35 * burden))
-        chem_prob = float(expit(0.65 + 0.35 * burden))
-        vital_prob = float(expit(1.65 + 0.25 * burden)) if setting != "telehealth" else 0.15
-        note_prob = float(expit(1.10 + 0.25 * burden))
+        cbc_prob = _expit(0.95 + 0.35 * burden)
+        chem_prob = _expit(0.65 + 0.35 * burden)
+        vital_prob = _expit(1.65 + 0.25 * burden) if setting != "telehealth" else 0.15
+        note_prob = _expit(1.10 + 0.25 * burden)
         hemoglobin = None
         cbc = None
         chem = None
