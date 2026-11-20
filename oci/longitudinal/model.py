@@ -1,4 +1,4 @@
-"""A cross-modal longitudinal patient encoder and two-way CausalPFN study model."""
+"""A cross-modal longitudinal patient encoder and hybrid differentiable CausalPFN study model."""
 
 from dataclasses import dataclass
 import inspect
@@ -13,18 +13,26 @@ from torch.utils.checkpoint import checkpoint
 from oci.models.lossless_tokenization import SemanticTruncationError
 from .events import (
     CODE_BUCKETS,
+    ENCOUNTER_SUMMARY_SIZE,
     EXTRA_LAB_BUCKETS,
     EXTRA_PRO_BUCKETS,
     LAB_INPUT_SIZE,
+    LAB_SUMMARY_SIZE,
     LEGACY_STREAMS,
     PRO_INPUT_SIZE,
+    PRO_SUMMARY_SIZE,
     STREAMS,
     VITAL_INPUT_SIZE,
+    VITAL_SUMMARY_SIZE,
     binary_observations,
     encounter_codes,
+    encounter_stream_summary,
     event_times,
     lab_features,
+    lab_stream_summary,
     pro_features,
+    pro_stream_summary,
+    vital_stream_summary,
     vital_vector,
 )
 
@@ -49,7 +57,7 @@ _BIDIRECTIONAL_MODELS = frozenset(
         "xlm-roberta",
     }
 )
-CHECKPOINT_FORMAT_VERSION = 3
+CHECKPOINT_FORMAT_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -57,11 +65,12 @@ class ModelConfig:
     event_width: int = 128
     event_layers: int = 2
     study_width: int = 192
-    study_layers: int = 4
+    study_layers: int = 2
     heads: int = 4
     bins: int = 129
     note_batch_size: int = 64
-    note_slots: int = 4
+    note_slots: int = 8
+    solver_dim: int = 64
     cate_loss_weight: float = 2.0
     propensity_loss_weight: float = 0.5
 
@@ -75,6 +84,7 @@ class ModelConfig:
                 self.study_layers,
                 self.note_batch_size,
                 self.note_slots,
+                self.solver_dim,
             )
             < 1
             or self.bins < 3
@@ -173,7 +183,32 @@ class CrossModalTimeline(nn.Module):
         return self.norm(padded[:, :1])
 
 
+class _SummaryProjector(nn.Module):
+    """Linear trajectory projection plus small-init nonlinear residual to preserve slopes."""
+
+    def __init__(self, in_dim, width):
+        super().__init__()
+        self.linear = nn.Linear(in_dim, width)
+        self.residual = nn.Sequential(
+            nn.LayerNorm(in_dim),
+            nn.Linear(in_dim, width),
+            nn.GELU(),
+            nn.Linear(width, width),
+        )
+        nn.init.normal_(self.residual[-1].weight, std=0.01)
+        nn.init.zeros_(self.residual[-1].bias)
+
+    def forward(self, x):
+        return self.linear(x) + self.residual(x)
+
+
+def _summary_mlp(in_dim, width):
+    return _SummaryProjector(in_dim, width)
+
+
 class PatientEncoder(nn.Module):
+    """Cross-modal longitudinal patient encoder with multi-query note attention pooling."""
+
     def __init__(self, backbone, tokenizer, cfg, *, include_pros=True):
         super().__init__()
         self.backbone, self.tokenizer = backbone, tokenizer
@@ -192,18 +227,36 @@ class PatientEncoder(nn.Module):
             getattr(self.backbone.config, "model_type", "") in _BIDIRECTIONAL_MODELS
         )
         width = cfg.event_width
-        self.notes = nn.Linear(backbone.config.hidden_size, width)
+        hidden_size = backbone.config.hidden_size
+
+        # Multi-query learned token attention pooling + max pooling + mean gestalt for clinical notes.
+        self.note_pool_norm = nn.LayerNorm(hidden_size)
+        self.note_key = nn.Linear(hidden_size, width)
+        self.note_val = nn.Linear(hidden_size, width)
+        self.note_queries = nn.Parameter(torch.randn(cfg.note_slots, width) * 0.02)
+        self.note_max_proj = nn.Linear(hidden_size, width)
+        self.notes = nn.Linear(hidden_size, width)
+        self.note_cross_norm = nn.LayerNorm(width)
+
         self.labs = nn.Linear(LAB_INPUT_SIZE, width)
         self.extra_labs = nn.Embedding(EXTRA_LAB_BUCKETS, width)
         self.extra_lab_scale = nn.Linear(1, width)
+        self.lab_summary = _summary_mlp(LAB_SUMMARY_SIZE, width)
+
         self.vitals = nn.Linear(VITAL_INPUT_SIZE, width)
+        self.vital_summary = _summary_mlp(VITAL_SUMMARY_SIZE, width)
+
         # Mean pooling plus explicit log-count keeps encounter norms stable on real EHRs.
         self.codes = nn.EmbeddingBag(CODE_BUCKETS, width, mode="mean")
         self.code_count = nn.Linear(1, width)
+        self.encounter_summary = _summary_mlp(ENCOUNTER_SUMMARY_SIZE, width)
+
         if include_pros:
             self.pros = nn.Linear(PRO_INPUT_SIZE, width)
             self.extra_pros = nn.Embedding(EXTRA_PRO_BUCKETS, width)
             self.extra_pro_scale = nn.Linear(1, width)
+            self.pro_summary = _summary_mlp(PRO_SUMMARY_SIZE, width)
+
         names = STREAMS if include_pros else LEGACY_STREAMS
         self.streams = nn.ModuleDict(
             {
@@ -214,18 +267,33 @@ class PatientEncoder(nn.Module):
         self.cross_modal = CrossModalTimeline(cfg, len(names))
         self.num_slots = cfg.note_slots + (len(names) - 1) + 1
 
-    def _last_token(self, ids, mask):
+    def _backbone_hidden(self, ids, mask):
         kwargs = {"input_ids": ids, "attention_mask": mask}
         if self._accepts_use_cache:
             kwargs["use_cache"] = False
-        hidden = self.backbone(**kwargs).last_hidden_state
-        if self._is_bidirectional:
-            weights = mask.to(hidden.dtype).unsqueeze(-1)
-            pooled = (hidden * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
-        else:
-            last = mask.sum(dim=1) - 1
-            pooled = hidden[torch.arange(len(ids), device=ids.device), last]
-        return pooled.to(self.notes.weight.dtype)
+        return self.backbone(**kwargs).last_hidden_state
+
+    def _pool_window_hidden(self, hidden, mask):
+        """Extract exact per-window multi-query attention, max, and token-sum statistics."""
+        h = hidden.to(self.note_pool_norm.weight.dtype)
+        valid = mask.bool()
+        h_norm = self.note_pool_norm(h)
+        k = self.note_key(h_norm)
+        v = self.note_val(h_norm)
+        scores = torch.einsum("md,bld->bml", self.note_queries, k).float() / math.sqrt(k.shape[-1])
+        scores = scores.masked_fill(~valid[:, None, :], -1e9)
+        win_lse = torch.logsumexp(scores, dim=-1)  # (B, M) float32
+        attn_w = torch.softmax(scores, dim=-1).to(v.dtype)
+        win_attn = torch.einsum("bml,bld->bmd", attn_w, v)  # (B, M, D)
+        win_max = h.float().masked_fill(~valid[:, :, None], -1e9).max(dim=1).values.to(h.dtype)
+        w_f = valid.to(h.dtype).unsqueeze(-1)
+        win_sum = (h * w_f).sum(dim=1)
+        win_cnt = w_f.sum(dim=1).clamp_min(1.0)
+        return win_attn, win_lse, win_max, win_sum, win_cnt
+
+    def _forward_and_pool_window(self, ids, mask):
+        hidden = self._backbone_hidden(ids, mask)
+        return self._pool_window_hidden(hidden, mask)
 
     def _window_note_ids(self, ids, limit):
         """Split notes longer than ``limit`` into lossless non-overlapping windows."""
@@ -261,36 +329,89 @@ class PatientEncoder(nn.Module):
             counts.append(len(note_windows))
         return windows, counts
 
-    def _encode_note_subset(self, ids, indices, *, with_grad):
+    def _encode_note_subset(self, ids, indices, *, backbone_grad):
+        """Run backbone (optionally frozen/no_grad) and trainable token attention pooler."""
         device = self.notes.weight.device
-        batch_size = self.note_batch_size if with_grad else max(self.note_batch_size * 4, 32)
-        chunks = []
-        ctx = torch.enable_grad() if with_grad else torch.no_grad()
-        use_ckpt = with_grad and self.training and torch.is_grad_enabled()
-        with ctx:
-            for start in range(0, len(indices), batch_size):
-                sub_ids = [ids[i] for i in indices[start : start + batch_size]]
-                batch = self.tokenizer.pad(
-                    {"input_ids": sub_ids},
-                    padding=True,
-                    return_tensors="pt",
-                    return_attention_mask=True,
-                ).to(device)
-                args = batch["input_ids"], batch["attention_mask"]
-                if use_ckpt:
-                    last = checkpoint(self._last_token, *args, use_reentrant=False)
+        grad_enabled = self.training and torch.is_grad_enabled()
+        with_bb_grad = backbone_grad and grad_enabled
+        batch_size = self.note_batch_size if with_bb_grad else max(self.note_batch_size * 4, 32)
+        attns, lses, maxs, sums, cnts = [], [], [], [], []
+        for start in range(0, len(indices), batch_size):
+            sub_ids = [ids[i] for i in indices[start : start + batch_size]]
+            batch = self.tokenizer.pad(
+                {"input_ids": sub_ids},
+                padding=True,
+                return_tensors="pt",
+                return_attention_mask=True,
+            ).to(device)
+            input_ids, attn_mask = batch["input_ids"], batch["attention_mask"]
+            if with_bb_grad:
+                out = checkpoint(
+                    self._forward_and_pool_window, input_ids, attn_mask, use_reentrant=False
+                )
+            else:
+                with torch.no_grad():
+                    hidden = self._backbone_hidden(input_ids, attn_mask)
+                if grad_enabled:
+                    out = checkpoint(
+                        self._pool_window_hidden, hidden, attn_mask, use_reentrant=False
+                    )
                 else:
-                    last = self._last_token(*args)
-                chunks.append(last)
-        return torch.cat(chunks, dim=0)
+                    out = self._pool_window_hidden(hidden, attn_mask)
+            attns.append(out[0])
+            lses.append(out[1])
+            maxs.append(out[2])
+            sums.append(out[3])
+            cnts.append(out[4])
+        return (
+            torch.cat(attns, dim=0),
+            torch.cat(lses, dim=0),
+            torch.cat(maxs, dim=0),
+            torch.cat(sums, dim=0),
+            torch.cat(cnts, dim=0),
+        )
 
-    def _pool_windows(self, encoded, counts):
+    def _aggregate_windows(self, win_attn, win_lse, win_max, win_sum, win_cnt, counts):
+        """Exact global attention, max, and token-weighted mean pooling across lossless windows."""
         if all(c == 1 for c in counts):
-            return encoded
-        return torch.stack([chunk.mean(dim=0) for chunk in encoded.split(counts)], dim=0)
+            note_attn = win_attn
+            note_max_raw = win_max
+            note_mean_raw = win_sum / win_cnt.clamp_min(1.0)
+        else:
+            agg_attn, agg_max, agg_mean = [], [], []
+            for a_g, lse_g, mx_g, sm_g, ct_g in zip(
+                win_attn.split(counts),
+                win_lse.split(counts),
+                win_max.split(counts),
+                win_sum.split(counts),
+                win_cnt.split(counts),
+                strict=True,
+            ):
+                if len(a_g) == 1:
+                    agg_attn.append(a_g[0])
+                    agg_max.append(mx_g[0])
+                    agg_mean.append(sm_g[0] / ct_g[0].clamp_min(1.0))
+                else:
+                    w_win = torch.softmax(lse_g, dim=0).to(a_g.dtype).unsqueeze(-1)
+                    agg_attn.append((w_win * a_g).sum(dim=0))
+                    agg_max.append(mx_g.max(dim=0).values)
+                    agg_mean.append(sm_g.sum(dim=0) / ct_g.sum(dim=0).clamp_min(1.0))
+            note_attn = torch.stack(agg_attn, dim=0)
+            note_max_raw = torch.stack(agg_max, dim=0)
+            note_mean_raw = torch.stack(agg_mean, dim=0)
+        return note_attn, self.note_max_proj(note_max_raw), self.notes(note_mean_raw)
 
-    def _note_vectors(self, events, grad_flags=None):
+    def _encode_notes(self, events, grad_flags=None):
+        """Return per-note ``(note_attn [N, M, D], note_max [N, D], note_mean [N, D])``."""
         device = self.notes.weight.device
+        if not events:
+            width = self.notes.out_features
+            dtype = self.notes.weight.dtype
+            return (
+                torch.empty((0, self.note_slots, width), device=device, dtype=dtype),
+                torch.empty((0, width), device=device, dtype=dtype),
+                torch.empty((0, width), device=device, dtype=dtype),
+            )
         ids = self.tokenizer(
             [e["text"] for e in events], truncation=False, return_attention_mask=False
         )["input_ids"]
@@ -298,11 +419,11 @@ class PatientEncoder(nn.Module):
         windows, counts = self._window_note_ids(ids, limit)
 
         if grad_flags is None or not (self.training and torch.is_grad_enabled()):
-            with_grad = self.training and torch.is_grad_enabled()
-            encoded = self._encode_note_subset(
-                windows, list(range(len(windows))), with_grad=with_grad
+            bb_grad = self.training and torch.is_grad_enabled()
+            stats = self._encode_note_subset(
+                windows, list(range(len(windows))), backbone_grad=bb_grad
             )
-            return self.notes(self._pool_windows(encoded, counts))
+            return self._aggregate_windows(*stats, counts)
 
         win_grad_flags = [
             flag for flag, count in zip(grad_flags, counts, strict=True) for _ in range(count)
@@ -310,18 +431,28 @@ class PatientEncoder(nn.Module):
         grad_idx = [i for i, flag in enumerate(win_grad_flags) if flag]
         nograd_idx = [i for i, flag in enumerate(win_grad_flags) if not flag]
         if not nograd_idx:
-            encoded = self._encode_note_subset(windows, grad_idx, with_grad=True)
-            return self.notes(self._pool_windows(encoded, counts))
+            stats = self._encode_note_subset(windows, grad_idx, backbone_grad=True)
+            return self._aggregate_windows(*stats, counts)
         if not grad_idx:
-            encoded = self._encode_note_subset(windows, nograd_idx, with_grad=False)
-            return self.notes(self._pool_windows(encoded, counts))
+            stats = self._encode_note_subset(windows, nograd_idx, backbone_grad=False)
+            return self._aggregate_windows(*stats, counts)
 
-        grad_last = self._encode_note_subset(windows, grad_idx, with_grad=True)
-        nograd_last = self._encode_note_subset(windows, nograd_idx, with_grad=False)
-        combined = grad_last.new_empty((len(windows), grad_last.shape[-1]))
-        combined[torch.tensor(grad_idx, device=device, dtype=torch.long)] = grad_last
-        combined[torch.tensor(nograd_idx, device=device, dtype=torch.long)] = nograd_last
-        return self.notes(self._pool_windows(combined, counts))
+        g_stats = self._encode_note_subset(windows, grad_idx, backbone_grad=True)
+        ng_stats = self._encode_note_subset(windows, nograd_idx, backbone_grad=False)
+        g_idx_t = torch.tensor(grad_idx, device=device, dtype=torch.long)
+        ng_idx_t = torch.tensor(nograd_idx, device=device, dtype=torch.long)
+        combined = []
+        for g_t, ng_t in zip(g_stats, ng_stats, strict=True):
+            buf = g_t.new_empty((len(windows), *g_t.shape[1:]))
+            buf[g_idx_t] = g_t
+            buf[ng_idx_t] = ng_t
+            combined.append(buf)
+        return self._aggregate_windows(*combined, counts)
+
+    def _note_vectors(self, events, grad_flags=None):
+        """Combined per-note summary vector (attention + max + mean)."""
+        note_attn, note_max, note_mean = self._encode_notes(events, grad_flags=grad_flags)
+        return note_attn.mean(dim=1) + note_max + note_mean
 
     def _extra_bag(self, extra_lists, embedding, value_proj):
         device = embedding.weight.device
@@ -347,11 +478,9 @@ class PatientEncoder(nn.Module):
             out[row_idx] = chunk.mean(dim=0)
         return out
 
-    def _values(self, name, events, *, note_grad_flags=None):
+    def _values(self, name, events):
         if not events:
             return self.notes.weight.new_empty(0, self.notes.out_features)
-        if name == "notes":
-            return self._note_vectors(events, grad_flags=note_grad_flags)
         if name == "encounters":
             codes = [encounter_codes(e) for e in events]
             device = self.codes.weight.device
@@ -377,6 +506,27 @@ class PatientEncoder(nn.Module):
             return dense + extra
         return self.vitals(self.vitals.weight.new_tensor([vital_vector(e) for e in events]))
 
+    def _stream_trajectory_residual(self, name, streams):
+        device = self.notes.weight.device
+        dtype = self.notes.weight.dtype
+        if name == "labs":
+            vec = torch.tensor([lab_stream_summary(s) for s in streams], device=device, dtype=dtype)
+            return self.lab_summary(vec).unsqueeze(1)
+        if name == "vitals":
+            vec = torch.tensor(
+                [vital_stream_summary(s) for s in streams], device=device, dtype=dtype
+            )
+            return self.vital_summary(vec).unsqueeze(1)
+        if name == "encounters":
+            vec = torch.tensor(
+                [encounter_stream_summary(s) for s in streams], device=device, dtype=dtype
+            )
+            return self.encounter_summary(vec).unsqueeze(1)
+        if name == "pros":
+            vec = torch.tensor([pro_stream_summary(s) for s in streams], device=device, dtype=dtype)
+            return self.pro_summary(vec).unsqueeze(1)
+        return None
+
     def forward(self, rows, *, backbone_grad_mask=None):
         if not rows:
             raise ValueError("Expected at least one patient")
@@ -394,15 +544,34 @@ class PatientEncoder(nn.Module):
             lengths = [len(s) for s in streams]
             times = [time for stream in streams for time in event_times(stream)]
             flat_events = [event for stream in streams for event in stream]
-            note_grad_flags = None
-            if name == "notes" and backbone_grad_mask is not None:
-                note_grad_flags = [
-                    flag
-                    for flag, length in zip(backbone_grad_mask, lengths, strict=True)
-                    for _ in range(length)
-                ]
-            values = self._values(name, flat_events, note_grad_flags=note_grad_flags)
-            stream_summaries.append(encoder(values, times, lengths))
+            if name == "notes":
+                note_grad_flags = None
+                if backbone_grad_mask is not None:
+                    note_grad_flags = [
+                        flag
+                        for flag, length in zip(backbone_grad_mask, lengths, strict=True)
+                        for _ in range(length)
+                    ]
+                note_attn, note_max, note_mean = self._encode_notes(
+                    flat_events, grad_flags=note_grad_flags
+                )
+                values = note_attn.mean(dim=1) + note_max + note_mean
+                temporal = encoder(values, times, lengths)  # (N_patients, M, D)
+                # Preserve rare findings across the entire multi-note history via cross-note max.
+                cross_note = temporal.new_zeros((n_patients, self.note_slots, values.shape[-1]))
+                for p_idx, (a_chunk, mx_chunk) in enumerate(
+                    zip(note_attn.split(lengths), note_max.split(lengths), strict=True)
+                ):
+                    if len(a_chunk):
+                        cross_note[p_idx] = a_chunk.max(dim=0).values + mx_chunk.max(
+                            dim=0
+                        ).values.unsqueeze(0)
+                stream_summaries.append(temporal + self.note_cross_norm(cross_note))
+            else:
+                values = self._values(name, flat_events)
+                encoded = encoder(values, times, lengths)
+                traj = self._stream_trajectory_residual(name, streams)
+                stream_summaries.append(encoded + traj if traj is not None else encoded)
 
             if flat_events:
                 mod_vec = self.cross_modal.modality.weight[modality_idx]
@@ -484,6 +653,77 @@ class ArmScale:
         return (self.rate.logit()[:, None] + centers[None, :]).sigmoid()
 
 
+@dataclass
+class RidgeFit:
+    """Cached closed-form LOO-CV Ridge solution for repeated query batch scoring."""
+
+    weights: torch.Tensor  # (D + 1,)
+    chol: torch.Tensor  # (K, D + 1, D + 1)
+    alpha: torch.Tensor  # (K,)
+
+
+@dataclass
+class SolverMemory:
+    """Context-conditioned state for the differentiable in-context orthogonalized R-learner."""
+
+    mu: torch.Tensor  # (1, D)
+    sd: torch.Tensor  # (1, D)
+    propensity_fit: RidgeFit
+    outcome_fit: RidgeFit
+    cate_fit: RidgeFit
+    n_ctx: int
+
+
+@dataclass
+class StudyMemory:
+    """Combined context memory for both the differentiable R-learner and residual attention."""
+
+    solver: SolverMemory
+    attn_memories: list
+
+
+def _fit_loo_cv_ridge(A_ctx, y_ctx, lambdas, cv_temp, *, intercept_reg=1e-4):
+    """Differentiable batched LOO-CV Ridge via Cholesky (exact, strictly PD, fp32)."""
+    d = A_ctx.shape[1]
+    k = len(lambdas)
+    G = A_ctx.T @ A_ctx  # (D, D)
+    rhs = (A_ctx.T @ y_ctx).unsqueeze(0).expand(k, -1).unsqueeze(-1)  # (K, D, 1)
+
+    eye = torch.eye(d, device=A_ctx.device, dtype=A_ctx.dtype)
+    pen = lambdas[:, None, None] * eye[None]
+    pen[:, 0, 0] = intercept_reg
+    chol = torch.linalg.cholesky(G.unsqueeze(0) + pen)  # (K, D, D)
+    w = torch.cholesky_solve(rhs, chol).squeeze(-1)  # (K, D)
+
+    # Exact LOO hat diagonal: h_{k,i} = ||L_k^{-1} a_i||^2 >= 0
+    V = torch.linalg.solve_triangular(
+        chol, A_ctx.T.unsqueeze(0).expand(k, -1, -1), upper=False
+    )  # (K, D, N)
+    h = (V * V).sum(dim=1)  # (K, N)
+    y_hat = (A_ctx @ w.T).T  # (K, N)
+    denom = (1.0 - h).clamp_min(1e-2)
+    loo_resid = (y_ctx.unsqueeze(0) - y_hat) / denom
+    loo_mse = loo_resid.square().mean(dim=1)  # (K,)
+    y_loo_k = y_ctx.unsqueeze(0) - loo_resid
+
+    scale = loo_mse.detach().std(unbiased=False).clamp_min(1e-5)
+    alpha = F.softmax(-cv_temp * (loo_mse - loo_mse.min()) / scale, dim=0)  # (K,)
+    w_blend = (alpha[:, None] * w).sum(dim=0)  # (D,)
+    y_loo = (alpha[:, None] * y_loo_k).sum(dim=0)  # (N,)
+    return RidgeFit(weights=w_blend, chol=chol, alpha=alpha), y_loo
+
+
+def _predict_ridge(fit, A_q):
+    """Return query point predictions and Bayesian leverage h_q from a cached RidgeFit."""
+    pred = A_q @ fit.weights
+    k = fit.chol.shape[0]
+    Vq = torch.linalg.solve_triangular(
+        fit.chol, A_q.T.unsqueeze(0).expand(k, -1, -1), upper=False
+    )  # (K, D, N_q)
+    h_q = (fit.alpha[:, None] * (Vq * Vq).sum(dim=1)).sum(dim=0).clamp_min(0.0)
+    return pred, h_q
+
+
 class CausalStudyModel(nn.Module):
     def __init__(self, backbone, tokenizer, cfg, *, include_pros=True):
         super().__init__()
@@ -491,6 +731,42 @@ class CausalStudyModel(nn.Module):
         self.include_pros = include_pros
         self.schema_version = CHECKPOINT_FORMAT_VERSION if include_pros else 1
         self.patient = PatientEncoder(backbone, tokenizer, cfg, include_pros=include_pros)
+
+        # Compact solver representation: dedicated note + structured subspaces + cross-modal MLP.
+        flat_dim = self.patient.num_slots * cfg.event_width
+        sol_dim = cfg.solver_dim
+        self._note_sol_dim = sol_dim // 2
+        self._struct_sol_dim = sol_dim - self._note_sol_dim
+        note_flat_dim = cfg.note_slots * cfg.event_width
+        struct_flat_dim = (self.patient.num_slots - cfg.note_slots) * cfg.event_width
+        self.solver_note_proj = (
+            nn.Linear(note_flat_dim, self._note_sol_dim) if self._note_sol_dim > 0 else None
+        )
+        self.solver_struct_proj = nn.Linear(struct_flat_dim, self._struct_sol_dim)
+        self.solver_mlp = nn.Sequential(
+            nn.LayerNorm(flat_dim),
+            nn.Linear(flat_dim, 2 * sol_dim),
+            nn.GELU(),
+            nn.Linear(2 * sol_dim, sol_dim),
+        )
+        nn.init.normal_(self.solver_mlp[-1].weight, std=0.01)
+        nn.init.zeros_(self.solver_mlp[-1].bias)
+
+        # Learnable log-penalty grids for closed-form LOO-CV propensity, outcome, and R-learner.
+        self.log_lam_e = nn.Parameter(torch.tensor([0.5, 2.0, 3.5, 5.0, 6.5]))
+        self.log_lam_m = nn.Parameter(torch.tensor([0.5, 2.0, 3.5, 5.0, 6.5]))
+        self.log_lam_tau = nn.Parameter(torch.tensor([1.0, 2.5, 4.0, 5.5, 7.0]))
+        self.log_cv_temp = nn.Parameter(torch.tensor(1.5))
+
+        # Calibration and epistemic-uncertainty heads on solver predictions + query leverages.
+        self.arm_cal = nn.Sequential(nn.Linear(8, 32), nn.GELU(), nn.Linear(32, 4))
+        self.prop_cal = nn.Sequential(nn.Linear(4, 16), nn.GELU(), nn.Linear(16, 1))
+        nn.init.normal_(self.arm_cal[-1].weight, std=0.01)
+        nn.init.zeros_(self.arm_cal[-1].bias)
+        nn.init.normal_(self.prop_cal[-1].weight, std=0.01)
+        nn.init.zeros_(self.prop_cal[-1].bias)
+
+        # Lightweight residual two-way CausalPFN study layers for nonlinear/posterior refinement.
         self.slot_proj = nn.Linear(cfg.event_width, cfg.study_width)
         self.slot_embed = nn.Parameter(
             torch.randn(1, self.patient.num_slots, cfg.study_width) * 0.02
@@ -504,6 +780,9 @@ class CausalStudyModel(nn.Module):
         self.propensity_head = nn.Sequential(
             nn.LayerNorm(cfg.study_width), nn.Linear(cfg.study_width, 1)
         )
+        self.attn_residual_scale = nn.Parameter(torch.tensor(0.1))
+        self.prop_residual_scale = nn.Parameter(torch.tensor(0.1))
+
         centers = _sinh_grid(cfg.bins)
         spacings = centers[1:] - centers[:-1]
         local_width = torch.cat(
@@ -514,6 +793,17 @@ class CausalStudyModel(nn.Module):
 
     def _patient_slots(self, embeddings):
         return self.slot_proj(embeddings) + self.slot_embed
+
+    def _solver_features(self, embeddings):
+        n = len(embeddings)
+        n_note = self.patient.note_slots
+        struct_part = self.solver_struct_proj(embeddings[:, n_note:].reshape(n, -1))
+        if self.solver_note_proj is not None:
+            note_part = self.solver_note_proj(embeddings[:, :n_note].reshape(n, -1))
+            base = torch.cat([note_part, struct_part], dim=-1)
+        else:
+            base = struct_part
+        return base + self.solver_mlp(embeddings.reshape(n, -1))
 
     def _assemble_context(self, embeddings, t, y, scale):
         arm = t.long()
@@ -549,33 +839,119 @@ class CausalStudyModel(nn.Module):
         tok = self.outcome_token(token_in).unsqueeze(1)
         return torch.cat([self._patient_slots(embeddings), tok], dim=1)
 
+    def _fit_solver(self, embeddings, t, y):
+        device_type = embeddings.device.type
+        with torch.amp.autocast(device_type=device_type, enabled=False):
+            phi_ctx = self._solver_features(embeddings).float()
+            t_f = t.float()
+            y_f = y.float()
+            n_ctx = len(phi_ctx)
+            mu = phi_ctx.mean(dim=0, keepdim=True)
+            sd = phi_ctx.std(dim=0, unbiased=False, keepdim=True).clamp_min(1e-4)
+            z_ctx = (phi_ctx - mu) / sd
+            ones = torch.ones((n_ctx, 1), device=phi_ctx.device, dtype=torch.float32)
+            A_ctx = torch.cat([ones, z_ctx], dim=1)
+            cv_temp = F.softplus(self.log_cv_temp.float()) + 0.1
+
+            lam_e = self.log_lam_e.float().exp().clamp(0.05, 1e5)
+            prop_fit, e_loo = _fit_loo_cv_ridge(A_ctx, t_f, lam_e, cv_temp)
+            e_loo = e_loo.clamp(0.02, 0.98)
+
+            lam_m = self.log_lam_m.float().exp().clamp(0.05, 1e5)
+            out_fit, m_loo = _fit_loo_cv_ridge(A_ctx, y_f, lam_m, cv_temp)
+
+            t_res = t_f - e_loo
+            y_res = y_f - m_loo
+            B_ctx = t_res.unsqueeze(-1) * A_ctx
+            lam_tau = self.log_lam_tau.float().exp().clamp(0.05, 1e5)
+            cate_fit, _ = _fit_loo_cv_ridge(B_ctx, y_res, lam_tau, cv_temp, intercept_reg=0.05)
+
+            return SolverMemory(
+                mu=mu,
+                sd=sd,
+                propensity_fit=prop_fit,
+                outcome_fit=out_fit,
+                cate_fit=cate_fit,
+                n_ctx=n_ctx,
+            )
+
+    def _solver_query_stats(self, embeddings, solver_mem):
+        device_type = embeddings.device.type
+        with torch.amp.autocast(device_type=device_type, enabled=False):
+            phi_q = self._solver_features(embeddings).float()
+            z_q = (phi_q - solver_mem.mu) / solver_mem.sd
+            ones_q = torch.ones((len(z_q), 1), device=z_q.device, dtype=torch.float32)
+            A_q = torch.cat([ones_q, z_q], dim=1)
+            e_q, h_e = _predict_ridge(solver_mem.propensity_fit, A_q)
+            m_q, h_m = _predict_ridge(solver_mem.outcome_fit, A_q)
+            tau_q, h_tau = _predict_ridge(solver_mem.cate_fit, A_q)
+            e_prob = e_q.clamp(0.01, 0.99)
+            y0_raw = (m_q - e_prob * tau_q).clamp(0.01, 0.99)
+            y1_raw = (m_q + (1.0 - e_prob) * tau_q).clamp(0.01, 0.99)
+            return y0_raw, y1_raw, m_q, e_prob, tau_q, h_m, h_tau, h_e
+
     def condition(self, embeddings, t, y):
         scale = ArmScale.from_context(t, y)
+        solver_mem = self._fit_solver(embeddings, t, y)
         context = self._assemble_context(embeddings, t, y, scale)
-        memories = []
+        attn_memories = []
         for i, layer in enumerate(self.layers):
             context = layer.slot_mix(context)
             memory = layer.sample_norm(context).transpose(0, 1)  # (S, N_ctx, D)
-            memories.append(memory)
+            attn_memories.append(memory)
             if i + 1 < len(self.layers):
                 context = layer.sample_mix(context, memory)
-        return memories, scale
+        return StudyMemory(solver=solver_mem, attn_memories=attn_memories), scale
 
-    def _attend_queries(self, queries, memories):
-        for layer, memory in zip(self.layers, memories, strict=True):
+    def _attend_queries(self, queries, attn_memories):
+        for layer, memory in zip(self.layers, attn_memories, strict=True):
             queries = layer.slot_mix(queries)
             queries = layer.sample_mix(queries, memory)
         return queries[:, -1, :]
 
     def query_logits(self, embeddings, memories, scale):
+        y0_raw, y1_raw, m_q, e_prob, tau_q, h_m, h_tau, _ = self._solver_query_stats(
+            embeddings, memories.solver
+        )
+        device_type = embeddings.device.type
+        with torch.amp.autocast(device_type=device_type, enabled=False):
+            n_q = len(embeddings)
+            log_n = y0_raw.new_full((n_q,), math.log1p(memories.solver.n_ctx))
+            arm_feats = torch.stack(
+                [y0_raw, y1_raw, m_q, e_prob, tau_q, h_m.sqrt(), h_tau.sqrt(), log_n], dim=-1
+            )
+            cal = self.arm_cal(arm_feats.to(self.arm_cal[0].weight.dtype)).float()
+            delta_shift = cal[:, :2]
+            log_sigma = cal[:, 2:]
+            base_delta = scale.logit_offsets(torch.stack([y0_raw, y1_raw], dim=1))
+            center_delta = (base_delta + delta_shift).clamp(self.centers[0], self.centers[-1])
+            sigma = F.softplus(log_sigma + 0.5) + 0.15
+            solver_bin_logits = -0.5 * (
+                (self.centers[None, None, :] - center_delta[..., None]) / sigma[..., None]
+            ).square()
+
         queries = self._assemble_arm_queries(embeddings, scale)
-        pooled = self._attend_queries(queries, memories)
-        return self.head(pooled).reshape(len(embeddings), 2, -1)
+        pooled = self._attend_queries(queries, memories.attn_memories)
+        attn_logits = self.head(pooled).reshape(len(embeddings), 2, -1).float()
+        return solver_bin_logits + self.attn_residual_scale.float() * attn_logits
 
     def query_propensity_logits(self, embeddings, memories, scale):
+        _, _, _, e_prob, _, _, _, h_e = self._solver_query_stats(embeddings, memories.solver)
+        device_type = embeddings.device.type
+        with torch.amp.autocast(device_type=device_type, enabled=False):
+            n_q = len(embeddings)
+            log_n = e_prob.new_full((n_q,), math.log1p(memories.solver.n_ctx))
+            e_logit = e_prob.logit()
+            prop_feats = torch.stack([e_prob, e_logit, h_e.sqrt(), log_n], dim=-1)
+            prop_shift = self.prop_cal(prop_feats.to(self.prop_cal[0].weight.dtype)).float().squeeze(
+                -1
+            )
+            base_prop_logit = e_logit + prop_shift
+
         queries = self._assemble_propensity_queries(embeddings, scale)
-        pooled = self._attend_queries(queries, memories)
-        return self.propensity_head(pooled).squeeze(-1)
+        pooled = self._attend_queries(queries, memories.attn_memories)
+        attn_prop = self.propensity_head(pooled).squeeze(-1).float()
+        return base_prop_logit + self.prop_residual_scale.float() * attn_prop
 
     def forward(
         self, context, queries, *, note_grad_patients=None, freeze_note_backbone=False

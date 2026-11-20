@@ -15,6 +15,7 @@ from pathlib import Path
 import tempfile
 
 import numpy as np
+from scipy.linalg import cho_solve, solve_triangular
 from scipy.stats import pearsonr, spearmanr
 import torch
 from transformers import (
@@ -298,7 +299,16 @@ def _is_no_decay(name, param):
     lowered = name.lower()
     return any(
         token in lowered
-        for token in ("bias", "norm", "embed", "codes", "extra_labs", "extra_pros", "summary")
+        for token in (
+            "bias",
+            "norm",
+            "embed",
+            "codes",
+            "extra_labs",
+            "extra_pros",
+            "note_queries",
+            ".summary",
+        )
     )
 
 
@@ -644,8 +654,14 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                 _save(directory, model, optimizer, settings, step)
 
 
-def _ridge_t_learner_cate(context_rows, query_rows, *, alpha=10.0):
-    """Fast closed-form observational ridge T-learner baseline on structured summaries."""
+def _ridge_t_learner_cate(
+    context_rows, query_rows, *, alphas=(1.0, 10.0, 100.0, 1000.0, 10000.0)
+):
+    """Observational LOO-CV Ridge T-learner baseline on structured patient summaries.
+
+    Selects per-arm regularization strictly by closed-form leave-one-out cross-validation
+    on observed context (X, T, Y) with zero oracle information.
+    """
     x_ctx = np.asarray([patient_summary_vector(r) for r in context_rows], dtype=np.float64)
     x_q = np.asarray([patient_summary_vector(r) for r in query_rows], dtype=np.float64)
     t_ctx = np.asarray([r["treatment_indicator"] for r in context_rows], dtype=np.int64)
@@ -659,6 +675,7 @@ def _ridge_t_learner_cate(context_rows, query_rows, *, alpha=10.0):
     d = z_ctx.shape[1]
     eye = np.eye(d + 1, dtype=np.float64)
     eye[0, 0] = 0.0  # do not penalize intercept
+    xq = np.hstack([np.ones((len(query_rows), 1)), z_q])
 
     preds = []
     for arm in (0, 1):
@@ -673,9 +690,23 @@ def _ridge_t_learner_cate(context_rows, query_rows, *, alpha=10.0):
             continue
         xa = np.hstack([np.ones((n_arm, 1)), z_ctx[mask]])
         ya = y_ctx[mask]
-        coef = np.linalg.solve(xa.T @ xa + alpha * eye, xa.T @ ya)
-        xq = np.hstack([np.ones((len(query_rows), 1)), z_q])
-        preds.append(np.clip(xq @ coef, 0.0, 1.0))
+        gram = xa.T @ xa
+        rhs = xa.T @ ya
+        best_loo = float("inf")
+        best_coef = None
+        for alpha in alphas:
+            reg = alpha * eye
+            reg[0, 0] = 1e-6
+            chol = np.linalg.cholesky(gram + reg)
+            coef = cho_solve((chol, True), rhs)
+            v = solve_triangular(chol, xa.T, lower=True)
+            h = np.sum(v * v, axis=0)
+            denom = np.maximum(1.0 - h, 1e-3)
+            loo_mse = float(np.mean(((ya - xa @ coef) / denom) ** 2))
+            if loo_mse < best_loo:
+                best_loo = loo_mse
+                best_coef = coef
+        preds.append(np.clip(xq @ best_coef, 0.0, 1.0))
     return preds[1] - preds[0]
 
 

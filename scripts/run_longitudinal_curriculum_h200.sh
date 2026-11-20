@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 #
-# Two-stage curriculum TinyBERT longitudinal CausalPFN training + N=5,000 eval
-# on an H200 GPU.
+# Two-stage curriculum TinyBERT longitudinal hybrid R-learner + CausalPFN training
+# and N=5,000 evaluation on an H200 GPU.
 #
-# Why a curriculum:
+# Architecture & curriculum:
+#   - Multi-query token attention + max + mean note pooling (lossless windowing)
+#     and per-stream longitudinal trajectory summaries (latest, mean, slope/yr).
+#   - Differentiable closed-form LOO-CV orthogonalized R-learner head + residual
+#     two-way CausalPFN attention layers.
 #   - Stage 1 (steps 1..600): unfrozen TinyBERT (--note-grad-patients 64),
-#     smaller contexts (N_ctx = 64..256) so initial cross-patient softmax
-#     attention weights are sharp, and a true PFN meta-batch size of 32 studies
-#     per update (--grad-accum-steps 32 -> 19,200 studies) for low-variance
-#     meta-gradients that escape the cohort-mean plateau.
+#     moderate contexts (N_ctx = 64..256), and meta-batch = 32 studies/update
+#     (19,200 studies) for fast, low-variance representation & solver learning.
 #   - Stage 2 (steps 601..1200): resume with large contexts (N_ctx = 500..5000,
-#     query = 64, --grad-accum-steps 8 -> 4,800 large studies) once attention
-#     heads are already sharp.
+#     query = 64, --grad-accum-steps 8 -> 4,800 large studies).
 #   - Stage 3: full 1,000-design held-out evaluation at N_ctx = 5,000.
 #
 # Usage:
@@ -40,7 +41,7 @@ fi
 
 # Tip: override RUN_ROOT=/tmp/longitudinal on local NVMe if /data1 is slow for checkpoints.
 RUN_ROOT="${RUN_ROOT:-${REPO_ROOT}/artifacts}"
-RUN_DIR="${RUN_DIR:-${RUN_ROOT}/longitudinal_tinybert_curriculum}"
+RUN_DIR="${RUN_DIR:-${RUN_ROOT}/longitudinal_tinybert_hybrid}"
 DEVICE="${DEVICE:-cuda}"
 NOTE_MODEL="${NOTE_MODEL:-huawei-noah/TinyBERT_General_4L_312D}"
 NUM_WORKERS="${NUM_WORKERS:-16}"

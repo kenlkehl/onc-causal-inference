@@ -15,13 +15,17 @@ Each note passes through a pretrained Hugging Face text encoder — by default
 Pass `--note-model` to swap in another bidirectional encoder (e.g., `prajjwal1/bert-tiny`
 or `emilyalsentzer/Bio_ClinicalBERT`) or a causal decoder (e.g.,
 `LiquidAI/LFM2.5-230M-Base`, pinned at revision
-`9d2be5519834990d30996f878b6771cccbd24f2c`). Bidirectional encoders use masked mean
-pooling across non-padding tokens; causal models use the last non-padding token. Notes
-longer than the backbone's `max_position_embeddings` (512 for TinyBERT) are split into
-lossless non-overlapping windows and averaged across windows rather than silently
-truncated; empty notes raise `SemanticTruncationError`. Activation checkpointing
-trades computation for memory, and `--note-batch-size` (default 64; overridable at
-`evaluate` and `predict` time) controls the microbatch size.
+`9d2be5519834990d30996f878b6771cccbd24f2c`). Rather than crushing an entire note into a
+single mean-pooled vector, a trainable token pooler extracts `--note-slots` (default 8)
+**multi-query attention-pooled concept vectors** alongside **masked max-pooled** (preserving
+rare single-sentence findings regardless of note length) and **token-weighted mean-pooled**
+representations over the backbone's contextualized token hidden states. Notes longer than
+the backbone's `max_position_embeddings` (512 for TinyBERT) are split into lossless
+non-overlapping windows and aggregated via exact cross-window log-sum-exp attention, global
+max, and token-weighted mean rather than truncated; empty notes raise
+`SemanticTruncationError`. Activation checkpointing trades computation for memory, and
+`--note-batch-size` (default 64; overridable at `evaluate` and `predict` time) controls the
+microbatch size.
 
 Each lab panel encodes canonical CBC/BMP/CMP components with fixed reference scales,
 an `asinh` transform, and presence indicators. Additional real-EHR panels, components,
@@ -40,26 +44,39 @@ embeddings.
 Five modality-specific transformers summarize the five event streams using a learned
 clock embedding of `log1p(-day_from_index)`, `log1p(elapsed_days)`, and a first-event
 indicator (accepting events on or before the index day, `day_from_index <= 0`, with
-`delta_years` optional for real EHR tables). Clinical notes produce `--note-slots`
-(default 4) learned concept tokens so high-dimensional chart findings are not crushed
-into a single vector, while labs, encounters, vitals, and PROs produce one summary
-token each. A cross-modal timeline transformer also attends jointly over all
-chronologically aligned events across all five modalities to produce a visit-aligned
-fused token (default `event_width=128`, `event_layers=2`).
+`delta_years` optional for real EHR tables). Clinical notes combine their temporal
+`EventTransformer` slots with cross-note max-pooled attention and token representations so
+findings documented at an earlier visit are never diluted across a long chart. Labs,
+vitals, PROs, and encounters each pair their `EventTransformer` summary with an explicit
+per-stream longitudinal trajectory summary (`latest`, `mean`, `asinh` OLS slope per year,
+observation flags, recency, and utilization counts) so clinical trends such as creatinine
+slope and annualized weight loss are preserved directly. A cross-modal timeline transformer
+also attends jointly over all chronologically aligned events across all five modalities to
+produce a visit-aligned fused token (default `event_width=128`, `event_layers=2`).
 
-The resulting patient tokens (`note_slots + 5` slots, projected to `study_width=192`)
-combine with a dedicated treatment/outcome token that carries treatment status,
-standardized observed outcome (for context), smoothed empirical arm log-odds, and
-`log1p(arm_count)`. Four two-way CausalPFN study layers alternate:
+To avoid the zero-gradient cohort-mean plateau of pure attention PFNs, `CausalStudyModel`
+uses a **hybrid differentiable in-context orthogonalized R-learner plus residual two-way
+CausalPFN head**:
 
-1. **Within-patient slot attention** across each patient's modality/concept tokens and
-   its treatment/outcome token.
-2. **Across-patient sample attention** per slot, where only context patients supply
-   keys and values so query predictions are strictly independent of other queries and
-   permutation-invariant in context order.
+1. **Differentiable in-context LOO-CV R-learner.** Patient slots project into a compact
+   representation (`--solver-dim`, default 64) standardized over the context cohort. Inside
+   `condition()`, exact closed-form Cholesky leave-one-out cross-validated Ridge fits
+   estimate propensity $\hat{e}(x)$ and marginal outcome $\hat{m}(x)$ (strictly in
+   `float32`), then fit the orthogonalized Robinson R-learner
+   $(Y - \hat{m}^{(-i)}(X)) \sim (T - \hat{e}^{(-i)}(X)) \cdot [1, \phi(X)]$ for
+   $\hat{\tau}(x)$ with separate learnable penalty grids. Query patients receive point
+   estimates $(\hat{y}_0, \hat{y}_1, \hat{e})$ together with exact Bayesian query leverages
+   $(h_m, h_\tau, h_e)$, which parameterize the centered log-odds prior over the 129-bin
+   sinh histogram and send coherent patient-level gradients back into the encoder and note
+   backbone from step 1.
+2. **Residual two-way CausalPFN study layers.** Two alternating within-patient slot
+   attention and context-only cross-patient sample attention layers (`study_width=192`,
+   `study_layers=2`) add a learned residual refinement to the outcome histogram and
+   propensity logits while preserving strict query independence and permutation invariance
+   in context order.
 
-Inference computes context representations once and reuses them across both arms,
-propensity queries, and all query batches.
+Inference computes context solver fits and attention memories once and reuses them across
+both arms, propensity queries, and all query batches.
 
 ## Binary outcome, propensity, and loss
 
@@ -165,7 +182,7 @@ writes `best_checkpoint.pt`.
 Evaluation reports `risk_rmse`, `risk_brier`, `propensity_rmse`, `cate_rmse`,
 `ate_rmse`, `ate_bias`, `cate_pearson`, `cate_spearman`,
 `mean_within_study_cate_pearson`, three baselines (`arm_mean_cate_rmse`,
-`zero_cate_rmse`, and an observational structured-feature Ridge T-learner
+`zero_cate_rmse`, and an observational LOO-CV structured-feature Ridge T-learner
 `linear_t_learner_cate_rmse`), stratification `by_width` and `by_generalization`
 (`unseen_cancer` vs `seen_cancer_new_question`), and per-design RMSE. Pass
 `--eval-cohort PATH` (repeatable) to evaluate on materialized Parquet cohorts such as

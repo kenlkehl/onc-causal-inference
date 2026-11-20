@@ -89,6 +89,12 @@ PRO_INDEX = {item: i for i, item in enumerate(PRO_ITEMS)}
 # Per item: score observed, then four cumulative ordinal thresholds.
 PRO_INPUT_SIZE = 5 * len(PRO_ITEMS)
 
+# Explicit per-modality longitudinal summary sizes (latest, mean, slope/yr, obs + count/recency).
+LAB_SUMMARY_SIZE = 4 * len(LAB_NAMES) + 2
+VITAL_SUMMARY_SIZE = 4 * len(VITAL_SCALES) + 2
+PRO_SUMMARY_SIZE = 4 * len(PRO_ITEMS) + 2
+ENCOUNTER_SUMMARY_SIZE = 9
+
 
 def read_patient_table(path, streams=STREAMS, labels=()):
     """Project input fields explicitly, allowing pre-PRO cohorts to omit the new column."""
@@ -279,73 +285,128 @@ def binary_observations(rows, device):
     return observations.unbind(dim=1)
 
 
+def _series_stats(points):
+    """Return ``[latest, mean, asinh(ols_slope_per_year), observed]`` for ``(day, val)`` pairs."""
+    if not points:
+        return [0.0, 0.0, 0.0, 0.0]
+    latest = points[-1][1]
+    n = len(points)
+    v_mean = sum(v for _, v in points) / n
+    slope = 0.0
+    if n >= 2 and (points[-1][0] - points[0][0]) >= 1.0:
+        ts = [day / DAYS_PER_YEAR for day, _ in points]
+        t_mean = sum(ts) / n
+        cov = sum((t - t_mean) * (v - v_mean) for t, (_, v) in zip(ts, points))
+        var = sum((t - t_mean) ** 2 for t in ts)
+        slope = math.asinh(cov / (var + 1e-4))
+    return [latest, v_mean, slope, 1.0]
+
+
+def lab_stream_summary(stream):
+    """Fixed-length longitudinal summary (latest, mean, slope/yr, obs) for canonical labs."""
+    stream = stream or ()
+    series = {name: [] for name in LAB_NAMES}
+    for panel in stream:
+        day = float(panel["day_from_index"])
+        for item in panel.get("results") or ():
+            name = item.get("component")
+            val = item.get("value")
+            if name in series and val is not None and item.get("unit") == LAB_UNITS[name]:
+                series[name].append((day, _numeric(val, *LAB_SCALES[name])))
+    feats = []
+    for name in LAB_NAMES:
+        feats.extend(_series_stats(series[name]))
+    recency = math.log1p(max(0.0, -float(stream[-1]["day_from_index"]))) if stream else 0.0
+    feats.extend([math.log1p(len(stream)), recency])
+    return feats
+
+
+def vital_stream_summary(stream):
+    """Fixed-length longitudinal summary (latest, mean, slope/yr, obs) for canonical vitals."""
+    stream = stream or ()
+    series = {name: [] for name in VITAL_SCALES}
+    for vital in stream:
+        day = float(vital["day_from_index"])
+        for name, scale in VITAL_SCALES.items():
+            if vital.get(name) is not None:
+                series[name].append((day, _numeric(vital[name], *scale)))
+    feats = []
+    for name in VITAL_SCALES:
+        feats.extend(_series_stats(series[name]))
+    recency = math.log1p(max(0.0, -float(stream[-1]["day_from_index"]))) if stream else 0.0
+    feats.extend([math.log1p(len(stream)), recency])
+    return feats
+
+
+def pro_stream_summary(stream):
+    """Fixed-length longitudinal summary (latest, mean, slope/yr, obs) for canonical PROs."""
+    stream = stream or ()
+    series = {item: [] for item in PRO_ITEMS}
+    for form in stream:
+        instrument = str(form.get("instrument", PRO_INSTRUMENT))
+        recall = form.get("recall_days", RECALL_DAYS)
+        if instrument != PRO_INSTRUMENT or recall != RECALL_DAYS:
+            continue
+        day = float(form["day_from_index"])
+        for resp in form.get("responses") or ():
+            key = (resp.get("symptom"), resp.get("attribute"))
+            score = resp.get("score")
+            if key in series and score is not None:
+                series[key].append((day, float(score) / 4.0))
+    feats = []
+    for item in PRO_ITEMS:
+        feats.extend(_series_stats(series[item]))
+    recency = math.log1p(max(0.0, -float(stream[-1]["day_from_index"]))) if stream else 0.0
+    feats.extend([math.log1p(len(stream)), recency])
+    return feats
+
+
+def encounter_stream_summary(stream):
+    """Fixed-length utilization and recency summary for longitudinal encounters."""
+    stream = stream or ()
+    ed_total = ed_180 = ed_90 = 0.0
+    inpt_total = inpt_180 = outpt_total = 0.0
+    code_total = 0.0
+    for enc in stream:
+        day = float(enc.get("day_from_index", -9999.0))
+        setting = enc.get("setting")
+        if setting == "emergency":
+            ed_total += 1.0
+            if day >= -180.0:
+                ed_180 += 1.0
+            if day >= -90.0:
+                ed_90 += 1.0
+        elif setting == "inpatient":
+            inpt_total += 1.0
+            if day >= -180.0:
+                inpt_180 += 1.0
+        elif setting == "outpatient":
+            outpt_total += 1.0
+        code_total += len(enc.get("icd10cm") or ()) + len(enc.get("cpt") or ())
+    recency = math.log1p(max(0.0, -float(stream[-1]["day_from_index"]))) if stream else 0.0
+    return [
+        math.log1p(len(stream)),
+        math.log1p(ed_total),
+        math.log1p(ed_180),
+        math.log1p(ed_90),
+        math.log1p(inpt_total),
+        math.log1p(inpt_180),
+        math.log1p(outpt_total),
+        math.log1p(code_total),
+        recency,
+    ]
+
+
 def patient_summary_vector(row):
     """Fixed-length observational numeric summary of a patient for tabular baselines.
 
     Uses only observed pretreatment histories (never oracle columns or outcomes).
     """
-    # Labs: last, mean, and change across canonical components (3 * len(LAB_NAMES)).
-    lab_series = {name: [] for name in LAB_NAMES}
-    for panel in row.get("labs") or ():
-        for item in panel.get("results") or ():
-            name = item.get("component")
-            val = item.get("value")
-            if name in lab_series and val is not None and item.get("unit") == LAB_UNITS[name]:
-                lab_series[name].append(_numeric(val, *LAB_SCALES[name]))
-    feats = []
-    for name in LAB_NAMES:
-        vals = lab_series[name]
-        if vals:
-            feats.extend([vals[-1], sum(vals) / len(vals), vals[-1] - vals[0], 1.0])
-        else:
-            feats.extend([0.0, 0.0, 0.0, 0.0])
-
-    # Vitals: last, mean, change, observed.
-    vital_series = {name: [] for name in VITAL_SCALES}
-    for vital in row.get("vitals") or ():
-        for name, scale in VITAL_SCALES.items():
-            if vital.get(name) is not None:
-                vital_series[name].append(_numeric(vital[name], *scale))
-    for name in VITAL_SCALES:
-        vals = vital_series[name]
-        if vals:
-            feats.extend([vals[-1], sum(vals) / len(vals), vals[-1] - vals[0], 1.0])
-        else:
-            feats.extend([0.0, 0.0, 0.0, 0.0])
-
-    # PROs: mean and last score for canonical items.
-    pro_series = {item: [] for item in PRO_ITEMS}
-    for form in row.get("pros") or ():
-        for resp in form.get("responses") or ():
-            key = (resp.get("symptom"), resp.get("attribute"))
-            if key in pro_series and resp.get("score") is not None:
-                pro_series[key].append(float(resp["score"]) / 4.0)
-    for item in PRO_ITEMS:
-        vals = pro_series[item]
-        if vals:
-            feats.extend([sum(vals) / len(vals), vals[-1], 1.0])
-        else:
-            feats.extend([0.0, 0.0, 0.0])
-
-    # Encounters & note counts / ECOG if present.
-    encounters = row.get("encounters") or ()
-    ed_180 = sum(
-        1.0
-        for e in encounters
-        if e.get("setting") == "emergency" and float(e.get("day_from_index", -9999)) >= -180
-    )
-    inpatient_180 = sum(
-        1.0
-        for e in encounters
-        if e.get("setting") == "inpatient" and float(e.get("day_from_index", -9999)) >= -180
-    )
     notes = row.get("notes") or ()
-    feats.extend(
-        [
-            math.log1p(len(encounters)),
-            math.log1p(ed_180),
-            math.log1p(inpatient_180),
-            math.log1p(len(notes)),
-        ]
-    )
-    return feats
+    return [
+        *lab_stream_summary(row.get("labs")),
+        *vital_stream_summary(row.get("vitals")),
+        *pro_stream_summary(row.get("pros")),
+        *encounter_stream_summary(row.get("encounters")),
+        math.log1p(len(notes)),
+    ]

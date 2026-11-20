@@ -107,21 +107,35 @@ def test_inference_modules_do_not_import_synthetic_data():
     assert json.loads(completed.stdout.splitlines()[-1]) == []
 
 
-def test_gradients_time_and_last_nonpadding_token(model):
+def test_gradients_time_and_note_attention_pooling(model):
     rows, _ = simulate_episode(7, 1, False, 8)
     loss, _, _, _, _, parts = fit_episode(model, rows, 5)
     assert all(torch.isfinite(v) for v in parts.values())
     loss.backward()
     for part in [
         model.patient.backbone,
+        model.patient.note_pool_norm,
+        model.patient.note_key,
+        model.patient.note_val,
+        model.patient.note_max_proj,
+        model.patient.notes,
+        model.patient.note_cross_norm,
         model.patient.codes,
         model.patient.code_count,
+        model.patient.encounter_summary,
         model.patient.labs,
+        model.patient.lab_summary,
         model.patient.vitals,
-        model.patient.notes,
+        model.patient.vital_summary,
         model.patient.pros,
+        model.patient.pro_summary,
         model.patient.cross_modal,
         *model.patient.streams.values(),
+        model.solver_note_proj,
+        model.solver_struct_proj,
+        model.solver_mlp,
+        model.arm_cal,
+        model.prop_cal,
         model.slot_proj,
         model.outcome_token,
         model.layers,
@@ -129,17 +143,30 @@ def test_gradients_time_and_last_nonpadding_token(model):
         model.propensity_head,
     ]:
         assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in part.parameters())
+    for scalar_param in (
+        model.patient.note_queries,
+        model.log_lam_e,
+        model.log_lam_m,
+        model.log_lam_tau,
+        model.log_cv_temp,
+        model.attn_residual_scale,
+        model.prop_residual_scale,
+    ):
+        assert scalar_param.grad is not None and scalar_param.grad.abs().sum() > 0
+
     model.eval()
     docs = [{"text": "visit"}, {"text": "visit ECOG visit ECOG"}]
     with torch.no_grad():
-        pad = model.patient.tokenizer([d["text"] for d in docs], padding=True, return_tensors="pt")
-        hidden = model.patient.backbone(
-            input_ids=pad.input_ids, attention_mask=pad.attention_mask, use_cache=False
-        ).last_hidden_state
-        expected = model.patient.notes(hidden[[0, 1], [0, 3]])
-        torch.testing.assert_close(model.patient._note_vectors(docs), expected)
+        # Right-padding invariance for multi-query attention + max + mean pooling.
         torch.testing.assert_close(
-            model.patient._note_vectors(docs)[:1], model.patient._note_vectors(docs[:1])
+            model.patient._note_vectors(docs)[:1],
+            model.patient._note_vectors(docs[:1]),
+            atol=1e-5,
+            rtol=1e-5,
+        )
+        assert not torch.allclose(
+            model.patient._note_vectors([{"text": "visit"}]),
+            model.patient._note_vectors([{"text": "visit ECOG"}]),
         )
         changed = copy.deepcopy(rows[0])
         for event in changed["labs"]:
@@ -732,7 +759,7 @@ def test_freeze_backbone_partial_note_grads_and_worker_prefetch_determinism(
         torch.testing.assert_close(p_sync, p_async, rtol=0, atol=0)
 
 
-def test_tinybert_encoder_mean_pooling_and_lossless_long_note_windowing(tmp_path):
+def test_tinybert_encoder_attention_pooling_and_lossless_long_note_windowing(tmp_path):
     bert_dir = tmp_path / "tiny-bert"
     vocab = {"[PAD]": 0, "[UNK]": 1, "[CLS]": 2, "[SEP]": 3, "visit": 4, "ECOG": 5, "anemia": 6}
     tokens = Tokenizer(WordLevel(vocab, unk_token="[UNK]"))
@@ -758,12 +785,18 @@ def test_tinybert_encoder_mean_pooling_and_lossless_long_note_windowing(tmp_path
         AutoModel.from_pretrained(bert_dir),
         AutoTokenizer.from_pretrained(bert_dir),
         ModelConfig(
-            event_width=8, event_layers=1, study_width=16, study_layers=1, bins=17, note_slots=2
+            event_width=8,
+            event_layers=1,
+            study_width=16,
+            study_layers=1,
+            bins=17,
+            note_slots=2,
+            solver_dim=8,
         ),
     )
     assert bert_model.patient._is_bidirectional is True
 
-    # Verify gradients flow through BertModel cleanly.
+    # Verify gradients flow through BertModel and attention pooler cleanly.
     rows, _ = simulate_episode(11, 1, False, 6)
     loss, _, _, _, _, _ = fit_episode(bert_model, rows, 4)
     loss.backward()
@@ -771,8 +804,18 @@ def test_tinybert_encoder_mean_pooling_and_lossless_long_note_windowing(tmp_path
         p.grad is not None and p.grad.abs().sum() > 0
         for p in bert_model.patient.backbone.parameters()
     )
+    assert bert_model.patient.note_queries.grad is not None
+    assert bert_model.patient.note_queries.grad.abs().sum() > 0
 
-    # Verify masked mean pooling & right-padding invariance on short notes.
+    # Frozen backbone must still train note_queries / note_key / note_val.
+    bert_model.zero_grad(set_to_none=True)
+    loss_frozen, _, _, _, _, _ = fit_episode(bert_model, rows, 4, freeze_note_backbone=True)
+    loss_frozen.backward()
+    assert all(p.grad is None for p in bert_model.patient.backbone.parameters())
+    assert bert_model.patient.note_queries.grad is not None
+    assert bert_model.patient.note_queries.grad.abs().sum() > 0
+
+    # Verify right-padding invariance, exact cross-window aggregation, and lossless windowing.
     bert_model.eval()
     docs = [{"text": "visit"}, {"text": "visit ECOG visit ECOG"}]
     with torch.no_grad():
@@ -782,6 +825,19 @@ def test_tinybert_encoder_mean_pooling_and_lossless_long_note_windowing(tmp_path
             atol=1e-5,
             rtol=1e-5,
         )
+        # Verify exact log-sum-exp cross-window attention + max + token-weighted mean equivalence.
+        hidden = torch.randn(1, 10, 16)
+        mask = torch.ones(1, 10, dtype=torch.long)
+        full_stats = bert_model.patient._pool_window_hidden(hidden, mask)
+        full_agg = bert_model.patient._aggregate_windows(*full_stats, [1])
+        h_parts = torch.cat([hidden[:, :4], torch.zeros(1, 2, 16)], dim=1)
+        m_parts = torch.tensor([[1, 1, 1, 1, 0, 0], [1, 1, 1, 1, 1, 1]], dtype=torch.long)
+        split_hidden = torch.cat([h_parts, hidden[:, 4:]], dim=0)
+        split_stats = bert_model.patient._pool_window_hidden(split_hidden, m_parts)
+        split_agg = bert_model.patient._aggregate_windows(*split_stats, [2])
+        for a, b in zip(full_agg, split_agg, strict=True):
+            torch.testing.assert_close(a, b, atol=1e-5, rtol=1e-5)
+
         # Verify lossless windowing for notes longer than max_position_embeddings (16):
         # changing a token past token 30 must change the resulting note representation.
         long_a = {"text": " ".join(["visit"] * 35 + ["ECOG"])}
@@ -793,3 +849,36 @@ def test_tinybert_encoder_mean_pooling_and_lossless_long_note_windowing(tmp_path
 
     with pytest.raises(SemanticTruncationError):
         bert_model.patient._note_vectors([{"text": ""}])
+
+
+def test_longitudinal_trajectory_slopes_and_observational_loocv_ridge_baseline():
+    from oci.longitudinal.events import LAB_INDEX, lab_stream_summary, vital_stream_summary
+    from oci.longitudinal.training import _ridge_t_learner_cate
+
+    # Rising vs falling creatinine over 180 days must produce opposite-signed slopes.
+    rising = [
+        {"day_from_index": -180, "panel": "BMP", "results": [{"component": "creatinine", "value": 0.8, "unit": "mg/dL"}]},
+        {"day_from_index": 0, "panel": "BMP", "results": [{"component": "creatinine", "value": 2.0, "unit": "mg/dL"}]},
+    ]
+    falling = [
+        {"day_from_index": -180, "panel": "BMP", "results": [{"component": "creatinine", "value": 2.0, "unit": "mg/dL"}]},
+        {"day_from_index": 0, "panel": "BMP", "results": [{"component": "creatinine", "value": 0.8, "unit": "mg/dL"}]},
+    ]
+    cr_slope_idx = 4 * LAB_INDEX["creatinine"] + 2
+    assert lab_stream_summary(rising)[cr_slope_idx] > 0.5
+    assert lab_stream_summary(falling)[cr_slope_idx] < -0.5
+
+    # Weight loss over a year must yield a clearly negative slope.
+    w_loss = [
+        {"day_from_index": -365, "weight_kg": 85.0},
+        {"day_from_index": -180, "weight_kg": 77.0},
+        {"day_from_index": 0, "weight_kg": 70.0},
+    ]
+    assert vital_stream_summary(w_loss)[2] < -0.3
+
+    # Observational LOO-CV Ridge baseline stays well-regularized when N_ctx < d_summary.
+    rows, _ = simulate_episode(19, 1, True, 96)
+    pred_ite = _ridge_t_learner_cate(rows[:64], rows[64:])
+    true_ite = [r["true_y1"] - r["true_y0"] for r in rows[64:]]
+    rmse = float(torch.tensor(pred_ite - torch.tensor(true_ite).numpy()).square().mean().sqrt())
+    assert rmse < 0.25
