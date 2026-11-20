@@ -19,9 +19,9 @@ or `emilyalsentzer/Bio_ClinicalBERT`) or a causal decoder (e.g.,
 single mean-pooled vector, a trainable token pooler extracts `--note-slots` (default 8)
 **multi-query attention-pooled concept vectors** alongside **masked max-pooled** (preserving
 rare single-sentence findings regardless of note length) and **token-weighted mean-pooled**
-representations over the backbone's contextualized token hidden states. Notes longer than
-the backbone's `max_position_embeddings` (512 for TinyBERT) are split into lossless
-non-overlapping windows and aggregated via exact cross-window log-sum-exp attention, global
+representations over the backbone's contextualized token hidden states. Notes longer than the backbone's `max_position_embeddings` (512 for TinyBERT) are split
+into lossless overlapping windows (32-token overlap, clamped to half the window body on
+smaller backbones) and aggregated via exact cross-window log-sum-exp attention, global
 max, and token-weighted mean rather than truncated; empty notes raise
 `SemanticTruncationError`. Activation checkpointing trades computation for memory, and
 `--note-batch-size` (default 64; overridable at `evaluate` and `predict` time) controls the

@@ -59,6 +59,7 @@ _BIDIRECTIONAL_MODELS = frozenset(
     }
 )
 CHECKPOINT_FORMAT_VERSION = 4
+NOTE_WINDOW_OVERLAP = 32
 
 
 @dataclass(frozen=True)
@@ -298,8 +299,8 @@ class PatientEncoder(nn.Module):
         hidden = self._backbone_hidden(ids, mask)
         return self._pool_window_hidden(hidden, mask)
 
-    def _window_note_ids(self, ids, limit):
-        """Split notes longer than ``limit`` into lossless non-overlapping windows."""
+    def _window_note_ids(self, ids, limit, *, overlap=NOTE_WINDOW_OVERLAP):
+        """Split notes longer than ``limit`` into lossless overlapping windows."""
         cls_id = self.tokenizer.cls_token_id
         if cls_id is None:
             cls_id = self.tokenizer.bos_token_id
@@ -324,10 +325,16 @@ class PatientEncoder(nn.Module):
                 raise SemanticTruncationError(
                     f"Backbone max_position_embeddings ({limit}) is too small for windowing"
                 )
-            note_windows = [
-                [*prefix, *body[pos : pos + body_limit], *suffix]
-                for pos in range(0, len(body), body_limit)
-            ]
+            eff_overlap = min(max(int(overlap), 0), body_limit // 2)
+            stride = body_limit - eff_overlap
+            note_windows = []
+            pos = 0
+            while True:
+                end = min(pos + body_limit, len(body))
+                note_windows.append([*prefix, *body[pos:end], *suffix])
+                if end >= len(body):
+                    break
+                pos += stride
             windows.extend(note_windows)
             counts.append(len(note_windows))
         return windows, counts

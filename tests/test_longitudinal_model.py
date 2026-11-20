@@ -838,8 +838,14 @@ def test_tinybert_encoder_attention_pooling_and_lossless_long_note_windowing(tmp
         for a, b in zip(full_agg, split_agg, strict=True):
             torch.testing.assert_close(a, b, atol=1e-5, rtol=1e-5)
 
-        # Verify lossless windowing for notes longer than max_position_embeddings (16):
-        # changing a token past token 30 must change the resulting note representation.
+        # Verify lossless overlapping windowing (32-token overlap at limit=512; clamped at limit=16).
+        seq_512 = [2, *range(10, 10 + 988), 3]  # 988 body tokens -> exact 2 windows of 510 with 32 overlap
+        w512, c512 = bert_model.patient._window_note_ids([seq_512], 512)
+        assert c512 == [2]
+        assert len(w512[0]) == 512 and len(w512[1]) == 512
+        assert w512[0][-33:-1] == w512[1][1:33]  # exact 32-token body overlap
+
+        # Changing a token past token 30 must change the resulting note representation at limit=16.
         long_a = {"text": " ".join(["visit"] * 35 + ["ECOG"])}
         long_b = {"text": " ".join(["visit"] * 35 + ["anemia"])}
         va = bert_model.patient._note_vectors([long_a])
