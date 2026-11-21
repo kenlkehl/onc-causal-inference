@@ -11,7 +11,7 @@ pretreatment (or index-day) histories for query patients.
 
 Each note passes through a pretrained Hugging Face text encoder — by default
 **TinyBERT** (`huawei-noah/TinyBERT_General_4L_312D`, 4 layers, 312 hidden dim,
-14.5M parameters), enabling studies up to 5,000 context patients on a single H200.
+14.5M parameters), enabling studies up to 10,000 context patients on a single H200.
 Pass `--note-model` to swap in another bidirectional encoder (e.g., `prajjwal1/bert-tiny`
 or `emilyalsentzer/Bio_ClinicalBERT`) or a causal decoder (e.g.,
 `LiquidAI/LFM2.5-230M-Base`, pinned at revision
@@ -46,12 +46,15 @@ clock embedding of `log1p(-day_from_index)`, `log1p(elapsed_days)`, and a first-
 indicator (accepting events on or before the index day, `day_from_index <= 0`, with
 `delta_years` optional for real EHR tables). Clinical notes combine their temporal
 `EventTransformer` slots with cross-note max-pooled attention and token representations so
-findings documented at an earlier visit are never diluted across a long chart. Labs,
-vitals, PROs, and encounters each pair their `EventTransformer` summary with an explicit
-per-stream longitudinal trajectory summary (`latest`, `mean`, `asinh` OLS slope per year,
-observation flags, recency, and utilization counts) so clinical trends such as creatinine
-slope and annualized weight loss are preserved directly. A cross-modal timeline transformer
-also attends jointly over all chronologically aligned events across all five modalities to
+findings documented at an earlier visit are never diluted across a long chart; passing
+`--per-slot-note-temporal` upgrades this residual to preserve per-slot longitudinal
+progression (`max`, `latest`, `latest - first` delta, and learned timestamp-conditioned
+attention across visits) independently for every note concept slot. Labs, vitals, PROs,
+and encounters each pair their `EventTransformer` summary with an explicit per-stream
+longitudinal trajectory summary (`latest`, `mean`, `asinh` OLS slope per year, observation
+flags, recency, and utilization counts) so clinical trends such as creatinine slope and
+annualized weight loss are preserved directly. A cross-modal timeline transformer also
+attends jointly over all chronologically aligned events across all five modalities to
 produce a visit-aligned fused token (default `event_width=128`, `event_layers=2`).
 
 To avoid the zero-gradient cohort-mean plateau of pure attention PFNs, `CausalStudyModel`
@@ -68,7 +71,9 @@ CausalPFN head**:
    cross-validated Ridge fits estimate propensity $\hat{e}(x)$ and marginal outcome
    $\hat{m}(x)$ (strictly in `float32`), then fit the orthogonalized Robinson R-learner
    $(Y - \hat{m}^{(-i)}(X)) \sim (T - \hat{e}^{(-i)}(X)) \cdot [1, \phi(X)]$ for
-   $\hat{\tau}(x)$ with separate learnable penalty grids. Query patients receive point
+   $\hat{\tau}(x)$ with separate learnable penalty grids (`--ridge-grid-size`, default `5`;
+   use `7` with wider solvers to extend the upper CATE penalty ceiling to `~22,000`). Query
+   patients receive point
    estimates $(\hat{y}_0, \hat{y}_1, \hat{e})$ together with exact Bayesian query leverages
    $(h_m, h_\tau, h_e)$, which parameterize the centered log-odds prior over the 129-bin
    sinh histogram and send coherent patient-level gradients back into the encoder and note
@@ -138,30 +143,34 @@ checkpoint.
 From the repository root, with the project dependencies installed, run:
 
 ```bash
-# Stage 1: escape the cohort-mean plateau with sharp small/moderate contexts and meta-batch=32
+# Single-stage training across log-uniform N_ctx = 100..10,000 with wide neural +
+# study-adaptive lexical SVD + per-slot longitudinal note temporal pooling
 python -m oci.longitudinal.cli train --run-dir artifacts/longitudinal_run \
-  --steps 600 --grad-accum-steps 32 --min-context-size 64 --context-size 256 \
-  --query-size 32 --note-batch-size 256 --note-grad-patients 64 --num-workers 16 \
-  --lr 6e-4 --note-lr 3e-5 --lr-scheduler cosine --warmup-steps 30 \
-  --eval-every 50 --eval-studies 32 --device cuda
-
-# Stage 2: scale context size to N=500..5,000 once cross-patient attention heads are sharp
-python -m oci.longitudinal.cli resume --run-dir artifacts/longitudinal_run \
-  --steps 1200 --min-context-size 500 --context-size 5000 --query-size 64 \
-  --grad-accum-steps 8 --note-grad-patients 128 --lr 2e-4 --note-lr 1e-5 \
-  --eval-every 100 --eval-studies 32 --num-workers 16 --device cuda
+  --note-slots 16 --per-slot-note-temporal --solver-dim 256 --lexical-dim 128 \
+  --ridge-grid-size 7 --steps 1200 --grad-accum-steps 8 \
+  --min-context-size 100 --context-size 10000 --context-size-sampling log_uniform \
+  --query-size 64 --note-batch-size 256 --note-grad-patients 128 --num-workers 16 \
+  --lr 4e-4 --note-lr 2e-5 --lr-scheduler cosine --warmup-steps 30 \
+  --eval-every 100 --eval-studies 32 --eval-context-size 5000 --device cuda
 
 python -m oci.longitudinal.cli evaluate --run-dir artifacts/longitudinal_run \
   --studies 1000 --context-size 5000 --query-size 64 --note-batch-size 512 \
   --num-workers 16 --seed 42 --device cuda
 ```
 
-`resume` accepts curriculum overrides (`--min-context-size`, `--context-size`,
-`--query-size`, `--grad-accum-steps`, `--lr`, `--note-lr`, `--eval-every`,
-`--eval-studies`, `--freeze-note-backbone` / `--no-freeze-note-backbone`,
-`--note-grad-patients`, and `--num-workers`). To scale to large contexts
-(`N = 500–5,000`) without backpropagating through the note backbone on tens of
-thousands of context notes per step:
+For a ready-to-run H200 launcher covering single-stage training (`N_ctx = 100..10,000`)
+followed by the 1,000-design `N_ctx = 5,000` evaluation, use
+`scripts/run_longitudinal_single_stage_h200.sh`.
+
+`--context-size-sampling log_uniform` samples variable context sizes evenly across orders
+of magnitude between `--min-context-size` and `--context-size` (default `uniform`), and
+`--eval-context-size` decouples mid-training evaluation cohort size from the maximum
+training context size. `resume` accepts curriculum overrides (`--min-context-size`,
+`--context-size`, `--context-size-sampling`, `--query-size`, `--grad-accum-steps`, `--lr`,
+`--note-lr`, `--eval-every`, `--eval-studies`, `--eval-context-size`,
+`--freeze-note-backbone` / `--no-freeze-note-backbone`, `--note-grad-patients`, and
+`--num-workers`). To scale to large contexts (`N = 100–10,000`) without backpropagating
+through the note backbone on tens of thousands of context notes per step:
 
 - `--freeze-note-backbone` runs the note LLM in fast `no_grad` mode (4× larger note
   microbatches, no activation checkpointing) while training all downstream modality and
@@ -188,9 +197,10 @@ Evaluation reports `risk_rmse`, `risk_brier`, `propensity_rmse`, `cate_rmse`,
 `mean_within_study_cate_pearson`, three baselines (`arm_mean_cate_rmse`,
 `zero_cate_rmse`, and an observational LOO-CV structured-feature Ridge T-learner
 `linear_t_learner_cate_rmse`), stratification `by_width` and `by_generalization`
-(`unseen_cancer` vs `seen_cancer_new_question`), and per-design RMSE. Pass
-`--eval-cohort PATH` (repeatable) to evaluate on materialized Parquet cohorts such as
-LLM-rendered studies.
+(`unseen_cancer` vs `seen_cancer_new_question`), and per-design RMSE. For evaluations of
+50 or more studies, periodic elapsed/ETA progress is printed to `stderr` while `stdout`
+remains pure JSON. Pass `--eval-cohort PATH` (repeatable) to evaluate on materialized
+Parquet cohorts such as LLM-rendered studies.
 
 ## Predict
 

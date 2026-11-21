@@ -1005,3 +1005,172 @@ def test_study_adaptive_lexical_svd_channel_and_v4_checkpoint_compat(note_model,
         torch.testing.assert_close(
             loaded.eval()(rows[:4], rows[4:])[0], base(rows[:4], rows[4:])[0]
         )
+
+
+def test_per_slot_note_temporal_log_uniform_sampling_and_eval_context_size(
+    note_model, tmp_path, capsys
+):
+    import numpy as np
+    from oci.longitudinal.training import _sample_context_size
+
+    # 1. Log-uniform context sampling covers every order of magnitude cleanly.
+    rng = np.random.default_rng(7)
+    draws = [_sample_context_size(rng, 100, 10000, "log_uniform") for _ in range(2000)]
+    assert min(draws) >= 100 and max(draws) <= 10000
+    assert 700 <= float(np.median(draws)) <= 1400
+    assert sum(d <= 300 for d in draws) > 300 and sum(d >= 5000 for d in draws) > 200
+
+    # 2. Per-slot longitudinal note temporal refinement + 7-point Ridge grid.
+    m = CausalStudyModel(
+        AutoModel.from_pretrained(note_model),
+        AutoTokenizer.from_pretrained(note_model),
+        ModelConfig(
+            event_width=8,
+            event_layers=1,
+            study_width=16,
+            study_layers=1,
+            bins=17,
+            note_slots=2,
+            solver_dim=8,
+            lexical_dim=4,
+            ridge_grid_size=7,
+            per_slot_note_temporal=True,
+        ),
+    )
+    assert m.log_lam_tau.shape == (7,)
+    rows, _ = simulate_episode(17, 1, False, 8)
+    loss, _, _, _, _, parts = fit_episode(m, rows, 5)
+    assert all(torch.isfinite(v) for v in parts.values())
+    loss.backward()
+    for part in (
+        m.patient.note_slot_clock,
+        m.patient.note_slot_temporal_fuse,
+        m.patient.note_slot_temporal_norm,
+    ):
+        assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in part.parameters())
+    assert m.patient.note_slot_time_q.grad is not None
+    assert m.patient.note_slot_time_q.grad.abs().sum() > 0
+
+    # Reversing progression order of two distinct notes or shifting timestamps changes note slots.
+    m.eval()
+    base_row = {s: [] for s in STREAMS}
+    p_a = {
+        **base_row,
+        "notes": [
+            {"day_from_index": -100, "text": "visit"},
+            {"day_from_index": 0, "text": "visit ECOG visit ECOG"},
+        ],
+    }
+    p_b = {
+        **base_row,
+        "notes": [
+            {"day_from_index": -100, "text": "visit ECOG visit ECOG"},
+            {"day_from_index": 0, "text": "visit"},
+        ],
+    }
+    p_c = {
+        **base_row,
+        "notes": [
+            {"day_from_index": -10, "text": "visit"},
+            {"day_from_index": 0, "text": "visit ECOG visit ECOG"},
+        ],
+    }
+    p_one = {**base_row, "notes": [{"day_from_index": 0, "text": "visit"}]}
+    with torch.no_grad():
+        embs = m.patient([p_a, p_b, p_c, p_one, base_row])
+        assert torch.isfinite(embs).all()
+        assert not torch.allclose(embs[0, :2], embs[1, :2])
+        assert not torch.allclose(embs[0, :2], embs[2, :2])
+
+    # 3. CLI end-to-end with --per-slot-note-temporal, --ridge-grid-size 7, log_uniform, --eval-context-size.
+    run = tmp_path / "single_stage"
+    main(
+        [
+            "train",
+            "--run-dir",
+            str(run),
+            "--mixed-prior",
+            "--note-model",
+            str(note_model),
+            "--device",
+            "cpu",
+            "--steps",
+            "1",
+            "--min-context-size",
+            "4",
+            "--context-size",
+            "8",
+            "--context-size-sampling",
+            "log_uniform",
+            "--query-size",
+            "2",
+            "--eval-every",
+            "1",
+            "--eval-studies",
+            "2",
+            "--eval-context-size",
+            "5",
+            "--event-width",
+            "8",
+            "--event-layers",
+            "1",
+            "--study-width",
+            "16",
+            "--study-layers",
+            "1",
+            "--note-slots",
+            "2",
+            "--per-slot-note-temporal",
+            "--solver-dim",
+            "8",
+            "--lexical-dim",
+            "4",
+            "--ridge-grid-size",
+            "7",
+            "--bins",
+            "17",
+        ]
+    )
+    log_lines = [json.loads(s) for s in capsys.readouterr().out.splitlines() if s.startswith("{")]
+    assert log_lines[-1]["eval_context_size"] == 5
+    reloaded, saved = load_run(run, "cpu")
+    assert reloaded.cfg.per_slot_note_temporal is True and reloaded.cfg.ridge_grid_size == 7
+    assert saved["settings"]["context_size_sampling"] == "log_uniform"
+    assert saved["settings"]["eval_context_size"] == 5
+
+    # 4. Backward compatibility with Run 2 v4 checkpoints (lexical_dim > 0, no new fields).
+    r2_dir = tmp_path / "run2_compat"
+    r2_dir.mkdir()
+    r2 = CausalStudyModel(
+        AutoModel.from_pretrained(note_model),
+        AutoTokenizer.from_pretrained(note_model),
+        ModelConfig(
+            event_width=8,
+            event_layers=1,
+            study_width=16,
+            study_layers=1,
+            bins=17,
+            note_slots=2,
+            solver_dim=8,
+            lexical_dim=4,
+        ),
+    ).eval()
+    r2.patient.tokenizer.save_pretrained(r2_dir / "tokenizer")
+    old_r2_cfg = {
+        k: v
+        for k, v in vars(r2.cfg).items()
+        if k not in ("per_slot_note_temporal", "ridge_grid_size")
+    }
+    torch.save(
+        dict(
+            format_version=CHECKPOINT_FORMAT_VERSION,
+            model=old_r2_cfg,
+            backbone=r2.patient.backbone.config.to_dict(),
+            weights=r2.state_dict(),
+        ),
+        r2_dir / "checkpoint.pt",
+    )
+    r2_loaded, _ = load_run(r2_dir, "cpu")
+    assert r2_loaded.cfg.per_slot_note_temporal is False and r2_loaded.cfg.ridge_grid_size == 5
+    with torch.no_grad():
+        torch.testing.assert_close(r2_loaded.eval()(rows[:4], rows[4:])[0], r2(rows[:4], rows[4:])[0])

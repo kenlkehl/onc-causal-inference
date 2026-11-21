@@ -192,6 +192,12 @@ def main(argv=None):
         help="Optional lower bound to sample variable context sizes up to --context-size.",
     )
     train.add_argument(
+        "--context-size-sampling",
+        choices=("uniform", "log_uniform"),
+        default="uniform",
+        help="Distribution for variable context sizes between --min-context-size and --context-size.",
+    )
+    train.add_argument(
         "--grad-accum-steps",
         type=int,
         default=1,
@@ -251,6 +257,12 @@ def main(argv=None):
         help="Override minimum context size on resume.",
     )
     resume.add_argument(
+        "--context-size-sampling",
+        choices=("uniform", "log_uniform"),
+        default=None,
+        help="Override variable context-size sampling distribution on resume.",
+    )
+    resume.add_argument(
         "--query-size",
         type=int,
         default=None,
@@ -287,6 +299,12 @@ def main(argv=None):
         help="Override held-out evaluation study count on resume.",
     )
     resume.add_argument(
+        "--eval-context-size",
+        type=int,
+        default=None,
+        help="Override mid-training held-out evaluation context size on resume.",
+    )
+    resume.add_argument(
         "--note-grad-patients",
         type=int,
         default=None,
@@ -311,6 +329,12 @@ def main(argv=None):
         help="Evaluate on held-out studies every N steps and save best_checkpoint.pt (0 disables).",
     )
     train.add_argument("--eval-studies", type=int, default=16)
+    train.add_argument(
+        "--eval-context-size",
+        type=int,
+        default=None,
+        help="Optional context size for mid-training held-out evaluations (defaults to --context-size).",
+    )
     prior = train.add_mutually_exclusive_group()
     prior.add_argument(
         "--design-bank", type=Path, help="LLM-designed study prior (default: bundled bank)."
@@ -327,8 +351,12 @@ def main(argv=None):
     )
     defaults = ModelConfig()
     for key, value in vars(defaults).items():
-        arg_type = float if isinstance(value, float) else int
-        train.add_argument("--" + key.replace("_", "-"), type=arg_type, default=value)
+        flag = "--" + key.replace("_", "-")
+        if isinstance(value, bool):
+            train.add_argument(flag, action=argparse.BooleanOptionalAction, default=value)
+        else:
+            arg_type = float if isinstance(value, float) else int
+            train.add_argument(flag, type=arg_type, default=value)
     scoring.add_argument("--studies", type=int, default=16)
     scoring.add_argument(
         "--eval-cohort",
@@ -383,6 +411,7 @@ def main(argv=None):
                 "lr_scheduler",
                 "context_size",
                 "min_context_size",
+                "context_size_sampling",
                 "query_size",
                 "grad_accum_steps",
                 "precision",
@@ -392,6 +421,7 @@ def main(argv=None):
                 "num_workers",
                 "eval_every",
                 "eval_studies",
+                "eval_context_size",
                 "seed",
             )
         }
@@ -410,12 +440,14 @@ def main(argv=None):
             for k in (
                 "context_size",
                 "min_context_size",
+                "context_size_sampling",
                 "query_size",
                 "grad_accum_steps",
                 "lr",
                 "note_lr",
                 "eval_every",
                 "eval_studies",
+                "eval_context_size",
                 "note_grad_patients",
                 "freeze_note_backbone",
                 "num_workers",

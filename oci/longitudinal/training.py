@@ -12,7 +12,9 @@ import math
 import multiprocessing
 import os
 from pathlib import Path
+import sys
 import tempfile
+import time
 
 import numpy as np
 from scipy.linalg import cho_solve, solve_triangular
@@ -307,9 +309,22 @@ def _is_no_decay(name, param):
             "extra_labs",
             "extra_pros",
             "note_queries",
+            "note_slot_time_q",
             ".summary",
         )
     )
+
+
+def _sample_context_size(rng, min_context, max_context, sampling):
+    """Sample a study context size in ``[min_context, max_context]``."""
+    if min_context >= max_context:
+        return max_context
+    if sampling == "uniform":
+        return int(rng.integers(min_context, max_context + 1))
+    if sampling == "log_uniform":
+        u = float(rng.uniform(math.log(min_context), math.log(max_context)))
+        return int(min(max_context, max(min_context, round(math.exp(u)))))
+    raise ValueError(f"Unknown context_size_sampling: {sampling}")
 
 
 def _optimizer(model, settings):
@@ -473,27 +488,38 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
 
     max_context = int(settings["context_size"])
     min_context = int(settings.get("min_context_size") or max_context)
+    context_sampling = settings.get("context_size_sampling", "uniform")
     query_size = int(settings["query_size"])
     grad_accum = int(settings.get("grad_accum_steps", 1))
     precision = settings.get("precision", "auto")
     augment = bool(settings.get("augment_notes", False))
     eval_every = int(settings.get("eval_every", 0))
     eval_studies = int(settings.get("eval_studies", 16))
+    eval_context = int(settings.get("eval_context_size") or max_context)
     best_eval_rmse = settings.get("best_eval_cate_rmse")
     note_grad_patients = settings.get("note_grad_patients")
     freeze_note_backbone = bool(settings.get("freeze_note_backbone", False))
     num_workers = int(settings.get("num_workers", 0))
     if (
-        min(max_context, min_context, query_size, grad_accum, settings["lr"], settings["note_lr"])
+        min(
+            max_context,
+            min_context,
+            eval_context,
+            query_size,
+            grad_accum,
+            settings["lr"],
+            settings["note_lr"],
+        )
         <= 0
         or min_context > max_context
+        or context_sampling not in ("uniform", "log_uniform")
         or eval_every < 0
         or eval_studies < 1
         or num_workers < 0
         or (note_grad_patients is not None and note_grad_patients < 0)
     ):
         raise ValueError(
-            "Invalid context/query sizes, grad_accum_steps, eval settings, LRs, or workers"
+            "Invalid context/query sizes, sampling mode, grad_accum_steps, eval settings, LRs, or workers"
         )
 
     designs = split_designs(bank, "train")
@@ -528,7 +554,9 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
             for micro in range(grad_accum):
                 if min_context < max_context:
                     ctx_rng = np.random.default_rng([settings["seed"], step, micro, 313])
-                    n_context = int(ctx_rng.integers(min_context, max_context + 1))
+                    n_context = _sample_context_size(
+                        ctx_rng, min_context, max_context, context_sampling
+                    )
                 else:
                     n_context = max_context
                 design = _select_episode_design(
@@ -566,7 +594,9 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                 if tables:
                     if min_context < max_context:
                         ctx_rng = np.random.default_rng([settings["seed"], step, micro, 313])
-                        n_context = int(ctx_rng.integers(min_context, max_context + 1))
+                        n_context = _sample_context_size(
+                            ctx_rng, min_context, max_context, context_sampling
+                        )
                     else:
                         n_context = max_context
                     size = n_context + query_size
@@ -623,13 +653,14 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                     model,
                     settings["seed"],
                     eval_studies,
-                    max_context,
+                    eval_context,
                     query_size,
                     bank=bank,
                     precision=precision,
                     num_workers=num_workers,
                 )
                 _set_train_modes()
+                record["eval_context_size"] = eval_context
                 record["eval_cate_rmse"] = val["cate_rmse"]
                 record["eval_risk_rmse"] = val["risk_rmse"]
                 record["eval_ate_rmse"] = val["ate_rmse"]
@@ -819,8 +850,10 @@ def evaluate(
                 ),
             )
 
+    progress_every = max(studies // 20, 25) if studies >= 50 else 0
+    t_eval_start = time.monotonic()
     with _EpisodePrefetcher(_eval_jobs(), num_workers=num_workers) as prefetcher:
-        for _ in range(studies):
+        for done_idx in range(1, studies + 1):
             _, rows, provenance = prefetcher.next_item()
             rec = _score_episode(model, rows, context_size, precision=precision)
             records.append(rec)
@@ -833,6 +866,15 @@ def evaluate(
                     else "unseen_cancer"
                 )
                 by_gen.setdefault(gen_key, []).append(rec)
+            if progress_every and (done_idx % progress_every == 0 or done_idx == studies):
+                elapsed = time.monotonic() - t_eval_start
+                eta = elapsed * (studies - done_idx) / done_idx
+                print(
+                    f"[evaluate] {done_idx}/{studies} studies "
+                    f"({elapsed / 60.0:.1f}m elapsed, ~{eta / 60.0:.1f}m left)",
+                    file=sys.stderr,
+                    flush=True,
+                )
     result = _aggregate_eval(records)
     if designs:
         result["by_width"] = {k: _aggregate_eval(v) for k, v in sorted(by_width.items())}

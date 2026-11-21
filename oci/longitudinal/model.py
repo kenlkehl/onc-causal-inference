@@ -74,6 +74,8 @@ class ModelConfig:
     note_slots: int = 8
     solver_dim: int = 64
     lexical_dim: int = 0
+    ridge_grid_size: int = 5
+    per_slot_note_temporal: bool = False
     cate_loss_weight: float = 2.0
     propensity_loss_weight: float = 0.5
 
@@ -91,6 +93,7 @@ class ModelConfig:
             )
             < 1
             or self.lexical_dim < 0
+            or self.ridge_grid_size < 2
             or self.bins < 3
             or self.cate_loss_weight < 0
             or self.propensity_loss_weight < 0
@@ -224,6 +227,7 @@ class PatientEncoder(nn.Module):
                 raise ValueError("Note tokenizer must define a pad_token or eos_token")
         self.note_batch_size = cfg.note_batch_size
         self.note_slots = cfg.note_slots
+        self.per_slot_note_temporal = bool(cfg.per_slot_note_temporal)
         self._accepts_use_cache = (
             "use_cache" in inspect.signature(self.backbone.forward).parameters
         )
@@ -241,6 +245,13 @@ class PatientEncoder(nn.Module):
         self.note_max_proj = nn.Linear(hidden_size, width)
         self.notes = nn.Linear(hidden_size, width)
         self.note_cross_norm = nn.LayerNorm(width)
+        if self.per_slot_note_temporal:
+            self.note_slot_clock = nn.Sequential(
+                nn.Linear(3, width), nn.GELU(), nn.Linear(width, width)
+            )
+            self.note_slot_time_q = nn.Parameter(torch.randn(cfg.note_slots, width) * 0.02)
+            self.note_slot_temporal_fuse = nn.Linear(4 * width, width)
+            self.note_slot_temporal_norm = nn.LayerNorm(width)
 
         self.labs = nn.Linear(LAB_INPUT_SIZE, width)
         self.extra_labs = nn.Embedding(EXTRA_LAB_BUCKETS, width)
@@ -578,15 +589,55 @@ class PatientEncoder(nn.Module):
                 )
                 values = note_attn.mean(dim=1) + note_max + note_mean
                 temporal = encoder(values, times, lengths)  # (N_patients, M, D)
-                # Preserve rare findings across the entire multi-note history via cross-note max.
+                # Preserve rare findings (and optional per-slot progression) across longitudinal notes.
                 cross_note = temporal.new_zeros((n_patients, self.note_slots, values.shape[-1]))
-                for p_idx, (a_chunk, mx_chunk) in enumerate(
-                    zip(note_attn.split(lengths), note_max.split(lengths), strict=True)
-                ):
-                    if len(a_chunk):
-                        cross_note[p_idx] = a_chunk.max(dim=0).values + mx_chunk.max(
-                            dim=0
-                        ).values.unsqueeze(0)
+                if self.per_slot_note_temporal:
+                    if len(times):
+                        slot_time_emb = self.note_slot_clock(
+                            values.new_tensor(times).reshape(-1, 3)
+                        )
+                    else:
+                        slot_time_emb = values.new_empty((0, values.shape[-1]))
+                    inv_sqrt_d = 1.0 / math.sqrt(values.shape[-1])
+                    for p_idx, (a_chunk, mx_chunk, t_chunk) in enumerate(
+                        zip(
+                            note_attn.split(lengths),
+                            note_max.split(lengths),
+                            slot_time_emb.split(lengths),
+                            strict=True,
+                        )
+                    ):
+                        if len(a_chunk):
+                            slot_max = a_chunk.max(dim=0).values
+                            slot_latest = a_chunk[-1]
+                            slot_delta = (
+                                a_chunk[-1] - a_chunk[0]
+                                if len(a_chunk) >= 2
+                                else torch.zeros_like(slot_latest)
+                            )
+                            timed = a_chunk + t_chunk.unsqueeze(1)
+                            t_scores = (
+                                torch.einsum("md,lmd->ml", self.note_slot_time_q, timed).float()
+                                * inv_sqrt_d
+                            )
+                            t_w = torch.softmax(t_scores, dim=-1).to(a_chunk.dtype)
+                            slot_attn = torch.einsum("ml,lmd->md", t_w, a_chunk)
+                            fused_slot = self.note_slot_temporal_norm(
+                                self.note_slot_temporal_fuse(
+                                    torch.cat(
+                                        [slot_max, slot_latest, slot_delta, slot_attn], dim=-1
+                                    )
+                                )
+                            )
+                            cross_note[p_idx] = fused_slot + mx_chunk.max(dim=0).values.unsqueeze(0)
+                else:
+                    for p_idx, (a_chunk, mx_chunk) in enumerate(
+                        zip(note_attn.split(lengths), note_max.split(lengths), strict=True)
+                    ):
+                        if len(a_chunk):
+                            cross_note[p_idx] = a_chunk.max(dim=0).values + mx_chunk.max(
+                                dim=0
+                            ).values.unsqueeze(0)
                 stream_summaries.append(temporal + self.note_cross_norm(cross_note))
             else:
                 values = self._values(name, flat_events)
@@ -801,9 +852,12 @@ class CausalStudyModel(nn.Module):
         nn.init.zeros_(self.solver_mlp[-1].bias)
 
         # Learnable log-penalty grids for closed-form LOO-CV propensity, outcome, and R-learner.
-        self.log_lam_e = nn.Parameter(torch.tensor([0.5, 2.0, 3.5, 5.0, 6.5]))
-        self.log_lam_m = nn.Parameter(torch.tensor([0.5, 2.0, 3.5, 5.0, 6.5]))
-        self.log_lam_tau = nn.Parameter(torch.tensor([1.0, 2.5, 4.0, 5.5, 7.0]))
+        k_grid = cfg.ridge_grid_size
+        base_grid = torch.linspace(0.5, 0.5 + 1.5 * (k_grid - 1), k_grid)
+        tau_grid = torch.linspace(1.0, 1.0 + 1.5 * (k_grid - 1), k_grid)
+        self.log_lam_e = nn.Parameter(base_grid.clone())
+        self.log_lam_m = nn.Parameter(base_grid.clone())
+        self.log_lam_tau = nn.Parameter(tau_grid.clone())
         self.log_cv_temp = nn.Parameter(torch.tensor(1.5))
         if cfg.lexical_dim > 0:
             self.lexical_log_weight = nn.Parameter(torch.tensor(0.0))
