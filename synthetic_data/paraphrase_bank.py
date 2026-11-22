@@ -160,6 +160,20 @@ class _NemotronParaphraser:
 
         last_err = None
         feedback = ""
+        is_nemotron = bool(re.search(r"nemotron[-_ ]?3[._]5(?![0-9])", self.model, re.I))
+        temp = 1.0 if is_nemotron else 0.7
+        extra = (
+            {
+                "top_k": 0,
+                "min_p": 0.0,
+                "presence_penalty": 0.0,
+                "frequency_penalty": 0.0,
+                "repetition_penalty": 1.0,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+            if is_nemotron
+            else {"chat_template_kwargs": {"enable_thinking": False}}
+        )
         for attempt in range(8):
             req_seed = _derive_seed(self.seed, key, attempt)
             try:
@@ -167,11 +181,11 @@ class _NemotronParaphraser:
                     model=self.model,
                     messages=[{"role": "user", "content": prompt + feedback}],
                     seed=req_seed,
-                    temperature=0.7,
+                    temperature=temp,
                     top_p=0.95,
                     max_tokens=max_tokens,
                     response_format={"type": "json_object"},
-                    extra_body={"chat_template_kwargs": {"enable_thinking": False}, "top_k": 40},
+                    extra_body=extra,
                 )
             except (APIConnectionError, APIStatusError) as exc:
                 last_err = exc

@@ -13,7 +13,11 @@ from pathlib import Path
 import time
 
 from synthetic_data.config import LLMConfig
-from synthetic_data.longitudinal import generate_longitudinal_cohort
+from synthetic_data.longitudinal import (
+    _is_nemotron_3_5,
+    _nemotron_3_5_extra_body,
+    generate_longitudinal_cohort,
+)
 from synthetic_data.paraphrase_bank import DEFAULT_API_URL, DEFAULT_MODEL
 from synthetic_data.study_designs import DEFAULT_BANK, load_bank
 
@@ -77,13 +81,20 @@ def main():
     bank = load_bank(args.bank)
     selected = select_stratified_held_out(bank, args.num_designs)
     args.output_root.mkdir(parents=True, exist_ok=True)
+    if _is_nemotron_3_5(args.model):
+        extra_body = _nemotron_3_5_extra_body(enable_thinking=False)
+        temp = 1.0
+    else:
+        extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
+        temp = 0.7
     llm_cfg = LLMConfig(
         api_base_url=args.api_url,
         model_name=args.model,
+        temperature=temp,
         max_tokens=args.max_tokens,
         api_key=os.getenv("OPENAI_API_KEY") or os.getenv("VLLM_API_KEY") or "",
         reject_incomplete=True,
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}, "top_k": 40},
+        extra_body=extra_body,
     )
     print(
         f"Generating {len(selected)} realistic full-LLM held-out cohorts "

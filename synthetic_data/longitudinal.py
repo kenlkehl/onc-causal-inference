@@ -166,6 +166,24 @@ _SEX_SPECIFIC_CANCERS = re.compile(
     r"\b(prostate|testicular|ovarian|cervical|endometrial|uterine|vulvar|vaginal|penile)\b",
     re.IGNORECASE,
 )
+_NEMOTRON_3_5_RE = re.compile(r"nemotron[-_ ]?3[._]5(?![0-9])", re.IGNORECASE)
+
+
+def _is_nemotron_3_5(model_name: str | None) -> bool:
+    return bool(model_name and _NEMOTRON_3_5_RE.search(str(model_name)))
+
+
+def _nemotron_3_5_extra_body(*, enable_thinking: bool = False) -> dict:
+    """NVIDIA recommended text sampling profile for Nemotron 3.5 (temp=1.0, top_p=0.95)."""
+    return {
+        "top_p": 0.95,
+        "top_k": 0,
+        "min_p": 0.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
+        "repetition_penalty": 1.0,
+        "chat_template_kwargs": {"enable_thinking": enable_thinking},
+    }
 _MAX_TX_INTERACTIONS = 15
 _MAX_OUTCOME_INTERACTIONS = 6
 _CALIBRATION_DRAWS = 512
@@ -390,12 +408,13 @@ def _render_llm_note(
             "Return just the clinical note.\n\n" + note["text"]
         )
         path = cache_dir / f"patient_{patient_id:06d}" / f"day_{note['day_from_index']}.realistic.json"
+        temp = 1.0 if _is_nemotron_3_5(client.config.model_name) else 0.7
         text = _request(
             client,
             path,
             client.config.model_name,
             prompt,
-            0.7,
+            temp,
             client.config.max_tokens,
             lambda t: _validate_note(t, allow_sex_terms=allow_sex_terms),
             system_prompt=CLINICAL_SYSTEM_PROMPT + NOTE_OUTPUT_FORMAT,
@@ -413,12 +432,13 @@ def _render_llm_note(
         "Return just the clinical note.\n\n" + draft
     )
     path = cache_dir / f"patient_{patient_id:06d}" / f"day_{note['day_from_index']}.json"
+    temp = 1.0 if _is_nemotron_3_5(client.config.model_name) else 0.5
     text = _request(
         client,
         path,
         client.config.model_name,
         prompt,
-        0.5,
+        temp,
         client.config.max_tokens,
         lambda t: _validate_note(t, allow_sex_terms=allow_sex_terms),
         system_prompt=CLINICAL_SYSTEM_PROMPT + NOTE_OUTPUT_FORMAT,
@@ -776,14 +796,20 @@ def longitudinal_main(argv):
     paraphrase_bank = load_paraphrase_bank(args.paraphrase_bank) if args.paraphrase_bank else None
     llm_config = None
     if args.note_style == "llm":
-        extra_body = (
-            {"chat_template_kwargs": {"enable_thinking": False}, "top_k": 40}
-            if args.disable_thinking
-            else None
-        )
+        if _is_nemotron_3_5(args.model):
+            extra_body = _nemotron_3_5_extra_body(enable_thinking=not args.disable_thinking)
+            llm_temp = 1.0
+        else:
+            extra_body = (
+                {"chat_template_kwargs": {"enable_thinking": False}}
+                if args.disable_thinking
+                else None
+            )
+            llm_temp = llm.temperature
         llm_config = LLMConfig(
             api_base_url=args.api_url,
             model_name=args.model,
+            temperature=llm_temp,
             max_tokens=args.max_tokens,
             api_key=os.getenv("OPENAI_API_KEY") or os.getenv("VLLM_API_KEY") or "",
             reject_incomplete=True,
