@@ -738,6 +738,9 @@ def main(argv: Optional[List[str]] = None):
     if argv and argv[0] == "design-bank":
         from .study_designs import designs_main
         return designs_main(argv[1:])
+    if argv and argv[0] == "paraphrase-bank":
+        from .paraphrase_bank import paraphrase_bank_main
+        return paraphrase_bank_main(argv[1:])
     if argv and argv[0] == "longitudinal":
         from .longitudinal import longitudinal_main
         return longitudinal_main(argv[1:])

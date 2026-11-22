@@ -212,19 +212,112 @@ def _burden_coupling(name):
     return -0.25 + 0.90 * unit
 
 
-def prepare_note_findings(candidates):
+def prepare_note_findings(candidates, *, paraphrase_bank=None):
     """Precompute deduplicated findings, base logits, and couplings once per design."""
+    from .paraphrase_bank import finding_key
+
     deduped = sanitize_note_findings(candidates)
+    p_lookup = paraphrase_bank.get("findings") if paraphrase_bank else None
     prepared = []
     for spec in deduped:
         base_p = _clip(float(spec["prevalence"]), 1e-4, 1.0 - 1e-4)
         base_logit = math.log(base_p / (1.0 - base_p))
         phys_key = _physiology_key(spec)
         coupling = _burden_coupling(spec["name"])
-        prepared.append(
-            (spec["name"], base_p, base_logit, phys_key, coupling, spec["present"], spec["absent"])
-        )
+        if p_lookup is not None:
+            entry = p_lookup.get(finding_key(spec["present"], spec["absent"]))
+            if entry:
+                present_opts = tuple(entry["present"])
+                absent_opts = tuple(entry["absent"])
+                section = entry.get("section", "oncology_history")
+            else:
+                present_opts = (spec["present"],)
+                absent_opts = (spec["absent"],)
+                section = "oncology_history"
+            prepared.append(
+                (
+                    spec["name"],
+                    base_p,
+                    base_logit,
+                    phys_key,
+                    coupling,
+                    present_opts,
+                    absent_opts,
+                    section,
+                )
+            )
+        else:
+            prepared.append(
+                (spec["name"], base_p, base_logit, phys_key, coupling, spec["present"], spec["absent"])
+            )
     return tuple(prepared)
+
+
+def _format_realistic_note(narrative, ecog_str, sectioned_findings, paraphrase_bank, rng):
+    """Assemble a multi-section oncology note from paraphrased findings and benign filler."""
+    from .paraphrase_bank import SECTION_HEADERS, SECTIONS
+
+    fillers = paraphrase_bank.get("filler_paragraphs") or {}
+    ecog_templates = paraphrase_bank.get("ecog_templates") or {}
+    ecog_digit = ecog_str.strip().rstrip(".")
+    ecog_opts = ecog_templates.get(ecog_digit)
+    ecog_line = (
+        ecog_opts[int(rng.integers(len(ecog_opts)))]
+        if ecog_opts
+        else f"ECOG performance status: {ecog_str}"
+    )
+
+    parts = []
+    hpi_fillers = fillers.get("hpi_intro")
+    hpi_header = ("INTERVAL HISTORY:", "HPI:", "ONCOLOGY FOLLOW-UP:")[int(rng.integers(3))]
+    if hpi_fillers and rng.random() < 0.75:
+        intro = hpi_fillers[int(rng.integers(len(hpi_fillers)))]
+        parts.append(f"{hpi_header} {intro} {narrative}")
+    else:
+        parts.append(f"{hpi_header} {narrative}")
+
+    # Emit populated clinical sections in a mildly varied order.
+    sec_order = list(SECTIONS)
+    if rng.random() < 0.5:
+        rng.shuffle(sec_order)
+    for sec in sec_order:
+        items = sectioned_findings.get(sec)
+        if not items:
+            continue
+        if len(items) > 1:
+            rng.shuffle(items)
+        headers = SECTION_HEADERS.get(sec, ("CLINICAL NOTES:",))
+        hdr = headers[int(rng.integers(len(headers)))]
+        parts.append(f"{hdr} {' '.join(items)}")
+
+    ros_fillers = fillers.get("ros_general")
+    if ros_fillers and rng.random() < 0.65:
+        parts.append(f"ROS: {ros_fillers[int(rng.integers(len(ros_fillers)))]}")
+
+    exam_fillers = fillers.get("exam_general")
+    exam_hdr = ("PHYSICAL EXAM:", "EXAM:", "OBJECTIVE:")[int(rng.integers(3))]
+    if exam_fillers and rng.random() < 0.75:
+        exam_line = exam_fillers[int(rng.integers(len(exam_fillers)))]
+        if rng.random() < 0.5:
+            parts.append(f"{exam_hdr} {exam_line} {ecog_line}")
+            ecog_placed = True
+        else:
+            parts.append(f"{exam_hdr} {exam_line}")
+            ecog_placed = False
+    else:
+        parts.append(f"{exam_hdr} {ecog_line}")
+        ecog_placed = True
+
+    plan_fillers = fillers.get("plan_followup")
+    plan_hdr = ("ASSESSMENT & PLAN:", "IMPRESSION / PLAN:", "A/P:")[int(rng.integers(3))]
+    plan_bits = []
+    if not ecog_placed:
+        plan_bits.append(ecog_line)
+    if plan_fillers and rng.random() < 0.8:
+        plan_bits.append(plan_fillers[int(rng.integers(len(plan_fillers)))])
+    if plan_bits:
+        parts.append(f"{plan_hdr} {' '.join(plan_bits)}")
+    return "\n".join(parts)
 
 
 def document_findings(
@@ -236,6 +329,7 @@ def document_findings(
     omit_absent_prob=0.0,
     style_variation=False,
     prepared=None,
+    paraphrase_bank=None,
 ):
     """Sample design-specific findings and record each one in a dated pretreatment note.
 
@@ -243,17 +337,54 @@ def document_findings(
     strongly to the matching simulated stream, and other findings carry a
     finding-specific correlation with overall clinical burden. ``omit_absent_prob``
     mimics real-EHR positive-only charting where absent findings may go unstated
-    rather than explicitly negated.
+    rather than explicitly negated. When ``paraphrase_bank`` is supplied, findings
+    are rendered with diverse LLM-authored clinical paraphrases inside multi-section
+    oncology notes.
     """
-    items = prepared if prepared is not None else prepare_note_findings(candidates)
+    items = (
+        prepared
+        if prepared is not None
+        else prepare_note_findings(candidates, paraphrase_bank=paraphrase_bank)
+    )
+    use_paraphrases = paraphrase_bank is not None or (items and len(items[0]) == 8)
     signals = _physiology_signals(streams)
     burden = signals.get("_burden", 0.0)
     has_signals = bool(signals)
     n_notes = len(notes)
     n_prefixes = len(_NOTE_PREFIXES)
     values = {}
-    additions = [[] for _ in range(n_notes)]
-    for name, base_p, base_logit, phys_key, coupling, present_stmt, absent_stmt in items:
+
+    if not use_paraphrases:
+        additions = [[] for _ in range(n_notes)]
+        for name, base_p, base_logit, phys_key, coupling, present_stmt, absent_stmt in items:
+            if phys_key is not None and phys_key in signals:
+                prob = _expit(base_logit + 1.8 * _clip(signals[phys_key], -2.5, 2.5))
+            elif has_signals:
+                prob = _expit(base_logit + coupling * burden)
+            else:
+                prob = base_p
+
+            is_present = rng.random() < prob
+            values[name] = "present" if is_present else "absent"
+            if not is_present and omit_absent_prob > 0.0 and rng.random() < omit_absent_prob:
+                continue
+            statement = present_stmt if is_present else absent_stmt
+            if style_variation:
+                prefix = _NOTE_PREFIXES[int(rng.integers(n_prefixes))]
+                if prefix:
+                    statement = prefix + statement
+            additions[int(rng.integers(n_notes))].append(statement)
+
+        for note, extra in zip(notes, additions):
+            if extra:
+                narrative, ecog = note["text"].rsplit(" ECOG performance status: ", 1)
+                note["text"] = f"{narrative} {' '.join(extra)} ECOG performance status: {ecog}"
+        return values
+
+    # Loop 1: sample causal finding presence, omission, and note placement using the exact
+    # same RNG consumption order as the plain path so ground-truth labels are bit-identical.
+    placements = []
+    for name, base_p, base_logit, phys_key, coupling, present_opts, absent_opts, section in items:
         if phys_key is not None and phys_key in signals:
             prob = _expit(base_logit + 1.8 * _clip(signals[phys_key], -2.5, 2.5))
         elif has_signals:
@@ -265,15 +396,24 @@ def document_findings(
         values[name] = "present" if is_present else "absent"
         if not is_present and omit_absent_prob > 0.0 and rng.random() < omit_absent_prob:
             continue
-        statement = present_stmt if is_present else absent_stmt
         if style_variation:
-            prefix = _NOTE_PREFIXES[int(rng.integers(n_prefixes))]
-            if prefix:
-                statement = prefix + statement
-        additions[int(rng.integers(n_notes))].append(statement)
+            _ = int(rng.integers(n_prefixes))
+        note_idx = int(rng.integers(n_notes))
+        placements.append((note_idx, section, present_opts if is_present else absent_opts))
 
-    for note, extra in zip(notes, additions):
-        if extra:
-            narrative, ecog = note["text"].rsplit(" ECOG performance status: ", 1)
-            note["text"] = f"{narrative} {' '.join(extra)} ECOG performance status: {ecog}"
+    # Loop 2: render diverse clinical paraphrases and multi-section formatting after all
+    # causal ground-truth draws have completed.
+    render_rng = np.random.default_rng(int(rng.integers(0, 2**31 - 1)))
+    sectioned = [{} for _ in range(n_notes)]
+    for note_idx, section, pool in placements:
+        statement = (
+            pool[int(render_rng.integers(len(pool)))] if isinstance(pool, (tuple, list)) else pool
+        )
+        sectioned[note_idx].setdefault(section, []).append(statement)
+
+    for note, sec_map in zip(notes, sectioned):
+        narrative, ecog = note["text"].rsplit(" ECOG performance status: ", 1)
+        note["text"] = _format_realistic_note(
+            narrative, ecog, sec_map, paraphrase_bank or {}, render_rng
+        )
     return values

@@ -36,6 +36,7 @@ from .longitudinal_history import (
     history_features,
     simulate_history,
 )
+from .paraphrase_bank import load_paraphrase_bank
 from .pro_ctcae import PRO_ATTRIBUTES, PRO_INSTRUMENT, PRO_SOURCE, RECALL_DAYS
 from .prompts import CLINICAL_SYSTEM_PROMPT
 from .reequation import _features_with_roles, draw_equations, resolve_scenario
@@ -365,14 +366,45 @@ def _validate_note(text, *, allow_sex_terms=False):
         raise ValueError("Clinical note introduced an undocumented patient demographic")
 
 
-def _render_llm_note(client, cache_dir, patient_id, note, *, allow_sex_terms=False):
-    # Only the current visit goes to the writer. Keep the numeric ECOG field exact.
-    draft, ecog = note["text"].rsplit(" ECOG performance status: ", 1)
+def _render_llm_note(
+    client, cache_dir, patient_id, note, *, allow_sex_terms=False, realistic_notes=False
+):
     pronoun_rule = (
         ""
         if allow_sex_terms
         else "Use 'the patient' throughout because sex and gender are undocumented. "
     )
+    if realistic_notes:
+        prompt = (
+            "Write a realistic, multi-section outpatient medical oncology clinic note "
+            "(e.g. Interval History / HPI, Oncology & Past Medical History, Physical Exam, "
+            "Assessment & Plan) from the visit facts below.\n"
+            "Requirements:\n"
+            "- Include EVERY supplied clinical finding and the exact ECOG performance status "
+            "score naturally inside the clinical prose (do not drop findings or flip polarity).\n"
+            "- Paraphrase naturally using realistic physician wording, synonyms, and standard "
+            "oncology abbreviations rather than copying sentences verbatim.\n"
+            f"- {pronoun_rule}"
+            "Do not invent specific lab numbers, biomarkers, comorbidities, treatments, or "
+            "future outcomes beyond the supplied facts.\n"
+            "Return just the clinical note.\n\n" + note["text"]
+        )
+        path = cache_dir / f"patient_{patient_id:06d}" / f"day_{note['day_from_index']}.realistic.json"
+        text = _request(
+            client,
+            path,
+            client.config.model_name,
+            prompt,
+            0.7,
+            client.config.max_tokens,
+            lambda t: _validate_note(t, allow_sex_terms=allow_sex_terms),
+            system_prompt=CLINICAL_SYSTEM_PROMPT + NOTE_OUTPUT_FORMAT,
+        )
+        note["text"] = text.strip()
+        return
+
+    # Only the current visit goes to the writer. Keep the numeric ECOG field exact.
+    draft, ecog = note["text"].rsplit(" ECOG performance status: ", 1)
     prompt = (
         "Write one short pretreatment clinical note from the visit facts below. "
         "Use only the supplied facts and preserve the findings and their polarity. "
@@ -402,6 +434,7 @@ class LongitudinalDGP:
     schema_version: int = 2
     reference: dict = field(default_factory=lambda: REFERENCE)
     design: dict | None = None
+    paraphrase_bank: dict | None = field(default=None, repr=False, compare=False)
     prepared_findings: tuple | None = field(default=None, repr=False, compare=False)
     design_measurements: list | None = field(default=None, repr=False, compare=False)
 
@@ -409,10 +442,14 @@ class LongitudinalDGP:
         if self.design is not None and self.prepared_findings is None:
             measurements, note_findings = sanitized_design_candidates(self.design)
             self.design_measurements = measurements
-            self.prepared_findings = prepare_note_findings(note_findings)
+            self.prepared_findings = prepare_note_findings(
+                note_findings, paraphrase_bank=self.paraphrase_bank
+            )
 
 
-def draw_longitudinal_dgp(dgp_seed, prior=None, *, schema_version=2, design=None):
+def draw_longitudinal_dgp(
+    dgp_seed, prior=None, *, schema_version=2, design=None, paraphrase_bank=None
+):
     """One reproducible study, shared by its context and query patients."""
     if schema_version not in (1, 2):
         raise ValueError(f"Unknown longitudinal schema version: {schema_version}")
@@ -459,7 +496,9 @@ def draw_longitudinal_dgp(dgp_seed, prior=None, *, schema_version=2, design=None
         treatment, outcome = _calibrate_longitudinal_equations(
             features, reference, treatment, outcome, rng
         )
-    return LongitudinalDGP(features, treatment, outcome, schema_version, reference, design)
+    return LongitudinalDGP(
+        features, treatment, outcome, schema_version, reference, design, paraphrase_bank
+    )
 
 
 def sample_longitudinal_patient(
@@ -471,6 +510,7 @@ def sample_longitudinal_patient(
     cache_dir=None,
     omit_absent_prob=0.0,
     style_variation=False,
+    realistic_notes=False,
 ):
     design = dgp.design
     streams = simulate_history(
@@ -497,6 +537,7 @@ def sample_longitudinal_patient(
                 omit_absent_prob=omit_absent_prob,
                 style_variation=style_variation,
                 prepared=dgp.prepared_findings,
+                paraphrase_bank=dgp.paraphrase_bank,
             )
         )
     else:
@@ -507,7 +548,12 @@ def sample_longitudinal_patient(
         )
         for note in streams["notes"]:
             _render_llm_note(
-                note_client, cache_dir, patient_id, note, allow_sex_terms=allow_sex
+                note_client,
+                cache_dir,
+                patient_id,
+                note,
+                allow_sex_terms=allow_sex,
+                realistic_notes=realistic_notes,
             )
     # The label-draw stream is independent of every history and its renderer.
     rng = np.random.default_rng([seed, patient_id, 2])
@@ -549,6 +595,9 @@ def generate_longitudinal_cohort(
     prior=None,
     schema_version=2,
     design=None,
+    paraphrase_bank=None,
+    omit_absent_prob=0.0,
+    realistic_notes=False,
 ):
     """Publish a Parquet cohort with longitudinal observations and the exact DGP."""
     if dataset_size < 1 or num_workers < 1 or seed < 0 or dgp_seed < 0:
@@ -559,7 +608,13 @@ def generate_longitudinal_cohort(
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     if prior is None:
         prior = "design" if design is not None else "fixed_roles"
-    dgp = draw_longitudinal_dgp(dgp_seed, prior, schema_version=schema_version, design=design)
+    dgp = draw_longitudinal_dgp(
+        dgp_seed,
+        prior,
+        schema_version=schema_version,
+        design=design,
+        paraphrase_bank=paraphrase_bank,
+    )
     streams = STREAMS if schema_version == 2 else LEGACY_STREAMS
     config = dict(
         generation_mode="longitudinal",
@@ -605,6 +660,8 @@ def generate_longitudinal_cohort(
                 dgp=dgp,
                 note_client=writer,
                 cache_dir=cache_dir,
+                omit_absent_prob=omit_absent_prob,
+                realistic_notes=realistic_notes,
             )
             for start in range(0, dataset_size, 64):
                 rows = list(generate_rows(make_row, range(start, min(start + 64, dataset_size))))
@@ -668,6 +725,29 @@ def longitudinal_main(argv):
     )
     parser.add_argument("--design-id", help="Design to use from the supplied bank.")
     parser.add_argument(
+        "--paraphrase-bank",
+        type=Path,
+        default=None,
+        help="Optional LLM paraphrase + EHR-scaffold sidecar for richer offline notes.",
+    )
+    parser.add_argument(
+        "--omit-absent-prob",
+        type=float,
+        default=0.0,
+        help="Probability of omitting absent findings (positive-only charting).",
+    )
+    parser.add_argument(
+        "--realistic-notes",
+        action="store_true",
+        help="Prompt the LLM for multi-section clinic notes with woven-in ECOG & paraphrases.",
+    )
+    parser.add_argument(
+        "--disable-thinking",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Pass enable_thinking=False in extra_body for reasoning-capable vLLM models.",
+    )
+    parser.add_argument(
         "--schema-version",
         type=int,
         choices=(1, 2),
@@ -693,14 +773,21 @@ def longitudinal_main(argv):
         design = next((d for d in designs if d["id"] == args.design_id), None)
         if design is None:
             parser.error(f"Unknown design ID: {args.design_id}")
+    paraphrase_bank = load_paraphrase_bank(args.paraphrase_bank) if args.paraphrase_bank else None
     llm_config = None
     if args.note_style == "llm":
+        extra_body = (
+            {"chat_template_kwargs": {"enable_thinking": False}, "top_k": 40}
+            if args.disable_thinking
+            else None
+        )
         llm_config = LLMConfig(
             api_base_url=args.api_url,
             model_name=args.model,
             max_tokens=args.max_tokens,
-            api_key=os.getenv("OPENAI_API_KEY", ""),
+            api_key=os.getenv("OPENAI_API_KEY") or os.getenv("VLLM_API_KEY") or "",
             reject_incomplete=True,
+            extra_body=extra_body,
         )
     path = generate_longitudinal_cohort(
         args.output_dir,
@@ -709,6 +796,9 @@ def longitudinal_main(argv):
         dgp_seed=args.dgp_seed,
         prior="design" if design else args.prior,
         design=design,
+        paraphrase_bank=paraphrase_bank,
+        omit_absent_prob=args.omit_absent_prob,
+        realistic_notes=args.realistic_notes,
         schema_version=args.schema_version,
         llm_config=llm_config,
         num_workers=args.num_workers,

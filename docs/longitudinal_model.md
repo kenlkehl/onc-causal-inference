@@ -133,6 +133,10 @@ A training episode has three levels.
    equations, coupling overlapping chart findings to simulated physiology, correlating
    other findings with patient burden, and varying note framing and positive-only
    charting (`--augment-notes`) so the encoder adapts to real-EHR documentation patterns.
+   Supply `--paraphrase-bank PATH` on `train` or `evaluate` (built via
+   `python -m synthetic_data.cli paraphrase-bank`) to replace single-template finding
+   sentences with LLM-authored clinical paraphrases, varied ECOG phrasings, and
+   multi-section oncology note scaffolds while preserving exact paired causal ground truth.
 
 The checkpoint writes the design bank once to `design_bank.json.gz` beside
 `checkpoint.pt` (verified by SHA-256) rather than duplicating it inside every

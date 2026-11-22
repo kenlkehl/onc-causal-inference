@@ -11,6 +11,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
+from synthetic_data.paraphrase_bank import load_paraphrase_bank
 from synthetic_data.study_designs import load_bank
 
 from .events import binary_observations, read_patient_table
@@ -22,6 +23,7 @@ from .training import (
     evaluate_cohorts,
     load_run,
     load_run_design_bank,
+    load_run_paraphrase_bank_path,
     run_training,
 )
 
@@ -335,6 +337,12 @@ def main(argv=None):
         default=None,
         help="Optional context size for mid-training held-out evaluations (defaults to --context-size).",
     )
+    train.add_argument(
+        "--paraphrase-bank",
+        type=Path,
+        default=None,
+        help="Optional LLM paraphrase + EHR-scaffold sidecar for realistic multi-section notes.",
+    )
     prior = train.add_mutually_exclusive_group()
     prior.add_argument(
         "--design-bank", type=Path, help="LLM-designed study prior (default: bundled bank)."
@@ -370,6 +378,12 @@ def main(argv=None):
         type=Path,
         default=None,
         help="Override the checkpoint's design bank during evaluation.",
+    )
+    scoring.add_argument(
+        "--paraphrase-bank",
+        type=Path,
+        default=None,
+        help="Override or supply a paraphrase sidecar bank during held-out evaluation.",
     )
     scoring.add_argument(
         "--note-batch-size",
@@ -431,6 +445,8 @@ def main(argv=None):
             settings["design_bank"] = load_bank(args.design_bank)
         elif args.mixed_prior:
             settings["design_bank"] = None
+        if args.paraphrase_bank:
+            settings["paraphrase_bank"] = load_paraphrase_bank(args.paraphrase_bank)
         run_training(
             args.run_dir, args.steps, args.device, args.save_every, settings=settings, cfg=cfg
         )
@@ -483,6 +499,11 @@ def main(argv=None):
                     if args.design_bank is not None
                     else load_run_design_bank(args.run_dir, saved)
                 )
+                paraphrase_bank_path = (
+                    str(args.paraphrase_bank.resolve())
+                    if args.paraphrase_bank is not None
+                    else load_run_paraphrase_bank_path(args.run_dir, saved)
+                )
                 del saved
                 metrics = evaluate(
                     model,
@@ -493,6 +514,7 @@ def main(argv=None):
                     bank=bank,
                     precision=args.precision,
                     num_workers=args.num_workers,
+                    paraphrase_bank_path=paraphrase_bank_path,
                 )
             print(json.dumps(metrics, indent=2))
         else:

@@ -216,3 +216,76 @@ def test_wide_design_calibration_deduplication_and_llm_rendering_order(tmp_path)
     finding = prostate["candidates"]["note_findings"][0]
     expected_stmt = finding[row["true_" + finding["name"]]]
     assert any(expected_stmt in p for p in prompts)
+
+
+def test_paraphrase_bank_sidecar_and_realistic_llm_note_rendering(tmp_path):
+    from synthetic_data.paraphrase_bank import (
+        PARAPHRASE_BANK_VERSION,
+        _write_gzip_json,
+        finding_key,
+        load_paraphrase_bank,
+    )
+    from synthetic_data.study_designs import DEFAULT_BANK
+
+    bank = load_bank(DEFAULT_BANK)
+    design = bank["designs"][0]
+    nf = design["candidates"]["note_findings"][0]
+    p_key = finding_key(nf["present"], nf["absent"])
+    sidecar = {
+        "version": PARAPHRASE_BANK_VERSION,
+        "findings": {
+            p_key: {
+                "section": "comorbidities",
+                "present": ["Active cigarette smoker (paraphrase A).", "Current tobacco use (paraphrase B)."],
+                "absent": ["Denies current tobacco use (paraphrase A).", "Nonsmoker at present (paraphrase B)."],
+            }
+        },
+        "ecog_templates": {str(i): [f"Functional status: ECOG PS {i}."] for i in range(5)},
+        "filler_paragraphs": {
+            "hpi_intro": ["Returns to oncology clinic for routine follow-up."],
+            "ros_general": ["Review of systems otherwise noncontributory."],
+            "exam_general": ["Alert, oriented, in no acute distress."],
+            "plan_followup": ["Will continue multidisciplinary oncology care."],
+        },
+    }
+    p_path = tmp_path / "paraphrases.json.gz"
+    _write_gzip_json(p_path, sidecar)
+    loaded = load_paraphrase_bank(p_path)
+
+    dgp_plain = draw_longitudinal_dgp(19, "design", design=design)
+    dgp_para = draw_longitudinal_dgp(19, "design", design=design, paraphrase_bank=loaded)
+    r_plain = sample_longitudinal_patient(0, seed=11, dgp=dgp_plain)
+    r_para = sample_longitudinal_patient(0, seed=11, dgp=dgp_para)
+    # Underlying causal ground truth and labels must remain identical; only text rendering changes.
+    assert r_plain["true_" + nf["name"]] == r_para["true_" + nf["name"]]
+    assert r_plain["true_y0"] == pytest.approx(r_para["true_y0"])
+    assert r_plain["true_y1"] == pytest.approx(r_para["true_y1"])
+    assert "Functional status: ECOG PS" in r_para["clinical_text"]
+    assert "ASSESSMENT & PLAN:" in r_para["clinical_text"] or "IMPRESSION / PLAN:" in r_para["clinical_text"] or "A/P:" in r_para["clinical_text"]
+    expected_pool = sidecar["findings"][p_key][r_para["true_" + nf["name"]]]
+    assert any(variant in r_para["clinical_text"] for variant in expected_pool)
+
+    # realistic_notes=True sends full visit draft including ECOG and returns natural prose directly.
+    realistic_prompts = []
+
+    class RealisticStub:
+        config = SimpleNamespace(model_name="stub-realistic", max_tokens=512)
+
+        def generate(self, prompt, **kwargs):
+            realistic_prompts.append(prompt)
+            return "HPI: The patient returns to oncology clinic. Exam: Ambulatory, ECOG PS 1."
+
+        def close(self):
+            pass
+
+    r_llm = sample_longitudinal_patient(
+        0,
+        seed=11,
+        dgp=dgp_plain,
+        note_client=RealisticStub(),
+        cache_dir=tmp_path / "rcache",
+        realistic_notes=True,
+    )
+    assert any("ECOG performance status:" in p for p in realistic_prompts)
+    assert all("ECOG performance status:" not in n["text"] for n in r_llm["notes"])
+    assert all("ECOG PS 1" in n["text"] for n in r_llm["notes"])

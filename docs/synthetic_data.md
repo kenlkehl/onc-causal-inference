@@ -99,16 +99,33 @@ Use `--prior mixed` to draw new role assignments, intercepts, treatment
 effects and outcome equation shapes for each DGP seed. This is the original six-variable training prior. New model runs use the study-design bank described below.
 
 To use the repository’s OpenAI-compatible note writer, supply an endpoint
-and model. The writer receives the pretreatment facts from a single visit.
-The simulator appends the recorded ECOG score and generates the same
-structured observations and oracle labels as the offline path. LLM wording
-can vary across independent generations.
+and model. By default, the writer receives the pretreatment facts from a single visit and
+the simulator appends the recorded ECOG score. Pass `--realistic-notes` (and optional
+`--omit-absent-prob`) to generate multi-section clinic notes where the LLM weaves ECOG and
+clinical findings naturally into varied physician prose without a verbatim ECOG suffix.
+Pass `--paraphrase-bank PATH` for fast offline multi-section notes drawn from a reusable
+LLM-authored paraphrase and EHR-scaffold sidecar (keeping causal ground truth bit-identical
+for the same seeds).
 
 ```bash
-python -m synthetic_data.cli longitudinal --dataset-size 100 --note-style llm \
-  --api-url http://127.0.0.1:8000/v1 --model MODEL --num-workers 4 \
+# Build a reusable paraphrase + multi-section EHR scaffold sidecar for nemotron_5000
+python -m synthetic_data.cli paraphrase-bank \
+  --bank synthetic_data/designs/nemotron_5000.json.gz \
+  --output synthetic_data/designs/nemotron_5000_paraphrases.json.gz \
+  --api-url http://sn4622130540:8000/v1 \
+  --model nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4 --workers 16
+
+# Generate a realistic full-LLM cohort for a single held-out design
+python -m synthetic_data.cli longitudinal --dataset-size 1000 --note-style llm \
+  --realistic-notes --omit-absent-prob 0.25 \
+  --design-bank synthetic_data/designs/nemotron_5000.json.gz --design-id cervix_q04_v004 \
+  --api-url http://sn4622130540:8000/v1 \
+  --model nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4 --num-workers 24 \
   --output-dir ./synthetic_output_longitudinal_llm
 ```
+
+For a stratified 16-design held-out realistic full-LLM evaluation suite, run
+`python scripts/generate_llm_eval_cohorts.py` (resumable; skips completed cohorts).
 
 Use a fresh or empty output directory. A complete cohort is published together
 with its configuration and metadata. LLM runs keep completed requests in a

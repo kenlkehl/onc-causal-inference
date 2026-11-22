@@ -29,6 +29,7 @@ from transformers import (
 )
 
 from synthetic_data.longitudinal import draw_longitudinal_dgp, sample_longitudinal_patient
+from synthetic_data.paraphrase_bank import load_paraphrase_bank
 from synthetic_data.study_designs import DEFAULT_BANK, load_bank
 from .events import binary_observations, patient_summary_vector, read_patient_table
 from .model import (
@@ -44,6 +45,19 @@ OBSERVED = ["treatment_indicator", "outcome_indicator"]
 TARGETS = ["true_y0", "true_y1"]
 PROPENSITY_COL = "true_treatment_prob"
 DESIGN_BANK_FILENAME = "design_bank.json.gz"
+PARAPHRASE_BANK_FILENAME = "paraphrase_bank.json.gz"
+_WORKER_PARAPHRASE_CACHE: dict[str, dict] = {}
+
+
+def _get_worker_paraphrase_bank(path_or_bank):
+    if path_or_bank is None or isinstance(path_or_bank, dict):
+        return path_or_bank
+    key = str(path_or_bank)
+    cached = _WORKER_PARAPHRASE_CACHE.get(key)
+    if cached is None:
+        cached = load_paraphrase_bank(key)
+        _WORKER_PARAPHRASE_CACHE[key] = cached
+    return cached
 
 
 def _select_episode_design(seed, step, held_out, designs, micro_step=0):
@@ -61,7 +75,15 @@ def _select_episode_design(seed, step, held_out, designs, micro_step=0):
 
 
 def _simulate_for_design(
-    design, seed, step, held_out, size, schema_version, micro_step, augment
+    design,
+    seed,
+    step,
+    held_out,
+    size,
+    schema_version,
+    micro_step,
+    augment,
+    paraphrase_bank_ref=None,
 ):
     """Top-level picklable worker for ProcessPoolExecutor episode prefetching."""
     seed_parts = [seed, step] if micro_step == 0 else [seed, step, micro_step]
@@ -78,8 +100,13 @@ def _simulate_for_design(
             + len(design["candidates"]["note_findings"]),
         )
     sim_schema = 1 if schema_version == 1 else 2
+    p_bank = _get_worker_paraphrase_bank(paraphrase_bank_ref)
     dgp = draw_longitudinal_dgp(
-        dgp_seed, "design" if design else "mixed", schema_version=sim_schema, design=design
+        dgp_seed,
+        "design" if design else "mixed",
+        schema_version=sim_schema,
+        design=design,
+        paraphrase_bank=p_bank,
     )
     omit_absent = 0.0
     style_var = False
@@ -111,10 +138,19 @@ def simulate_episode(
     designs=None,
     micro_step=0,
     augment=False,
+    paraphrase_bank=None,
 ):
     design = _select_episode_design(seed, step, held_out, designs, micro_step=micro_step)
     return _simulate_for_design(
-        design, seed, step, held_out, size, schema_version, micro_step, augment
+        design,
+        seed,
+        step,
+        held_out,
+        size,
+        schema_version,
+        micro_step,
+        augment,
+        paraphrase_bank,
     )
 
 
@@ -246,6 +282,21 @@ def load_run_design_bank(directory, saved):
             raise ValueError(f"Design bank checksum mismatch: {bank_path}")
         return load_bank(bank_path)
     return settings.get("design_bank")
+
+
+def load_run_paraphrase_bank_path(directory, saved):
+    """Verify and return the path to a paraphrase bank stored beside a checkpoint, or None."""
+    settings = saved.get("settings") or {}
+    filename = settings.get("paraphrase_bank_file")
+    if not filename:
+        return None
+    bank_path = Path(directory) / filename
+    with gzip.open(bank_path, "rb") as handle:
+        raw = handle.read()
+    expected = settings.get("paraphrase_bank_sha256")
+    if expected and hashlib.sha256(raw).hexdigest() != expected:
+        raise ValueError(f"Paraphrase bank checksum mismatch: {bank_path}")
+    return str(bank_path)
 
 
 def load_run(directory, device, *, note_batch_size=None):
@@ -428,8 +479,11 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
             ):
                 settings["min_context_size"] = settings["context_size"]
         bank = load_run_design_bank(directory, saved)
+        paraphrase_bank_path = load_run_paraphrase_bank_path(directory, saved)
+        paraphrase_bank_data = None
         # Never re-embed large bank dictionaries inside checkpoint.pt.
         settings.pop("design_bank", None)
+        settings.pop("paraphrase_bank", None)
         optimizer = _optimizer(model, settings)
         optimizer.load_state_dict(saved["optimizer"])
         if lr_overridden:
@@ -447,6 +501,8 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
     else:
         settings = dict(settings)
         bank = settings.pop("design_bank", None)
+        paraphrase_bank_data = settings.pop("paraphrase_bank", None)
+        paraphrase_bank_path = None
         use_default_bank = not settings["cohorts"] and not settings.get("mixed_prior", False)
         if bank is None and use_default_bank:
             bank = load_bank(DEFAULT_BANK)
@@ -541,6 +597,13 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
             settings["design_bank_file"] = DESIGN_BANK_FILENAME
         else:
             settings["design_bank_file"] = None
+        if paraphrase_bank_data is not None:
+            p_path = directory / PARAPHRASE_BANK_FILENAME
+            settings["paraphrase_bank_sha256"] = _write_gzip_json(p_path, paraphrase_bank_data)
+            settings["paraphrase_bank_file"] = PARAPHRASE_BANK_FILENAME
+            paraphrase_bank_path = str(p_path)
+        else:
+            settings["paraphrase_bank_file"] = None
         model.patient.tokenizer.save_pretrained(directory / "tokenizer")
         _save(directory, model, optimizer, settings, step=0)
 
@@ -573,6 +636,7 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                         model.schema_version,
                         micro,
                         augment,
+                        paraphrase_bank_path,
                     ),
                 )
 
@@ -658,6 +722,7 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                     bank=bank,
                     precision=precision,
                     num_workers=num_workers,
+                    paraphrase_bank_path=paraphrase_bank_path,
                 )
                 _set_train_modes()
                 record["eval_context_size"] = eval_context
@@ -817,7 +882,16 @@ def _score_episode(model, rows, context_size, *, precision="auto"):
 
 @torch.inference_mode()
 def evaluate(
-    model, seed, studies, context_size, query_size, *, bank=None, precision="auto", num_workers=0
+    model,
+    seed,
+    studies,
+    context_size,
+    query_size,
+    *,
+    bank=None,
+    precision="auto",
+    num_workers=0,
+    paraphrase_bank_path=None,
 ):
     if min(studies, context_size, query_size) < 1 or num_workers < 0:
         raise ValueError("Evaluation study/patient counts must be positive and workers nonnegative")
@@ -847,6 +921,7 @@ def evaluate(
                     model.schema_version,
                     0,
                     False,
+                    paraphrase_bank_path,
                 ),
             )
 
