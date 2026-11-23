@@ -17,8 +17,8 @@ from oci.tabular_pfn.model import (
     TabularModelConfig,
 )
 from oci.tabular_pfn.preprocessing import TabularPreprocessor
-from oci.tabular_pfn.prior import ROLE_TO_ID, PriorConfig, sample_tabular_study
-from oci.tabular_pfn.training import load_tabular_run
+from oci.tabular_pfn.prior import DGP_FAMILIES, ROLE_TO_ID, PriorConfig, sample_tabular_study
+from oci.tabular_pfn.training import evaluate_tabular, load_tabular_run
 
 
 def test_prior_high_p_2000_and_null_hte():
@@ -53,6 +53,44 @@ def test_prior_high_p_2000_and_null_hte():
     assert ep_null["meta"]["n_mod"] == 0 and ep_null["meta"]["n_dual"] == 0
     assert not np.any(ep_null["roles"] == ROLE_TO_ID["modifier"])
     assert not np.any(ep_null["roles"] == ROLE_TO_ID["dual_role"])
+
+
+def test_prior_all_three_oci_families_and_split_disjointness():
+    # Every OCI DGP family must produce clean P = 2,000 studies (and exact P = 30 studies)
+    for fam in DGP_FAMILIES:
+        ep_hi = sample_tabular_study(
+            303,
+            n_total=120,
+            num_features=2000,
+            prior=PriorConfig(
+                unmeasured_conf_prob=1.0,
+                extraction_noise_prob=1.0,
+                mnar_prob=1.0,
+                rd_scale_prob=1.0,
+                design_split="train",
+            ),
+            family=fam,
+        )
+        assert ep_hi["X"].shape == (120, 2000)
+        assert ep_hi["roles"].shape == (2000,)
+        assert ep_hi["meta"]["family"] == fam
+        assert ep_hi["meta"]["scale"] == "RD"
+        assert ep_hi["meta"]["n_unmeasured"] >= 1
+        assert np.all(np.isfinite(ep_hi["true_ite"]))
+
+        ep_lo = sample_tabular_study(304, n_total=90, num_features=30, family=fam)
+        assert ep_lo["X"].shape == (90, 30)
+
+    # Strict train vs held_out disjointness on bundled nemotron_5000.json.gz
+    tr_ids = {
+        sample_tabular_study(1000 + i, 60, num_features=40, prior=PriorConfig(design_split="train"), family="nemotron_design")["meta"]["design_id"]
+        for i in range(25)
+    }
+    ho_ids = {
+        sample_tabular_study(2000 + i, 60, num_features=40, prior=PriorConfig(design_split="held_out"), family="nemotron_design")["meta"]["design_id"]
+        for i in range(25)
+    }
+    assert tr_ids.isdisjoint(ho_ids) and len(tr_ids) > 5 and len(ho_ids) > 5
 
 
 def test_preprocessor_mixed_types_and_three_state_missingness():

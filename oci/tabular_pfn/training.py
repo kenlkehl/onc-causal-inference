@@ -1,7 +1,7 @@
 """Training, resuming, and high-P stress-test evaluation for SparseTabularCausalPFN."""
 
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import math
 import os
@@ -14,13 +14,15 @@ import torch
 from torch.nn import functional as F
 
 from .model import CHECKPOINT_FORMAT_VERSION, SparseTabularCausalPFN, TabularModelConfig
-from .prior import ROLE_TO_ID, PriorConfig, sample_tabular_study
+from .prior import DGP_FAMILIES, ROLE_TO_ID, PriorConfig, sample_tabular_study
 
 
 def _sample_episode_worker(args):
-    seed, n_ctx, n_q, num_features, prior_dict = args
+    seed, n_ctx, n_q, num_features, prior_dict, family = args
     prior = PriorConfig(**prior_dict)
-    return sample_tabular_study(seed, n_ctx + n_q, num_features=num_features, prior=prior)
+    return sample_tabular_study(
+        seed, n_ctx + n_q, num_features=num_features, prior=prior, family=family
+    )
 
 
 def _spearman(x: np.ndarray, y: np.ndarray) -> float:
@@ -186,6 +188,7 @@ def evaluate_tabular(
     query_size: int = 128,
     num_features: int | None = None,
     prior: PriorConfig = PriorConfig(),
+    family: str | None = None,
     seed: int = 100_001,
     compute_baselines: bool = True,
     num_workers: int = 0,
@@ -195,10 +198,12 @@ def evaluate_tabular(
     model.eval()
     device = model.centers.device
 
-    prior_dict = asdict(prior)
+    # Strictly enforce held_out design split during evaluation (zero design leakage!)
+    eval_prior = replace(prior, design_split="held_out")
+    prior_dict = asdict(eval_prior)
     # Odd seeds reserved for held-out evaluation (even seeds for training)
     tasks = [
-        (seed + 2 * i + 1, context_size, query_size, num_features, prior_dict)
+        (seed + 2 * i + 1, context_size, query_size, num_features, prior_dict, family)
         for i in range(studies)
     ]
 
@@ -215,6 +220,9 @@ def evaluate_tabular(
     null_cates, non_null_cates = [], []
     role_aucs = []
     conf_ge, inst_ge = [], []
+    fam_sq: dict[str, list[np.ndarray]] = {}
+    fam_wr: dict[str, list[float]] = {}
+    fam_arm_sq: dict[str, list[np.ndarray]] = {}
 
     for idx_ep, ep in enumerate(episodes, 1):
         X = ep["X"]
@@ -254,10 +262,14 @@ def evaluate_tabular(
         all_e.append(e_np)
         all_te.append(te_q)
 
+        fam = str(ep["meta"].get("family", "sparse_oci"))
         if not ep["meta"]["is_null_hte"] and cate_np.std() > 1e-8 and tcate_q.std() > 1e-8:
-            within_rs.append(float(np.corrcoef(cate_np, tcate_q)[0, 1]))
+            r_ep = float(np.corrcoef(cate_np, tcate_q)[0, 1])
+            within_rs.append(r_ep)
+            fam_wr.setdefault(fam, []).append(r_ep)
         ate_errs.append(float(cate_np.mean() - tcate_q.mean()))
         err_sq = (cate_np - tcate_q) ** 2
+        fam_sq.setdefault(fam, []).append(err_sq)
         if ep["meta"]["is_null_hte"]:
             null_cates.append(err_sq)
         else:
@@ -283,7 +295,9 @@ def evaluate_tabular(
         # Arm-mean baseline
         y0_bar = float(y_ctx[t_ctx < 0.5].mean()) if (t_ctx < 0.5).any() else float(y_ctx.mean())
         y1_bar = float(y_ctx[t_ctx > 0.5].mean()) if (t_ctx > 0.5).any() else float(y_ctx.mean())
-        all_arm_cate.append(np.full_like(tcate_q, y1_bar - y0_bar))
+        arm_ep = np.full_like(tcate_q, y1_bar - y0_bar)
+        all_arm_cate.append(arm_ep)
+        fam_arm_sq.setdefault(fam, []).append((arm_ep - tcate_q) ** 2)
 
         if compute_baselines:
             # Dense Ridge only when P <= 600 (keep eval snappy); screened top-32 always runs
@@ -332,6 +346,15 @@ def evaluate_tabular(
     if all_ridge_cate and len(all_ridge_cate) == len(all_tcate):
         rdg_a = np.concatenate(all_ridge_cate)
         out["dense_ridge_r_cate_rmse"] = float(np.sqrt(np.mean((rdg_a - tcate_a) ** 2)))
+    out["by_family"] = {
+        fam_name: {
+            "studies": len(sq_list),
+            "cate_rmse": float(np.sqrt(np.mean(np.concatenate(sq_list)))),
+            "arm_mean_cate_rmse": float(np.sqrt(np.mean(np.concatenate(fam_arm_sq[fam_name])))),
+            "within_study_cate_pearson": float(np.mean(fam_wr[fam_name])) if fam_wr.get(fam_name) else 0.0,
+        }
+        for fam_name, sq_list in sorted(fam_sq.items())
+    }
     return out
 
 
@@ -391,6 +414,8 @@ def run_tabular_training(
         model = SparseTabularCausalPFN(cfg).to(dev)
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
+    # Strictly enforce train split for Nemotron oncology designs during training
+    prior = replace(prior, design_split="train")
     prior_dict = asdict(prior)
     rng = np.random.default_rng(seed + start_step * 997)
     metrics_path = run_dir / "metrics.jsonl"
@@ -406,11 +431,11 @@ def run_tabular_training(
     def _make_tasks(step_num: int):
         tasks = []
         for ep_i in range(grad_accum_steps):
-            # Even seeds for training; log-uniform N_ctx and P
+            # Even seeds for training; log-uniform N_ctx and P across all 3 OCI DGP families
             ep_seed = int(seed * 100_000 + (step_num * grad_accum_steps + ep_i) * 2)
             log_n = rng.uniform(math.log(min_context_size), math.log(context_size))
             n_ctx = int(round(math.exp(log_n)))
-            tasks.append((ep_seed, n_ctx, query_size, None, prior_dict))
+            tasks.append((ep_seed, n_ctx, query_size, None, prior_dict, None))
         return tasks
 
     t_start = time.time()

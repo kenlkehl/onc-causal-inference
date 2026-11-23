@@ -12,10 +12,11 @@ from .model import (
     TabularModelConfig,
 )
 from .preprocessing import TabularPreprocessor
-from .prior import ROLE_TO_ID, PriorConfig, sample_tabular_study
+from .prior import DGP_FAMILIES, ROLE_TO_ID, PriorConfig, sample_tabular_study
 
 __all__ = [
     "CHECKPOINT_FORMAT_VERSION",
+    "DGP_FAMILIES",
     "ROLE_NAMES",
     "ROLE_TO_ID",
     "PriorConfig",

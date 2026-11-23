@@ -15,7 +15,7 @@ import torch
 
 from .model import SparseTabularCausalPFN, TabularModelConfig
 from .preprocessing import TabularPreprocessor, read_tabular_file
-from .prior import PriorConfig
+from .prior import DGP_FAMILIES, PriorConfig
 from .training import evaluate_tabular, load_tabular_run, run_tabular_training
 
 OVERLAP_MARGIN = 0.05
@@ -282,6 +282,12 @@ def main(argv=None):
     p_train.add_argument("--max-features", type=int, default=2000)
     p_train.add_argument("--null-hte-prob", type=float, default=0.25)
     p_train.add_argument("--instrument-prob", type=float, default=0.70)
+    p_train.add_argument("--unmeasured-conf-prob", type=float, default=0.25)
+    p_train.add_argument("--extraction-noise-prob", type=float, default=0.35)
+    p_train.add_argument("--mnar-prob", type=float, default=0.50)
+    p_train.add_argument("--rd-scale-prob", type=float, default=0.25)
+    p_train.add_argument("--rct-prob", type=float, default=0.08)
+    p_train.add_argument("--design-bank", type=str, default=None)
     defaults = TabularModelConfig()
     for key, value in vars(defaults).items():
         flag = "--" + key.replace("_", "-")
@@ -295,6 +301,8 @@ def main(argv=None):
     p_eval.add_argument("--min-features", type=int, default=20)
     p_eval.add_argument("--max-features", type=int, default=2000)
     p_eval.add_argument("--null-hte-prob", type=float, default=0.25)
+    p_eval.add_argument("--family", choices=("all", *DGP_FAMILIES), default="all")
+    p_eval.add_argument("--design-bank", type=str, default=None)
     p_eval.add_argument("--num-workers", type=int, default=0)
     p_eval.add_argument("--no-baselines", action="store_true")
 
@@ -322,6 +330,13 @@ def main(argv=None):
                 max_features=args.max_features,
                 null_hte_prob=args.null_hte_prob,
                 instrument_prob=args.instrument_prob,
+                unmeasured_conf_prob=args.unmeasured_conf_prob,
+                extraction_noise_prob=args.extraction_noise_prob,
+                mnar_prob=args.mnar_prob,
+                rd_scale_prob=args.rd_scale_prob,
+                rct_prob=args.rct_prob,
+                design_bank_path=args.design_bank,
+                design_split="train",
             )
             if args.command == "train"
             else PriorConfig()
@@ -354,6 +369,8 @@ def main(argv=None):
             min_features=args.min_features,
             max_features=args.max_features,
             null_hte_prob=args.null_hte_prob,
+            design_bank_path=args.design_bank,
+            design_split="held_out",
         )
         metrics = evaluate_tabular(
             model,
@@ -362,6 +379,7 @@ def main(argv=None):
             query_size=args.query_size,
             num_features=args.num_features,
             prior=prior,
+            family=None if args.family == "all" else args.family,
             seed=args.seed,
             compute_baselines=not args.no_baselines,
             num_workers=args.num_workers,

@@ -31,7 +31,7 @@ fi
 RUN_ROOT="${RUN_ROOT:-${REPO_ROOT}/artifacts}"
 RUN_DIR="${RUN_DIR:-${RUN_ROOT}/tabular_causal_pfn_p2000}"
 DEVICE="${DEVICE:-cuda}"
-STEPS="${STEPS:-6000}"
+STEPS="${STEPS:-12000}"
 NUM_WORKERS="${NUM_WORKERS:-16}"
 
 echo "Using PYTHON=${PYTHON}"
@@ -39,7 +39,8 @@ echo "Using RUN_DIR=${RUN_DIR}"
 echo "Using STEPS=${STEPS} NUM_WORKERS=${NUM_WORKERS} DEVICE=${DEVICE}"
 
 # ==============================================================================
-# TRAINING: LOG-UNIFORM N_ctx = 80..3,000, P = 20..2,000 (48,000 SYNTHETIC STUDIES)
+# TRAINING: LOG-UNIFORM N_ctx = 80..3,000, P = 20..2,000 ACROSS 3 OCI DGP FAMILIES
+# (50% sparse_oci + 25% reequation_calc + 25% nemotron_design train-split)
 # ==============================================================================
 "${PYTHON}" -m oci.tabular_pfn.cli train \
   --run-dir "${RUN_DIR}" \
@@ -51,6 +52,11 @@ echo "Using STEPS=${STEPS} NUM_WORKERS=${NUM_WORKERS} DEVICE=${DEVICE}"
   --max-features 2000 \
   --null-hte-prob 0.25 \
   --instrument-prob 0.70 \
+  --unmeasured-conf-prob 0.25 \
+  --extraction-noise-prob 0.35 \
+  --mnar-prob 0.50 \
+  --rd-scale-prob 0.25 \
+  --rct-prob 0.08 \
   --col-dim 128 \
   --study-width 128 \
   --study-layers 2 \
@@ -62,7 +68,7 @@ echo "Using STEPS=${STEPS} NUM_WORKERS=${NUM_WORKERS} DEVICE=${DEVICE}"
   --ridge-grid-size 7 \
   --grad-accum-steps 8 \
   --lr 5e-4 \
-  --warmup-steps 150 \
+  --warmup-steps 200 \
   --save-every 500 \
   --eval-every 500 \
   --eval-studies 48 \
@@ -75,7 +81,7 @@ echo "Using STEPS=${STEPS} NUM_WORKERS=${NUM_WORKERS} DEVICE=${DEVICE}"
 # HELD-OUT STRESS TESTS ACROSS P = 50, 200, 500, 2000 (N_ctx = 800, 128 STUDIES)
 # ==============================================================================
 for P in 50 200 500 2000; do
-  echo "=== Evaluating held-out P=${P} (N_ctx=800, 128 studies) ==="
+  echo "=== Evaluating held-out mixture P=${P} (N_ctx=800, 128 studies) ==="
   "${PYTHON}" -m oci.tabular_pfn.cli evaluate \
     --run-dir "${RUN_DIR}" \
     --studies 128 \
@@ -85,4 +91,21 @@ for P in 50 200 500 2000; do
     --num-workers "${NUM_WORKERS}" \
     --seed 700001 \
     --device "${DEVICE}" | tee "${RUN_DIR}/eval_n800_p${P}.json"
+done
+
+# Family-specific held-out checks (unseen Nemotron oncology designs & OCI reequation/calculator DGPs)
+for FAM in nemotron_design reequation_calc; do
+  for P in 500 2000; do
+    echo "=== Evaluating held-out family=${FAM} P=${P} (N_ctx=800, 96 studies) ==="
+    "${PYTHON}" -m oci.tabular_pfn.cli evaluate \
+      --run-dir "${RUN_DIR}" \
+      --studies 96 \
+      --context-size 800 \
+      --query-size 128 \
+      --num-features "${P}" \
+      --family "${FAM}" \
+      --num-workers "${NUM_WORKERS}" \
+      --seed 800001 \
+      --device "${DEVICE}" | tee "${RUN_DIR}/eval_n800_${FAM}_p${P}.json"
+  done
 done

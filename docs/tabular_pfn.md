@@ -15,21 +15,20 @@ Unlike vanilla TabPFN / CausalPFN architectures whose $O(N P^2)$ attention and d
 4. **Residual Two-Way TabPFN Study Layers & 129-Bin Sinh Posterior Head**:
    Two lightweight two-way attention layers over the top `attn_slots` (default `16`) gated columns refine pairwise feature interactions and calibrate arm-specific risk means, epistemic SDs, and propensity logits.
 
-## Synthetic All-Evidence Prior (`oci/tabular_pfn/prior.py`)
+## Synthetic OCI Multi-DGP Prior (`oci/tabular_pfn/prior.py`)
 
-Training draws log-uniform $N_{\text{ctx}} \in [80, 3{,}000]$ and $P \in [20, 2{,}000]$ with:
-- 2–18 sparse active causal features (confounders, prognostics, modifiers, dual-role) embedded inside 50–99.5% noise,
-- Strong pure instruments ($T$-only drivers, zero direct effect on $Y$),
-- Collinear noisy proxy duplicates ($\rho \in [0.55, 0.94]$) plus block-correlated factor noise,
-- Mixed rare/common binary, ordinal, Gaussian, and heavy-tailed log-normal columns with MCAR/MAR missingness,
-- Linear, threshold, quadratic, hinge, saturating, and pairwise-interaction mechanisms,
-- 25% strictly null-HTE studies ($\tau(x) \equiv \text{ATE}$) to calibrate shrinkage against false heterogeneity discovery.
+Training draws log-uniform $N_{\text{ctx}} \in [80, 3{,}000]$ and $P \in [20, 2{,}000]$ from a 3-family OCI-aligned mixture prior:
+
+1. **`sparse_oci` (50%):** High-dimensional sparse all-evidence tables with 2–18 active features inside 50–99.5% noise, multi-level mutually exclusive Dirichlet one-hot categorical blocks, strong pure instruments, collinear noisy proxies ($\rho \in [0.55, 0.94]$) plus proxy-only latent confounders, block-correlated factor noise, linear/threshold/quadratic/hinge/saturating + pairwise interactions, optional unmeasured confounding (creating real Z-bias on instruments), Stage-1 LLM extraction noise, MCAR/MAR/**MNAR** + 3-state EHR documentation, occasional RCTs (8%), 25% strictly null-HTE studies, and both `logOR` and bounded additive `RD` scales.
+2. **`reequation_calc` (25%):** Vectorized implementation of OCI's `synthetic_data/reequation.py` and `sample_size_calculator/engine.R` tabular DGP family (exchangeable Gaussian copula, uniform-CDF & positive log-normal continuous, Beta-prevalence binary, Dirichlet categorical contrasts, `none`/`threshold`/`quadratic` nonlinearities, unmeasured confounders, `logOR`/`RD` scales) padded to $P = 20\text{–}2{,}000$.
+3. **`nemotron_design` (25%):** Direct tabular studies sampled strictly from the 4,000 `split == "train"` oncology designs in `synthetic_data/designs/nemotron_5000.json.gz` (real lab/vital/PRO moments, cancer-specific note-finding prevalences and causal role menus, pairwise interactions, extraction noise, MNAR/MAR missingness) padded to $P = 20\text{–}2{,}000$. The 1,000 `split == "held_out"` designs (including 3 unseen cancers) are strictly excluded from training and used automatically inside `evaluate`.
 
 ## Usage
 
-### Train on 1× H200 (~1–1.5 hours for 6,000 steps / 48,000 studies up to $P = 2{,}000$)
+### Train on 1× H200 (~2–2.5 hours for 12,000 steps / 96,000 studies up to $P = 2{,}000$)
 ```bash
 ./scripts/run_tabular_pfn_h200.sh
+# Override step budget as desired, e.g. STEPS=20000 ./scripts/run_tabular_pfn_h200.sh
 ```
 
 ### Zero-Shot Prediction + Interpretable Feature Role Report on Any Tabular Cohort
