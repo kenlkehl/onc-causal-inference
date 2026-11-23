@@ -31,6 +31,7 @@ from .events import (
     lab_features,
     lab_stream_summary,
     note_lexical_vector,
+    note_sentences,
     pro_features,
     pro_stream_summary,
     vital_stream_summary,
@@ -74,6 +75,7 @@ class ModelConfig:
     note_slots: int = 8
     solver_dim: int = 64
     lexical_dim: int = 0
+    sentence_concept_dim: int = 0
     ridge_grid_size: int = 5
     per_slot_note_temporal: bool = False
     cate_loss_weight: float = 2.0
@@ -93,6 +95,7 @@ class ModelConfig:
             )
             < 1
             or self.lexical_dim < 0
+            or self.sentence_concept_dim < 0
             or self.ridge_grid_size < 2
             or self.bins < 3
             or self.cate_loss_weight < 0
@@ -486,6 +489,71 @@ class PatientEncoder(nn.Module):
             dtype=torch.float32,
         )
 
+    @torch.no_grad()
+    def sentence_features(self, rows, *, max_length=64, max_sentences=128):
+        """Deduplicated, L2-normalized per-sentence backbone embeddings for study-adaptive pooling."""
+        if not rows:
+            raise ValueError("Expected at least one patient")
+        device = self.notes.weight.device
+        hidden_size = int(self.backbone.config.hidden_size)
+        per_patient = [
+            note_sentences(row.get("notes"), max_sentences=max_sentences) for row in rows
+        ]
+        uniq_texts = tuple(sorted({s for sents in per_patient for s in sents}))
+        if not uniq_texts:
+            return SentenceBatch(
+                unique_embs=torch.empty((0, hidden_size), device=device, dtype=torch.float32),
+                flat_idx=torch.empty((0,), device=device, dtype=torch.long),
+                patient_ids=torch.empty((0,), device=device, dtype=torch.long),
+                num_patients=len(rows),
+                unique_texts=(),
+            )
+
+        text_to_id = {text: idx for idx, text in enumerate(uniq_texts)}
+        flat_idx_list = []
+        patient_id_list = []
+        for p_idx, sents in enumerate(per_patient):
+            for s in sents:
+                flat_idx_list.append(text_to_id[s])
+                patient_id_list.append(p_idx)
+
+        limit = int(getattr(self.backbone.config, "max_position_embeddings", max_length))
+        eff_len = min(max_length, limit)
+        batch_size = max(self.note_batch_size * 4, 256)
+        order = sorted(range(len(uniq_texts)), key=lambda i: (len(uniq_texts[i]), uniq_texts[i]))
+        unique_embs = torch.empty((len(uniq_texts), hidden_size), device=device, dtype=torch.float32)
+
+        for start in range(0, len(order), batch_size):
+            batch_order = order[start : start + batch_size]
+            batch_texts = [uniq_texts[i] for i in batch_order]
+            enc = self.tokenizer(
+                batch_texts,
+                padding=True,
+                truncation=True,
+                max_length=eff_len,
+                return_tensors="pt",
+                return_attention_mask=True,
+            ).to(device)
+            hidden = self._backbone_hidden(enc["input_ids"], enc["attention_mask"]).float()
+            mask = enc["attention_mask"]
+            if self._is_bidirectional:
+                w = mask.unsqueeze(-1).float()
+                pooled = (hidden * w).sum(dim=1) / w.sum(dim=1).clamp_min(1.0)
+            else:
+                last_pos = mask.sum(dim=1).clamp_min(1) - 1
+                pooled = hidden[torch.arange(len(batch_texts), device=device), last_pos]
+            pooled = F.normalize(pooled, p=2, dim=-1)
+            dest = torch.tensor(batch_order, device=device, dtype=torch.long)
+            unique_embs[dest] = pooled
+
+        return SentenceBatch(
+            unique_embs=unique_embs,
+            flat_idx=torch.tensor(flat_idx_list, device=device, dtype=torch.long),
+            patient_ids=torch.tensor(patient_id_list, device=device, dtype=torch.long),
+            num_patients=len(rows),
+            unique_texts=uniq_texts,
+        )
+
     def _extra_bag(self, extra_lists, embedding, value_proj):
         device = embedding.weight.device
         dtype = embedding.weight.dtype
@@ -735,6 +803,83 @@ class RidgeFit:
 
 
 @dataclass
+class SentenceBatch:
+    """Deduplicated per-sentence backbone embeddings mapped back to patients."""
+
+    unique_embs: torch.Tensor  # (U, H) float32 L2-normalized
+    flat_idx: torch.Tensor  # (M,) long indices into unique_embs
+    patient_ids: torch.Tensor  # (M,) long indices in [0, num_patients)
+    num_patients: int
+    unique_texts: tuple[str, ...] = ()
+
+    @classmethod
+    def concat(cls, batches):
+        """Merge chunked SentenceBatch objects while preserving canonical deduplicated order."""
+        if not batches:
+            raise ValueError("Expected at least one SentenceBatch")
+        if len(batches) == 1:
+            return batches[0]
+        device = batches[0].unique_embs.device
+        hidden_size = batches[0].unique_embs.shape[1]
+        if all(len(b.unique_texts) == len(b.unique_embs) for b in batches):
+            text_to_emb = {}
+            for b in batches:
+                for idx, text in enumerate(b.unique_texts):
+                    if text not in text_to_emb:
+                        text_to_emb[text] = b.unique_embs[idx]
+            merged_texts = tuple(sorted(text_to_emb))
+            if not merged_texts:
+                return cls(
+                    unique_embs=torch.empty((0, hidden_size), device=device, dtype=torch.float32),
+                    flat_idx=torch.empty((0,), device=device, dtype=torch.long),
+                    patient_ids=torch.empty((0,), device=device, dtype=torch.long),
+                    num_patients=sum(b.num_patients for b in batches),
+                    unique_texts=(),
+                )
+            text_to_id = {t: i for i, t in enumerate(merged_texts)}
+            merged_embs = torch.stack([text_to_emb[t] for t in merged_texts], dim=0)
+            flat_parts = []
+            pat_parts = []
+            pat_offset = 0
+            for b in batches:
+                if len(b.flat_idx):
+                    remap = torch.tensor(
+                        [text_to_id[t] for t in b.unique_texts], device=device, dtype=torch.long
+                    )
+                    flat_parts.append(remap[b.flat_idx])
+                    pat_parts.append(b.patient_ids + pat_offset)
+                pat_offset += b.num_patients
+            return cls(
+                unique_embs=merged_embs,
+                flat_idx=torch.cat(flat_parts, dim=0) if flat_parts else torch.empty((0,), device=device, dtype=torch.long),
+                patient_ids=torch.cat(pat_parts, dim=0) if pat_parts else torch.empty((0,), device=device, dtype=torch.long),
+                num_patients=pat_offset,
+                unique_texts=merged_texts,
+            )
+
+        emb_parts = []
+        flat_parts = []
+        pat_parts = []
+        emb_offset = 0
+        pat_offset = 0
+        for b in batches:
+            if len(b.unique_embs):
+                emb_parts.append(b.unique_embs)
+            if len(b.flat_idx):
+                flat_parts.append(b.flat_idx + emb_offset)
+                pat_parts.append(b.patient_ids + pat_offset)
+            emb_offset += len(b.unique_embs)
+            pat_offset += b.num_patients
+        return cls(
+            unique_embs=torch.cat(emb_parts, dim=0) if emb_parts else torch.empty((0, hidden_size), device=device, dtype=torch.float32),
+            flat_idx=torch.cat(flat_parts, dim=0) if flat_parts else torch.empty((0,), device=device, dtype=torch.long),
+            patient_ids=torch.cat(pat_parts, dim=0) if pat_parts else torch.empty((0,), device=device, dtype=torch.long),
+            num_patients=pat_offset,
+            unique_texts=(),
+        )
+
+
+@dataclass
 class SolverMemory:
     """Context-conditioned state for the differentiable in-context orthogonalized R-learner."""
 
@@ -747,6 +892,9 @@ class SolverMemory:
     lex_mu: torch.Tensor | None = None
     lex_basis: torch.Tensor | None = None
     lex_rms: torch.Tensor | None = None
+    sent_centroids: torch.Tensor | None = None
+    sent_mu: torch.Tensor | None = None
+    sent_rms: torch.Tensor | None = None
 
 
 @dataclass
@@ -779,6 +927,70 @@ def _fit_lexical_basis(lex_ctx, max_dim):
     proj = xc @ basis
     rms = proj.square().mean().sqrt().clamp_min(1e-4)
     return mu, basis, rms
+
+
+@torch.no_grad()
+def _project_sentence_maxsim(sent_batch, centroids):
+    """Per-patient maximum cosine similarity to each study-specific sentence prototype."""
+    n_pat = sent_batch.num_patients
+    k = centroids.shape[0]
+    device = centroids.device
+    if n_pat == 0 or k == 0:
+        return torch.zeros((n_pat, k), device=device, dtype=torch.float32)
+    if len(sent_batch.flat_idx) == 0 or len(sent_batch.unique_embs) == 0:
+        return torch.zeros((n_pat, k), device=device, dtype=torch.float32)
+
+    sim_uniq = sent_batch.unique_embs.float() @ centroids.T  # (U, K)
+    vals = sim_uniq[sent_batch.flat_idx]  # (M, K)
+    out = torch.full((n_pat, k), -1.0, device=device, dtype=torch.float32)
+    idx = sent_batch.patient_ids.unsqueeze(-1).expand(-1, k)
+    out.scatter_reduce_(0, idx, vals, reduce="amax", include_self=False)
+    has_sent = torch.zeros(n_pat, device=device, dtype=torch.bool)
+    has_sent[sent_batch.patient_ids] = True
+    return torch.where(has_sent.unsqueeze(-1), out, torch.zeros_like(out))
+
+
+@torch.no_grad()
+def _fit_sentence_concepts(ctx_sent, max_dim, *, max_pool=4096, n_iter=10):
+    """Unsupervised, permutation-invariant spherical k-means prototypes on context sentences."""
+    if ctx_sent is None or len(ctx_sent.unique_embs) == 0 or max_dim <= 0:
+        return None, None, None
+    pool = ctx_sent.unique_embs.float()
+    if len(pool) > max_pool:
+        mean_v = F.normalize(pool.mean(dim=0, keepdim=True), p=2, dim=-1)
+        dist = 1.0 - (pool @ mean_v.T).squeeze(-1)
+        top = torch.topk(dist, max_pool, largest=True).indices
+        pool = pool[top]
+
+    k = min(max_dim, len(pool))
+    mean_v = F.normalize(pool.mean(dim=0, keepdim=True), p=2, dim=-1)
+    first_idx = int((1.0 - (pool @ mean_v.T).squeeze(-1)).argmax().item())
+    centroids = torch.empty((k, pool.shape[1]), device=pool.device, dtype=torch.float32)
+    centroids[0] = pool[first_idx]
+    max_sim = pool @ centroids[0]
+    for ci in range(1, k):
+        nxt = int(max_sim.argmin().item())
+        centroids[ci] = pool[nxt]
+        max_sim = torch.maximum(max_sim, pool @ centroids[ci])
+
+    for _ in range(n_iter):
+        sims = pool @ centroids.T
+        labels = sims.argmax(dim=1)
+        new_c = torch.zeros_like(centroids)
+        new_c.index_add_(0, labels, pool)
+        norms = new_c.norm(dim=1, keepdim=True)
+        empty = norms[:, 0] < 1e-6
+        if empty.any():
+            n_empty = int(empty.sum().item())
+            worst = torch.topk(sims.max(dim=1).values, n_empty, largest=False).indices
+            new_c[empty] = pool[worst]
+            norms = new_c.norm(dim=1, keepdim=True)
+        centroids = new_c / norms.clamp_min(1e-8)
+
+    raw_ctx = _project_sentence_maxsim(ctx_sent, centroids)
+    mu = raw_ctx.mean(dim=0, keepdim=True)
+    rms = (raw_ctx - mu).square().mean().sqrt().clamp_min(1e-4)
+    return centroids, mu, rms
 
 
 def _fit_loo_cv_ridge(A_ctx, y_ctx, lambdas, cv_temp, *, intercept_reg=1e-4):
@@ -863,6 +1075,10 @@ class CausalStudyModel(nn.Module):
             self.lexical_log_weight = nn.Parameter(torch.tensor(0.0))
         else:
             self.lexical_log_weight = None
+        if cfg.sentence_concept_dim > 0:
+            self.sentence_log_weight = nn.Parameter(torch.tensor(0.0))
+        else:
+            self.sentence_log_weight = None
 
         # Calibration and epistemic-uncertainty heads on solver predictions + query leverages.
         self.arm_cal = nn.Sequential(nn.Linear(8, 32), nn.GELU(), nn.Linear(32, 4))
@@ -945,7 +1161,7 @@ class CausalStudyModel(nn.Module):
         tok = self.outcome_token(token_in).unsqueeze(1)
         return torch.cat([self._patient_slots(embeddings), tok], dim=1)
 
-    def _fit_solver(self, embeddings, t, y, *, lexical=None):
+    def _fit_solver(self, embeddings, t, y, *, lexical=None, sentences=None):
         device_type = embeddings.device.type
         with torch.amp.autocast(device_type=device_type, enabled=False):
             phi_ctx = self._solver_features(embeddings).float()
@@ -962,6 +1178,16 @@ class CausalStudyModel(nn.Module):
                 w_lex = F.softplus(self.lexical_log_weight.float())
                 z_lex = w_lex * ((lex_f - lex_mu) @ lex_basis) / lex_rms
                 z_ctx = torch.cat([z_ctx, z_lex], dim=1)
+            sent_centroids = sent_mu = sent_rms = None
+            if self.cfg.sentence_concept_dim > 0 and sentences is not None:
+                sent_centroids, sent_mu, sent_rms = _fit_sentence_concepts(
+                    sentences, self.cfg.sentence_concept_dim
+                )
+                if sent_centroids is not None:
+                    w_sent = F.softplus(self.sentence_log_weight.float())
+                    raw_sent = _project_sentence_maxsim(sentences, sent_centroids)
+                    z_sent = w_sent * (raw_sent - sent_mu) / sent_rms
+                    z_ctx = torch.cat([z_ctx, z_sent], dim=1)
             ones = torch.ones((n_ctx, 1), device=phi_ctx.device, dtype=torch.float32)
             A_ctx = torch.cat([ones, z_ctx], dim=1)
             cv_temp = F.softplus(self.log_cv_temp.float()) + 0.1
@@ -989,9 +1215,12 @@ class CausalStudyModel(nn.Module):
                 lex_mu=lex_mu,
                 lex_basis=lex_basis,
                 lex_rms=lex_rms,
+                sent_centroids=sent_centroids,
+                sent_mu=sent_mu,
+                sent_rms=sent_rms,
             )
 
-    def _solver_query_stats(self, embeddings, solver_mem, *, lexical=None):
+    def _solver_query_stats(self, embeddings, solver_mem, *, lexical=None, sentences=None):
         device_type = embeddings.device.type
         with torch.amp.autocast(device_type=device_type, enabled=False):
             phi_q = self._solver_features(embeddings).float()
@@ -1005,6 +1234,15 @@ class CausalStudyModel(nn.Module):
                     / solver_mem.lex_rms
                 )
                 z_q = torch.cat([z_q, z_lex_q], dim=1)
+            if solver_mem.sent_centroids is not None:
+                if sentences is None:
+                    raise ValueError(
+                        "Expected query sentence features for sentence_concept_dim > 0"
+                    )
+                w_sent = F.softplus(self.sentence_log_weight.float())
+                raw_sent_q = _project_sentence_maxsim(sentences, solver_mem.sent_centroids)
+                z_sent_q = w_sent * (raw_sent_q - solver_mem.sent_mu) / solver_mem.sent_rms
+                z_q = torch.cat([z_q, z_sent_q], dim=1)
             ones_q = torch.ones((len(z_q), 1), device=z_q.device, dtype=torch.float32)
             A_q = torch.cat([ones_q, z_q], dim=1)
             e_q, h_e = _predict_ridge(solver_mem.propensity_fit, A_q)
@@ -1015,9 +1253,11 @@ class CausalStudyModel(nn.Module):
             y1_raw = (m_q + (1.0 - e_prob) * tau_q).clamp(0.01, 0.99)
             return y0_raw, y1_raw, m_q, e_prob, tau_q, h_m, h_tau, h_e
 
-    def condition(self, embeddings, t, y, *, lexical=None):
+    def condition(self, embeddings, t, y, *, lexical=None, sentences=None):
         scale = ArmScale.from_context(t, y)
-        solver_mem = self._fit_solver(embeddings, t, y, lexical=lexical)
+        solver_mem = self._fit_solver(
+            embeddings, t, y, lexical=lexical, sentences=sentences
+        )
         context = self._assemble_context(embeddings, t, y, scale)
         attn_memories = []
         for i, layer in enumerate(self.layers):
@@ -1034,9 +1274,9 @@ class CausalStudyModel(nn.Module):
             queries = layer.sample_mix(queries, memory)
         return queries[:, -1, :]
 
-    def query_logits(self, embeddings, memories, scale, *, lexical=None):
+    def query_logits(self, embeddings, memories, scale, *, lexical=None, sentences=None):
         y0_raw, y1_raw, m_q, e_prob, tau_q, h_m, h_tau, _ = self._solver_query_stats(
-            embeddings, memories.solver, lexical=lexical
+            embeddings, memories.solver, lexical=lexical, sentences=sentences
         )
         device_type = embeddings.device.type
         with torch.amp.autocast(device_type=device_type, enabled=False):
@@ -1060,9 +1300,11 @@ class CausalStudyModel(nn.Module):
         attn_logits = self.head(pooled).reshape(len(embeddings), 2, -1).float()
         return solver_bin_logits + self.attn_residual_scale.float() * attn_logits
 
-    def query_propensity_logits(self, embeddings, memories, scale, *, lexical=None):
+    def query_propensity_logits(
+        self, embeddings, memories, scale, *, lexical=None, sentences=None
+    ):
         _, _, _, e_prob, _, _, _, h_e = self._solver_query_stats(
-            embeddings, memories.solver, lexical=lexical
+            embeddings, memories.solver, lexical=lexical, sentences=sentences
         )
         device_type = embeddings.device.type
         with torch.amp.autocast(device_type=device_type, enabled=False):
@@ -1109,10 +1351,26 @@ class CausalStudyModel(nn.Module):
         lex = self.patient.lexical_features(all_rows) if self.cfg.lexical_dim > 0 else None
         ctx_lex = lex[:n_ctx] if lex is not None else None
         q_lex = lex[n_ctx:] if lex is not None else None
-        memories, scale = self.condition(embeddings[:n_ctx], t, y, lexical=ctx_lex)
+        ctx_sent = (
+            self.patient.sentence_features(context)
+            if self.cfg.sentence_concept_dim > 0
+            else None
+        )
+        q_sent = (
+            self.patient.sentence_features(queries)
+            if self.cfg.sentence_concept_dim > 0
+            else None
+        )
+        memories, scale = self.condition(
+            embeddings[:n_ctx], t, y, lexical=ctx_lex, sentences=ctx_sent
+        )
         q_emb = embeddings[n_ctx:]
-        outcome_logits = self.query_logits(q_emb, memories, scale, lexical=q_lex)
-        prop_logits = self.query_propensity_logits(q_emb, memories, scale, lexical=q_lex)
+        outcome_logits = self.query_logits(
+            q_emb, memories, scale, lexical=q_lex, sentences=q_sent
+        )
+        prop_logits = self.query_propensity_logits(
+            q_emb, memories, scale, lexical=q_lex, sentences=q_sent
+        )
         return outcome_logits, prop_logits, scale
 
     def risk_stats(self, logits, scale):

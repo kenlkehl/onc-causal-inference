@@ -116,6 +116,28 @@ def _code_id(name):
     return _hash_bucket(name, CODE_BUCKETS)
 
 
+_SENTENCE_SPLIT_RE = re.compile(r"(?:\n+|;\s+|(?<!\d)\.(?:\s+|$)|(?:\s+-\s+))")
+
+
+def note_sentences(notes, *, max_sentences=128, min_chars=8):
+    """Split a patient's pretreatment notes into deduplicated short clinical clauses."""
+    seen = set()
+    sentences = []
+    for note in notes or ():
+        text = note.get("text")
+        if not text:
+            continue
+        for chunk in _SENTENCE_SPLIT_RE.split(str(text)):
+            clause = chunk.strip(" \t\r\n*-•:")
+            if len(clause) < min_chars or clause in seen:
+                continue
+            seen.add(clause)
+            sentences.append(clause)
+            if len(sentences) >= max_sentences:
+                return sentences
+    return sentences
+
+
 def note_lexical_vector(notes):
     """Deterministic hashed 1-3gram log-count vector across a patient's pretreatment notes."""
     counts = [0.0] * LEXICAL_BUCKETS

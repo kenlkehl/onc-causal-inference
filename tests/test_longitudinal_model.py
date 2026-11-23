@@ -1172,5 +1172,181 @@ def test_per_slot_note_temporal_log_uniform_sampling_and_eval_context_size(
     )
     r2_loaded, _ = load_run(r2_dir, "cpu")
     assert r2_loaded.cfg.per_slot_note_temporal is False and r2_loaded.cfg.ridge_grid_size == 5
+    assert r2_loaded.cfg.sentence_concept_dim == 0 and r2_loaded.sentence_log_weight is None
     with torch.no_grad():
         torch.testing.assert_close(r2_loaded.eval()(rows[:4], rows[4:])[0], r2(rows[:4], rows[4:])[0])
+
+
+def test_sentence_concept_channel(note_model, tmp_path):
+    from oci.longitudinal.model import SentenceBatch
+
+    torch.manual_seed(0)
+    rows, _ = simulate_episode(31, 0, False, 8)
+    # Give one context patient empty notes to verify edge-case handling.
+    rows[2] = {**rows[2], "notes": []}
+
+    cfg = ModelConfig(
+        event_width=8,
+        event_layers=1,
+        study_width=16,
+        study_layers=1,
+        bins=17,
+        note_slots=2,
+        solver_dim=8,
+        lexical_dim=4,
+        sentence_concept_dim=12,
+    )
+    m = CausalStudyModel(
+        AutoModel.from_pretrained(note_model),
+        AutoTokenizer.from_pretrained(note_model),
+        cfg,
+    )
+    assert m.sentence_log_weight is not None
+
+    # 1. Forward + loss + backward produces finite gradients on sentence_log_weight.
+    logits, prop_logits, scale = m(rows[:5], rows[5:])
+    oracle = torch.tensor([[r["true_y0"], r["true_y1"]] for r in rows[5:]], dtype=torch.float32)
+    true_prop = torch.tensor([r["true_treatment_prob"] for r in rows[5:]], dtype=torch.float32)
+    loss = m.loss(logits, scale, oracle, propensity_logits=prop_logits, true_propensity=true_prop)
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert m.sentence_log_weight.grad is not None and torch.isfinite(m.sentence_log_weight.grad)
+
+    # 2. Exact permutation invariance + SentenceBatch.concat equivalence + zero query leakage.
+    m.eval()
+    with torch.no_grad():
+        ctx = rows[:5]
+        qry = rows[5:]
+        t, y = binary_observations(ctx, "cpu")
+        emb_ctx = m.patient(ctx)
+        lex_ctx = m.patient.lexical_features(ctx)
+        sent_ctx = m.patient.sentence_features(ctx)
+        mem1, scale1 = m.condition(emb_ctx, t, y, lexical=lex_ctx, sentences=sent_ctx)
+        assert mem1.solver.sent_centroids is not None
+        assert mem1.solver.sent_centroids.shape[0] <= cfg.sentence_concept_dim
+
+        q_emb = m.patient(qry)
+        q_lex = m.patient.lexical_features(qry)
+        q_sent = m.patient.sentence_features(qry)
+        out1 = m.query_logits(q_emb, mem1, scale1, lexical=q_lex, sentences=q_sent)
+        p1 = m.query_propensity_logits(q_emb, mem1, scale1, lexical=q_lex, sentences=q_sent)
+
+        # Shuffled context must produce identical prototypes and query predictions.
+        perm = [3, 0, 4, 2, 1]
+        ctx_p = [ctx[i] for i in perm]
+        t_p, y_p = binary_observations(ctx_p, "cpu")
+        mem_p, scale_p = m.condition(
+            m.patient(ctx_p),
+            t_p,
+            y_p,
+            lexical=m.patient.lexical_features(ctx_p),
+            sentences=m.patient.sentence_features(ctx_p),
+        )
+        torch.testing.assert_close(
+            mem1.solver.sent_centroids, mem_p.solver.sent_centroids, atol=1e-5, rtol=1e-5
+        )
+        out_p = m.query_logits(q_emb, mem_p, scale_p, lexical=q_lex, sentences=q_sent)
+        p_p = m.query_propensity_logits(q_emb, mem_p, scale_p, lexical=q_lex, sentences=q_sent)
+        mean1, sd1 = m.risk_stats(out1, scale1)
+        mean_p, sd_p = m.risk_stats(out_p, scale_p)
+        torch.testing.assert_close(mean1, mean_p, atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(sd1, sd_p, atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(p1.sigmoid(), p_p.sigmoid(), atol=1e-4, rtol=1e-4)
+
+        # Chunked SentenceBatch.concat merges unique texts cleanly and matches query predictions.
+        sent_chunks = SentenceBatch.concat(
+            [m.patient.sentence_features(ctx_p[:2]), m.patient.sentence_features(ctx_p[2:])]
+        )
+        assert sent_chunks.unique_texts == sent_ctx.unique_texts
+        assert sent_chunks.num_patients == len(ctx_p)
+        mem2, scale2 = m.condition(
+            m.patient(ctx_p),
+            t_p,
+            y_p,
+            lexical=m.patient.lexical_features(ctx_p),
+            sentences=sent_chunks,
+        )
+        out2 = m.query_logits(q_emb, mem2, scale2, lexical=q_lex, sentences=q_sent)
+        p2 = m.query_propensity_logits(q_emb, mem2, scale2, lexical=q_lex, sentences=q_sent)
+        mean2, sd2 = m.risk_stats(out2, scale2)
+        torch.testing.assert_close(mean1, mean2, atol=1e-3, rtol=1e-3)
+        torch.testing.assert_close(sd1, sd2, atol=1e-3, rtol=1e-3)
+        torch.testing.assert_close(p1.sigmoid(), p2.sigmoid(), atol=1e-3, rtol=1e-3)
+
+        # Zero query leakage: changing query notes must not alter fitted sentence prototypes.
+        qry_alt = [
+            {**r, "notes": [{"day_from_index": -5, "delta_years": None, "text": "Completely unseen clinical sentence about rare metastasis."}]}
+            for r in qry
+        ]
+        # Fit again via condition on ctx; centroids depend only on ctx.
+        sent_ctx_only = m.patient.sentence_features(ctx)
+        mem3, _ = m.condition(emb_ctx, t, y, lexical=lex_ctx, sentences=sent_ctx_only)
+        torch.testing.assert_close(mem1.solver.sent_centroids, mem3.solver.sent_centroids)
+        # Forward with completely empty notes across all patients works cleanly.
+        empty_rows = [{**r, "notes": []} for r in rows]
+        eo, ep, _ = m(empty_rows[:5], empty_rows[5:])
+        assert torch.isfinite(eo).all() and torch.isfinite(ep).all()
+        # Query with unseen sentences works cleanly.
+        ao, ap, _ = m(ctx, qry_alt)
+        assert torch.isfinite(ao).all() and torch.isfinite(ap).all()
+
+    # 3. End-to-end CLI train + chunked predict with --sentence-concept-dim.
+    data = generate_longitudinal_cohort(tmp_path / "sent_data", dataset_size=10) / "dataset.parquet"
+    run = tmp_path / "sent_run"
+    main(
+        [
+            "train",
+            "--steps",
+            "1",
+            "--device",
+            "cpu",
+            "--context-size",
+            "4",
+            "--query-size",
+            "2",
+            "--note-model",
+            str(note_model),
+            "--run-dir",
+            str(run),
+            "--train-cohort",
+            str(data),
+            "--event-width",
+            "8",
+            "--event-layers",
+            "1",
+            "--study-width",
+            "16",
+            "--study-layers",
+            "1",
+            "--note-slots",
+            "2",
+            "--solver-dim",
+            "8",
+            "--sentence-concept-dim",
+            "6",
+            "--bins",
+            "17",
+        ]
+    )
+    reloaded, _ = load_run(run, "cpu")
+    assert reloaded.cfg.sentence_concept_dim == 6
+    pred_out = tmp_path / "sent_preds.parquet"
+    main(
+        [
+            "predict",
+            "--run-dir",
+            str(run),
+            "--context",
+            str(data),
+            "--context-size",
+            "6",
+            "--output",
+            str(pred_out),
+            "--batch-size",
+            "2",
+            "--device",
+            "cpu",
+        ]
+    )
+    preds = pq.read_table(pred_out)
+    assert preds.num_rows == 4

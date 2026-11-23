@@ -65,9 +65,12 @@ CausalPFN head**:
    note and structured subspaces (`--solver-dim`, default 64) standardized over the context
    cohort. Optionally, `--lexical-dim K` (default 0; e.g. `128`) appends the top-$K$
    unsupervised study-adaptive SVD components of each patient's hashed pretreatment note
-   1–3grams (fitted strictly on the context cohort in `float32` and weighted by a learned
-   scalar) so wide note designs and unseen cancer vocabularies do not bottleneck on fixed
-   slot capacity. Inside `condition()`, exact closed-form Cholesky leave-one-out
+   1–3grams, and `--sentence-concept-dim K` (default 0; e.g. `128`) appends per-patient
+   maximum cosine similarity against $K$ unsupervised, permutation-invariant spherical
+   k-means prototypes over deduplicated context note sentences (both fitted strictly on the
+   context cohort in `float32` and weighted by learned scalars) so paraphrased and
+   realistic clinical notes do not dilute rare or unseen findings across whole-note
+   pooling or fixed slot capacity. Inside `condition()`, exact closed-form Cholesky leave-one-out
    cross-validated Ridge fits estimate propensity $\hat{e}(x)$ and marginal outcome
    $\hat{m}(x)$ (strictly in `float32`), then fit the orthogonalized Robinson R-learner
    $(Y - \hat{m}^{(-i)}(X)) \sim (T - \hat{e}^{(-i)}(X)) \cdot [1, \phi(X)]$ for

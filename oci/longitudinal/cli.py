@@ -15,7 +15,7 @@ from synthetic_data.paraphrase_bank import load_paraphrase_bank
 from synthetic_data.study_designs import load_bank
 
 from .events import binary_observations, read_patient_table
-from .model import BASE_MODEL, ModelConfig
+from .model import BASE_MODEL, ModelConfig, SentenceBatch
 from .training import (
     OBSERVED,
     _autocast,
@@ -76,17 +76,24 @@ def predict(
     model.eval()
     device = model.centers.device
     use_lexical = model.cfg.lexical_dim > 0
+    use_sentences = model.cfg.sentence_concept_dim > 0
     with _autocast(device, precision):
         ctx_embs = []
         ctx_lexs = []
+        ctx_sents = []
         for rows in _chunks(context.drop(OBSERVED), batch_size):
             ctx_embs.append(model.patient(rows))
             if use_lexical:
                 ctx_lexs.append(model.patient.lexical_features(rows))
+            if use_sentences:
+                ctx_sents.append(model.patient.sentence_features(rows))
         embeddings = torch.cat(ctx_embs)
         ctx_lex = torch.cat(ctx_lexs) if use_lexical else None
+        ctx_sent = SentenceBatch.concat(ctx_sents) if use_sentences else None
         t, y = binary_observations(context.select(OBSERVED).to_pylist(), device)
-        memories, scale = model.condition(embeddings, t, y, lexical=ctx_lex)
+        memories, scale = model.condition(
+            embeddings, t, y, lexical=ctx_lex, sentences=ctx_sent
+        )
     n0, n1 = int(scale.counts[0].item()), int(scale.counts[1].item())
     if min(n0, n1) < 5:
         print(
@@ -119,9 +126,12 @@ def predict(
                 with _autocast(device, precision):
                     q_emb = model.patient(rows)
                     q_lex = model.patient.lexical_features(rows) if use_lexical else None
-                    logits = model.query_logits(q_emb, memories, scale, lexical=q_lex)
+                    q_sent = model.patient.sentence_features(rows) if use_sentences else None
+                    logits = model.query_logits(
+                        q_emb, memories, scale, lexical=q_lex, sentences=q_sent
+                    )
                     prop_logits = model.query_propensity_logits(
-                        q_emb, memories, scale, lexical=q_lex
+                        q_emb, memories, scale, lexical=q_lex, sentences=q_sent
                     )
                 mean, sd = model.risk_stats(logits, scale)
                 p0, p1 = mean.cpu().unbind(dim=1)
