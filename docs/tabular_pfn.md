@@ -45,3 +45,13 @@ python -m oci.tabular_pfn.cli predict \
 (You can also pass explicit `--context` + `--queries` tables, or `--context-size K` for a single holdout split.)
 
 `TabularPreprocessor` automatically handles mixed numeric, binary, categorical, and 3-state EHR missingness (`not_documented` vs. `documented_unknown`) strictly fitted on context rows with zero query or oracle leakage.
+
+## Proof-of-Concept Stress-Test Benchmark (`P = 50, 500, 2,000`)
+
+Measured after a 6.1-minute, 500-step proof-of-concept training run (2.11M parameters, log-uniform `N_ctx = 80..1,200`, `P = 20..2,000`, 1× RTX A6000), evaluated across 48 held-out synthetic all-evidence studies per width (`N_ctx = 800`, `N_q = 128`, 25% strictly null-HTE, 70% strong instruments, collinear proxies, mixed types, MCAR/MAR missingness):
+
+| Candidate Width `P` | **PFN `cate_rmse` ↓** | Arm-Mean ↓ | Dense Ridge-R ↓ | Screened-32 Ridge-R ↓ | Cross-Fit GBM-R ↓ | **PFN `within_r` ↑** (vs. Scr-32) | **PFN `null_rmse` ↓** | Signal / Modifier AUROC ↑ | `g_e` (Conf / Inst) | Median Infer / Peak VRAM |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **`P = 50`** | **`0.1209`** | `0.1521` | `0.1639` | `0.1585` | `0.2325` | **`+0.473`** (`+0.391`) | `0.0724` | `0.838 / 0.806` | `0.59 / 0.43` | `20.5 ms` / `134 MB` |
+| **`P = 500`** | **`0.1246`** | `0.1490` | `0.1480` | `0.1634` | `0.2392` | **`+0.440`** (`+0.324`) | `0.0765` | `0.872 / 0.878` | `0.53 / 0.33` | `22.0 ms` / `143 MB` |
+| **`P = 2,000`** | **`0.1323`** | `0.1630` | `—` | `0.1467` | `0.2376` | **`+0.388`** (`+0.302`) | `0.0711` | **`0.863 / 0.866`** | **`0.42 / 0.29`** | **`27.5 ms` / `170 MB`** |
