@@ -10,6 +10,8 @@ from .model import (
     ROLE_NAMES,
     SparseTabularCausalPFN,
     TabularModelConfig,
+    calibrate_role_probabilities,
+    format_role_summary,
 )
 from .preprocessing import TabularPreprocessor
 from .prior import DGP_FAMILIES, ROLE_TO_ID, PriorConfig, sample_tabular_study
@@ -23,5 +25,7 @@ __all__ = [
     "SparseTabularCausalPFN",
     "TabularModelConfig",
     "TabularPreprocessor",
+    "calibrate_role_probabilities",
+    "format_role_summary",
     "sample_tabular_study",
 ]

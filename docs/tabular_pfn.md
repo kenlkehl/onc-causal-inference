@@ -31,17 +31,18 @@ Training draws log-uniform $N_{\text{ctx}} \in [80, 3{,}000]$ and $P \in [20, 2{
 # Override step budget as desired, e.g. STEPS=20000 ./scripts/run_tabular_pfn_h200.sh
 ```
 
-### Zero-Shot Prediction + Interpretable Feature Role Report on Any Tabular Cohort
+### Zero-Shot Prediction + Calibrated Feature Role Report on Any Tabular Cohort
 ```bash
 # Out-of-fold zero-shot predictions for every patient in a Stage-2 cohort (5-fold cross-fitted)
+# Supports .json or .csv for --role-report and prints top confounders, modifiers, & instruments
 python -m oci.tabular_pfn.cli predict \
   --run-dir artifacts/tabular_causal_pfn_p2000 \
   --context path/to/stage2_catalog.parquet \
   --cv-folds 5 \
   --output predictions.parquet \
-  --role-report feature_roles.json
+  --role-report feature_roles.csv
 ```
-(You can also pass explicit `--context` + `--queries` tables, or `--context-size K` for a single holdout split.)
+(You can also pass explicit `--context` + `--queries` tables, `--context-size K` for a single holdout split, or `--print-roles` to display the summary table without writing a file. By default, role probabilities are calibrated to the cohort's empirical sparsity via Normalized Saerens EM.)
 
 `TabularPreprocessor` automatically handles mixed numeric, binary, categorical, and 3-state EHR missingness (`not_documented` vs. `documented_unknown`) strictly fitted on context rows with zero query or oracle leakage.
 

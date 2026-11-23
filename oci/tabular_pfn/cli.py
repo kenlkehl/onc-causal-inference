@@ -3,6 +3,7 @@ with SparseTabularCausalPFN on high-dimensional (up to P = 2,000+) candidate tab
 """
 
 import argparse
+import csv
 import json
 import os
 from pathlib import Path
@@ -13,9 +14,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
-from .model import SparseTabularCausalPFN, TabularModelConfig
+from .model import SparseTabularCausalPFN, TabularModelConfig, format_role_summary
 from .preprocessing import TabularPreprocessor, read_tabular_file
-from .prior import DGP_FAMILIES, PriorConfig
+from .prior import DGP_FAMILIES, ROLE_NAMES, PriorConfig
 from .training import evaluate_tabular, load_tabular_run, run_tabular_training
 
 OVERLAP_MARGIN = 0.05
@@ -75,6 +76,9 @@ def predict_tabular(
     cv_folds: int | None = None,
     query_batch_size: int = 512,
     role_report_path: str | Path | None = None,
+    print_roles: bool = False,
+    role_summary_top_k: int = 15,
+    calibrate_roles: bool = True,
     seed: int = 42,
 ):
     """Estimate arm risks, uncertainty SDs, propensities, CATEs, and optional column roles.
@@ -95,6 +99,7 @@ def predict_tabular(
             if c not in exclude and not c.startswith("true_")
         ]
 
+    need_roles = role_report_path is not None or print_roles
     report = None
     if cv_folds is not None:
         if query_file is not None or context_size is not None:
@@ -142,8 +147,10 @@ def predict_tabular(
             s0_arr[val_mask] = s0
             s1_arr[val_mask] = s1
             prop_arr[val_mask] = prop
-            if role_report_path is not None:
-                for row in model.column_role_report(mem, pre.feature_names):
+            if need_roles:
+                for row in model.column_role_report(
+                    mem, pre.feature_names, calibrated=calibrate_roles
+                ):
                     fn = row["feature"]
                     if fn not in role_acc:
                         role_acc[fn] = {k: v for k, v in row.items() if isinstance(v, (int, float))}
@@ -155,16 +162,32 @@ def predict_tabular(
                         role_counts[fn] += 1
 
         q_tbl = ctx_tbl
-        if role_report_path is not None:
-            from .prior import ROLE_NAMES
-
+        if need_roles:
             report = []
             for fn, sums in role_acc.items():
                 cnt = role_counts[fn]
                 avg = {k: float(v / cnt) for k, v in sums.items()}
-                best_role = max(ROLE_NAMES, key=lambda r: avg.get(f"p_{r}", 0.0))
+                p_sig = float(1.0 - avg.get("p_noise", 1.0))
+                avg["p_signal"] = p_sig
+                avg["p_any_confounder"] = float(
+                    avg.get("p_confounder", 0.0) + avg.get("p_dual_role", 0.0)
+                )
+                avg["p_any_modifier"] = float(
+                    avg.get("p_modifier", 0.0) + avg.get("p_dual_role", 0.0)
+                )
+                best_role = (
+                    max(ROLE_NAMES[1:], key=lambda r: avg.get(f"p_{r}", 0.0))
+                    if p_sig >= 0.5
+                    else "noise"
+                )
                 report.append({"feature": fn, "predicted_role": best_role, **avg})
-            report.sort(key=lambda r: 1.0 - r.get("p_noise", 1.0), reverse=True)
+            report.sort(
+                key=lambda r: (
+                    r["p_signal"],
+                    max(r.get("gate_outcome", 0.0), r.get("gate_cate", 0.0)),
+                ),
+                reverse=True,
+            )
     else:
         if query_file is None:
             if context_size is None or not 0 < context_size < ctx_tbl.num_rows:
@@ -193,8 +216,10 @@ def predict_tabular(
         p0_arr, p1_arr, s0_arr, s1_arr, prop_arr = _score_queries_batched(
             model, X_q, M_q, mem, scale, batch_size=query_batch_size
         )
-        if role_report_path is not None:
-            report = model.column_role_report(mem, pre.feature_names)
+        if need_roles:
+            report = model.column_role_report(
+                mem, pre.feature_names, calibrated=calibrate_roles
+            )
 
     outside = (prop_arr < OVERLAP_MARGIN) | (prop_arr > 1.0 - OVERLAP_MARGIN)
 
@@ -243,7 +268,17 @@ def predict_tabular(
     if role_report_path is not None and report is not None:
         rpath = Path(role_report_path)
         rpath.parent.mkdir(parents=True, exist_ok=True)
-        rpath.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        if rpath.suffix.lower() == ".csv":
+            fieldnames = list(report[0].keys()) if report else ["feature", "predicted_role"]
+            with rpath.open("w", encoding="utf-8", newline="") as fh:
+                writer = csv.DictWriter(fh, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(report)
+        else:
+            rpath.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    if need_roles and report is not None and role_summary_top_k > 0:
+        print(format_role_summary(report, top_k=role_summary_top_k))
 
     return len(q_ids)
 
@@ -312,7 +347,10 @@ def main(argv=None):
     p_pred.add_argument("--cv-folds", type=int, default=None)
     p_pred.add_argument("--query-batch-size", type=int, default=512)
     p_pred.add_argument("--output", type=Path, required=True)
-    p_pred.add_argument("--role-report", type=Path, default=None)
+    p_pred.add_argument("--role-report", type=Path, default=None, help="Output .json or .csv per-column role report.")
+    p_pred.add_argument("--print-roles", action="store_true", help="Print top confounders, modifiers, and instruments to stdout.")
+    p_pred.add_argument("--role-summary-top-k", type=int, default=15, help="Rows per section in stdout role summary (0 disables).")
+    p_pred.add_argument("--uncalibrated-roles", action="store_true", help="Disable empirical-sparsity EM calibration on role probabilities.")
     p_pred.add_argument("--id-col", default="patient_id")
     p_pred.add_argument("--treatment-col", default="treatment_indicator")
     p_pred.add_argument("--outcome-col", default="outcome_indicator")
@@ -399,6 +437,9 @@ def main(argv=None):
             cv_folds=args.cv_folds,
             query_batch_size=args.query_batch_size,
             role_report_path=args.role_report,
+            print_roles=args.print_roles,
+            role_summary_top_k=args.role_summary_top_k,
+            calibrate_roles=not args.uncalibrated_roles,
             seed=args.seed,
         )
         print(f"Wrote tabular causal predictions for {n} patients to {args.output}")

@@ -15,6 +15,8 @@ from oci.tabular_pfn.model import (
     ROLE_NAMES,
     SparseTabularCausalPFN,
     TabularModelConfig,
+    calibrate_role_probabilities,
+    format_role_summary,
 )
 from oci.tabular_pfn.preprocessing import TabularPreprocessor
 from oci.tabular_pfn.prior import DGP_FAMILIES, ROLE_TO_ID, PriorConfig, sample_tabular_study
@@ -399,3 +401,48 @@ def test_cli_train_resume_evaluate_and_predict(tmp_path):
     assert cv_preds["patient_id"].to_pylist() == list(range(60))
     cv_rep = json.loads(cv_roles.read_text())
     assert 20 <= len(cv_rep) <= 25 and math.isfinite(cv_rep[0]["p_confounder"])
+    assert "p_any_confounder" in cv_rep[0] and "p_any_modifier" in cv_rep[0]
+    summary = format_role_summary(cv_rep, top_k=5)
+    assert "Top 5 Suspected Confounders" in summary and "Top 5 Suspected Effect Modifiers" in summary
+
+    # CSV role report export + Normalized Saerens EM sparsity calibration check
+    csv_out = tmp_path / "preds_csv.parquet"
+    csv_roles = tmp_path / "roles.csv"
+    main(
+        [
+            "predict",
+            "--run-dir",
+            str(run),
+            "--context",
+            str(data_path),
+            "--context-size",
+            "45",
+            "--output",
+            str(csv_out),
+            "--role-report",
+            str(csv_roles),
+            "--role-summary-top-k",
+            "5",
+            "--device",
+            "cpu",
+        ]
+    )
+    csv_lines = csv_roles.read_text(encoding="utf-8").strip().splitlines()
+    assert len(csv_lines) >= 21 and "p_any_confounder" in csv_lines[0]
+
+    # Calibrated probabilities shrink extreme-P noise while preserving exact rank order
+    rng = np.random.default_rng(11)
+    syn_logits = np.zeros((500, len(ROLE_NAMES)), dtype=np.float64)
+    # Note: logsumexp of 5 zero non-noise logits is log(5) ~= 1.61, so noise has l0 > 1.61
+    syn_logits[:, 0] = rng.normal(2.6, 0.6, size=500)
+    syn_logits[:10, 3] = 7.0  # 10 strong confounders out of 500
+    probs_cal, pi_hat, _ = calibrate_role_probabilities(syn_logits)
+    assert probs_cal.shape == (500, len(ROLE_NAMES))
+    np.testing.assert_allclose(probs_cal.sum(axis=1), 1.0, atol=1e-6)
+    assert 0.005 < pi_hat < 0.08
+    assert (1.0 - probs_cal[:10, 0]).mean() > 0.75
+    raw_ps = 1.0 - torch.softmax(torch.from_numpy(syn_logits), dim=-1)[:, 0].numpy()
+    cal_ps = 1.0 - probs_cal[:, 0]
+    assert cal_ps[10:].mean() < 0.05 and cal_ps[10:].mean() < 0.25 * raw_ps[10:].mean()
+    # Rank order of p_signal must match raw signal log-odds monotonically
+    assert np.corrcoef(np.argsort(np.argsort(raw_ps)), np.argsort(np.argsort(cal_ps)))[0, 1] > 0.9999

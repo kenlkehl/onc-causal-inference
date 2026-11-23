@@ -20,6 +20,7 @@ Scales cleanly to P = 2,000+ candidate features and N = 10,000+ patients via:
 from dataclasses import dataclass
 import math
 
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -915,11 +916,27 @@ class SparseTabularCausalPFN(nn.Module):
         }
 
     @torch.no_grad()
-    def column_role_report(self, mem: TabularMemory, feature_names: list[str] | None = None) -> list[dict]:
-        """Return interpretable per-column Bayesian role posteriors and ARD gate weights."""
+    def column_role_report(
+        self,
+        mem: TabularMemory,
+        feature_names: list[str] | None = None,
+        *,
+        calibrated: bool = True,
+    ) -> list[dict]:
+        """Return interpretable per-column Bayesian role posteriors and ARD gate weights.
+
+        When ``calibrated=True`` (default), applies Normalized Saerens EM
+        (:func:`calibrate_role_probabilities`) so probabilities reflect the cohort's
+        empirical sparsity instead of the 50/50 balanced training prior while preserving
+        exact column ranking.
+        """
         p = mem.n_features
         names = feature_names if feature_names is not None else [f"x_{i}" for i in range(p)]
-        probs = F.softmax(mem.role_logits.float(), dim=-1).cpu().numpy()
+        raw_probs = F.softmax(mem.role_logits.float(), dim=-1).cpu().numpy()
+        if calibrated:
+            probs, _, _ = calibrate_role_probabilities(mem.role_logits)
+        else:
+            probs = raw_probs.astype(np.float64)
         ge = torch.zeros(p, device=mem.col_mean.device)
         gm = torch.zeros(p, device=mem.col_mean.device)
         gt = torch.zeros(p, device=mem.col_mean.device)
@@ -929,15 +946,169 @@ class SparseTabularCausalPFN(nn.Module):
         ge_np, gm_np, gt_np = ge.cpu().numpy(), gm.cpu().numpy(), gt.cpu().numpy()
         rows = []
         for j in range(p):
+            p_sig = float(1.0 - probs[j, 0])
+            pred_role = (
+                ROLE_NAMES[1 + int(probs[j, 1:].argmax())] if p_sig >= 0.5 else "noise"
+            )
+            p_conf = float(probs[j, ROLE_NAMES.index("confounder")])
+            p_mod = float(probs[j, ROLE_NAMES.index("modifier")])
+            p_dual = float(probs[j, ROLE_NAMES.index("dual_role")])
             row = {
                 "feature": names[j],
-                "predicted_role": ROLE_NAMES[int(probs[j].argmax())],
+                "predicted_role": pred_role,
+                "p_signal": p_sig,
+                "p_any_confounder": p_conf + p_dual,
+                "p_any_modifier": p_mod + p_dual,
                 "gate_propensity": float(ge_np[j]),
                 "gate_outcome": float(gm_np[j]),
                 "gate_cate": float(gt_np[j]),
+                "raw_signal_score": float(1.0 - raw_probs[j, 0]),
             }
             for r_i, r_name in enumerate(ROLE_NAMES):
                 row[f"p_{r_name}"] = float(probs[j, r_i])
             rows.append(row)
-        rows.sort(key=lambda r: max(r["gate_outcome"], r["gate_cate"], 1.0 - r["p_noise"]), reverse=True)
+        rows.sort(
+            key=lambda r: (r["p_signal"], max(r["gate_outcome"], r["gate_cate"])),
+            reverse=True,
+        )
         return rows
+
+
+def calibrate_role_probabilities(
+    role_logits: torch.Tensor | np.ndarray, *, max_iter: int = 50
+) -> tuple[np.ndarray, float, float]:
+    """Calibrate balanced-loss 6-class ``role_logits`` to empirical cohort sparsity.
+
+    Because training balances noise and non-noise columns 50/50 so 99% noise does not
+    collapse logits to all-noise, raw softmax probabilities over-call non-noise at large P.
+    This uses Normalized Saerens EM (enforcing the exact likelihood-ratio identity
+    ``E[LR | noise] == 1`` with zero Gaussian assumption on the null tail) to recover
+    cohort-calibrated posterior probabilities while preserving exact column ranking.
+
+    Returns ``(probs (P, 6), estimated_signal_prior, c_null)``.
+    """
+    logits_np = (
+        role_logits.detach().float().cpu().numpy()
+        if isinstance(role_logits, torch.Tensor)
+        else np.asarray(role_logits, dtype=np.float64)
+    )
+    p = len(logits_np)
+    if p == 0:
+        return np.empty((0, NUM_ROLES), dtype=np.float64), 0.0, 1.0
+
+    l0 = logits_np[:, 0].astype(np.float64)
+    ls_max = logits_np[:, 1:].max(axis=1).astype(np.float64)
+    l_sig = ls_max + np.log(
+        np.exp(logits_np[:, 1:].astype(np.float64) - ls_max[:, None]).sum(axis=1)
+    )
+    log_lr = np.clip(l_sig - l0, -25.0, 25.0)
+    lr_raw = np.exp(log_lr)
+
+    pi = min(0.25, max(10.0 / max(p, 1), 1.0 / max(p, 1)))
+    c_null = 1.0
+    for _ in range(max_iter):
+        lr = lr_raw / max(c_null, 1e-4)
+        num = pi * lr
+        p_sig = num / (1.0 - pi + num)
+        w0 = float((1.0 - p_sig).sum())
+        if w0 > 1.0:
+            c_new = float(np.clip(((1.0 - p_sig) * lr_raw).sum() / w0, 0.25, 2.0))
+            c_null = 0.7 * c_new + 0.3 * c_null
+        pi_new = float(np.clip((p_sig.sum() + 0.5) / (p + 1.0), 0.25 / p, 0.75))
+        if abs(pi_new - pi) < 1e-6:
+            pi = pi_new
+            break
+        pi = pi_new
+
+    lr = lr_raw / max(c_null, 1e-4)
+    p_sig = (pi * lr) / (1.0 - pi + pi * lr)
+    cond = np.exp(logits_np[:, 1:].astype(np.float64) - l_sig[:, None])
+    probs = np.empty((p, NUM_ROLES), dtype=np.float64)
+    probs[:, 0] = 1.0 - p_sig
+    probs[:, 1:] = p_sig[:, None] * cond
+    return probs, float(pi), float(c_null)
+
+
+def format_role_summary(report: list[dict], *, top_k: int = 15) -> str:
+    """Format a compact stdout summary of top confounders, modifiers, and instruments."""
+    p_total = len(report)
+    if p_total == 0:
+        return "No candidate features in role report."
+    est_active = sum(float(r.get("p_signal", 1.0 - r.get("p_noise", 1.0))) for r in report)
+    n_called = sum(1 for r in report if r.get("predicted_role") != "noise")
+    lines = [
+        f"=== SparseTabularCausalPFN Feature Role Summary (P={p_total}) ===",
+        f"Estimated active features: ~{est_active:.1f} / {p_total} "
+        f"({100.0 * (1.0 - est_active / max(p_total, 1)):.1f}% noise) | "
+        f"features with p_signal >= 0.50: {n_called}",
+    ]
+
+    def _section(title: str, rows: list[dict], cols: list[tuple[str, str]]):
+        lines.append("")
+        lines.append(title)
+        hdr = f"  {'Feature':<36s}" + "".join(f" {lbl:>9s}" for lbl, _ in cols) + "  Role"
+        lines.append(hdr)
+        lines.append("  " + "-" * (len(hdr) - 2))
+        for r in rows[:top_k]:
+            fname = str(r["feature"])
+            if len(fname) > 36:
+                fname = fname[:33] + "..."
+            vals = "".join(f" {float(r.get(key, 0.0)):9.3f}" for _, key in cols)
+            lines.append(f"  {fname:<36s}{vals}  {r.get('predicted_role', 'noise')}")
+
+    conf_rows = sorted(
+        report,
+        key=lambda r: (
+            float(r.get("p_any_confounder", r.get("p_confounder", 0.0) + r.get("p_dual_role", 0.0))),
+            float(r.get("gate_outcome", 0.0)) + float(r.get("gate_propensity", 0.0)),
+        ),
+        reverse=True,
+    )
+    _section(
+        f"Top {min(top_k, p_total)} Suspected Confounders (ranked by p_confounder + p_dual_role):",
+        conf_rows,
+        [
+            ("p_any_c", "p_any_confounder"),
+            ("p_conf", "p_confounder"),
+            ("p_dual", "p_dual_role"),
+            ("gate_e", "gate_propensity"),
+            ("gate_m", "gate_outcome"),
+        ],
+    )
+
+    mod_rows = sorted(
+        report,
+        key=lambda r: (
+            float(r.get("p_any_modifier", r.get("p_modifier", 0.0) + r.get("p_dual_role", 0.0))),
+            float(r.get("gate_cate", 0.0)),
+        ),
+        reverse=True,
+    )
+    _section(
+        f"Top {min(top_k, p_total)} Suspected Effect Modifiers (ranked by p_modifier + p_dual_role):",
+        mod_rows,
+        [
+            ("p_any_m", "p_any_modifier"),
+            ("p_mod", "p_modifier"),
+            ("p_dual", "p_dual_role"),
+            ("gate_tau", "gate_cate"),
+            ("p_sig", "p_signal"),
+        ],
+    )
+
+    inst_rows = sorted(
+        report,
+        key=lambda r: float(r.get("p_instrument", 0.0)),
+        reverse=True,
+    )
+    _section(
+        f"Top {min(min(top_k, 10), p_total)} Suspected Pure Instruments (suppressed in nuisance gates):",
+        inst_rows[: min(top_k, 10)],
+        [
+            ("p_inst", "p_instrument"),
+            ("gate_e", "gate_propensity"),
+            ("gate_m", "gate_outcome"),
+            ("p_sig", "p_signal"),
+        ],
+    )
+    return "\n".join(lines)

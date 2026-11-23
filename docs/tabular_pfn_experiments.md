@@ -84,6 +84,21 @@ Instead of asking a pure transformer to approximate linear algebra over 2,000 co
 
 *(Overall 36-study diagnostics: `null_hte_cate_rmse = 0.0690`, `role_signal_auroc = 0.8765`, `confounder/instrument` propensity gate `0.57 / 0.36`, `risk_rmse = 0.1648`, `propensity_rmse = 0.1448`, `ate_rmse = 0.0488`.)*
 
+### Iteration 5 — Empirical-Sparsity Role Calibration (Normalized Saerens EM) & Clinical Role Summary CLI
+- **Problem Identified:** Because `loss_components()` balances noise vs. non-noise columns 50/50 during training (so 99% noise doesn't collapse `role_logits` to all-noise), raw softmax probabilities over-called non-noise at large $P$ (`61.4` non-noise calls at `P = 2,000` with `13%` precision and `0.0982` Brier).
+- **Calibration Ablation (measured on Run 1 step-500 checkpoint, 15 studies per $P$, `N_ctx = 800`, ~15 true active columns):**
+  1. *Naive Saerens EM* (unnormalized `LR = exp(l_sig - l_0)`): Collapsed $\hat{\pi} \to 0$ at `P = 2,000` (`est_K = 1.1`, `top10 mean_p = 0.04` vs. `0.54` empirical accuracy) because the neural network's null $\mathbb{E}[\text{LR} \mid \text{noise}]$ drifted to `~0.50 < 1.0`.
+  2. *Gaussian 2-component local-FDR mixture*: Over-called (`est_K = 221.8`, `prec = 0.06`) because the null `log_lr` tail is right-skewed (non-Gaussian).
+  3. **Normalized Saerens EM** (`calibrate_role_probabilities` in `oci/tabular_pfn/model.py`): Enforces the exact distribution-free likelihood-ratio identity $\mathbb{E}[\text{LR} \mid \text{noise}] = 1$ inside EM (zero Gaussian assumption, zero checkpoint changes, preserves exact ranking):
+
+| `P` | True Active `K` | Raw Calls / Prec / Brier ↓ | **Calibrated Calls (`p_sig ≥ 0.5`) / Prec / Brier ↓** | **Top-10 Empirical Hit vs. Mean Calibrated `p_sig`** |
+|---:|---:|---|---|---|
+| `50` | `15.9` | `11.3` / `0.70` / `0.1634` | `13.7` / **`0.74`** / **`0.1403`** | **`0.81` vs. `0.76`** |
+| `500` | `15.3` | `28.4` / `0.31` / `0.1086` | `10.1` / **`0.69`** / **`0.0204`** (`5.3×` ↓) | **`0.67` vs. `0.70`** |
+| `2,000` | `15.3` | `61.4` / `0.13` / `0.0982` | `4.7` / **`0.68`** / **`0.0060`** (`16.4×` ↓) | **`0.54` vs. `0.50`** |
+
+- **Clinical Summary & Export (`oci/tabular_pfn/cli.py`, `format_role_summary`):** `predict` now supports `.csv` and `.json` for `--role-report` (with composite `p_signal`, `p_any_confounder`, `p_any_modifier`, and `raw_signal_score` columns) and automatically prints a ranked summary table of top suspected confounders, effect modifiers, and suppressed pure instruments (also available standalone via `--print-roles` / `--role-summary-top-k`).
+
 ---
 
 ## 3. Training Runs Summary
