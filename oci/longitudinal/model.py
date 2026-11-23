@@ -77,6 +77,7 @@ class ModelConfig:
     lexical_dim: int = 0
     sentence_concept_dim: int = 0
     ridge_grid_size: int = 5
+    block_ridge: bool = False
     per_slot_note_temporal: bool = False
     cate_loss_weight: float = 2.0
     propensity_loss_weight: float = 0.5
@@ -993,32 +994,52 @@ def _fit_sentence_concepts(ctx_sent, max_dim, *, max_pool=4096, n_iter=10):
     return centroids, mu, rms
 
 
-def _fit_loo_cv_ridge(A_ctx, y_ctx, lambdas, cv_temp, *, intercept_reg=1e-4):
-    """Differentiable batched LOO-CV Ridge via Cholesky (exact, strictly PD, fp32)."""
+def _fit_loo_cv_ridge(
+    A_ctx, y_ctx, lambdas, cv_temp, *, intercept_reg=1e-4, text_mask=None, text_mults=None
+):
+    """Differentiable batched LOO-CV Ridge via Cholesky (exact, strictly PD, fp32).
+
+    When ``text_mask`` and ``text_mults`` are provided, searches the 2D grid of
+    ``(lambda_k, text_mult_g)`` so observational LOO-CV can independently shrink
+    high-dimensional text blocks relative to structured features.
+    """
     d = A_ctx.shape[1]
     k = len(lambdas)
     G = A_ctx.T @ A_ctx  # (D, D)
-    rhs = (A_ctx.T @ y_ctx).unsqueeze(0).expand(k, -1).unsqueeze(-1)  # (K, D, 1)
 
-    eye = torch.eye(d, device=A_ctx.device, dtype=A_ctx.dtype)
-    pen = lambdas[:, None, None] * eye[None]
-    pen[:, 0, 0] = intercept_reg
-    chol = torch.linalg.cholesky(G.unsqueeze(0) + pen)  # (K, D, D)
-    w = torch.cholesky_solve(rhs, chol).squeeze(-1)  # (K, D)
+    if text_mask is not None and text_mults is not None and len(text_mults) > 0:
+        g = len(text_mults)
+        m = k * g
+        lam_2d = lambdas[:, None]
+        mult_2d = text_mults[None, :]
+        base_pen = lam_2d.expand(k, g).reshape(m, 1)
+        text_pen = (lam_2d * mult_2d).clamp(0.05, 1e8).reshape(m, 1)
+        diag_pen = torch.where(text_mask[None, :], text_pen, base_pen)
+        diag_pen[:, 0] = intercept_reg
+        pen = torch.diag_embed(diag_pen)
+    else:
+        m = k
+        eye = torch.eye(d, device=A_ctx.device, dtype=A_ctx.dtype)
+        pen = lambdas[:, None, None] * eye[None]
+        pen[:, 0, 0] = intercept_reg
 
-    # Exact LOO hat diagonal: h_{k,i} = ||L_k^{-1} a_i||^2 >= 0
+    rhs = (A_ctx.T @ y_ctx).unsqueeze(0).expand(m, -1).unsqueeze(-1)  # (M, D, 1)
+    chol = torch.linalg.cholesky(G.unsqueeze(0) + pen)  # (M, D, D)
+    w = torch.cholesky_solve(rhs, chol).squeeze(-1)  # (M, D)
+
+    # Exact LOO hat diagonal: h_{m,i} = ||L_m^{-1} a_i||^2 >= 0
     V = torch.linalg.solve_triangular(
-        chol, A_ctx.T.unsqueeze(0).expand(k, -1, -1), upper=False
-    )  # (K, D, N)
-    h = (V * V).sum(dim=1)  # (K, N)
-    y_hat = (A_ctx @ w.T).T  # (K, N)
+        chol, A_ctx.T.unsqueeze(0).expand(m, -1, -1), upper=False
+    )  # (M, D, N)
+    h = (V * V).sum(dim=1)  # (M, N)
+    y_hat = (A_ctx @ w.T).T  # (M, N)
     denom = (1.0 - h).clamp_min(1e-2)
     loo_resid = (y_ctx.unsqueeze(0) - y_hat) / denom
-    loo_mse = loo_resid.square().mean(dim=1)  # (K,)
+    loo_mse = loo_resid.square().mean(dim=1)  # (M,)
     y_loo_k = y_ctx.unsqueeze(0) - loo_resid
 
     scale = loo_mse.detach().std(unbiased=False).clamp_min(1e-5)
-    alpha = F.softmax(-cv_temp * (loo_mse - loo_mse.min()) / scale, dim=0)  # (K,)
+    alpha = F.softmax(-cv_temp * (loo_mse - loo_mse.min()) / scale, dim=0)  # (M,)
     w_blend = (alpha[:, None] * w).sum(dim=0)  # (D,)
     y_loo = (alpha[:, None] * y_loo_k).sum(dim=0)  # (N,)
     return RidgeFit(weights=w_blend, chol=chol, alpha=alpha), y_loo
@@ -1079,6 +1100,16 @@ class CausalStudyModel(nn.Module):
             self.sentence_log_weight = nn.Parameter(torch.tensor(0.0))
         else:
             self.sentence_log_weight = None
+        if cfg.block_ridge:
+            # 3-level study-adaptive text-to-structured penalty multipliers: ~1x, ~10x, ~1000x.
+            init_mult = torch.tensor([0.0, 2.3, 6.9])
+            self.log_text_mult_e = nn.Parameter(init_mult.clone())
+            self.log_text_mult_m = nn.Parameter(init_mult.clone())
+            self.log_text_mult_tau = nn.Parameter(init_mult.clone())
+        else:
+            self.log_text_mult_e = None
+            self.log_text_mult_m = None
+            self.log_text_mult_tau = None
 
         # Calibration and epistemic-uncertainty heads on solver predictions + query leverages.
         self.arm_cal = nn.Sequential(nn.Linear(8, 32), nn.GELU(), nn.Linear(32, 4))
@@ -1192,18 +1223,42 @@ class CausalStudyModel(nn.Module):
             A_ctx = torch.cat([ones, z_ctx], dim=1)
             cv_temp = F.softplus(self.log_cv_temp.float()) + 0.1
 
+            text_mask = None
+            mult_e = mult_m = mult_tau = None
+            if self.cfg.block_ridge and self.log_text_mult_e is not None:
+                text_mask = torch.zeros(A_ctx.shape[1], device=A_ctx.device, dtype=torch.bool)
+                if self._note_sol_dim > 0:
+                    text_mask[1 : 1 + self._note_sol_dim] = True
+                if A_ctx.shape[1] > 1 + self.cfg.solver_dim:
+                    text_mask[1 + self.cfg.solver_dim :] = True
+                mult_e = self.log_text_mult_e.float().exp().clamp(0.1, 1e5)
+                mult_m = self.log_text_mult_m.float().exp().clamp(0.1, 1e5)
+                mult_tau = self.log_text_mult_tau.float().exp().clamp(0.1, 1e5)
+
             lam_e = self.log_lam_e.float().exp().clamp(0.05, 1e5)
-            prop_fit, e_loo = _fit_loo_cv_ridge(A_ctx, t_f, lam_e, cv_temp)
+            prop_fit, e_loo = _fit_loo_cv_ridge(
+                A_ctx, t_f, lam_e, cv_temp, text_mask=text_mask, text_mults=mult_e
+            )
             e_loo = e_loo.clamp(0.02, 0.98)
 
             lam_m = self.log_lam_m.float().exp().clamp(0.05, 1e5)
-            out_fit, m_loo = _fit_loo_cv_ridge(A_ctx, y_f, lam_m, cv_temp)
+            out_fit, m_loo = _fit_loo_cv_ridge(
+                A_ctx, y_f, lam_m, cv_temp, text_mask=text_mask, text_mults=mult_m
+            )
 
             t_res = t_f - e_loo
             y_res = y_f - m_loo
             B_ctx = t_res.unsqueeze(-1) * A_ctx
             lam_tau = self.log_lam_tau.float().exp().clamp(0.05, 1e5)
-            cate_fit, _ = _fit_loo_cv_ridge(B_ctx, y_res, lam_tau, cv_temp, intercept_reg=0.05)
+            cate_fit, _ = _fit_loo_cv_ridge(
+                B_ctx,
+                y_res,
+                lam_tau,
+                cv_temp,
+                intercept_reg=0.05,
+                text_mask=text_mask,
+                text_mults=mult_tau,
+            )
 
             return SolverMemory(
                 mu=mu,

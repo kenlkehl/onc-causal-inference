@@ -14,6 +14,7 @@ import torch
 from synthetic_data.paraphrase_bank import load_paraphrase_bank
 from synthetic_data.study_designs import load_bank
 
+from .adapt import adapt_and_predict
 from .events import binary_observations, read_patient_table
 from .model import BASE_MODEL, ModelConfig, SentenceBatch
 from .training import (
@@ -177,10 +178,14 @@ def main(argv=None):
         "evaluate", help="Evaluate against oracle risks from held-out DGPs or materialized cohorts."
     )
     inference = sub.add_parser("predict", help="Estimate both risks for unlabeled query patients.")
-    for p in (train, resume, scoring, inference):
+    adapt = sub.add_parser(
+        "adapt-predict",
+        help="Cross-fit adapt representation/nuisances on an applied cohort (with zero-shot safety gate) and predict.",
+    )
+    for p in (train, resume, scoring, inference, adapt):
         p.add_argument("--run-dir", type=Path, required=True)
         p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    for p in (train, scoring, inference):
+    for p in (train, scoring, inference, adapt):
         p.add_argument(
             "--precision",
             choices=("auto", "fp32", "bf16"),
@@ -195,7 +200,7 @@ def main(argv=None):
     for p in (train, scoring):
         p.add_argument("--context-size", type=int, default=64)
         p.add_argument("--query-size", type=int, default=16)
-    for p in (train, scoring, inference):
+    for p in (train, scoring, inference, adapt):
         p.add_argument("--seed", type=int, default=42)
     train.add_argument(
         "--min-context-size",
@@ -420,6 +425,28 @@ def main(argv=None):
         default=None,
         help="Override the checkpoint's note microbatch size for inference.",
     )
+    adapt.add_argument("--context", type=Path, required=True)
+    adapt.add_argument("--queries", type=Path, help="Optional separate Parquet of query histories.")
+    adapt.add_argument("--output", type=Path, required=True)
+    adapt.add_argument("--folds", type=int, default=5)
+    adapt.add_argument("--adapt-steps", type=int, default=30)
+    adapt.add_argument("--lr", type=float, default=1e-3)
+    adapt.add_argument("--backbone-lr", type=float, default=1e-5)
+    adapt.add_argument("--anchor-weight", type=float, default=1e-2)
+    adapt.add_argument(
+        "--adapt-backbone",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Also fine-tune the note backbone during episodic adaptation (default: frozen).",
+    )
+    adapt.add_argument("--eval-every", type=int, default=5)
+    adapt.add_argument("--batch-size", type=int, default=32)
+    adapt.add_argument(
+        "--note-batch-size",
+        type=int,
+        default=None,
+        help="Override the checkpoint's note microbatch size for adaptation/inference.",
+    )
     args = parser.parse_args(argv)
     if args.command == "train":
         cfg = ModelConfig(**{k: getattr(args, k) for k in vars(defaults)})
@@ -527,6 +554,29 @@ def main(argv=None):
                     paraphrase_bank_path=paraphrase_bank_path,
                 )
             print(json.dumps(metrics, indent=2))
+        elif args.command == "adapt-predict":
+            del saved
+            n, fold_stats = adapt_and_predict(
+                model,
+                args.context,
+                args.queries,
+                args.output,
+                folds=args.folds,
+                adapt_steps=args.adapt_steps,
+                lr=args.lr,
+                backbone_lr=args.backbone_lr,
+                anchor_weight=args.anchor_weight,
+                adapt_backbone=args.adapt_backbone,
+                batch_size=args.batch_size,
+                eval_every=args.eval_every,
+                seed=args.seed,
+                precision=args.precision,
+            )
+            n_adapted = sum(1 for f in fold_stats if f.get("used_adaptation"))
+            print(
+                f"Wrote cross-fit adapted predictions for {n} patients to {args.output} "
+                f"({n_adapted}/{len(fold_stats)} folds adapted; remainder kept zero-shot)"
+            )
         else:
             del saved
             n = predict(

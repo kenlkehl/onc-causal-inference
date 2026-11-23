@@ -1350,3 +1350,179 @@ def test_sentence_concept_channel(note_model, tmp_path):
     )
     preds = pq.read_table(pred_out)
     assert preds.num_rows == 4
+
+
+def test_block_ridge_and_cross_fit_adaptation(note_model, tmp_path):
+    import math
+    from oci.longitudinal.adapt import _FROZEN_PREFIXES, adapt_fold_model
+
+    torch.manual_seed(0)
+    rows, _ = simulate_episode(41, 0, False, 14)
+
+    cfg = ModelConfig(
+        event_width=8,
+        event_layers=1,
+        study_width=16,
+        study_layers=1,
+        bins=17,
+        note_slots=2,
+        solver_dim=8,
+        lexical_dim=4,
+        sentence_concept_dim=6,
+        ridge_grid_size=4,
+        block_ridge=True,
+    )
+    m = CausalStudyModel(
+        AutoModel.from_pretrained(note_model),
+        AutoTokenizer.from_pretrained(note_model),
+        cfg,
+    )
+    assert m.log_text_mult_e is not None
+    assert m.log_text_mult_m is not None
+    assert m.log_text_mult_tau is not None
+
+    # 1. Block-ridge forward/backward + 2D grid shape check (K * 3).
+    logits, prop_logits, scale = m(rows[:10], rows[10:])
+    oracle = torch.tensor([[r["true_y0"], r["true_y1"]] for r in rows[10:]], dtype=torch.float32)
+    true_prop = torch.tensor([r["true_treatment_prob"] for r in rows[10:]], dtype=torch.float32)
+    loss = m.loss(logits, scale, oracle, propensity_logits=prop_logits, true_propensity=true_prop)
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert m.log_text_mult_e.grad is not None and torch.isfinite(m.log_text_mult_e.grad).all()
+    assert m.log_text_mult_m.grad is not None and torch.isfinite(m.log_text_mult_m.grad).all()
+    assert m.log_text_mult_tau.grad is not None and torch.isfinite(m.log_text_mult_tau.grad).all()
+
+    m.eval()
+    with torch.no_grad():
+        t, y = binary_observations(rows[:10], "cpu")
+        mem, _ = m.condition(
+            m.patient(rows[:10]),
+            t,
+            y,
+            lexical=m.patient.lexical_features(rows[:10]),
+            sentences=m.patient.sentence_features(rows[:10]),
+        )
+        assert mem.solver.propensity_fit.chol.shape[0] == cfg.ridge_grid_size * 3
+        assert mem.solver.cate_fit.chol.shape[0] == cfg.ridge_grid_size * 3
+
+    # 2. Cross-fit adaptation freezes CATE/calibration heads and respects zero-shot safety gate.
+    orig_frozen = {
+        k: v.detach().clone()
+        for k, v in m.named_parameters()
+        if k.startswith(_FROZEN_PREFIXES) or k.startswith("patient.backbone.")
+    }
+    adapted, info = adapt_fold_model(
+        m, rows[:12], adapt_steps=4, lr=1e-3, eval_every=2, batch_size=6, seed=7
+    )
+    assert "used_adaptation" in info and math.isfinite(info["val_loss_step0"])
+    assert info["val_loss_best"] <= info["val_loss_step0"] + 1e-6
+    for k, orig_val in orig_frozen.items():
+        torch.testing.assert_close(dict(adapted.named_parameters())[k], orig_val)
+
+    # 3. CLI train (--block-ridge) + adapt-predict (single-cohort K-fold & separate queries).
+    data = generate_longitudinal_cohort(tmp_path / "adapt_data", dataset_size=16) / "dataset.parquet"
+    run = tmp_path / "block_run"
+    main(
+        [
+            "train",
+            "--steps",
+            "1",
+            "--device",
+            "cpu",
+            "--context-size",
+            "6",
+            "--query-size",
+            "2",
+            "--note-model",
+            str(note_model),
+            "--run-dir",
+            str(run),
+            "--train-cohort",
+            str(data),
+            "--event-width",
+            "8",
+            "--event-layers",
+            "1",
+            "--study-width",
+            "16",
+            "--study-layers",
+            "1",
+            "--note-slots",
+            "2",
+            "--solver-dim",
+            "8",
+            "--lexical-dim",
+            "4",
+            "--sentence-concept-dim",
+            "6",
+            "--block-ridge",
+            "--bins",
+            "17",
+        ]
+    )
+    reloaded, _ = load_run(run, "cpu")
+    assert reloaded.cfg.block_ridge is True
+
+    oof_out = tmp_path / "oof_preds.parquet"
+    main(
+        [
+            "adapt-predict",
+            "--run-dir",
+            str(run),
+            "--context",
+            str(data),
+            "--output",
+            str(oof_out),
+            "--folds",
+            "2",
+            "--adapt-steps",
+            "2",
+            "--eval-every",
+            "2",
+            "--batch-size",
+            "4",
+            "--device",
+            "cpu",
+        ]
+    )
+    oof_tbl = pq.read_table(oof_out)
+    assert oof_tbl.num_rows == 16
+    assert set(oof_tbl.column_names) == {
+        "patient_id",
+        "risk_control",
+        "risk_treated",
+        "risk_difference",
+        "risk_control_sd",
+        "risk_treated_sd",
+        "propensity_score",
+        "outside_overlap",
+    }
+
+    # Separate context + queries mode
+    tbl = pq.read_table(data)
+    cpath, qpath = tmp_path / "ctx.parquet", tmp_path / "qry.parquet"
+    pq.write_table(tbl.slice(0, 12), cpath)
+    pq.write_table(tbl.slice(12).select(["patient_id", *STREAMS]), qpath)
+    sep_out = tmp_path / "sep_preds.parquet"
+    main(
+        [
+            "adapt-predict",
+            "--run-dir",
+            str(run),
+            "--context",
+            str(cpath),
+            "--queries",
+            str(qpath),
+            "--output",
+            str(sep_out),
+            "--adapt-steps",
+            "2",
+            "--eval-every",
+            "2",
+            "--batch-size",
+            "4",
+            "--device",
+            "cpu",
+        ]
+    )
+    assert pq.read_table(sep_out).num_rows == 4

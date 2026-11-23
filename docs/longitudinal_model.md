@@ -75,7 +75,10 @@ CausalPFN head**:
    $\hat{m}(x)$ (strictly in `float32`), then fit the orthogonalized Robinson R-learner
    $(Y - \hat{m}^{(-i)}(X)) \sim (T - \hat{e}^{(-i)}(X)) \cdot [1, \phi(X)]$ for
    $\hat{\tau}(x)$ with separate learnable penalty grids (`--ridge-grid-size`, default `5`;
-   use `7` with wider solvers to extend the upper CATE penalty ceiling to `~22,000`). Query
+   use `7` with wider solvers to extend the upper CATE penalty ceiling to `~22,000`). Passing
+   `--block-ridge` expands each Cholesky LOO-CV fit into a 2D grid over `(\lambda, \text{text\_mult})`
+   so propensity, outcome, and CATE independently shrink high-dimensional text blocks relative to
+   structured trajectory features whenever text is noisy or `N` is small. Query
    patients receive point
    estimates $(\hat{y}_0, \hat{y}_1, \hat{e})$ together with exact Bayesian query leverages
    $(h_m, h_\tau, h_e)$, which parameterize the centered log-odds prior over the 129-bin

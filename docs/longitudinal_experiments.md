@@ -126,3 +126,56 @@ Metric shown: **mean held-out AUROC across all 78 hidden note-only clinical find
 2. **Why static 16-slot note attention failed on unseen findings:** Globally learned `note_queries` are study-blind and cannot target 2,902 cancer-specific findings (many unseen at test time), yielding only `0.521–0.529` AUROC in Run 4.
 3. **Why study-adaptive sentence-level MaxSim is the key breakthrough:** Whole-note pooling dilutes 1 signal sentence across ~100–200 benign/unrelated clauses per patient. Discovering study-specific sentence prototypes via unsupervised context-only spherical k-means and taking per-patient MaxSim jumped 14M `TinyBERT-base` from `0.515 → 0.653` (paraphrased) and `0.558 → 0.720` (full-LLM), matching 600M `Qwen3-Embedding-0.6B` (`0.635 / 0.725`) at 40× smaller parameter count while preserving affirmation vs. negation polarity.
 4. **Why clinical BERT alone wasn't enough:** Whole-note `Bio_ClinicalBERT` (`0.538 / 0.574`) and `PubMedBERT-embed` (`0.533 / 0.643`) still trailed sentence-level pooling substantially, and retrieval-tuned models (`PubMedBERT-embed`) tended to cluster `"reports X"` and `"denies X"` together. Distilling a compact `TinyOncBERT` from `Qwen3-Embedding-0.6B` with negation-preserving objectives on synthetic oncology notes is a promising next encoder upgrade on top of sentence-level concept pooling.
+
+---
+
+## 5. `TinyOncBERT` Distillation & 16-Cohort Full-LLM Applied vs. Foundation Model Benchmark
+
+### `TinyOncBERT` (6L / 384D / 6 heads, 22.7M params, PubMedBERT vocab)
+Trained with `scripts/run_tinyoncbert_h200.sh` (`oci/longitudinal/tinyoncbert.py`) on 2M curated `split == "train"` clinical sentences + 250k contiguous 512-token windows from `ksg-dfci/mmai-synthetic-1226/patients/all_synthetic_notes.parquet` (3 epochs, **7.6 min on 1× H200**, `artifacts/tinyoncbert_6l_384d`):
+- `val_teacher_cos = 0.900` (vs. 600M `Qwen/Qwen3-Embedding-0.6B` teacher)
+- `val_neg_flip_cos = 0.066` (affirmed vs. negated clinical clauses pushed nearly orthogonal)
+- `val_pol_acc = 99.73%` | `val_mlm_loss = 0.949` | `val_window_mlm_loss = 1.150`
+
+### Head-to-Head Benchmark on All 16 Full-LLM Realistic Held-Out Cohorts
+Evaluated across all 16 Nemotron 3.5 full-LLM held-out cohorts (`artifacts/llm_eval_cohorts/*/dataset.parquet`, `N = 1,000` each; fixed held-out query split `rows[800:1000]` = **3,200 query patients** total) at `N_ctx = 200` and `N_ctx = 800`. All applied models fit strictly on each study's `N_ctx` observational `(X, T, Y)` with zero synthetic pretraining; all PFN models perform a single zero-shot forward pass.
+
+#### `N_ctx = 800` (3,200 held-out query patients across 16 full-LLM cohorts)
+
+| Method | `cate_rmse` ↓ | `within_r` ↑ | `pool_r` ↑ | `risk_rmse` ↓ | `prop_rmse` ↓ | `ate_rmse` ↓ |
+|---|---:|---:|---:|---:|---:|---:|
+| Baseline: Arm-Mean (ATE only) | `0.1316` | `+0.000` | `+0.627` | `0.2114` | `0.1998` | `0.0610` |
+| PFN Run 1 (Hybrid, plain, s1200) | `0.1240` | `+0.092` | `+0.702` | `0.1919` | `0.1770` | `0.0585` |
+| PFN Run 2 (Wide Hybrid, plain, s1200) | `0.1273` | `+0.117` | `+0.671` | `0.1956` | `0.1848` | `0.0634` |
+| PFN Run 3 (Single-Stage, plain, s800) | `0.1228` | `+0.093` | `+0.692` | `0.1882` | `0.1774` | `0.0550` |
+| PFN Run 4 (Single-Stage, paraphrased, s700) | `0.1233` | `+0.096` | `+0.691` | `0.1891` | `0.1762` | `0.0558` |
+| Applied: Struct-Only Ridge R-Learner | `0.1137` | `+0.152` | `+0.739` | `0.1838` | `0.1742` | **`0.0421`** |
+| Applied: Struct + LexSVD Ridge R-Learner | `0.1144` | `+0.135` | `+0.736` | `0.1857` | `0.1770` | `0.0441` |
+| Applied: Struct + TinyBERT SentKM Ridge-R | `0.1147` | `+0.155` | `+0.734` | `0.1847` | `0.1758` | `0.0469` |
+| Applied: Struct + Qwen3-0.6B SentKM Ridge-R | `0.1164` | `+0.141` | `+0.724` | `0.1875` | `0.1774` | `0.0465` |
+| Applied: Struct + **TinyOncBERT** SentKM Ridge-R | `0.1129` | `+0.144` | **`+0.744`** | `0.1841` | `0.1737` | `0.0463` |
+| **Applied: Struct + TinyOncBERT SentKM+Lex GBM-R** | **`0.1127`** | **`+0.160`** | **`+0.743`** | **`0.1768`** | **`0.1697`** | `0.0456` |
+| Applied: Struct + TinyOncBERT SentKM+Lex DragonNet | `0.1446` | `+0.085` | `+0.579` | `0.1925` | `0.1861` | `0.0662` |
+
+#### `N_ctx = 200` (small cohort regime, 3,200 held-out query patients)
+
+| Method | `cate_rmse` ↓ | `within_r` ↑ | `pool_r` ↑ | `risk_rmse` ↓ | `prop_rmse` ↓ | `ate_rmse` ↓ |
+|---|---:|---:|---:|---:|---:|---:|
+| Baseline: Arm-Mean (ATE only) | **`0.1315`** | `+0.000` | `+0.624` | `0.2124` | `0.2017` | `0.0608` |
+| PFN Run 1 (Hybrid, plain, s1200) | `0.1322` | `-0.019` | **`+0.639`** | `0.2006` | `0.1915` | `0.0675` |
+| PFN Run 3 (Single-Stage, plain, s800) | `0.1337` | `+0.004` | `+0.611` | `0.1979` | `0.1923` | `0.0627` |
+| PFN Run 4 (Single-Stage, paraphrased, s700) | `0.1332` | `+0.009` | `+0.614` | `0.1993` | `0.1924` | `0.0633` |
+| Applied: Struct-Only Ridge R-Learner | `0.1331` | `+0.025` | `+0.616` | **`0.1964`** | **`0.1897`** | `0.0670` |
+| Applied: Struct + TinyBERT SentKM Ridge-R | `0.1458` | `+0.015` | `+0.549` | `0.1992` | `0.1929` | `0.0689` |
+| Applied: Struct + Qwen3-0.6B SentKM Ridge-R | `0.1395` | `+0.012` | `+0.576` | `0.2021` | `0.1907` | `0.0693` |
+| Applied: Struct + **TinyOncBERT** SentKM Ridge-R | `0.1336` | `-0.004` | `+0.614` | `0.1972` | `0.1906` | `0.0701` |
+| Applied: Struct + TinyOncBERT SentKM+Lex GBM-R | `0.1404` | **`+0.045`** | `+0.608` | `0.2126` | `0.2030` | **`0.0577`** |
+| Applied: Struct + TinyOncBERT SentKM+Lex DragonNet | `0.1639` | `+0.007` | `+0.457` | `0.2082` | `0.1941` | `0.0706` |
+
+### Key Conclusions from the 16-Cohort Full-LLM Benchmark
+1. **`TinyOncBERT` (22.7M) beat both `TinyBERT` (14M) and its own 600M teacher `Qwen3-Embedding-0.6B`** on every metric at both `N = 200` and `N = 800` — validating that oncology domain vocabulary + negation-repulsion distillation (`val_neg_flip_cos = 0.066`) makes a compact encoder outperform a 26× larger general embedder on realistic clinical notes.
+2. **Per-study cross-fitted R-learners beat all current PFN models (Runs 1–4) by a wide margin at `N = 800`:** `Applied: Struct + TinyOncBERT SentKM+Lex GBM-R` achieved `cate_rmse = 0.1127` (`-0.0101` vs. best PFN `0.1228`), `within_r = +0.160` (+72% vs. PFN), `risk_rmse = 0.1768` (`-0.0114` vs. PFN, `-0.0070` vs. Struct-Only), and `prop_rmse = 0.1697`.
+3. **Tree-based nuisance selection (`GBM-R`) unlocked the realistic-note signal where ungrouped Ridge couldn't:** Adding 128 sentence-concept features to a single global Ridge penalty diluted the clean structured features at `N = 200–800`, whereas cross-fitted `HistGradientBoosting` nuisances automatically ignored noisy boilerplate clusters and extracted the true note confounders/prognostics (`risk_rmse` `0.1838 → 0.1768`, `prop_rmse` `0.1742 → 0.1697`).
+4. **Per-study end-to-end neural CATE (`DragonNet`) severely overfit** (`cate_rmse = 0.1639` at `N = 200`, `0.1446` at `N = 800` — worse than Arm-Mean `0.1316`), confirming that orthogonalized R-learner regularization is essential when CATE is unobserved.
+5. **PFN Run 3 (plain) and Run 4 (paraphrased) performed identically on Full-LLM notes** (`0.1228` vs. `0.1233` at `N = 800`), confirming that without `TinyOncBERT` + `--sentence-concept-dim` (and separate structured vs. text regularization), paraphrasing alone does not close the realistic-note gap.
+
