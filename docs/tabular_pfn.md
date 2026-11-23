@@ -54,3 +54,5 @@ Measured after a 6.1-minute, 500-step proof-of-concept training run (2.11M param
 | **`P = 50`** | **`0.1209`** | `0.1521` | `0.1639` | `0.1585` | `0.2325` | **`+0.473`** (`+0.391`) | `0.0724` | `0.838 / 0.806` | `0.59 / 0.43` | `20.5 ms` / `134 MB` |
 | **`P = 500`** | **`0.1246`** | `0.1490` | `0.1480` | `0.1634` | `0.2392` | **`+0.440`** (`+0.324`) | `0.0765` | `0.872 / 0.878` | `0.53 / 0.33` | `22.0 ms` / `143 MB` |
 | **`P = 2,000`** | **`0.1323`** | `0.1630` | `—` | `0.1467` | `0.2376` | **`+0.388`** (`+0.302`) | `0.0711` | **`0.863 / 0.866`** | **`0.42 / 0.29`** | **`27.5 ms` / `170 MB`** |
+
+For the full architectural iteration history, bug-fix notes, 3-family zero-shot out-of-distribution transfer results, and ongoing H200 training run tracker, see [`docs/tabular_pfn_experiments.md`](tabular_pfn_experiments.md).
