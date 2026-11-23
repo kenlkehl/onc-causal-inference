@@ -4,15 +4,21 @@ Adapts a pretrained ``CausalStudyModel`` to a single applied dataset using stric
 observable ``(X, T, Y)`` factual losses inside K-fold cross-fitting:
   - Freezes synthetic-pretrained CATE shrinkage and posterior calibration heads so
     unobserved treatment effect heterogeneity cannot overfit factual noise.
-  - Adapts patient representation and nuisance-weighting layers via out-of-sample
-    inner episodes ``(ctx_inner -> qry_inner)`` with an L2 anchor to pretrained weights.
+  - By default caches frozen ``PatientEncoder`` embeddings, lexical features, and
+    sentence-concept batches once per cohort (~50-100x faster) and adapts the
+    nonlinear solver projections (``solver_mlp``, ``solver_struct_proj``,
+    ``solver_note_proj``), text-channel weights, and propensity/outcome LOO-CV
+    penalties via multi-episode out-of-sample factual losses with cosine LR decay
+    and an L2 anchor to pretrained weights.
+  - Optionally unfreezes ``PatientEncoder`` (``adapt_patient=True``) or the note
+    backbone (``adapt_backbone=True``) for deeper end-to-end adaptation.
   - Gates every fold automatically against step-0 zero-shot inner-validation factual
     loss, falling back seamlessly to zero-shot when ``N`` is too small for adaptation
     to improve observable ``(T, Y)`` likelihood.
 """
 
-from contextlib import nullcontext
 import copy
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -29,7 +35,7 @@ from .training import OBSERVED, _autocast
 
 OVERLAP_MARGIN = 0.05
 
-# Parameter name prefixes frozen during applied adaptation to prevent CATE overfitting.
+# Parameter name prefixes always frozen during applied adaptation to prevent CATE overfitting.
 _FROZEN_PREFIXES = (
     "log_lam_tau",
     "log_text_mult_tau",
@@ -143,10 +149,13 @@ def _subset_sentence_batch(batch: SentenceBatch, indices: np.ndarray) -> Sentenc
     )
 
 
-def _configure_adaptation_params(model, *, adapt_backbone: bool = False):
-    """Freeze CATE/calibration heads and return trainable representation/nuisance parameters."""
+def _configure_adaptation_params(
+    model, *, adapt_patient: bool = False, adapt_backbone: bool = False
+):
+    """Freeze CATE/calibration heads (and optionally PatientEncoder/backbone)."""
     backbone_params = []
     adapter_params = []
+    train_patient = adapt_patient or adapt_backbone
     for name, param in model.named_parameters():
         if name.startswith(_FROZEN_PREFIXES):
             param.requires_grad = False
@@ -155,6 +164,13 @@ def _configure_adaptation_params(model, *, adapt_backbone: bool = False):
             if adapt_backbone:
                 param.requires_grad = True
                 backbone_params.append((name, param))
+            else:
+                param.requires_grad = False
+            continue
+        if name.startswith("patient."):
+            if train_patient:
+                param.requires_grad = True
+                adapter_params.append((name, param))
             else:
                 param.requires_grad = False
             continue
@@ -188,27 +204,20 @@ def _encode_rows_chunked(
     return torch.cat(chunks, dim=0)
 
 
-def _forward_with_cached_text(
+def _forward_from_embeddings(
     model,
-    ctx_rows,
-    qry_rows,
+    ctx_emb,
+    t_ctx,
+    y_ctx,
+    qry_emb,
     *,
     ctx_lex=None,
     qry_lex=None,
     ctx_sent=None,
     qry_sent=None,
-    batch_size: int,
     precision: str,
-    freeze_backbone: bool,
 ):
     device = model.centers.device
-    t_ctx, y_ctx = binary_observations(ctx_rows, device)
-    ctx_emb = _encode_rows_chunked(
-        model, ctx_rows, batch_size=batch_size, precision=precision, freeze_backbone=freeze_backbone
-    )
-    qry_emb = _encode_rows_chunked(
-        model, qry_rows, batch_size=batch_size, precision=precision, freeze_backbone=freeze_backbone
-    )
     with _autocast(device, precision):
         memories, scale = model.condition(
             ctx_emb, t_ctx, y_ctx, lexical=ctx_lex, sentences=ctx_sent
@@ -226,19 +235,26 @@ def adapt_fold_model(
     base_model,
     train_rows: list[dict],
     *,
-    adapt_steps: int = 30,
-    lr: float = 1e-3,
+    adapt_steps: int = 40,
+    episodes_per_step: int = 4,
+    lr: float = 1e-4,
     backbone_lr: float = 1e-5,
     anchor_weight: float = 1e-2,
+    adapt_patient: bool = False,
     adapt_backbone: bool = False,
     batch_size: int = 64,
     eval_every: int = 5,
     precision: str = "auto",
     seed: int = 42,
+    train_emb: torch.Tensor | None = None,
     train_lex: torch.Tensor | None = None,
     train_sent: SentenceBatch | None = None,
 ):
     """Adapt a copy of ``base_model`` on ``train_rows`` via episodic observable factual losses.
+
+    When ``adapt_patient`` and ``adapt_backbone`` are both False (default), pre-encodes
+    ``PatientEncoder`` embeddings once and adapts only the nonlinear solver projections,
+    text-channel weights, and nuisance Ridge penalties (~50-100x faster).
 
     Automatically gates against step-0 zero-shot inner-validation loss: if adaptation does
     not improve observable ``(T, Y)`` log-loss on the inner validation split, returns the
@@ -248,6 +264,7 @@ def adapt_fold_model(
     device = model.centers.device
     use_lex = model.cfg.lexical_dim > 0
     use_sent = model.cfg.sentence_concept_dim > 0
+    cache_patient = not (adapt_patient or adapt_backbone)
 
     if len(train_rows) < 10 or adapt_steps <= 0:
         model.eval()
@@ -258,14 +275,24 @@ def adapt_fold_model(
             "val_loss_best": float("nan"),
         }
 
+    if cache_patient and train_emb is None:
+        model.eval()
+        with torch.inference_mode():
+            train_emb = _encode_rows_chunked(
+                model, train_rows, batch_size=batch_size, precision=precision, freeze_backbone=True
+            )
     if use_lex and train_lex is None:
         train_lex = model.patient.lexical_features(train_rows)
     if use_sent and train_sent is None and not adapt_backbone:
-        with _autocast(device, precision):
+        model.eval()
+        with torch.inference_mode(), _autocast(device, precision):
             train_sent = model.patient.sentence_features(train_rows)
 
     t_all = np.array([float(r["treatment_indicator"]) for r in train_rows], dtype=np.float64)
     y_all = np.array([float(r["outcome_indicator"]) for r in train_rows], dtype=np.float64)
+    t_all_t = torch.tensor(t_all, device=device, dtype=torch.float32)
+    y_all_t = torch.tensor(y_all, device=device, dtype=torch.float32)
+
     rng = np.random.default_rng(seed)
     tr_idx, va_idx = _stratified_split(t_all, y_all, val_frac=0.2, rng=rng)
     if len(tr_idx) < 6 or len(va_idx) < 2:
@@ -284,6 +311,10 @@ def adapt_fold_model(
 
     tr_idx_t = torch.as_tensor(tr_idx, device=device, dtype=torch.long)
     va_idx_t = torch.as_tensor(va_idx, device=device, dtype=torch.long)
+    emb_tr = train_emb[tr_idx_t] if (cache_patient and train_emb is not None) else None
+    emb_va = train_emb[va_idx_t] if (cache_patient and train_emb is not None) else None
+    t_tr_t, y_tr_t = t_all_t[tr_idx_t], y_all_t[tr_idx_t]
+    t_va_t, y_va_t = t_all_t[va_idx_t], y_all_t[va_idx_t]
     lex_tr = train_lex[tr_idx_t] if (use_lex and train_lex is not None) else None
     lex_va = train_lex[va_idx_t] if (use_lex and train_lex is not None) else None
     sent_tr = (
@@ -296,11 +327,32 @@ def adapt_fold_model(
         if (use_sent and train_sent is not None)
         else None
     )
-    t_va_t, y_va_t = binary_observations(inner_val, device)
 
     def _eval_inner_val() -> float:
         model.eval()
         with torch.inference_mode():
+            c_emb = (
+                emb_tr
+                if cache_patient
+                else _encode_rows_chunked(
+                    model,
+                    inner_train,
+                    batch_size=batch_size,
+                    precision=precision,
+                    freeze_backbone=True,
+                )
+            )
+            q_emb = (
+                emb_va
+                if cache_patient
+                else _encode_rows_chunked(
+                    model,
+                    inner_val,
+                    batch_size=batch_size,
+                    precision=precision,
+                    freeze_backbone=True,
+                )
+            )
             c_sent = (
                 model.patient.sentence_features(inner_train)
                 if (use_sent and adapt_backbone)
@@ -311,22 +363,22 @@ def adapt_fold_model(
                 if (use_sent and adapt_backbone)
                 else sent_va
             )
-            ol, pl, sc = _forward_with_cached_text(
+            ol, pl, sc = _forward_from_embeddings(
                 model,
-                inner_train,
-                inner_val,
+                c_emb,
+                t_tr_t,
+                y_tr_t,
+                q_emb,
                 ctx_lex=lex_tr,
                 qry_lex=lex_va,
                 ctx_sent=c_sent,
                 qry_sent=q_sent,
-                batch_size=batch_size,
                 precision=precision,
-                freeze_backbone=True,
             )
             return float(_observable_factual_loss(model, ol, pl, sc, t_va_t, y_va_t).item())
 
     adapter_params, backbone_params = _configure_adaptation_params(
-        model, adapt_backbone=adapt_backbone
+        model, adapt_patient=adapt_patient, adapt_backbone=adapt_backbone
     )
     trainable = [*adapter_params, *backbone_params]
     if not trainable:
@@ -351,48 +403,81 @@ def adapt_fold_model(
     if backbone_params:
         param_groups.append({"params": [p for _, p in backbone_params], "lr": backbone_lr})
     optimizer = torch.optim.AdamW(param_groups, weight_decay=0.0)
+    n_eps = max(1, int(episodes_per_step)) if cache_patient else 1
 
     for step in range(1, adapt_steps + 1):
+        # Cosine LR schedule from base lr down to 10% lr
+        cos_mult = 0.1 + 0.9 * 0.5 * (1.0 + math.cos(math.pi * (step - 1) / max(adapt_steps, 1)))
+        for idx_g, group in enumerate(optimizer.param_groups):
+            base_g_lr = lr if (idx_g == 0 and adapter_params) else backbone_lr
+            group["lr"] = base_g_lr * cos_mult
+
         model.train()
-        ep_ctx_i, ep_qry_i = _stratified_split(t_inner, y_inner, val_frac=0.25, rng=rng)
-        ep_ctx = [inner_train[i] for i in ep_ctx_i]
-        ep_qry = [inner_train[i] for i in ep_qry_i]
-        t_q_t, y_q_t = binary_observations(ep_qry, device)
-
-        ep_ctx_t = torch.as_tensor(ep_ctx_i, device=device, dtype=torch.long)
-        ep_qry_t = torch.as_tensor(ep_qry_i, device=device, dtype=torch.long)
-        c_lex = lex_tr[ep_ctx_t] if lex_tr is not None else None
-        q_lex = lex_tr[ep_qry_t] if lex_tr is not None else None
-        if use_sent:
-            if adapt_backbone:
-                c_sent = model.patient.sentence_features(ep_ctx)
-                q_sent = model.patient.sentence_features(ep_qry)
-            else:
-                c_sent = _subset_sentence_batch(sent_tr, ep_ctx_i)
-                q_sent = _subset_sentence_batch(sent_tr, ep_qry_i)
-        else:
-            c_sent = q_sent = None
-
         optimizer.zero_grad(set_to_none=True)
-        ol, pl, sc = _forward_with_cached_text(
-            model,
-            ep_ctx,
-            ep_qry,
-            ctx_lex=c_lex,
-            qry_lex=q_lex,
-            ctx_sent=c_sent,
-            qry_sent=q_sent,
-            batch_size=batch_size,
-            precision=precision,
-            freeze_backbone=not adapt_backbone,
-        )
-        loss = _observable_factual_loss(model, ol, pl, sc, t_q_t, y_q_t)
-        if anchor_weight > 0:
-            sq_diff = sum((p - anchor_ref[n]).float().square().sum() for n, p in trainable)
-            n_elem = sum(p.numel() for _, p in trainable)
-            loss = loss + anchor_weight * (sq_diff / max(n_elem, 1))
-        if torch.isfinite(loss):
-            loss.backward()
+        step_finite = True
+
+        for _ in range(n_eps):
+            ep_ctx_i, ep_qry_i = _stratified_split(t_inner, y_inner, val_frac=0.25, rng=rng)
+            ep_ctx_t = torch.as_tensor(ep_ctx_i, device=device, dtype=torch.long)
+            ep_qry_t = torch.as_tensor(ep_qry_i, device=device, dtype=torch.long)
+            c_lex = lex_tr[ep_ctx_t] if lex_tr is not None else None
+            q_lex = lex_tr[ep_qry_t] if lex_tr is not None else None
+
+            if cache_patient:
+                c_emb = emb_tr[ep_ctx_t]
+                q_emb = emb_tr[ep_qry_t]
+                c_sent = _subset_sentence_batch(sent_tr, ep_ctx_i) if sent_tr is not None else None
+                q_sent = _subset_sentence_batch(sent_tr, ep_qry_i) if sent_tr is not None else None
+            else:
+                ep_ctx = [inner_train[i] for i in ep_ctx_i]
+                ep_qry = [inner_train[i] for i in ep_qry_i]
+                c_emb = _encode_rows_chunked(
+                    model,
+                    ep_ctx,
+                    batch_size=batch_size,
+                    precision=precision,
+                    freeze_backbone=not adapt_backbone,
+                )
+                q_emb = _encode_rows_chunked(
+                    model,
+                    ep_qry,
+                    batch_size=batch_size,
+                    precision=precision,
+                    freeze_backbone=not adapt_backbone,
+                )
+                if use_sent:
+                    if adapt_backbone:
+                        c_sent = model.patient.sentence_features(ep_ctx)
+                        q_sent = model.patient.sentence_features(ep_qry)
+                    else:
+                        c_sent = _subset_sentence_batch(sent_tr, ep_ctx_i)
+                        q_sent = _subset_sentence_batch(sent_tr, ep_qry_i)
+                else:
+                    c_sent = q_sent = None
+
+            ol, pl, sc = _forward_from_embeddings(
+                model,
+                c_emb,
+                t_tr_t[ep_ctx_t],
+                y_tr_t[ep_ctx_t],
+                q_emb,
+                ctx_lex=c_lex,
+                qry_lex=q_lex,
+                ctx_sent=c_sent,
+                qry_sent=q_sent,
+                precision=precision,
+            )
+            ep_loss = _observable_factual_loss(model, ol, pl, sc, t_tr_t[ep_qry_t], y_tr_t[ep_qry_t])
+            if not torch.isfinite(ep_loss):
+                step_finite = False
+                break
+            (ep_loss / n_eps).backward()
+
+        if step_finite:
+            if anchor_weight > 0:
+                sq_diff = sum((p - anchor_ref[n]).float().square().sum() for n, p in trainable)
+                n_elem = sum(p.numel() for _, p in trainable)
+                (anchor_weight * (sq_diff / max(n_elem, 1))).backward()
             torch.nn.utils.clip_grad_norm_([p for _, p in trainable], 1.0)
             optimizer.step()
 
@@ -423,6 +508,8 @@ def _score_conditioned(
     *,
     batch_size: int,
     precision: str,
+    ctx_emb=None,
+    qry_emb=None,
     ctx_lex=None,
     qry_lex=None,
     ctx_sent=None,
@@ -444,9 +531,10 @@ def _score_conditioned(
         with _autocast(device, precision):
             qry_sent = model.patient.sentence_features(qry_rows)
 
-    ctx_emb = _encode_rows_chunked(
-        model, ctx_rows, batch_size=batch_size, precision=precision, freeze_backbone=True
-    )
+    if ctx_emb is None:
+        ctx_emb = _encode_rows_chunked(
+            model, ctx_rows, batch_size=batch_size, precision=precision, freeze_backbone=True
+        )
     t_ctx, y_ctx = binary_observations(ctx_rows, device)
     with _autocast(device, precision):
         memories, scale = model.condition(
@@ -455,12 +543,12 @@ def _score_conditioned(
 
     p0_list, p1_list, s0_list, s1_list, prop_list = [], [], [], [], []
     for start in range(0, len(qry_rows), batch_size):
-        sub = qry_rows[start : start + batch_size]
-        sub_idx = np.arange(start, min(start + batch_size, len(qry_rows)), dtype=np.int64)
-        q_lex = qry_lex[start : start + batch_size] if qry_lex is not None else None
+        end = min(start + batch_size, len(qry_rows))
+        sub_idx = np.arange(start, end, dtype=np.int64)
+        q_lex = qry_lex[start:end] if qry_lex is not None else None
         q_sent = _subset_sentence_batch(qry_sent, sub_idx) if qry_sent is not None else None
         with _autocast(device, precision):
-            q_emb = model.patient(sub)
+            q_emb = qry_emb[start:end] if qry_emb is not None else model.patient(qry_rows[start:end])
             logits = model.query_logits(q_emb, memories, scale, lexical=q_lex, sentences=q_sent)
             prop_logits = model.query_propensity_logits(
                 q_emb, memories, scale, lexical=q_lex, sentences=q_sent
@@ -489,10 +577,12 @@ def cross_fit_adapt_rows(
     rows: list[dict],
     *,
     folds: int = 5,
-    adapt_steps: int = 30,
-    lr: float = 1e-3,
+    adapt_steps: int = 40,
+    episodes_per_step: int = 4,
+    lr: float = 1e-4,
     backbone_lr: float = 1e-5,
     anchor_weight: float = 1e-2,
+    adapt_patient: bool = False,
     adapt_backbone: bool = False,
     batch_size: int = 64,
     eval_every: int = 5,
@@ -504,7 +594,15 @@ def cross_fit_adapt_rows(
     device = base_model.centers.device
     use_lex = base_model.cfg.lexical_dim > 0
     use_sent = base_model.cfg.sentence_concept_dim > 0
+    cache_patient = not (adapt_patient or adapt_backbone)
 
+    all_emb = None
+    if cache_patient:
+        base_model.eval()
+        with torch.inference_mode():
+            all_emb = _encode_rows_chunked(
+                base_model, rows, batch_size=batch_size, precision=precision, freeze_backbone=True
+            )
     all_lex = base_model.patient.lexical_features(rows) if use_lex else None
     all_sent = None
     if use_sent and not adapt_backbone:
@@ -530,6 +628,8 @@ def cross_fit_adapt_rows(
 
         tr_t = torch.as_tensor(train_idx, device=device, dtype=torch.long)
         va_t = torch.as_tensor(val_idx, device=device, dtype=torch.long)
+        tr_emb = all_emb[tr_t] if all_emb is not None else None
+        va_emb = all_emb[va_t] if all_emb is not None else None
         tr_lex = all_lex[tr_t] if all_lex is not None else None
         va_lex = all_lex[va_t] if all_lex is not None else None
         tr_sent = _subset_sentence_batch(all_sent, train_idx) if all_sent is not None else None
@@ -539,14 +639,17 @@ def cross_fit_adapt_rows(
             base_model,
             train_rows,
             adapt_steps=adapt_steps,
+            episodes_per_step=episodes_per_step,
             lr=lr,
             backbone_lr=backbone_lr,
             anchor_weight=anchor_weight,
+            adapt_patient=adapt_patient,
             adapt_backbone=adapt_backbone,
             batch_size=batch_size,
             eval_every=eval_every,
             precision=precision,
             seed=seed + 101 * k,
+            train_emb=tr_emb,
             train_lex=tr_lex,
             train_sent=tr_sent,
         )
@@ -556,6 +659,8 @@ def cross_fit_adapt_rows(
             val_rows,
             batch_size=batch_size,
             precision=precision,
+            ctx_emb=tr_emb,
+            qry_emb=va_emb,
             ctx_lex=tr_lex,
             qry_lex=va_lex,
             ctx_sent=tr_sent if not adapt_backbone else None,
@@ -637,10 +742,12 @@ def adapt_and_predict(
     output,
     *,
     folds: int = 5,
-    adapt_steps: int = 30,
-    lr: float = 1e-3,
+    adapt_steps: int = 40,
+    episodes_per_step: int = 4,
+    lr: float = 1e-4,
     backbone_lr: float = 1e-5,
     anchor_weight: float = 1e-2,
+    adapt_patient: bool = False,
     adapt_backbone: bool = False,
     batch_size: int = 32,
     eval_every: int = 5,
@@ -662,9 +769,11 @@ def adapt_and_predict(
             ctx_rows,
             folds=folds,
             adapt_steps=adapt_steps,
+            episodes_per_step=episodes_per_step,
             lr=lr,
             backbone_lr=backbone_lr,
             anchor_weight=anchor_weight,
+            adapt_patient=adapt_patient,
             adapt_backbone=adapt_backbone,
             batch_size=batch_size,
             eval_every=eval_every,
@@ -686,9 +795,11 @@ def adapt_and_predict(
         model,
         ctx_rows,
         adapt_steps=adapt_steps,
+        episodes_per_step=episodes_per_step,
         lr=lr,
         backbone_lr=backbone_lr,
         anchor_weight=anchor_weight,
+        adapt_patient=adapt_patient,
         adapt_backbone=adapt_backbone,
         batch_size=batch_size,
         eval_every=eval_every,

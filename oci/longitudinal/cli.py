@@ -429,10 +429,17 @@ def main(argv=None):
     adapt.add_argument("--queries", type=Path, help="Optional separate Parquet of query histories.")
     adapt.add_argument("--output", type=Path, required=True)
     adapt.add_argument("--folds", type=int, default=5)
-    adapt.add_argument("--adapt-steps", type=int, default=30)
-    adapt.add_argument("--lr", type=float, default=1e-3)
+    adapt.add_argument("--adapt-steps", type=int, default=40)
+    adapt.add_argument("--episodes-per-step", type=int, default=4)
+    adapt.add_argument("--lr", type=float, default=1e-4)
     adapt.add_argument("--backbone-lr", type=float, default=1e-5)
     adapt.add_argument("--anchor-weight", type=float, default=1e-2)
+    adapt.add_argument(
+        "--adapt-patient",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Also adapt non-backbone PatientEncoder layers (slower; default caches patient embeddings).",
+    )
     adapt.add_argument(
         "--adapt-backbone",
         action=argparse.BooleanOptionalAction,
@@ -563,9 +570,11 @@ def main(argv=None):
                 args.output,
                 folds=args.folds,
                 adapt_steps=args.adapt_steps,
+                episodes_per_step=args.episodes_per_step,
                 lr=args.lr,
                 backbone_lr=args.backbone_lr,
                 anchor_weight=args.anchor_weight,
+                adapt_patient=args.adapt_patient,
                 adapt_backbone=args.adapt_backbone,
                 batch_size=args.batch_size,
                 eval_every=args.eval_every,
