@@ -17,8 +17,8 @@ Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observat
 | **Curriculum (Pure PFN)** | `longitudinal_tinybert_curriculum` | Pure `TwoWayStudyLayer`, 2-stage small→large N | Plain | Stopped (723) | `0.1118` | `+0.0212` | `+0.6271` | `0.2122` | `0.2008` | `0.0470` |
 | **Run 1 (Hybrid)** | `longitudinal_tinybert_hybrid` | Differentiable LOO-CV R-learner (`solver_dim=64`), 8 note slots, trajectory slopes, 2-stage curriculum (`N=64..512` → `100..5000`) | Plain | Complete (1200) | `0.1016` | `+0.1504` | `+0.7156` | `0.1946` | `0.1719` | `0.0410` |
 | **Run 2 (Wide Hybrid)** | `longitudinal_tinybert_wide_hybrid` | Run 1 + `note_slots=16`, `solver_dim=256`, study-adaptive `lexical_dim=128` SVD, 2-stage curriculum | Plain | Complete (1200) | `0.1023` | `+0.1989` | `+0.7024` | `0.1754` | `0.1302` | `0.0375` |
-| **Run 3 (Single-Stage Plain)** | `longitudinal_tinybert_single_stage` | Run 2 + single-stage log-uniform `N_ctx=100..10,000`, `--per-slot-note-temporal`, `--ridge-grid-size 7`, 32-tok overlapping note windows | Plain | Active (step 700 / 1200) | **`0.0955`** | **`+0.2171`** | **`+0.7494`** | **`0.1533`** | **`0.1235`** | **`0.0292`** |
-| **Run 4 (Single-Stage Paraphrased)** | `longitudinal_tinybert_paraphrased` | Exact 1-variable ablation of Run 3 with `--paraphrase-bank` (`nemotron_5000_paraphrases.json.gz`, 2,902 findings × ~10 paraphrases + EHR sections + filler) | Paraphrased | Active (step 500 / 1200) | `0.0996` | `+0.1466` | `+0.7270` | `0.1886` | `0.1707` | `0.0368` |
+| **Run 3 (Single-Stage Plain)** | `longitudinal_tinybert_single_stage` | Run 2 + single-stage log-uniform `N_ctx=100..10,000`, `--per-slot-note-temporal`, `--ridge-grid-size 7`, 32-tok overlapping note windows | Plain | Training complete (1200; final 1k eval running) | **`0.0951`** | **`+0.2169`** | **`+0.7526`** | **`0.1522`** | **`0.1230`** | **`0.0288`** |
+| **Run 4 (Single-Stage Paraphrased)** | `longitudinal_tinybert_paraphrased` | Exact 1-variable ablation of Run 3 with `--paraphrase-bank` (`nemotron_5000_paraphrases.json.gz`, 2,902 findings × ~10 paraphrases + EHR sections + filler) | Paraphrased | Active (step 1000 / 1200) | `0.0988` | `+0.1588` | `+0.7318` | `0.1876` | `0.1699` | `0.0365` |
 
 ### Learning Trajectories (Run 3 & Run 4 on 32 Held-Out Studies at `N_ctx = 5,000`)
 
@@ -33,6 +33,11 @@ Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observat
 | 500 | `0.0966` | `+0.1966` | `+0.7422` | `0.1544` | `0.1245` | `0.0296` |
 | 600 | `0.0955` | `+0.2033` | `+0.7498` | `0.1535` | `0.1234` | `0.0285` |
 | 700 | `0.0955` | `+0.2171` | `+0.7494` | `0.1533` | `0.1235` | `0.0292` |
+| 800 | `0.0952` | `+0.2149` | `+0.7514` | `0.1529` | `0.1236` | `0.0289` |
+| 900 | `0.0951` | `+0.2168` | `+0.7523` | `0.1526` | `0.1230` | `0.0288` |
+| 1000 | `0.0950` | `+0.2171` | `+0.7530` | `0.1523` | `0.1230` | `0.0288` |
+| 1100 | `0.0950` | `+0.2170` | `+0.7528` | `0.1521` | `0.1230` | `0.0288` |
+| **1200** | **`0.0951`** | **`+0.2169`** | **`+0.7526`** | **`0.1522`** | **`0.1230`** | **`0.0288`** |
 
 **Run 4 (Single-Stage Paraphrased, evaluated on paraphrased held-out notes):**
 
@@ -43,6 +48,11 @@ Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observat
 | 300 | `0.1006` | `+0.1524` | `+0.7179` | `0.1894` | `0.1721` | `0.0379` |
 | 400 | `0.1009` | `+0.1346` | `+0.7189` | `0.1891` | `0.1716` | `0.0388` |
 | 500 | `0.0996` | `+0.1466` | `+0.7270` | `0.1886` | `0.1707` | `0.0368` |
+| 600 | `0.0995` | `+0.1527` | `+0.7274` | `0.1883` | `0.1705` | `0.0376` |
+| 700 | `0.0991` | `+0.1569` | `+0.7286` | `0.1880` | `0.1705` | `0.0368` |
+| 800 | `0.0989` | `+0.1571` | `+0.7293` | `0.1881` | `0.1707` | `0.0365` |
+| 900 | `0.0987` | `+0.1595` | `+0.7321` | `0.1880` | `0.1699` | `0.0363` |
+| **1000** | **`0.0988`** | **`+0.1588`** | **`+0.7318`** | **`0.1876`** | **`0.1699`** | **`0.0365`** |
 
 ---
 
@@ -178,4 +188,14 @@ Evaluated across all 16 Nemotron 3.5 full-LLM held-out cohorts (`artifacts/llm_e
 3. **Tree-based nuisance selection (`GBM-R`) unlocked the realistic-note signal where ungrouped Ridge couldn't:** Adding 128 sentence-concept features to a single global Ridge penalty diluted the clean structured features at `N = 200–800`, whereas cross-fitted `HistGradientBoosting` nuisances automatically ignored noisy boilerplate clusters and extracted the true note confounders/prognostics (`risk_rmse` `0.1838 → 0.1768`, `prop_rmse` `0.1742 → 0.1697`).
 4. **Per-study end-to-end neural CATE (`DragonNet`) severely overfit** (`cate_rmse = 0.1639` at `N = 200`, `0.1446` at `N = 800` — worse than Arm-Mean `0.1316`), confirming that orthogonalized R-learner regularization is essential when CATE is unobserved.
 5. **PFN Run 3 (plain) and Run 4 (paraphrased) performed identically on Full-LLM notes** (`0.1228` vs. `0.1233` at `N = 800`), confirming that without `TinyOncBERT` + `--sentence-concept-dim` (and separate structured vs. text regularization), paraphrasing alone does not close the realistic-note gap.
+
+### Zero-Shot vs. Cross-Fit Episodic Factual Adaptation (`adapt-predict`) on 16 Full-LLM Cohorts
+Evaluated on `Run 4 (step 1000)` at `N_ctx = 800`, `N_q = 200` (3,200 held-out queries) with frozen CATE shrinkage & calibration heads, cached `PatientEncoder` embeddings, 4 random inner episodes/step, cosine `lr = 1e-4`, L2 anchor `1e-2`, and an automatic step-0 zero-shot inner-validation safety gate (`oci/longitudinal/adapt.py`):
+
+| Mode | Cohorts Adapted | `cate_rmse` ↓ | `within_r` ↑ | `pool_r` ↑ | `risk_rmse` ↓ | `prop_rmse` ↓ | `ate_rmse` ↓ | Runtime (16 cohorts) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Zero-Shot (`Run 4 s1000`) | `0 / 16` | `0.1238` | `+0.094` | `+0.691` | `0.1887` | `0.1749` | `0.0561` | — |
+| **CF-Adapted (`adapt-predict`)** | **`10 / 16`** | **`0.1232`** | **`+0.102`** | **`+0.692`** | **`0.1878`** | **`0.1746`** | **`0.0540`** | `713s` (~44s/cohort) |
+
+*(An earlier uncached run at `lr = 1e-3` triggered the safety gate on `16 / 16` cohorts with zero regressions, confirming that the zero-shot gate protects against overly aggressive adaptation learning rates.)*
 
