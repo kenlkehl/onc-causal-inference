@@ -110,6 +110,18 @@ Instead of asking a pure transformer to approximate linear algebra over 2,000 co
   2. **Higher-capacity residual TabPFN & column attention (`7.38M` params):** `col_dim=192`, `col_attn_layers=3`, `study_width=192`, `study_layers=4`, `heads=6`, `attn_slots=24`, plus **bf16 FlashAttention-2 / SDPA autocast** strictly inside `study_layers` on CUDA (keeping Cholesky ARD solvers in exact fp32, cutting worst-case `N_ctx=3,000, P=2,000` VRAM to `~6–7 GiB`).
   3. **Higher Top-$K$ recall & smoother schedule:** `top_k_nuis=80`, `top_k_cate=64`, `lr=4e-4`, `warmup_steps=300`, `eval_studies=64`, default `STEPS=15000` (`artifacts/tabular_causal_pfn_v2_p2000`).
 
+### Iteration 7 — v3 Flagship Architecture & 5-Family Real-World Pathology Prior (`scripts/run_tabular_pfn_v3_h200.sh`)
+- **Motivation (Closing the Real Stage-2 & Non-Additive Generalization Gaps):** Real Stage-2 catalog evaluations (`S0/n1000/seed101` & `seed102`) exposed fragmented multi-column synonymous extractions (e.g., 5–8 partial-coverage/opposite-polarity columns per latent confounder like `sex` or `ECOG`), while v1/v2's 3-family prior remained largely additive-1D + 1 pairwise product and capped at `N_ctx = 3,000, P = 2,000`.
+- **5-Family Prior Upgrades (`oci/tabular_pfn/prior.py`, `178–219 ms/study` at `N=1,800, P=2,000`):**
+  1. **New Family 4 (`tree_subgroup`, 18%):** Multi-way depth 2–4 clinical decision-rule & biomarker subgroup HTE ensembles (crisp/soft conjunctions impossible for linear/quadratic ARD Ridge alone).
+  2. **New Family 5 (`causal_scm`, 17%):** Layered nonlinear DAG + 2-layer MLP treatment/outcome/HTE surfaces with explicit **observed-parent ($Z \to C \leftarrow W$, 100% identifiable by column attention)** and **latent-parent ($U_T \to C \leftarrow U_Y$)** M-bias colliders, heavy tails, dense weak confounding, and near-positivity extremes.
+  3. **Fragmented Stage-1 Extraction Synonym Clusters (`55%` across all 5 families):** Splits active causal variables into 2–6 synonymous opposite-polarity, coarsened, and partial-coverage (`NaN`-masked) clones inheriting the true causal role, forcing the model to pool across fragmented columns.
+  4. **Expanded Clinical Distributions & Scale:** Heavy-tailed Student-$t$ lab outliers, zero-inflated utilization counts, non-monotonic clinical reference bands, optional dense weak confounding (`15%`), and H200 training envelope **`N_ctx = 80..8,000`, `P = 20..3,500`, `query_size = 128`**.
+- **v3 Architecture (`18.88M` params, `--use-v3-solver-basis --decouple-rlearner-propensity`, 100% v1/v2 checkpoint compatible):**
+  1. **4-Channel $C^\infty$ ARD Solver Basis:** Extends closed-form LOO-CV ARD nuisances & R-learner from `(X, X^2)` to `(X, X^2, tanh(1.5 X), M_c)` (adding outlier/threshold-robust saturation and smooth variance-gated missingness `M_c` directly inside orthogonalization, expanding column stats `24 → 32` and Robinson stats `6 → 12`).
+  2. **6-d Pairwise-Complete Co-Observed Correlation Bias (`_pairwise_corr_features`):** Feeds both zero-imputed Pearson correlation AND pairwise-complete co-observed correlation + overlap fraction into `_CorrBiasedColumnLayer`, allowing column attention to distinguish redundant complete duplicates (`overlap ≈ 1`) from complementary fragmented extractions (`corr_coobs ≈ 0.9, overlap ≈ 0.25`) and observed-parent colliders.
+  3. **Expanded H200 Capacity & Budget:** `col_dim=256`, `col_attn_layers=4`, `study_width=256`, `study_layers=6`, `heads=8`, `top_k_nuis=128`, `top_k_cate=96`, `attn_slots=32`, `ridge_grid_size=9` (`[-0.5, 11.5]`), `30,000` steps × `grad_accum=12` (**`360,000` unique studies**). Verified worst-case peak VRAM at `N_ctx=8,000, P=3,500`: **`38.21 GiB`** (`27%` of H200 141 GB; `9.76 GiB` at typical `N=1,800, P=1,000`).
+
 ---
 
 ## 3. Training Runs Summary
@@ -119,6 +131,7 @@ Instead of asking a pure transformer to approximate linear algebra over 2,000 co
 | **PoC v1 (A6000)** | *(scratch)* | v1 single-family sparse | `500` / `4,000` (`6.1 min`) | `80..1,200` / `20..2,000` | Complete | `0.1246` (v1) / `0.1192` (3-fam OOD) | `0.1323` | `+0.388` | `0.863 / 0.866` | `0.42 / 0.29` |
 | **Run 1 (v1 2.11M, A6000)** | `artifacts/tabular_causal_pfn_p2000` | v2 3-family OCI mixture (`50/25/25`) | `12,000` / `96,000` | `80..3,000` / `20..2,000` | **Complete** | `0.1186` (`within_r = +0.491`) | `0.1155` | `+0.492` | `0.894` (sig) | `0.075 / 0.066` (`1.1×`) |
 | **Run 2 (v2 7.38M, Decoupled)** | `artifacts/tabular_causal_pfn_v2_p2000` | v2 3-family OCI mixture (`50/25/25`) | `15,000` / `120,000` | `80..3,000` / `20..2,000` | **Complete** (`best = s13,000`) | `0.1187` (`within_r = +0.502`) | **`0.1150`** | **`+0.503`** | **`0.895`** (sig) | **`0.032 / 0.015` (`2.1×`)** |
+| **Run 3 (v3 18.88M, H200 Flagship)** | `artifacts/tabular_causal_pfn_v3_h200` | v3 5-family + fragmented + colliders (`30/15/20/18/17`) | `30,000` / `360,000` | `80..8,000` / `20..3,500` | **Ready to launch** | `—` | `—` | `—` | `—` | `—` |
 
 ### Final Held-Out Stress Tests: v1 (`2.11M`, 12k) vs. v2 (`7.38M`, 15k) at `N_ctx = 800`, `N_q = 128`
 

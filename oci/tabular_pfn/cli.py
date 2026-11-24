@@ -319,9 +319,19 @@ def main(argv=None):
     p_train.add_argument("--instrument-prob", type=float, default=0.70)
     p_train.add_argument("--unmeasured-conf-prob", type=float, default=0.25)
     p_train.add_argument("--extraction-noise-prob", type=float, default=0.35)
+    p_train.add_argument("--fragmented-dup-prob", type=float, default=0.55)
+    p_train.add_argument("--collider-prob", type=float, default=0.45)
+    p_train.add_argument("--dense-conf-prob", type=float, default=0.15)
     p_train.add_argument("--mnar-prob", type=float, default=0.50)
     p_train.add_argument("--rd-scale-prob", type=float, default=0.25)
     p_train.add_argument("--rct-prob", type=float, default=0.08)
+    p_train.add_argument("--max-treatment-logit-std", type=float, default=3.0)
+    p_train.add_argument(
+        "--family-weights",
+        type=str,
+        default=None,
+        help="Optional comma-separated DGP family weights matching DGP_FAMILIES.",
+    )
     p_train.add_argument("--design-bank", type=str, default=None)
     defaults = TabularModelConfig()
     for key, value in vars(defaults).items():
@@ -365,23 +375,32 @@ def main(argv=None):
             if args.command == "train"
             else TabularModelConfig()
         )
-        prior = (
-            PriorConfig(
+        if args.command == "train":
+            fw = (
+                tuple(float(x.strip()) for x in args.family_weights.split(","))
+                if args.family_weights
+                else PriorConfig().family_weights
+            )
+            prior = PriorConfig(
                 min_features=args.min_features,
                 max_features=args.max_features,
                 null_hte_prob=args.null_hte_prob,
                 instrument_prob=args.instrument_prob,
                 unmeasured_conf_prob=args.unmeasured_conf_prob,
                 extraction_noise_prob=args.extraction_noise_prob,
+                fragmented_dup_prob=args.fragmented_dup_prob,
+                collider_prob=args.collider_prob,
+                dense_conf_prob=args.dense_conf_prob,
                 mnar_prob=args.mnar_prob,
                 rd_scale_prob=args.rd_scale_prob,
                 rct_prob=args.rct_prob,
+                max_treatment_logit_std=args.max_treatment_logit_std,
+                family_weights=fw,
                 design_bank_path=args.design_bank,
                 design_split="train",
             )
-            if args.command == "train"
-            else PriorConfig()
-        )
+        else:
+            prior = PriorConfig()
         run_tabular_training(
             args.run_dir,
             args.steps,

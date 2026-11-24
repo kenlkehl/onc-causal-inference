@@ -31,7 +31,9 @@ from .prior import ROLE_NAMES
 
 CHECKPOINT_FORMAT_VERSION = 1
 COL_STAT_DIM = 24
+COL_STAT_DIM_V3 = 32
 ROB_STAT_DIM = 6
+ROB_STAT_DIM_V3 = 12
 NUM_ROLES = len(ROLE_NAMES)
 
 
@@ -51,6 +53,7 @@ class TabularModelConfig:
     propensity_loss_weight: float = 0.5
     role_loss_weight: float = 0.3
     decouple_rlearner_propensity: bool = False
+    use_v3_solver_basis: bool = False
 
     def __post_init__(self):
         if (
@@ -108,6 +111,34 @@ class TabularMemory:
     attn_memories: list
     n_ctx: int
     n_features: int
+    # Optional v3 basis stats & gates (None for v1/v2 checkpoints)
+    xsat_mean: torch.Tensor | None = None
+    xsat_sd: torch.Tensor | None = None
+    miss_mean: torch.Tensor | None = None
+    miss_sd: torch.Tensor | None = None
+    miss_weight: torch.Tensor | None = None
+    g_e_sat: torch.Tensor | None = None
+    g_e_miss: torch.Tensor | None = None
+    g_er_sat: torch.Tensor | None = None
+    g_er_miss: torch.Tensor | None = None
+    g_m_sat: torch.Tensor | None = None
+    g_m_miss: torch.Tensor | None = None
+    g_tau_sat: torch.Tensor | None = None
+    g_tau_miss: torch.Tensor | None = None
+
+    def max_gate(self, kind: str) -> torch.Tensor:
+        if kind == "er":
+            parts = [self.g_er_lin, self.g_er_nl, self.g_er_sat, self.g_er_miss]
+        elif kind == "m":
+            parts = [self.g_m_lin, self.g_m_nl, self.g_m_sat, self.g_m_miss]
+        elif kind == "tau":
+            parts = [self.g_tau_lin, self.g_tau_nl, self.g_tau_sat, self.g_tau_miss]
+        elif kind == "e":
+            parts = [self.g_e_lin, self.g_e_nl, self.g_e_sat, self.g_e_miss]
+        else:
+            raise ValueError(f"Unknown gate kind {kind!r}")
+        valid = [t for t in parts if t is not None]
+        return torch.stack(valid, dim=-1).max(dim=-1).values
 
 
 def _fit_ard_loo_cv_ridge(A_ctx, y_ctx, lambdas, cv_temp, *, intercept_reg=1e-4):
@@ -196,6 +227,47 @@ def _apply_standardize(
 
 
 @torch.no_grad()
+def _compute_v3_basis_context(
+    X_s: torch.Tensor,
+    M_s: torch.Tensor,
+    obs: torch.Tensor,
+    valid_col: torch.Tensor,
+):
+    """Smooth C^inf saturating threshold/outlier basis (X_sat) + variance-gated missingness (M_c)."""
+    xsat_raw = torch.tanh(1.5 * X_s) * obs
+    xsat_mean = xsat_raw.mean(dim=0, keepdim=True)
+    xsat_c = xsat_raw - xsat_mean
+    xsat_sd = xsat_c.std(dim=0, unbiased=False, keepdim=True).clamp_min(1e-4)
+    X_sat = (xsat_c / xsat_sd).clamp(-6.0, 6.0) * valid_col.float().unsqueeze(0)
+
+    miss_mean = M_s.mean(dim=0, keepdim=True)
+    miss_c = M_s - miss_mean
+    miss_var = miss_c.square().mean(dim=0, keepdim=True)
+    miss_sd = miss_var.sqrt().clamp_min(1e-3)
+    miss_weight = (miss_var / (miss_var + 2e-3)).sqrt()
+    M_c = ((miss_c / miss_sd) * miss_weight).clamp(-6.0, 6.0) * valid_col.float().unsqueeze(0)
+    return X_sat, M_c, xsat_mean, xsat_sd, miss_mean, miss_sd, miss_weight
+
+
+@torch.no_grad()
+def _apply_v3_basis(
+    X_s: torch.Tensor,
+    M_s: torch.Tensor,
+    obs: torch.Tensor,
+    valid_col: torch.Tensor,
+    xsat_mean: torch.Tensor,
+    xsat_sd: torch.Tensor,
+    miss_mean: torch.Tensor,
+    miss_sd: torch.Tensor,
+    miss_weight: torch.Tensor,
+):
+    xsat_raw = torch.tanh(1.5 * X_s) * obs
+    X_sat = ((xsat_raw - xsat_mean) / xsat_sd).clamp(-6.0, 6.0) * valid_col.float().unsqueeze(0)
+    M_c = (((M_s - miss_mean) / miss_sd) * miss_weight).clamp(-6.0, 6.0) * valid_col.float().unsqueeze(0)
+    return X_sat, M_c
+
+
+@torch.no_grad()
 def _corr_and_tstat(X: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None):
     """Vectorized column-wise Pearson r and t-statistic against a 1D target."""
     if mask is not None:
@@ -224,8 +296,11 @@ def _column_sufficient_stats(
     t: torch.Tensor,
     y: torch.Tensor,
     valid_col: torch.Tensor,
+    *,
+    X_sat: torch.Tensor | None = None,
+    M_c: torch.Tensor | None = None,
 ):
-    """Compute 24-d strictly observational per-column descriptors in O(N * P) time."""
+    """Compute 24-d (v1/v2) or 32-d (v3) strictly observational per-column descriptors in O(N * P)."""
     n, p = X_s.shape
     t_f = t.float()
     y_f = y.float()
@@ -243,9 +318,11 @@ def _column_sufficient_stats(
     r_y1_2, _ = _corr_and_tstat(X2_s, y_f, mask=m1)
 
     # Zero arm stats if an arm is degenerate
-    if int(m0.sum().item()) < 3:
+    deg0 = int(m0.sum().item()) < 3
+    deg1 = int(m1.sum().item()) < 3
+    if deg0:
         r_y0.zero_(); t_y0.zero_(); r_y0_2.zero_()
-    if int(m1.sum().item()) < 3:
+    if deg1:
         r_y1.zero_(); t_y1.zero_(); r_y1_2.zero_()
 
     abs_t_t = t_t.abs()
@@ -281,38 +358,68 @@ def _column_sufficient_stats(
     k3 = min(3, k_ref)
     mean_top3_corr = torch.topk(corr_ref, k3, dim=1).values.mean(dim=1)
 
-    stats = torch.stack(
-        [
-            r_t,
-            t_t / 5.0,
-            abs_t_t / 5.0,
-            torch.log1p(abs_t_t),
-            r_t2,
-            r_y,
-            t_y / 5.0,
-            r_y0,
-            t_y0 / 5.0,
-            r_y1,
-            t_y1 / 5.0,
-            y_cond_t / 5.0,
-            torch.log1p(y_cond_t),
-            z_inter / 5.0,
-            abs_z_inter / 5.0,
-            torch.log1p(abs_z_inter),
-            z_inter2 / 5.0,
-            miss_rate,
-            near_end,
-            tail_frac,
-            log_n / 8.0,
-            log_p / 8.0,
-            max_corr,
-            mean_top3_corr,
-        ],
-        dim=-1,
+    stat_list = [
+        r_t,
+        t_t / 5.0,
+        abs_t_t / 5.0,
+        torch.log1p(abs_t_t),
+        r_t2,
+        r_y,
+        t_y / 5.0,
+        r_y0,
+        t_y0 / 5.0,
+        r_y1,
+        t_y1 / 5.0,
+        y_cond_t / 5.0,
+        torch.log1p(y_cond_t),
+        z_inter / 5.0,
+        abs_z_inter / 5.0,
+        torch.log1p(abs_z_inter),
+        z_inter2 / 5.0,
+        miss_rate,
+        near_end,
+        tail_frac,
+        log_n / 8.0,
+        log_p / 8.0,
+        max_corr,
+        mean_top3_corr,
+    ]
+    raw_nuis_priority = (
+        torch.log1p(y_cond_t) + 0.35 * torch.log1p(abs_t_t) + 0.5 * torch.log1p(abs_z_inter)
     )
-    stats = stats * valid_col.float().unsqueeze(-1)
-    # Also return raw step-0 priority signals (zero-shot recall guarantee on step 0!)
-    raw_nuis_priority = (torch.log1p(y_cond_t) + 0.35 * torch.log1p(abs_t_t) + 0.5 * torch.log1p(abs_z_inter))
+
+    if X_sat is not None and M_c is not None:
+        r_t_sat, _ = _corr_and_tstat(X_sat, t_f)
+        r_y0_sat, t_y0_sat = _corr_and_tstat(X_sat, y_f, mask=m0)
+        r_y1_sat, t_y1_sat = _corr_and_tstat(X_sat, y_f, mask=m1)
+        r_t_m, _ = _corr_and_tstat(M_c, t_f)
+        r_y0_m, t_y0_m = _corr_and_tstat(M_c, y_f, mask=m0)
+        r_y1_m, t_y1_m = _corr_and_tstat(M_c, y_f, mask=m1)
+        if deg0:
+            r_y0_sat.zero_(); t_y0_sat.zero_(); r_y0_m.zero_(); t_y0_m.zero_()
+        if deg1:
+            r_y1_sat.zero_(); t_y1_sat.zero_(); r_y1_m.zero_(); t_y1_m.zero_()
+        z_inter_sat = ((r_y1_sat - r_y0_sat) / se_diff).clamp(-25.0, 25.0)
+        z_inter_m = ((r_y1_m - r_y0_m) / se_diff).clamp(-25.0, 25.0)
+        stat_list.extend(
+            [
+                r_t_sat,
+                t_y0_sat / 5.0,
+                t_y1_sat / 5.0,
+                z_inter_sat / 5.0,
+                r_t_m,
+                t_y0_m / 5.0,
+                t_y1_m / 5.0,
+                z_inter_m / 5.0,
+            ]
+        )
+        y_cond_sat = torch.maximum(t_y0_sat.abs(), t_y1_sat.abs())
+        y_cond_m = torch.maximum(t_y0_m.abs(), t_y1_m.abs())
+        raw_nuis_priority = (
+            raw_nuis_priority + 0.25 * torch.log1p(y_cond_sat) + 0.25 * torch.log1p(y_cond_m)
+        )
+
+    stats = torch.stack(stat_list, dim=-1) * valid_col.float().unsqueeze(-1)
     raw_nuis_priority = torch.where(valid_col, raw_nuis_priority, raw_nuis_priority.new_full((), -1e4))
     return stats, raw_nuis_priority
 
@@ -324,9 +431,11 @@ def _robinson_all_p_stats(
     t_res: torch.Tensor,
     y_res: torch.Tensor,
     valid_col: torch.Tensor,
+    *,
+    X_sat: torch.Tensor | None = None,
+    M_c: torch.Tensor | None = None,
 ):
     """Scan ALL P columns against adjusted LOO residuals (t - e_loo, y - m_loo) in O(N * P)."""
-    n, p = X_s.shape
     y_var = y_res.square().mean().clamp_min(1e-5)
 
     def _z_score(Z):
@@ -339,18 +448,32 @@ def _robinson_all_p_stats(
     z_nl = _z_score(X2_s) * valid_col.float()
     abs_lin = z_lin.abs()
     abs_nl = z_nl.abs()
-    rob_feats = torch.stack(
-        [
-            z_lin / 5.0,
-            abs_lin / 5.0,
-            torch.log1p(abs_lin),
-            z_nl / 5.0,
-            abs_nl / 5.0,
-            torch.log1p(abs_nl),
-        ],
-        dim=-1,
-    )
+    rob_list = [
+        z_lin / 5.0,
+        abs_lin / 5.0,
+        torch.log1p(abs_lin),
+        z_nl / 5.0,
+        abs_nl / 5.0,
+        torch.log1p(abs_nl),
+    ]
     raw_mod_priority = torch.log1p(abs_lin) + 0.6 * torch.log1p(abs_nl)
+    if X_sat is not None and M_c is not None:
+        z_sat = _z_score(X_sat) * valid_col.float()
+        z_m = _z_score(M_c) * valid_col.float()
+        abs_sat = z_sat.abs()
+        abs_m = z_m.abs()
+        rob_list.extend(
+            [
+                z_sat / 5.0,
+                abs_sat / 5.0,
+                torch.log1p(abs_sat),
+                z_m / 5.0,
+                abs_m / 5.0,
+                torch.log1p(abs_m),
+            ]
+        )
+        raw_mod_priority = raw_mod_priority + 0.45 * torch.log1p(abs_sat) + 0.30 * torch.log1p(abs_m)
+    rob_feats = torch.stack(rob_list, dim=-1)
     raw_mod_priority = torch.where(valid_col, raw_mod_priority, raw_mod_priority.new_full((), -1e4))
     return rob_feats, raw_mod_priority
 
@@ -377,19 +500,20 @@ class _DeepSetsColumnBlock(nn.Module):
 class _CorrBiasedColumnLayer(nn.Module):
     """Pairwise column self-attention on top-K candidates with empirical correlation bias."""
 
-    def __init__(self, width: int, heads: int):
+    def __init__(self, width: int, heads: int, *, corr_in_dim: int = 3):
         super().__init__()
         self.heads = heads
         self.head_dim = width // heads
+        self.corr_in_dim = corr_in_dim
         self.norm1 = nn.LayerNorm(width)
         self.qkv = nn.Linear(width, 3 * width)
         self.out_proj = nn.Linear(width, width)
-        self.corr_bias = nn.Sequential(nn.Linear(3, 16), nn.GELU(), nn.Linear(16, heads))
+        self.corr_bias = nn.Sequential(nn.Linear(corr_in_dim, 16), nn.GELU(), nn.Linear(16, heads))
         self.norm2 = nn.LayerNorm(width)
         self.ff = nn.Sequential(nn.Linear(width, 4 * width), nn.GELU(), nn.Linear(4 * width, width))
 
     def forward(self, h: torch.Tensor, corr: torch.Tensor) -> torch.Tensor:
-        # h: (K, D), corr: (K, K)
+        # h: (K, D), corr: (K, K) or (K, K, corr_in_dim)
         k, d = h.shape
         hn = self.norm1(h)
         q, kv_k, v = self.qkv(hn).chunk(3, dim=-1)
@@ -397,7 +521,10 @@ class _CorrBiasedColumnLayer(nn.Module):
         kv_k = kv_k.view(k, self.heads, self.head_dim).transpose(0, 1)
         v = v.view(k, self.heads, self.head_dim).transpose(0, 1)
         scores = torch.matmul(q, kv_k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        c_feats = torch.stack([corr, corr.abs(), corr * corr], dim=-1)  # (K, K, 3)
+        if corr.ndim == 2:
+            c_feats = torch.stack([corr, corr.abs(), corr * corr], dim=-1)  # (K, K, 3)
+        else:
+            c_feats = corr
         bias = self.corr_bias(c_feats).permute(2, 0, 1)  # (H, K, K)
         attn = F.softmax(scores + bias, dim=-1)
         mixed = torch.matmul(attn, v).transpose(0, 1).contiguous().view(k, d)
@@ -444,22 +571,29 @@ class SparseTabularCausalPFN(nn.Module):
         self.cfg = cfg
         c_dim = cfg.col_dim
         s_dim = cfg.study_width
+        v3 = bool(cfg.use_v3_solver_basis)
+        col_stat_dim = COL_STAT_DIM_V3 if v3 else COL_STAT_DIM
+        rob_stat_dim = ROB_STAT_DIM_V3 if v3 else ROB_STAT_DIM
+        corr_in_dim = 6 if v3 else 3
+        basis_k = 4 if v3 else 2
 
         # 1. O(P) Round-1 Column Role Encoder & Screener
         self.col_in = nn.Sequential(
-            nn.Linear(COL_STAT_DIM, c_dim),
+            nn.Linear(col_stat_dim, c_dim),
             nn.LayerNorm(c_dim),
             nn.GELU(),
             nn.Linear(c_dim, c_dim),
         )
-        self.col_global_blocks = nn.ModuleList([_DeepSetsColumnBlock(c_dim) for _ in range(2)])
+        self.col_global_blocks = nn.ModuleList(
+            [_DeepSetsColumnBlock(c_dim) for _ in range(3 if v3 else 2)]
+        )
         self.nuis_screen_head = nn.Linear(c_dim, 1)
 
         # 2. Top-K_nuis Correlation-Biased Column Attention -> soft ARD nuisance gates
         self.nuis_col_layers = nn.ModuleList(
-            [_CorrBiasedColumnLayer(c_dim, cfg.heads) for _ in range(cfg.col_attn_layers)]
+            [_CorrBiasedColumnLayer(c_dim, cfg.heads, corr_in_dim=corr_in_dim) for _ in range(cfg.col_attn_layers)]
         )
-        n_nuis_gates = 6 if cfg.decouple_rlearner_propensity else 4
+        n_nuis_gates = (3 if cfg.decouple_rlearner_propensity else 2) * basis_k
         self.nuis_gate_head = nn.Sequential(
             nn.LayerNorm(c_dim),
             nn.Linear(c_dim, c_dim // 2),
@@ -471,28 +605,34 @@ class SparseTabularCausalPFN(nn.Module):
 
         # 3. Round-2 ALL-P Adjusted Robinson Updater -> Final 6-class Role Head + CATE Screener
         self.rob_update = nn.Sequential(
-            nn.LayerNorm(c_dim + ROB_STAT_DIM),
-            nn.Linear(c_dim + ROB_STAT_DIM, c_dim),
+            nn.LayerNorm(c_dim + rob_stat_dim),
+            nn.Linear(c_dim + rob_stat_dim, c_dim),
             nn.GELU(),
             nn.Linear(c_dim, c_dim),
         )
         self.rob_global_block = _DeepSetsColumnBlock(c_dim)
+        if v3:
+            self.rob_global_block2 = _DeepSetsColumnBlock(c_dim)
         self.role_head = nn.Sequential(nn.LayerNorm(c_dim), nn.Linear(c_dim, NUM_ROLES))
         self.mod_screen_head = nn.Linear(c_dim, 1)
 
         # 4. Top-K_cate Correlation-Biased Column Attention -> soft ARD CATE gates (tau)
         self.cate_col_layers = nn.ModuleList(
-            [_CorrBiasedColumnLayer(c_dim, cfg.heads) for _ in range(cfg.col_attn_layers)]
+            [_CorrBiasedColumnLayer(c_dim, cfg.heads, corr_in_dim=corr_in_dim) for _ in range(cfg.col_attn_layers)]
         )
         self.cate_gate_head = nn.Sequential(
-            nn.LayerNorm(c_dim), nn.Linear(c_dim, c_dim // 2), nn.GELU(), nn.Linear(c_dim // 2, 2)
+            nn.LayerNorm(c_dim), nn.Linear(c_dim, c_dim // 2), nn.GELU(), nn.Linear(c_dim // 2, basis_k)
         )
         nn.init.constant_(self.cate_gate_head[-1].bias, -0.5)
 
         # 5. Learnable LOO-CV Ridge penalty grids for e, m, tau
         k_grid = cfg.ridge_grid_size
-        base_grid = torch.linspace(0.2, 0.2 + 1.5 * (k_grid - 1), k_grid)
-        tau_grid = torch.linspace(0.8, 0.8 + 1.5 * (k_grid - 1), k_grid)
+        if v3:
+            base_grid = torch.linspace(-0.5, 11.5, k_grid)
+            tau_grid = torch.linspace(0.2, 12.0, k_grid)
+        else:
+            base_grid = torch.linspace(0.2, 0.2 + 1.5 * (k_grid - 1), k_grid)
+            tau_grid = torch.linspace(0.8, 0.8 + 1.5 * (k_grid - 1), k_grid)
         self.log_lam_e = nn.Parameter(base_grid.clone())
         if cfg.decouple_rlearner_propensity:
             self.log_lam_er = nn.Parameter(base_grid.clone())
@@ -501,16 +641,19 @@ class SparseTabularCausalPFN(nn.Module):
         self.log_cv_temp = nn.Parameter(torch.tensor(1.5))
 
         # 6. Calibration & Epistemic-Uncertainty Heads on ARD R-learner outputs + leverages
-        self.arm_cal = nn.Sequential(nn.Linear(8, 32), nn.GELU(), nn.Linear(32, 4))
-        self.prop_cal = nn.Sequential(nn.Linear(4, 16), nn.GELU(), nn.Linear(16, 1))
+        cal_arm_h = 64 if v3 else 32
+        cal_prop_h = 32 if v3 else 16
+        self.arm_cal = nn.Sequential(nn.Linear(8, cal_arm_h), nn.GELU(), nn.Linear(cal_arm_h, 4))
+        self.prop_cal = nn.Sequential(nn.Linear(4, cal_prop_h), nn.GELU(), nn.Linear(cal_prop_h, 1))
         nn.init.normal_(self.arm_cal[-1].weight, std=0.01)
         nn.init.zeros_(self.arm_cal[-1].bias)
         nn.init.normal_(self.prop_cal[-1].weight, std=0.01)
         nn.init.zeros_(self.prop_cal[-1].bias)
 
         # 7. Compact Residual Two-Way TabPFN Study Layers over top-attn_slots gated features
+        cell_in_dim = 8 if v3 else 6
         self.cell_proj = nn.Sequential(
-            nn.Linear(6, s_dim), nn.GELU(), nn.Linear(s_dim, s_dim)
+            nn.Linear(cell_in_dim, s_dim), nn.GELU(), nn.Linear(s_dim, s_dim)
         )
         self.col_to_study = nn.Linear(c_dim, s_dim)
         self.outcome_token = nn.Linear(6, s_dim)
@@ -535,12 +678,34 @@ class SparseTabularCausalPFN(nn.Module):
         Xn = F.normalize(X_sel - X_sel.mean(dim=0, keepdim=True), p=2, dim=0)
         return (Xn.T @ Xn).clamp(-1.0, 1.0)
 
+    @staticmethod
+    def _pairwise_corr_features(X_sel: torch.Tensor, M_sel: torch.Tensor) -> torch.Tensor:
+        """6-d smooth pairwise correlation: zero-imputed + co-observed pairwise-complete + overlap."""
+        obs = (1.0 - M_sel).clamp(0.0, 1.0)
+        Xn = F.normalize(X_sel - X_sel.mean(dim=0, keepdim=True), p=2, dim=0)
+        corr_x = (Xn.T @ Xn).clamp(-1.0, 1.0)
+        co_n = obs.T @ obs
+        num = X_sel.T @ X_sel
+        den_i = (X_sel * X_sel).T @ obs
+        den = (den_i * den_i.T).clamp_min(1e-6).sqrt()
+        corr_pair = (num / den).clamp(-1.0, 1.0)
+        conf = co_n / (co_n + 8.0)
+        corr_coobs = corr_pair * conf
+        overlap = (co_n / max(float(len(X_sel)), 1.0)).clamp(0.0, 1.0)
+        return torch.stack(
+            [corr_x, corr_x.abs(), corr_x * corr_x, corr_coobs, corr_coobs.abs(), overlap],
+            dim=-1,
+        )
+
     def _build_patient_slots(
         self,
         X_s: torch.Tensor,
         X2_s: torch.Tensor,
         M_s: torch.Tensor,
         mem: TabularMemory,
+        *,
+        X_sat: torch.Tensor | None = None,
+        M_c: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Build (N, attn_slots, study_width) cell embeddings on top gated columns."""
         n = len(X_s)
@@ -550,9 +715,22 @@ class SparseTabularCausalPFN(nn.Module):
         x2_sel = X2_s[:, idx]
         m_sel = M_s[:, idx]
         g_feats = mem.attn_gate_feats.unsqueeze(0).expand(n, -1, -1)  # (N, k_act, 3)
-        cell_in = torch.cat(
-            [x_sel.unsqueeze(-1), x2_sel.unsqueeze(-1), m_sel.unsqueeze(-1), g_feats], dim=-1
-        )
+        if self.cfg.use_v3_solver_basis and X_sat is not None and M_c is not None:
+            cell_in = torch.cat(
+                [
+                    x_sel.unsqueeze(-1),
+                    x2_sel.unsqueeze(-1),
+                    X_sat[:, idx].unsqueeze(-1),
+                    m_sel.unsqueeze(-1),
+                    M_c[:, idx].unsqueeze(-1),
+                    g_feats,
+                ],
+                dim=-1,
+            )
+        else:
+            cell_in = torch.cat(
+                [x_sel.unsqueeze(-1), x2_sel.unsqueeze(-1), m_sel.unsqueeze(-1), g_feats], dim=-1
+            )
         col_ctx = self.col_to_study(mem.col_embs[idx]).unsqueeze(0)  # (1, k_act, s_dim)
         slots = self.cell_proj(cell_in) + col_ctx
         if k_act < self.cfg.attn_slots:
@@ -619,11 +797,18 @@ class SparseTabularCausalPFN(nn.Module):
             scale = ArmScale.from_context(t_f, y_f)
 
             # 1. Context-only standardization & O(N * P) observational column stats
+            v3 = bool(self.cfg.use_v3_solver_basis)
             X_s, X2_s, M_s, col_mean, col_sd, x2_mean, x2_sd, valid_col = _standardize_context(
                 X_ctx, M_ctx
             )
+            X_sat = M_c = xsat_mean = xsat_sd = miss_mean = miss_sd = miss_weight = None
+            if v3:
+                obs_ctx = torch.isfinite(X_ctx.float()).float()
+                X_sat, M_c, xsat_mean, xsat_sd, miss_mean, miss_sd, miss_weight = (
+                    _compute_v3_basis_context(X_s, M_s, obs_ctx, valid_col)
+                )
             col_stats, raw_nuis_prio = _column_sufficient_stats(
-                X_s, X2_s, M_s, t_f, y_f, valid_col
+                X_s, X2_s, M_s, t_f, y_f, valid_col, X_sat=X_sat, M_c=M_c
             )
 
             # 2. O(P) Round-1 Column Role Encoder & Nuisance Screening
@@ -641,52 +826,125 @@ class SparseTabularCausalPFN(nn.Module):
             h_nuis = h_col[nuis_idx]
             X_nuis = X_s[:, nuis_idx]
             X2_nuis = X2_s[:, nuis_idx]
-            corr_nuis = self._empirical_corr(X_nuis)
+            corr_nuis = (
+                self._pairwise_corr_features(X_nuis, M_s[:, nuis_idx])
+                if v3
+                else self._empirical_corr(X_nuis)
+            )
             for layer in self.nuis_col_layers:
                 h_nuis = layer(h_nuis, corr_nuis)
             nuis_gates = torch.sigmoid(self.nuis_gate_head(h_nuis)).clamp(1e-3, 1.0)
             v_nuis = valid_col[nuis_idx].float()
-            if self.cfg.decouple_rlearner_propensity:
-                g_e_lin, g_e_nl, g_er_lin, g_er_nl, g_m_lin, g_m_nl = nuis_gates.unbind(dim=-1)
-                g_er_lin = g_er_lin * v_nuis
-                g_er_nl = g_er_nl * v_nuis
+
+            g_e_sat = g_e_miss = g_er_sat = g_er_miss = g_m_sat = g_m_miss = None
+            if v3:
+                if self.cfg.decouple_rlearner_propensity:
+                    (
+                        g_e_lin, g_e_nl, g_e_sat, g_e_miss,
+                        g_er_lin, g_er_nl, g_er_sat, g_er_miss,
+                        g_m_lin, g_m_nl, g_m_sat, g_m_miss,
+                    ) = nuis_gates.unbind(dim=-1)
+                    g_er_lin = g_er_lin * v_nuis
+                    g_er_nl = g_er_nl * v_nuis
+                    g_er_sat = g_er_sat * v_nuis
+                    g_er_miss = g_er_miss * v_nuis
+                else:
+                    (
+                        g_e_lin, g_e_nl, g_e_sat, g_e_miss,
+                        g_m_lin, g_m_nl, g_m_sat, g_m_miss,
+                    ) = nuis_gates.unbind(dim=-1)
+                g_e_lin = g_e_lin * v_nuis
+                g_e_nl = g_e_nl * v_nuis
+                g_e_sat = g_e_sat * v_nuis
+                g_e_miss = g_e_miss * v_nuis
+                g_m_lin = g_m_lin * v_nuis
+                g_m_nl = g_m_nl * v_nuis
+                g_m_sat = g_m_sat * v_nuis
+                g_m_miss = g_m_miss * v_nuis
             else:
-                g_e_lin, g_e_nl, g_m_lin, g_m_nl = nuis_gates.unbind(dim=-1)
-            g_e_lin = g_e_lin * v_nuis
-            g_e_nl = g_e_nl * v_nuis
-            g_m_lin = g_m_lin * v_nuis
-            g_m_nl = g_m_nl * v_nuis
+                if self.cfg.decouple_rlearner_propensity:
+                    g_e_lin, g_e_nl, g_er_lin, g_er_nl, g_m_lin, g_m_nl = nuis_gates.unbind(dim=-1)
+                    g_er_lin = g_er_lin * v_nuis
+                    g_er_nl = g_er_nl * v_nuis
+                else:
+                    g_e_lin, g_e_nl, g_m_lin, g_m_nl = nuis_gates.unbind(dim=-1)
+                g_e_lin = g_e_lin * v_nuis
+                g_e_nl = g_e_nl * v_nuis
+                g_m_lin = g_m_lin * v_nuis
+                g_m_nl = g_m_nl * v_nuis
 
             # 4. Differentiable ARD Closed-Form LOO-CV Nuisances (e_loo, e_r_loo, m_loo)
             ones = torch.ones((n_ctx, 1), device=X_s.device, dtype=torch.float32)
-            A_e = torch.cat([ones, X_nuis * g_e_lin[None, :], X2_nuis * g_e_nl[None, :]], dim=1)
-            A_m = torch.cat([ones, X_nuis * g_m_lin[None, :], X2_nuis * g_m_nl[None, :]], dim=1)
+            lam_hi = 5e5 if v3 else 1e5
+            if v3:
+                Xsat_nuis = X_sat[:, nuis_idx]
+                Mc_nuis = M_c[:, nuis_idx]
+                A_e = torch.cat(
+                    [
+                        ones,
+                        X_nuis * g_e_lin[None, :],
+                        X2_nuis * g_e_nl[None, :],
+                        Xsat_nuis * g_e_sat[None, :],
+                        Mc_nuis * g_e_miss[None, :],
+                    ],
+                    dim=1,
+                )
+                A_m = torch.cat(
+                    [
+                        ones,
+                        X_nuis * g_m_lin[None, :],
+                        X2_nuis * g_m_nl[None, :],
+                        Xsat_nuis * g_m_sat[None, :],
+                        Mc_nuis * g_m_miss[None, :],
+                    ],
+                    dim=1,
+                )
+            else:
+                A_e = torch.cat([ones, X_nuis * g_e_lin[None, :], X2_nuis * g_e_nl[None, :]], dim=1)
+                A_m = torch.cat([ones, X_nuis * g_m_lin[None, :], X2_nuis * g_m_nl[None, :]], dim=1)
             cv_temp = F.softplus(self.log_cv_temp.float()) + 0.1
 
-            lam_e = self.log_lam_e.float().exp().clamp(0.05, 1e5)
+            lam_e = self.log_lam_e.float().exp().clamp(0.05, lam_hi)
             prop_fit, e_loo = _fit_ard_loo_cv_ridge(A_e, t_f, lam_e, cv_temp)
             e_loo = e_loo.clamp(0.02, 0.98)
 
             if self.cfg.decouple_rlearner_propensity:
-                A_er = torch.cat(
-                    [ones, X_nuis * g_er_lin[None, :], X2_nuis * g_er_nl[None, :]], dim=1
-                )
-                lam_er = self.log_lam_er.float().exp().clamp(0.05, 1e5)
+                if v3:
+                    A_er = torch.cat(
+                        [
+                            ones,
+                            X_nuis * g_er_lin[None, :],
+                            X2_nuis * g_er_nl[None, :],
+                            Xsat_nuis * g_er_sat[None, :],
+                            Mc_nuis * g_er_miss[None, :],
+                        ],
+                        dim=1,
+                    )
+                else:
+                    A_er = torch.cat(
+                        [ones, X_nuis * g_er_lin[None, :], X2_nuis * g_er_nl[None, :]], dim=1
+                    )
+                lam_er = self.log_lam_er.float().exp().clamp(0.05, lam_hi)
                 r_prop_fit, e_r_loo = _fit_ard_loo_cv_ridge(A_er, t_f, lam_er, cv_temp)
                 e_r_loo = e_r_loo.clamp(0.02, 0.98)
             else:
                 g_er_lin, g_er_nl = g_e_lin, g_e_nl
+                g_er_sat, g_er_miss = g_e_sat, g_e_miss
                 r_prop_fit, e_r_loo = prop_fit, e_loo
 
-            lam_m = self.log_lam_m.float().exp().clamp(0.05, 1e5)
+            lam_m = self.log_lam_m.float().exp().clamp(0.05, lam_hi)
             out_fit, m_loo = _fit_ard_loo_cv_ridge(A_m, y_f, lam_m, cv_temp)
 
             # 5. Round-2 ALL-P Adjusted Robinson Interaction Scan -> Role Posteriors & CATE Set
             t_res = t_f - e_r_loo
             y_res = y_f - m_loo
-            rob_feats, raw_mod_prio = _robinson_all_p_stats(X_s, X2_s, t_res, y_res, valid_col)
+            rob_feats, raw_mod_prio = _robinson_all_p_stats(
+                X_s, X2_s, t_res, y_res, valid_col, X_sat=X_sat, M_c=M_c
+            )
             h_col2 = h_col + self.rob_update(torch.cat([h_col, rob_feats], dim=-1))
             h_col2 = self.rob_global_block(h_col2)
+            if v3:
+                h_col2 = self.rob_global_block2(h_col2)
             role_logits = self.role_head(h_col2)  # (P, 6)
 
             mod_screen_logits = self.mod_screen_head(h_col2).squeeze(-1)
@@ -699,29 +957,55 @@ class SparseTabularCausalPFN(nn.Module):
             h_cate = h_col2[cate_idx]
             X_cate = X_s[:, cate_idx]
             X2_cate = X2_s[:, cate_idx]
-            corr_cate = self._empirical_corr(X_cate)
+            corr_cate = (
+                self._pairwise_corr_features(X_cate, M_s[:, cate_idx])
+                if v3
+                else self._empirical_corr(X_cate)
+            )
             for layer in self.cate_col_layers:
                 h_cate = layer(h_cate, corr_cate)
             cate_gates = torch.sigmoid(self.cate_gate_head(h_cate)).clamp(1e-3, 1.0)
-            g_tau_lin, g_tau_nl = cate_gates.unbind(dim=-1)
             v_cate = valid_col[cate_idx].float()
-            g_tau_lin = g_tau_lin * v_cate
-            g_tau_nl = g_tau_nl * v_cate
-
-            A_tau = torch.cat(
-                [ones, X_cate * g_tau_lin[None, :], X2_cate * g_tau_nl[None, :]], dim=1
-            )
+            g_tau_sat = g_tau_miss = None
+            if v3:
+                g_tau_lin, g_tau_nl, g_tau_sat, g_tau_miss = cate_gates.unbind(dim=-1)
+                g_tau_lin = g_tau_lin * v_cate
+                g_tau_nl = g_tau_nl * v_cate
+                g_tau_sat = g_tau_sat * v_cate
+                g_tau_miss = g_tau_miss * v_cate
+                A_tau = torch.cat(
+                    [
+                        ones,
+                        X_cate * g_tau_lin[None, :],
+                        X2_cate * g_tau_nl[None, :],
+                        X_sat[:, cate_idx] * g_tau_sat[None, :],
+                        M_c[:, cate_idx] * g_tau_miss[None, :],
+                    ],
+                    dim=1,
+                )
+            else:
+                g_tau_lin, g_tau_nl = cate_gates.unbind(dim=-1)
+                g_tau_lin = g_tau_lin * v_cate
+                g_tau_nl = g_tau_nl * v_cate
+                A_tau = torch.cat(
+                    [ones, X_cate * g_tau_lin[None, :], X2_cate * g_tau_nl[None, :]], dim=1
+                )
             B_ctx = t_res.unsqueeze(-1) * A_tau
-            lam_tau = self.log_lam_tau.float().exp().clamp(0.05, 1e5)
+            lam_tau = self.log_lam_tau.float().exp().clamp(0.05, lam_hi)
             cate_fit, _ = _fit_ard_loo_cv_ridge(B_ctx, y_res, lam_tau, cv_temp, intercept_reg=0.05)
 
             # 7. Select top attn_slots columns across (e_r, m, tau) gates for residual Two-Way TabPFN
             full_ge = torch.zeros(p, device=X_s.device, dtype=torch.float32)
             full_gm = torch.zeros(p, device=X_s.device, dtype=torch.float32)
             full_gt = torch.zeros(p, device=X_s.device, dtype=torch.float32)
-            full_ge[nuis_idx] = torch.maximum(g_er_lin, g_er_nl)
-            full_gm[nuis_idx] = torch.maximum(g_m_lin, g_m_nl)
-            full_gt[cate_idx] = torch.maximum(g_tau_lin, g_tau_nl)
+            if v3:
+                full_ge[nuis_idx] = torch.stack([g_er_lin, g_er_nl, g_er_sat, g_er_miss], dim=-1).max(dim=-1).values
+                full_gm[nuis_idx] = torch.stack([g_m_lin, g_m_nl, g_m_sat, g_m_miss], dim=-1).max(dim=-1).values
+                full_gt[cate_idx] = torch.stack([g_tau_lin, g_tau_nl, g_tau_sat, g_tau_miss], dim=-1).max(dim=-1).values
+            else:
+                full_ge[nuis_idx] = torch.maximum(g_er_lin, g_er_nl)
+                full_gm[nuis_idx] = torch.maximum(g_m_lin, g_m_nl)
+                full_gt[cate_idx] = torch.maximum(g_tau_lin, g_tau_nl)
             attn_prio = (
                 full_gm + 1.5 * full_gt + 0.5 * full_ge + 1e-3 * (raw_nuis_prio.clamp(-10, 10) + raw_mod_prio.clamp(-10, 10))
             )
@@ -764,9 +1048,22 @@ class SparseTabularCausalPFN(nn.Module):
                 attn_memories=[],
                 n_ctx=n_ctx,
                 n_features=p,
+                xsat_mean=xsat_mean,
+                xsat_sd=xsat_sd,
+                miss_mean=miss_mean,
+                miss_sd=miss_sd,
+                miss_weight=miss_weight,
+                g_e_sat=g_e_sat,
+                g_e_miss=g_e_miss,
+                g_er_sat=g_er_sat,
+                g_er_miss=g_er_miss,
+                g_m_sat=g_m_sat,
+                g_m_miss=g_m_miss,
+                g_tau_sat=g_tau_sat,
+                g_tau_miss=g_tau_miss,
             )
 
-            ctx_slots = self._build_patient_slots(X_s, X2_s, M_s, tmp_mem)
+            ctx_slots = self._build_patient_slots(X_s, X2_s, M_s, tmp_mem, X_sat=X_sat, M_c=M_c)
             context = self._assemble_context(ctx_slots, t_f, y_f, scale)
             attn_memories = []
             use_bf16 = context.is_cuda and torch.cuda.is_bf16_supported()
@@ -783,38 +1080,98 @@ class SparseTabularCausalPFN(nn.Module):
     def _query_solver_stats(
         self, X_q: torch.Tensor, M_q: torch.Tensor | None, mem: TabularMemory
     ):
+        v3 = bool(self.cfg.use_v3_solver_basis)
         X_s, X2_s, M_s = _apply_standardize(
             X_q, M_q, mem.col_mean, mem.col_sd, mem.x2_mean, mem.x2_sd, mem.valid_col
         )
+        X_sat = M_c = None
+        if v3:
+            obs_q = torch.isfinite(X_q.float()).float()
+            X_sat, M_c = _apply_v3_basis(
+                X_s,
+                M_s,
+                obs_q,
+                mem.valid_col,
+                mem.xsat_mean,
+                mem.xsat_sd,
+                mem.miss_mean,
+                mem.miss_sd,
+                mem.miss_weight,
+            )
         n_q = len(X_s)
         ones_q = torch.ones((n_q, 1), device=X_s.device, dtype=torch.float32)
 
         X_n = X_s[:, mem.nuis_idx]
         X2_n = X2_s[:, mem.nuis_idx]
-        A_e_q = torch.cat([ones_q, X_n * mem.g_e_lin[None, :], X2_n * mem.g_e_nl[None, :]], dim=1)
-        A_m_q = torch.cat([ones_q, X_n * mem.g_m_lin[None, :], X2_n * mem.g_m_nl[None, :]], dim=1)
-
         X_c = X_s[:, mem.cate_idx]
         X2_c = X2_s[:, mem.cate_idx]
-        A_t_q = torch.cat(
-            [ones_q, X_c * mem.g_tau_lin[None, :], X2_c * mem.g_tau_nl[None, :]], dim=1
-        )
+        if v3:
+            Xsat_n = X_sat[:, mem.nuis_idx]
+            Mc_n = M_c[:, mem.nuis_idx]
+            A_e_q = torch.cat(
+                [
+                    ones_q,
+                    X_n * mem.g_e_lin[None, :],
+                    X2_n * mem.g_e_nl[None, :],
+                    Xsat_n * mem.g_e_sat[None, :],
+                    Mc_n * mem.g_e_miss[None, :],
+                ],
+                dim=1,
+            )
+            A_m_q = torch.cat(
+                [
+                    ones_q,
+                    X_n * mem.g_m_lin[None, :],
+                    X2_n * mem.g_m_nl[None, :],
+                    Xsat_n * mem.g_m_sat[None, :],
+                    Mc_n * mem.g_m_miss[None, :],
+                ],
+                dim=1,
+            )
+            A_t_q = torch.cat(
+                [
+                    ones_q,
+                    X_c * mem.g_tau_lin[None, :],
+                    X2_c * mem.g_tau_nl[None, :],
+                    X_sat[:, mem.cate_idx] * mem.g_tau_sat[None, :],
+                    M_c[:, mem.cate_idx] * mem.g_tau_miss[None, :],
+                ],
+                dim=1,
+            )
+        else:
+            A_e_q = torch.cat([ones_q, X_n * mem.g_e_lin[None, :], X2_n * mem.g_e_nl[None, :]], dim=1)
+            A_m_q = torch.cat([ones_q, X_n * mem.g_m_lin[None, :], X2_n * mem.g_m_nl[None, :]], dim=1)
+            A_t_q = torch.cat(
+                [ones_q, X_c * mem.g_tau_lin[None, :], X2_c * mem.g_tau_nl[None, :]], dim=1
+            )
 
         e_q, h_e = _predict_ridge(mem.propensity_fit, A_e_q)
         m_q, h_m = _predict_ridge(mem.outcome_fit, A_m_q)
         tau_q, h_tau = _predict_ridge(mem.cate_fit, A_t_q)
         e_prob = e_q.clamp(0.01, 0.99)
         if self.cfg.decouple_rlearner_propensity:
-            A_er_q = torch.cat(
-                [ones_q, X_n * mem.g_er_lin[None, :], X2_n * mem.g_er_nl[None, :]], dim=1
-            )
+            if v3:
+                A_er_q = torch.cat(
+                    [
+                        ones_q,
+                        X_n * mem.g_er_lin[None, :],
+                        X2_n * mem.g_er_nl[None, :],
+                        Xsat_n * mem.g_er_sat[None, :],
+                        Mc_n * mem.g_er_miss[None, :],
+                    ],
+                    dim=1,
+                )
+            else:
+                A_er_q = torch.cat(
+                    [ones_q, X_n * mem.g_er_lin[None, :], X2_n * mem.g_er_nl[None, :]], dim=1
+                )
             e_r_q, _ = _predict_ridge(mem.rlearner_prop_fit, A_er_q)
             e_r_prob = e_r_q.clamp(0.01, 0.99)
         else:
             e_r_prob = e_prob
         y0_raw = (m_q - e_r_prob * tau_q).clamp(0.01, 0.99)
         y1_raw = (m_q + (1.0 - e_r_prob) * tau_q).clamp(0.01, 0.99)
-        return X_s, X2_s, M_s, y0_raw, y1_raw, m_q, e_prob, e_r_prob, tau_q, h_m, h_tau, h_e
+        return X_s, X2_s, M_s, X_sat, M_c, y0_raw, y1_raw, m_q, e_prob, e_r_prob, tau_q, h_m, h_tau, h_e
 
     def query(
         self,
@@ -827,7 +1184,7 @@ class SparseTabularCausalPFN(nn.Module):
         """Predict arm risk histogram logits ``(N_q, 2, bins)`` and propensity logits ``(N_q,)``."""
         device_type = X_q.device.type
         with torch.amp.autocast(device_type=device_type, enabled=False):
-            X_s, X2_s, M_s, y0_raw, y1_raw, m_q, e_prob, e_r_prob, tau_q, h_m, h_tau, h_e = (
+            X_s, X2_s, M_s, X_sat, M_c, y0_raw, y1_raw, m_q, e_prob, e_r_prob, tau_q, h_m, h_tau, h_e = (
                 self._query_solver_stats(X_q, M_q, mem)
             )
             n_q = len(X_s)
@@ -849,7 +1206,7 @@ class SparseTabularCausalPFN(nn.Module):
             prop_feats = torch.stack([e_prob, e_logit, h_e.sqrt(), log_n], dim=-1)
             base_prop_logit = e_logit + self.prop_cal(prop_feats).squeeze(-1)
 
-            q_slots = self._build_patient_slots(X_s, X2_s, M_s, mem)
+            q_slots = self._build_patient_slots(X_s, X2_s, M_s, mem, X_sat=X_sat, M_c=M_c)
             arm_q = self._assemble_arm_queries(q_slots, scale)
             arm_pooled = self._attend_queries(arm_q, mem.attn_memories)
             attn_logits = self.head(arm_pooled).reshape(n_q, 2, -1)
@@ -984,9 +1341,9 @@ class SparseTabularCausalPFN(nn.Module):
         ge = torch.zeros(p, device=mem.col_mean.device)
         gm = torch.zeros(p, device=mem.col_mean.device)
         gt = torch.zeros(p, device=mem.col_mean.device)
-        ge[mem.nuis_idx] = torch.maximum(mem.g_er_lin, mem.g_er_nl)
-        gm[mem.nuis_idx] = torch.maximum(mem.g_m_lin, mem.g_m_nl)
-        gt[mem.cate_idx] = torch.maximum(mem.g_tau_lin, mem.g_tau_nl)
+        ge[mem.nuis_idx] = mem.max_gate("er")
+        gm[mem.nuis_idx] = mem.max_gate("m")
+        gt[mem.cate_idx] = mem.max_gate("tau")
         ge_np, gm_np, gt_np = ge.cpu().numpy(), gm.cpu().numpy(), gt.cpu().numpy()
         rows = []
         for j in range(p):

@@ -284,7 +284,7 @@ def evaluate_tabular(
 
         p_total = mem.n_features
         full_ge = np.zeros(p_total, dtype=np.float32)
-        full_ge[mem.nuis_idx.cpu().numpy()] = torch.maximum(mem.g_er_lin, mem.g_er_nl).cpu().numpy()
+        full_ge[mem.nuis_idx.cpu().numpy()] = mem.max_gate("er").cpu().numpy()
         conf_mask = (roles == ROLE_TO_ID["confounder"]) | (roles == ROLE_TO_ID["dual_role"])
         inst_mask = roles == ROLE_TO_ID["instrument"]
         if conf_mask.any():
@@ -404,6 +404,18 @@ def run_tabular_training(
         cfg = TabularModelConfig(**saved["model"])
         prior = PriorConfig(**saved["prior"])
         start_step = int(saved["step"])
+        best_cate = float(saved.get("settings", {}).get("best_eval_cate_rmse", float("inf")))
+        if not math.isfinite(best_cate) and (run_dir / "metrics.jsonl").is_file():
+            with (run_dir / "metrics.jsonl").open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    if "eval_cate_rmse" in line:
+                        try:
+                            val_c = float(json.loads(line)["eval_cate_rmse"])
+                            if math.isfinite(val_c) and val_c < best_cate:
+                                best_cate = val_c
+                        except Exception:
+                            pass
+        settings["best_eval_cate_rmse"] = best_cate
         model = SparseTabularCausalPFN(cfg).to(dev)
         model.load_state_dict(saved["weights"], strict=True)
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -499,6 +511,9 @@ def run_tabular_training(
                     acc["loss"] += float(loss.item()) / grad_accum_steps
                     for k, v in comps.items():
                         acc[k] += float(v.item()) / grad_accum_steps
+                del ep, X_ctx, M_ctx, t_ctx, y_ctx, X_q, M_q, oracle, t_prop, roles
+                del out_logits, prop_logits, scale, mem, loss, comps
+            del episodes
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -522,13 +537,14 @@ def run_tabular_training(
                     prior=prior,
                     seed=seed + 500_001,
                     compute_baselines=True,
-                    num_workers=num_workers,
+                    num_workers=min(num_workers, 8),
                 )
                 for k, v in ev.items():
                     if isinstance(v, (int, float)):
                         row[f"eval_{k}"] = v
                 if ev["cate_rmse"] < best_cate:
                     best_cate = ev["cate_rmse"]
+                    settings["best_eval_cate_rmse"] = float(best_cate)
                     save_tabular_checkpoint(
                         run_dir / "best_checkpoint.pt", model, optimizer, step, settings, prior
                     )

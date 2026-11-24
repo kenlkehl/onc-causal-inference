@@ -618,7 +618,7 @@ an independent confirmation. See
 | [Longitudinal causal model](docs/longitudinal_model.md) | End-to-end causal training across LLM-designed oncology studies using notes, labs, encounters, vitals, and PRO-CTCAE histories |
 | [Longitudinal PFN experiments](docs/longitudinal_experiments.md) | Training runs, diagnostic probes, `TinyOncBERT` distillation, 16-cohort full-LLM benchmarks, and cross-fit adaptation results |
 | [Sparse tabular CausalPFN](docs/tabular_pfn.md) | Zero-shot high-dimensional tabular causal foundation model (`oci.tabular_pfn`) for Stage-2 candidate tables up to `P = 2,000+` features, with calibrated confounder/modifier/instrument role reports |
-| [Sparse tabular PFN experiments](docs/tabular_pfn_experiments.md) | Architectural design log, bug fixes, 3-family OCI prior iterations, calibration ablations, and high-`P` benchmarks |
+| [Sparse tabular PFN experiments](docs/tabular_pfn_experiments.md) | Architectural design log, bug fixes, 5-family prior iterations (v1/v2/v3), calibration ablations, and synthetic + real Stage-2 benchmarks |
 | [Benchmarks](docs/benchmarks.md) | The scenario registry, seeds and the confirmatory rule, the benchmark commands, metrics, and caveats |
 | [Sample-size calculator](docs/sample_size_calculator.md) | Simulation-based sample sizes for discovering effect modifiers with a binary outcome, with Stage 2's orthogonal tests or a lasso: the dashboard, inputs, mechanism, selectors, and outputs |
 | [R-learner weighting](docs/design_notes/r_learner_weighting.md) | Design note on weighted and unweighted effect objectives |

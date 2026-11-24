@@ -532,3 +532,122 @@ def test_v2_decoupled_rlearner_propensity_and_v1_compat():
         torch.testing.assert_close(m1, m2, atol=5e-4, rtol=5e-4)
         torch.testing.assert_close(p1.sigmoid(), p2.sigmoid(), atol=5e-4, rtol=5e-4)
         torch.testing.assert_close(mem1.role_logits[cp], mem2.role_logits, atol=5e-4, rtol=5e-4)
+
+
+def test_v3_five_family_prior_basis_decoupling_and_invariance():
+    # 1. Legacy 3-tuple family_weights still loads cleanly
+    legacy_prior = PriorConfig(family_weights=(0.5, 0.25, 0.25))
+    assert len(legacy_prior.family_weights) == len(DGP_FAMILIES)
+    assert legacy_prior.family_weights[3:] == (0.0, 0.0)
+
+    # 2. Verify new families (tree_subgroup, causal_scm) + fragmented dups + M-bias colliders
+    ep_tree = sample_tabular_study(
+        601,
+        n_total=140,
+        num_features=200,
+        prior=PriorConfig(null_hte_prob=0.0, fragmented_dup_prob=1.0, missing_study_prob=1.0),
+        family="tree_subgroup",
+    )
+    assert ep_tree["X"].shape == (140, 200)
+    assert ep_tree["meta"]["family"] == "tree_subgroup"
+    assert ep_tree["meta"]["n_frag_dups"] >= 1
+    assert ep_tree["meta"]["n_mod"] + ep_tree["meta"]["n_dual"] >= 1
+    assert np.all(np.isfinite(ep_tree["true_ite"]))
+
+    ep_scm = sample_tabular_study(
+        602,
+        n_total=140,
+        num_features=200,
+        prior=PriorConfig(
+            null_hte_prob=0.0,
+            collider_prob=1.0,
+            fragmented_dup_prob=1.0,
+            missing_study_prob=1.0,
+        ),
+        family="causal_scm",
+    )
+    assert ep_scm["X"].shape == (140, 200)
+    assert ep_scm["meta"]["family"] == "causal_scm"
+    assert ep_scm["meta"]["n_colliders"] >= 1
+    assert ep_scm["meta"]["n_frag_dups"] >= 1
+    assert np.all(np.isfinite(ep_scm["true_ite"]))
+
+    # 3. v3 model forward/backward, ZERO prop_loss gradient into g_er[4:8] & log_lam_er, 100% grad coverage
+    torch.manual_seed(29)
+    cfg_v3 = TabularModelConfig(
+        col_dim=32,
+        study_width=32,
+        study_layers=2,
+        col_attn_layers=2,
+        heads=4,
+        bins=17,
+        top_k_nuis=24,
+        top_k_cate=16,
+        attn_slots=10,
+        ridge_grid_size=5,
+        decouple_rlearner_propensity=True,
+        use_v3_solver_basis=True,
+    )
+    m_v3 = SparseTabularCausalPFN(cfg_v3)
+    Xc = torch.from_numpy(ep_scm["X"][:100]); Mc = torch.from_numpy(ep_scm["M"][:100])
+    tc = torch.from_numpy(ep_scm["t"][:100]); yc = torch.from_numpy(ep_scm["y"][:100])
+    Xq = torch.from_numpy(ep_scm["X"][100:]); Mq = torch.from_numpy(ep_scm["M"][100:])
+    ora = torch.from_numpy(np.stack([ep_scm["true_y0"][100:], ep_scm["true_y1"][100:]], axis=1))
+    tp = torch.from_numpy(ep_scm["true_propensity"][100:])
+    roles = torch.from_numpy(ep_scm["roles"])
+
+    ol, pl, sc, mem = m_v3(Xc, tc, yc, Xq, M_ctx=Mc, M_q=Mq)
+    prop_only = torch.nn.functional.binary_cross_entropy_with_logits(pl, tp)
+    prop_only.backward()
+    assert m_v3.log_lam_er.grad is None
+    assert m_v3.nuis_gate_head[-1].weight.grad[4:8].abs().sum().item() == 0.0
+    assert m_v3.log_lam_e.grad is not None and m_v3.log_lam_e.grad.abs().sum().item() > 0.0
+
+    m_v3.zero_grad(set_to_none=True)
+    ol, pl, sc, mem = m_v3(Xc, tc, yc, Xq, M_ctx=Mc, M_q=Mq)
+    loss, _ = m_v3.loss_components(
+        ol,
+        pl,
+        sc,
+        ora,
+        tp,
+        role_logits=mem.role_logits,
+        nuis_screen_logits=mem.nuis_screen_logits,
+        mod_screen_logits=mem.mod_screen_logits,
+        true_roles=roles,
+    )
+    assert torch.isfinite(loss)
+    loss.backward()
+    grads = [p.grad for p in m_v3.parameters() if p.grad is not None]
+    assert len(grads) == sum(1 for _ in m_v3.parameters())
+    assert all(torch.isfinite(g).all() for g in grads)
+    assert m_v3.log_lam_er.grad.abs().sum().item() > 0.0
+
+    # 4. Exact simultaneous row + column permutation invariance on v3 (including missingness & co-obs corr!)
+    m_v3.eval()
+    ep_p = sample_tabular_study(
+        603,
+        n_total=90,
+        num_features=50,
+        prior=PriorConfig(fragmented_dup_prob=1.0, missing_study_prob=1.0),
+        family="tree_subgroup",
+    )
+    Xc2 = torch.from_numpy(ep_p["X"][:70]); Mc2 = torch.from_numpy(ep_p["M"][:70])
+    tc2 = torch.from_numpy(ep_p["t"][:70]); yc2 = torch.from_numpy(ep_p["y"][:70])
+    Xq2 = torch.from_numpy(ep_p["X"][70:]); Mq2 = torch.from_numpy(ep_p["M"][70:])
+    rng = np.random.default_rng(31)
+    rp = torch.from_numpy(rng.permutation(70))
+    cp = torch.from_numpy(rng.permutation(50))
+    with torch.no_grad():
+        o1, p1, s1, mem1 = m_v3(Xc2, tc2, yc2, Xq2, M_ctx=Mc2, M_q=Mq2)
+        m1, sd1 = m_v3.risk_stats(o1, s1)
+        o2, p2, s2, mem2 = m_v3(
+            Xc2[rp][:, cp], tc2[rp], yc2[rp], Xq2[:, cp], M_ctx=Mc2[rp][:, cp], M_q=Mq2[:, cp]
+        )
+        m2, sd2 = m_v3.risk_stats(o2, s2)
+        torch.testing.assert_close(m1, m2, atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(sd1, sd2, atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(p1.sigmoid(), p2.sigmoid(), atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(mem1.role_logits[cp], mem2.role_logits, atol=5e-4, rtol=5e-4)
+        rep = m_v3.column_role_report(mem1)
+        assert len(rep) == 50 and math.isfinite(rep[0]["gate_propensity"])

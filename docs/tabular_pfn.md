@@ -15,13 +15,16 @@ Unlike vanilla TabPFN / CausalPFN architectures whose $O(N P^2)$ attention and d
 4. **Residual Two-Way TabPFN Study Layers & 129-Bin Sinh Posterior Head**:
    Two lightweight two-way attention layers over the top `attn_slots` (default `16`) gated columns refine pairwise feature interactions and calibrate arm-specific risk means, epistemic SDs, and propensity logits.
 
-## Synthetic OCI Multi-DGP Prior (`oci/tabular_pfn/prior.py`)
+## Synthetic 5-Family Causal Prior (`oci/tabular_pfn/prior.py`)
 
-Training draws log-uniform $N_{\text{ctx}} \in [80, 3{,}000]$ and $P \in [20, 2{,}000]$ from a 3-family OCI-aligned mixture prior:
+Training draws log-uniform $N_{\text{ctx}} \in [80, 8{,}000]$ and $P \in [20, 3{,}500]$ (v3) from a 5-family mixture prior with real Stage-1 LLM extraction pathologies:
 
-1. **`sparse_oci` (50%):** High-dimensional sparse all-evidence tables with 2–18 active features inside 50–99.5% noise, multi-level mutually exclusive Dirichlet one-hot categorical blocks, strong pure instruments, collinear noisy proxies ($\rho \in [0.55, 0.94]$) plus proxy-only latent confounders, block-correlated factor noise, linear/threshold/quadratic/hinge/saturating + pairwise interactions, optional unmeasured confounding (creating real Z-bias on instruments), Stage-1 LLM extraction noise, MCAR/MAR/**MNAR** + 3-state EHR documentation, occasional RCTs (8%), 25% strictly null-HTE studies, and both `logOR` and bounded additive `RD` scales.
-2. **`reequation_calc` (25%):** Vectorized implementation of OCI's `synthetic_data/reequation.py` and `sample_size_calculator/engine.R` tabular DGP family (exchangeable Gaussian copula, uniform-CDF & positive log-normal continuous, Beta-prevalence binary, Dirichlet categorical contrasts, `none`/`threshold`/`quadratic` nonlinearities, unmeasured confounders, `logOR`/`RD` scales) padded to $P = 20\text{–}2{,}000$.
-3. **`nemotron_design` (25%):** Direct tabular studies sampled strictly from the 4,000 `split == "train"` oncology designs in `synthetic_data/designs/nemotron_5000.json.gz` (real lab/vital/PRO moments, cancer-specific note-finding prevalences and causal role menus, pairwise interactions, extraction noise, MNAR/MAR missingness) padded to $P = 20\text{–}2{,}000$. The 1,000 `split == "held_out"` designs (including 3 unseen cancers) are strictly excluded from training and used automatically inside `evaluate`.
+1. **`sparse_oci` (30%):** High-dimensional sparse all-evidence tables with mixed clinical types (binary, ordinal, Gaussian, log-normal, heavy-tailed Student-$t$ lab outliers, zero-inflated utilization counts), multi-level Dirichlet one-hot categorical blocks, strong pure instruments, collinear noisy proxies, optional dense weak-confounding regimes (`15%`), rich nonlinearities (including non-monotonic clinical reference bands and asymmetric sigmoids) + pairwise interactions, optional unmeasured confounding (creating Z-bias on instruments), Stage-1 LLM extraction noise, MCAR/MAR/**MNAR** + 3-state EHR documentation, occasional RCTs (8%), 25% strictly null-HTE studies, and both `logOR` and bounded additive `RD` scales.
+2. **`reequation_calc` (15%):** Vectorized implementation of OCI's `synthetic_data/reequation.py` and `sample_size_calculator/engine.R` tabular DGP family embedded in $P = 20\text{–}3{,}500$.
+3. **`nemotron_design` (20%):** Direct tabular studies sampled strictly from the 4,000 `split == "train"` oncology designs in `synthetic_data/designs/nemotron_5000.json.gz` embedded in $P = 20\text{–}3{,}500$. The 1,000 `split == "held_out"` designs (including 3 unseen cancers) are strictly excluded from training and used automatically inside `evaluate`.
+4. **`tree_subgroup` (18%):** Clinical decision-tree / multi-way biomarker rule-list subgroup DGP (depth 2–4 logical conjunctions, crisp/soft cutoffs, piecewise subgroups) requiring genuine nonlinear interaction discovery beyond linear/quadratic ARD Ridge.
+5. **`causal_scm` (17%):** General layered nonlinear Structural Causal Model (DAG + 2-layer MLP treatment, outcome, and HTE surfaces) with explicit observed-parent ($Z \to C \leftarrow W$) and latent-parent ($U_T \to C \leftarrow U_Y$) M-bias colliders, heavy tails, dense confounding, and near-positivity extremes.
+- **Fragmented Stage-1 LLM Extraction Clusters (applied across all 5 families, `55%`):** Splits active causal features into 2–6 synonymous opposite-polarity, coarsened, and partial-coverage (`NaN`-masked) columns so the model learns to pool across fragmented Stage-1 extractions rather than losing signal to missingness.
 
 ## Usage
 
@@ -33,8 +36,13 @@ Training draws log-uniform $N_{\text{ctx}} \in [80, 3{,}000]$ and $P \in [20, 2{
 # v2 (7.38M params, ~6-7 GiB peak VRAM with bf16 FlashAttention-2, 15,000 steps):
 # decoupled outcome-adaptive R-learner propensity + 4-layer/192-wide/24-slot TabPFN + wider top-K recall
 ./scripts/run_tabular_pfn_v2_h200.sh
+
+# v3 H200 flagship (18.88M params, N_ctx = 80..8,000, P = 20..3,500, 30,000 steps / 360k studies):
+# 5-family prior + fragmented extractions + M-bias colliders + 4-channel ARD basis (X, X^2, tanh, M_c)
+# + 6-d pairwise-complete co-observed correlation attention + 6-layer/256-wide/32-slot TabPFN
+./scripts/run_tabular_pfn_v3_h200.sh
 # Override step budget or GPU/workers as desired, e.g.:
-# CUDA_VISIBLE_DEVICES=0 NUM_WORKERS=8 ./scripts/run_tabular_pfn_v2_h200.sh
+# CUDA_VISIBLE_DEVICES=0 NUM_WORKERS=20 ./scripts/run_tabular_pfn_v3_h200.sh
 ```
 
 ### Zero-Shot Prediction + Calibrated Feature Role Report on Any Tabular Cohort
@@ -61,7 +69,7 @@ Every column in `--role-report` (`.csv` or `.json`) reports:
 
 Key CLI flags across subcommands (`python -m oci.tabular_pfn.cli {train,resume,evaluate,predict}`):
 - `predict`: `--cv-folds K` (stratified out-of-fold predictions for all $N$ patients + fold-averaged role report), `--context-size K` or `--queries FILE`, `--role-report PATH.{csv,json}`, `--print-roles` (print summary without writing a file), `--role-summary-top-k 15` (`0` disables stdout table), `--uncalibrated-roles` (disable EM sparsity calibration), `--query-batch-size 512`.
-- `evaluate`: `--num-features P`, `--family {all,sparse_oci,reequation_calc,nemotron_design}` (always locks `nemotron_design` to the 1,000 `split == "held_out"` designs), `--no-baselines`.
+- `evaluate`: `--num-features P`, `--family {all,sparse_oci,reequation_calc,nemotron_design,tree_subgroup,causal_scm}` (always locks `nemotron_design` to the 1,000 `split == "held_out"` designs), `--no-baselines`.
 - `resume`: `--run-dir DIR --steps TOTAL_STEPS` resumes optimizer state, model config, and saved prior seamlessly.
 
 ## Proof-of-Concept Stress-Test Benchmark (`P = 50, 500, 2,000`)
