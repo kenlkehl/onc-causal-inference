@@ -20,7 +20,8 @@ with a two-stage, science-first workflow:
 User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 `how_it_works.md`, `stage1_architectures.md`, `stage2_selection.md`,
 `configuration.md`, `serving.md`, `optional_extensions.md`,
-`synthetic_data.md`, `longitudinal_model.md`, `nemotron_design_bank.md`,
+`synthetic_data.md`, `longitudinal_model.md`, `longitudinal_experiments.md`,
+`nemotron_design_bank.md`, `tabular_pfn.md`, `tabular_pfn_experiments.md`,
 `benchmarks.md`, `standalone_htr.md`,
 `sample_size_calculator.md`, and `design_notes/`.
 
@@ -42,7 +43,7 @@ User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
 | `python -m synthetic_data.cli reequation` | `synthetic_data/reequation.py` (`reequation_cohort`) | Recompute treatment and outcome over an existing synthetic cohort's true characteristics for a scenario (no LLM; text copied unchanged; refuses cohorts with post-treatment notes) |
 | `python -m synthetic_data.cli longitudinal` | `synthetic_data/` (`longitudinal.py`, `longitudinal_history.py`, `designed_history.py`, `paraphrase_bank.py`, `pro_ctcae.py`, `study_designs.py`, `nemotron_bank.py`) | Generate five-stream longitudinal oncology cohorts (`notes`, `labs`, `encounters`, `vitals`, `pros`) with calibrated study-specific causal mechanisms (offline, paraphrase-sidecar, or realistic full-LLM notes; bundled 5,000-design Nemotron bank in `synthetic_data/designs/nemotron_5000.json.gz`, plus `design-bank` and `paraphrase-bank` authoring) |
 | `python -m oci.longitudinal.cli` | `oci/longitudinal/` (`events.py`, `model.py`, `training.py`, `adapt.py`, `cli.py`, `tinyoncbert.py`) | `train`, `resume`, `evaluate`, `predict` (zero-shot), and `adapt-predict` (K-fold cross-fitted episodic factual adaptation with frozen CATE/calibration heads and automatic zero-shot safety gate) for the cross-modal longitudinal patient encoder and hybrid differentiable in-context R-learner + residual two-way CausalPFN study model (TinyBERT default note encoder or distilled `TinyOncBERT`, multi-query token attention + max + mean pooling, 32-token overlapping lossless windowing, optional per-slot longitudinal note temporal pooling `--per-slot-note-temporal`, optional study-adaptive lexical SVD `--lexical-dim`, study-adaptive sentence-concept MaxSim `--sentence-concept-dim`, and 2D block-weighted Ridge `--block-ridge`, configurable `--ridge-grid-size`, log-uniform context sampling `--context-size-sampling` & `--eval-context-size`, explicit per-stream longitudinal slope summaries, open-vocabulary lab/PRO/encounter inputs, sinh-warped logit histogram outcome head, direct CATE loss, propensity head, observational LOO-CV Ridge baseline, partial-grad/frozen backbone scaling + CPU prefetching up to N=10,000, and real-EHR-compatible prediction outputs) |
-| `python -m oci.tabular_pfn.cli` | `oci/tabular_pfn/` (`prior.py`, `preprocessing.py`, `model.py`, `training.py`, `cli.py`) | High-dimensional sparse tabular causal foundation model (`SparseTabularCausalPFN`) for Stage-2 / all-evidence candidate tables up to `P = 2,000+` features and `N = 10,000+` patients, pretrained on a 3-family OCI-aligned mixture prior (`sparse_oci`, `reequation_calc`, and `nemotron_design` train-split designs with strict `held_out` eval separation; multi-level one-hot categoricals, MNAR/MAR/3-state EHR documentation, unmeasured confounding, Stage-1 extraction noise, `logOR`/`RD` scales): $O(N \cdot P)$ observational column statistics, $O(P)$ DeepSets role encoder + Round-1 top-$K$ correlation-biased column attention + ARD LOO-CV Ridge nuisances (with pure-instrument suppression), Round-2 all-$P$ adjusted Robinson residual modifier scan + ARD R-learner, residual two-way TabPFN attention + 129-bin sinh posterior head, context-only mixed/3-state EHR missingness preprocessing, `--cv-folds` out-of-fold scoring, and interpretable `--role-report` outputs |
+| `python -m oci.tabular_pfn.cli` | `oci/tabular_pfn/` (`prior.py`, `preprocessing.py`, `model.py`, `training.py`, `cli.py`) | High-dimensional sparse tabular causal foundation model (`SparseTabularCausalPFN`) for Stage-2 / all-evidence candidate tables up to `P = 2,000+` features and `N = 10,000+` patients, pretrained on a 3-family OCI-aligned mixture prior (`sparse_oci`, `reequation_calc`, and `nemotron_design` train-split designs with strict `held_out` eval separation; multi-level one-hot categoricals, MNAR/MAR/3-state EHR documentation, unmeasured confounding, Stage-1 extraction noise, `logOR`/`RD` scales): $O(N \cdot P)$ observational column statistics, $O(P)$ DeepSets role encoder + Round-1 top-$K$ correlation-biased column attention + ARD LOO-CV Ridge nuisances (with pure-instrument suppression), Round-2 all-$P$ adjusted Robinson residual modifier scan + ARD R-learner, residual two-way TabPFN attention + 129-bin sinh posterior head, context-only mixed/3-state EHR missingness preprocessing, `--cv-folds` out-of-fold scoring, Normalized Saerens EM empirical-sparsity role calibration, `.csv`/`.json` `--role-report` export, and `--print-roles` clinical role summary tables |
 | `./run_sample_size_calculator.sh` | `sample_size_calculator/` (`app.py`, `population.py`, `orthogonal_tests.py`, `engine.R`, `run.R`, `binary_selection_methods.R`, `index.html`, `app.js`) | Modifier-selection sample-size calculator: a loopback web dashboard (`--port`, `--runs-dir`; runs in `artifacts/sample_size_calculator/`) or one run with `--config CONFIG.json --output NEW_DIR`; simulates binary-outcome studies from a tabular DGP and reports how often a selector meets sensitivity and false-positive-rate targets per sample size: `selector: "lasso"` (Gao DINA lasso for log OR, Zhao residual lasso for RD) or `"orthogonal_tests"` (Stage 2's `candidate_tests` and `combine_and_select` with Stage 2's defaults, BH at `modifier_q`); standard-library Python plus R (`glmnet`, `jsonlite`); the orthogonal tests need the OCI environment (`PYTHON=.venv/bin/python`) |
 
 Helper scripts: `scripts/detect_all_evidence_hardware.py` (GPU and worker
@@ -76,10 +77,18 @@ oci/
 │   ├── concept_embedding_cache.py    # Chunk embedding cache (Stage 1)
 │   └── explicit_feature_featurizer.py          # `oci run` featurization
 ├── longitudinal/
-│   ├── events.py                     # Self-contained five-stream real-EHR/simulator featurization
-│   ├── model.py                      # Cross-modal PatientEncoder (attention/max note pooling + slopes) + hybrid R-learner/PFN CausalStudyModel
+│   ├── events.py                     # Self-contained five-stream real-EHR/simulator featurization + sentence extraction
+│   ├── model.py                      # Cross-modal PatientEncoder + study-adaptive Sent-KM MaxSim + 2D block-ridge hybrid R-learner/PFN
 │   ├── training.py                   # Episode simulation, mixed-precision/grad-accum training, baselines
-│   └── cli.py                        # `python -m oci.longitudinal.cli` (train, resume, evaluate, predict)
+│   ├── adapt.py                      # K-fold cross-fitted episodic factual adaptation with zero-shot safety gate
+│   ├── tinyoncbert.py                # Compact 22.7M oncology sentence encoder distilled from Qwen3-Embedding-0.6B
+│   └── cli.py                        # `python -m oci.longitudinal.cli` (train, resume, evaluate, predict, adapt-predict)
+├── tabular_pfn/
+│   ├── prior.py                      # 3-family OCI multi-DGP high-P prior (sparse_oci, reequation_calc, nemotron_design)
+│   ├── preprocessing.py              # Context-only mixed-type + 3-state EHR missingness preprocessor
+│   ├── model.py                      # SparseTabularCausalPFN (2-round ARD R-learner + 16-slot TabPFN) + Saerens EM role calibration
+│   ├── training.py                   # Async-prefetched training, resume, and multi-family held-out evaluation
+│   └── cli.py                        # `python -m oci.tabular_pfn.cli` (train, resume, evaluate, predict + CSV/JSON role reports)
 ├── utils/calibration.py              # Platt calibration of nuisance predictions
 └── inference/
     │ # Workflow and Stage 1

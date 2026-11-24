@@ -46,6 +46,18 @@ python -m oci.tabular_pfn.cli predict \
 
 `TabularPreprocessor` automatically handles mixed numeric, binary, categorical, and 3-state EHR missingness (`not_documented` vs. `documented_unknown`) strictly fitted on context rows with zero query or oracle leakage.
 
+### Feature Role Report & CLI Reference
+
+Every column in `--role-report` (`.csv` or `.json`) reports:
+- **Calibrated role probabilities** (adjusted from the 50/50 balanced training prior to the cohort's empirical sparsity via Normalized Saerens EM, preserving exact rank order): `p_signal` ($1 - p_{\text{noise}}$), `p_any_confounder` ($p_{\text{confounder}} + p_{\text{dual\_role}}$), `p_any_modifier` ($p_{\text{modifier}} + p_{\text{dual\_role}}$), plus all six individual probabilities (`p_noise`, `p_instrument`, `p_prognostic`, `p_confounder`, `p_modifier`, `p_dual_role`) and `predicted_role` (most likely non-noise role when `p_signal >= 0.50`, else `"noise"`).
+- **Solver ARD gate weights** (`0.0–1.0`): `gate_propensity` ($g_e$), `gate_outcome` ($g_m$), and `gate_cate` ($g_\tau$) — the actual feature weights used by the differentiable LOO-CV nuisances and Robinson R-learner (`0.0` if filtered out before top-$K$).
+- **Raw uncalibrated score**: `raw_signal_score` ($1 - p_{\text{noise}}^{\text{raw}}$).
+
+Key CLI flags across subcommands (`python -m oci.tabular_pfn.cli {train,resume,evaluate,predict}`):
+- `predict`: `--cv-folds K` (stratified out-of-fold predictions for all $N$ patients + fold-averaged role report), `--context-size K` or `--queries FILE`, `--role-report PATH.{csv,json}`, `--print-roles` (print summary without writing a file), `--role-summary-top-k 15` (`0` disables stdout table), `--uncalibrated-roles` (disable EM sparsity calibration), `--query-batch-size 512`.
+- `evaluate`: `--num-features P`, `--family {all,sparse_oci,reequation_calc,nemotron_design}` (always locks `nemotron_design` to the 1,000 `split == "held_out"` designs), `--no-baselines`.
+- `resume`: `--run-dir DIR --steps TOTAL_STEPS` resumes optimizer state, model config, and saved prior seamlessly.
+
 ## Proof-of-Concept Stress-Test Benchmark (`P = 50, 500, 2,000`)
 
 Measured after a 6.1-minute, 500-step proof-of-concept training run (2.11M parameters, log-uniform `N_ctx = 80..1,200`, `P = 20..2,000`, 1× RTX A6000), evaluated across 48 held-out synthetic all-evidence studies per width (`N_ctx = 800`, `N_q = 128`, 25% strictly null-HTE, 70% strong instruments, collinear proxies, mixed types, MCAR/MAR missingness):
