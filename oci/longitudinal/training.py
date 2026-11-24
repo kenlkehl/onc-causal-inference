@@ -5,6 +5,7 @@ from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
 from dataclasses import asdict
 import fcntl
+import gc
 import gzip
 import hashlib
 import json
@@ -157,12 +158,18 @@ def simulate_episode(
 class _EpisodePrefetcher:
     """Overlap CPU episode simulation with GPU compute in exact deterministic order."""
 
-    def __init__(self, jobs, *, num_workers=0):
+    def __init__(self, jobs, *, num_workers=0, max_inflight=None):
         self._jobs = iter(jobs)
         self._num_workers = int(num_workers)
         self._executor = None
         self._pending = deque()
-        self._max_inflight = max(2 * self._num_workers, 4) if self._num_workers > 0 else 0
+        if self._num_workers <= 0:
+            self._max_inflight = 0
+        elif max_inflight is not None:
+            self._max_inflight = max(1, int(max_inflight))
+        else:
+            # Cap buffered episodes so large paraphrased N=10,000 studies do not blow up host RAM
+            self._max_inflight = min(max(self._num_workers, 4), 6)
 
     def __enter__(self):
         if self._num_workers > 0:
@@ -692,6 +699,7 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                 outcome_sum += parts["outcome_loss"].item() / grad_accum
                 cate_sum += parts["cate_loss"].item() / grad_accum
                 prop_sum += parts["propensity_loss"].item() / grad_accum
+                del rows, loss, parts
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
             note_lr = optimizer.param_groups[0]["lr"]
@@ -713,6 +721,9 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                 **last_provenance,
             }
             if eval_every > 0 and (step % eval_every == 0 or step == steps) and not tables:
+                gc.collect()
+                # Bound nested eval workers/buffer while training prefetcher stays open
+                eval_workers = min(num_workers, 4)
                 val = evaluate(
                     model,
                     settings["seed"],
@@ -721,9 +732,11 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                     query_size,
                     bank=bank,
                     precision=precision,
-                    num_workers=num_workers,
+                    num_workers=eval_workers,
+                    max_inflight=min(eval_workers, 4) if eval_workers > 0 else None,
                     paraphrase_bank_path=paraphrase_bank_path,
                 )
+                gc.collect()
                 _set_train_modes()
                 record["eval_context_size"] = eval_context
                 record["eval_cate_rmse"] = val["cate_rmse"]
@@ -891,6 +904,7 @@ def evaluate(
     bank=None,
     precision="auto",
     num_workers=0,
+    max_inflight=None,
     paraphrase_bank_path=None,
 ):
     if min(studies, context_size, query_size) < 1 or num_workers < 0:
@@ -927,10 +941,13 @@ def evaluate(
 
     progress_every = max(studies // 20, 25) if studies >= 50 else 0
     t_eval_start = time.monotonic()
-    with _EpisodePrefetcher(_eval_jobs(), num_workers=num_workers) as prefetcher:
+    with _EpisodePrefetcher(
+        _eval_jobs(), num_workers=num_workers, max_inflight=max_inflight
+    ) as prefetcher:
         for done_idx in range(1, studies + 1):
             _, rows, provenance = prefetcher.next_item()
             rec = _score_episode(model, rows, context_size, precision=precision)
+            del rows
             records.append(rec)
             if designs:
                 by_design.setdefault(provenance["design_id"], []).append(rec)

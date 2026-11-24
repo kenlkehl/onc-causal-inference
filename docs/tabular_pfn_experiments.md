@@ -178,5 +178,49 @@ Reference baselines on this fixed 48-study held-out set: `arm_mean = 0.1541`, `s
 | 4000 | `58.3m` | `0.1201` | `+0.4763` | `+0.7433` | `+0.7562` | `0.1497` | `0.1373` | `0.0510` | `0.0738` | `0.8552` |
 | **4500** | **`65.3m`** | **`0.1163`** | **`+0.5001`** | **`+0.7568`** | **`+0.7650`** | **`0.1475`** | `0.1367` | **`0.0459`** | `0.0715` | `0.8537` |
 
+---
+
+## 4. Real OCI Stage-2 Extracted All-Evidence Candidate Catalog Benchmark (`S0/n1000`)
+
+Evaluated **v1 (`step 12,000`)** and **v2 (`best_checkpoint.pt`, `step 13,000`)** strictly **zero-shot** on the exact 5 outer cross-validation folds (`800` fit / `200` held-out per fold, zero leakage) of real LLM-extracted Stage-2 feature catalogs (`outer_001..005/extraction/extracted_features.csv`) from two independent `S0/n1000` cohorts under `/data1/ken/pcori_dev/oci_bench/` (`seed101` and `seed102`). Each fold's raw LLM-extracted schema (~600–780 columns) was preprocessed inside the fold via `TabularPreprocessor` into **1,310–1,744** 3-state EHR features (`fit` on outer-train only) and scored directly against each cohort's OCI Stage-2 baseline predictions (`multi_model` ensemble + constituent heads) and oracle `true_cate` / `true_treatment_prob`.
+
+### Cohort 1: `S0/n1000/seed101`
+- **Oracle DGP roles:** True confounders = `age`, `sex`, `baseline_nlr`; True modifiers = `creatinine_clearance`, `prior_platinum_therapy`, `brain_metastases_status`.
+- **Extracted catalog width across 5 folds:** raw `[703, 708, 690, 779, 678]` → preprocessed 3-state **`[1,590, 1,520, 1,612, 1,744, 1,354]`**.
+
+| Method | `CATE RMSE` ↓ | `MAE` ↓ | `ATE Bias` | `Pearson r` ↑ | `Spearman ρ` ↑ | `Pred SD` | `Prop RMSE` ↓ | 5-Fold Time |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| OCI Stage-2 Ensemble (`multi_model`) | `0.1344` | `0.1081` | `+0.0637` | `+0.349` | `+0.361` | `0.0673` | `0.2028` | `—` |
+| ↳ Stage-2 Causal Forest | `0.1313` | `0.1092` | `+0.0574` | `+0.320` | `+0.343` | `0.0250` | `—` | `—` |
+| ↳ Stage-2 Penalized Interactions | `0.1362` | `0.1083` | `+0.0676` | `+0.300` | `+0.314` | `0.0441` | `—` | `—` |
+| ↳ Stage-2 DINA | `0.1969` | `0.1516` | `+0.0662` | `+0.278` | `+0.272` | `0.1768` | `—` | `—` |
+| Arm-Mean (outer-fold ATE only) | `0.2319` | `0.2058` | `+0.1961` | `+0.047` | `+0.040` | `0.0001` | `—` | `—` |
+| v1 `SparseTabularCausalPFN` (zero-shot) | `0.1220` | `0.0957` | `+0.0455` | `+0.406` | `+0.420` | `0.0560` | `—` | `10.25s` |
+| **v2 `SparseTabularCausalPFN` (zero-shot)** | **`0.1175`** | **`0.0911`** | **`+0.0318`** | **`+0.417`** | **`+0.444`** | `0.0637` | **`0.1904`** | **`9.97s`** |
+
+- **Blind confounder discovery (zero knowledge of column names):** **11 of the top 11** ranked confounders across ~1,600 columns were direct LLM extractions of all 3 true confounders (`neutrophil_to_lymphocyte_ratio (5/5) p_any_c=0.880`, `age (5/5) 0.395`, `biological_sex==female/male`, `age_group==adult/elderly`, `gender==Female/Male`, `sex==female/male`, `age_at_diagnosis`).
+- **Blind modifier discovery:** Weaker at `N_fit = 800` (`p_any_m ≤ 0.095`), though `brain_metastases_progression_status`, `brain_lesion_characteristics`, `chronic_kidney_disease_status`, and `pemetrexed_cycle_status` surfaced in the top 12.
+
+### Cohort 2: `S0/n1000/seed102`
+- **Oracle DGP roles:** True confounders = `sex`, `ecog_performance_status`, `baseline_nlr`; True modifiers = `creatinine_clearance`, `prior_platinum_therapy`, `brain_metastases_status`.
+- **Extracted catalog width across 5 folds:** raw `[655, 627, 601, 718, 680]` → preprocessed 3-state **`[1,443, 1,431, 1,310, 1,583, 1,586]`**.
+
+| Method | `CATE RMSE` ↓ | `MAE` ↓ | `ATE Bias` | `Pearson r` ↑ | `Spearman ρ` ↑ | `Pred SD` | `Prop RMSE` ↓ | 5-Fold Time |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| OCI Stage-2 Ensemble (`multi_model`) | `0.2292` | `0.1817` | `+0.1238` | `+0.436` | `+0.424` | `0.1018` | **`0.1911`** | `—` |
+| ↳ Stage-2 Causal Forest | `0.2438` | `0.1887` | `+0.1272` | `+0.268` | `+0.255` | `0.0318` | `—` | `—` |
+| ↳ Stage-2 Penalized Interactions | `0.2149` | `0.1697` | `+0.1257` | `+0.620` | `+0.608` | `0.0866` | `—` | `—` |
+| ↳ Stage-2 DINA | `0.2964` | `0.2358` | `+0.1186` | `+0.294` | `+0.298` | `0.2415` | `—` | `—` |
+| Arm-Mean (outer-fold ATE only) | `0.2613` | `0.2046` | `+0.1498` | `+0.031` | `+0.056` | `0.0010` | `—` | `—` |
+| v1 `SparseTabularCausalPFN` (zero-shot) | `0.2015` | `0.1632` | `+0.1215` | **`+0.666`** | **`+0.653`** | `0.1249` | `—` | `9.15s` |
+| **v2 `SparseTabularCausalPFN` (zero-shot)** | **`0.1963`** | **`0.1580`** | **`+0.1091`** | `+0.648` | `+0.640` | `0.1353` | `0.2240` | **`9.65s`** |
+
+- **Blind confounder discovery:** Top 12 ranked confounders were again dominated by all 3 true confounders (`neutrophil_to_lymphocyte_ratio (5/5) p_any_c=0.788`, `gender==male/female`, `ecog_components==ECOG 2/1`, `biological_sex`, `activity_tolerance==ECOG 1`, `performance_status==1`, `functional_capacity==impaired`).
+- **Blind modifier discovery:** Top 5 ranked modifiers surfaced `comprehensive_metabolic_panel_status`, `renal_profile_stability`, and **`creatinine_clearance (5/5)`** — which received the **highest `gate_tau = 0.143`** across all ~1,500 columns.
+
+### Takeaways
+1. **Zero-shot `SparseTabularCausalPFN` v2 outperformed OCI's entire Stage-2 ensemble (`multi_model`) AND every single Stage-2 constituent estimator on both real LLM-extracted cohorts** (`0.1175` vs. `0.1344` on `seed101`, cutting ATE bias in half `+0.0637 → +0.0318`; `0.1963` vs. `0.2292` on `seed102`, raising Pearson `r` from `+0.436 → +0.648`), completing all 5 outer folds in **`< 10 seconds`** on 1× A6000.
+2. **Real-world v2 > v1 confirmation:** v2 beat v1 on `CATE RMSE`, `MAE`, and `ATE Bias` on both cohorts (`-0.0045` on `seed101`, `-0.0052` on `seed102`), validating the decoupled outcome-adaptive propensity gates and expanded residual TabPFN capacity on noisy real Stage-1 LLM extractions with hundreds of duplicate/collinear extracted columns.
+
 ### Next External Benchmarks
-- Zero-shot evaluation of v2 (`artifacts/tabular_causal_pfn_v2_p2000`) on real OCI Stage-2 extracted all-evidence candidate catalogs and `sample_size_calculator` reference configurations.
+- Evaluate v2 (`artifacts/tabular_causal_pfn_v2_p2000`) on additional OCI Stage-2 scenarios (e.g., `S1/S2/S3`, larger `N`, unmeasured confounding) and `sample_size_calculator` reference configurations, and assess integrating `SparseTabularCausalPFN` as an optional Stage-2 estimator / candidate screener.

@@ -37,7 +37,9 @@ RUN_ROOT="${RUN_ROOT:-${REPO_ROOT}/artifacts}"
 RUN_DIR="${RUN_DIR:-${RUN_ROOT}/longitudinal_tinyoncbert_v5}"
 DEVICE="${DEVICE:-cuda}"
 NOTE_MODEL="${NOTE_MODEL:-${REPO_ROOT}/artifacts/tinyoncbert_6l_384d}"
-NUM_WORKERS="${NUM_WORKERS:-16}"
+# Default 8 workers (paired with capped prefetch queue in oci/longitudinal/training.py)
+# keeps H200 GPU-saturated while keeping host RAM bounded on paraphrased N_ctx=10,000 episodes.
+NUM_WORKERS="${NUM_WORKERS:-8}"
 PARAPHRASE_BANK="${PARAPHRASE_BANK:-${REPO_ROOT}/synthetic_data/designs/nemotron_5000_paraphrases.json.gz}"
 
 echo "Using PYTHON=${PYTHON}"
