@@ -117,8 +117,51 @@ Instead of asking a pure transformer to approximate linear algebra over 2,000 co
 | Run | Artifact Dir | Prior Version | Budget (`Steps` / `Studies`) | `N_ctx` / `P` Range | Status | Held-Out `P = 500` `cate_rmse` ↓ | Held-Out `P = 2,000` `cate_rmse` ↓ | `P = 2,000` `within_r` ↑ | `P = 2,000` Role / Mod AUROC ↑ | `g_e` (Conf / Inst) |
 |---|---|---|---|---|---|---:|---:|---:|---:|---:|
 | **PoC v1 (A6000)** | *(scratch)* | v1 single-family sparse | `500` / `4,000` (`6.1 min`) | `80..1,200` / `20..2,000` | Complete | `0.1246` (v1) / `0.1192` (3-fam OOD) | `0.1323` | `+0.388` | `0.863 / 0.866` | `0.42 / 0.29` |
-| **Run 1 (v1 2.11M, A6000)** | `artifacts/tabular_causal_pfn_p2000` | v2 3-family OCI mixture (`50/25/25`) | `12,000` / `96,000` | `80..3,000` / `20..2,000` | Active (past step `5,500 / 12,000`) | **`0.1163`** (`within_r = +0.500`, s4500) | `—` | `—` | `—` | `—` |
-| **Run 2 (v2 7.38M, Decoupled)** | `artifacts/tabular_causal_pfn_v2_p2000` | v2 3-family OCI mixture (`50/25/25`) | `15,000` / `120,000` | `80..3,000` / `20..2,000` | Ready (`./scripts/run_tabular_pfn_v2_h200.sh`) | `—` | `—` | `—` | `—` | `—` |
+| **Run 1 (v1 2.11M, A6000)** | `artifacts/tabular_causal_pfn_p2000` | v2 3-family OCI mixture (`50/25/25`) | `12,000` / `96,000` | `80..3,000` / `20..2,000` | **Complete** | `0.1186` (`within_r = +0.491`) | `0.1155` | `+0.492` | `0.894` (sig) | `0.075 / 0.066` (`1.1×`) |
+| **Run 2 (v2 7.38M, Decoupled)** | `artifacts/tabular_causal_pfn_v2_p2000` | v2 3-family OCI mixture (`50/25/25`) | `15,000` / `120,000` | `80..3,000` / `20..2,000` | **Complete** (`best = s13,000`) | `0.1187` (`within_r = +0.502`) | **`0.1150`** | **`+0.503`** | **`0.895`** (sig) | **`0.032 / 0.015` (`2.1×`)** |
+
+### Final Held-Out Stress Tests: v1 (`2.11M`, 12k) vs. v2 (`7.38M`, 15k) at `N_ctx = 800`, `N_q = 128`
+
+Mixture benchmarks (`128` studies each, `seed = 700001`) + family-specific held-out benchmarks (`96` studies each, `seed = 800001`; `nemotron_design` strictly from the 1,000 `split == "held_out"` designs):
+
+| Benchmark | Model | `cate_rmse` ↓ | Arm-Mean ↓ | Scr-32 Ridge-R ↓ | Dense Ridge-R ↓ | `within_r` ↑ | `pool_r` ↑ | `risk_rmse` ↓ | `prop_rmse` ↓ | `ate_rmse` ↓ | `null_hte` ↓ | `role_auroc` ↑ | `g_e` (Conf / Inst) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Mixture `P = 50`** | v1 | **`0.1126`** | `0.1486` | `0.1953` | `0.1888` | `+0.534` | `+0.758` | `0.1482` | `0.1282` | `0.0442` | `0.0678` | `0.858` | `0.107 / 0.113` |
+| | **v2** | `0.1127` | `0.1486` | `0.1953` | `0.1888` | **`+0.546`** | `+0.757` | **`0.1477`** | **`0.1265`** | `0.0451` | **`0.0647`** | **`0.861`** | **`0.042 / 0.023`** |
+| **Mixture `P = 200`** | v1 | `0.1114` | `0.1470` | `0.1708` | `0.1646` | `+0.492` | `+0.752` | `0.1465` | `0.1313` | `0.0443` | `0.0625` | `0.884` | `0.086 / 0.084` |
+| | **v2** | **`0.1112`** | `0.1470` | `0.1708` | `0.1646` | **`+0.501`** | **`+0.754`** | **`0.1454`** | **`0.1307`** | `0.0459` | `0.0644` | **`0.886`** | **`0.038 / 0.018`** |
+| **Mixture `P = 500`** | v1 | **`0.1186`** | `0.1602` | `0.1742` | `0.1638` | `+0.491` | `+0.735` | `0.1509` | `0.1341` | `0.0516` | `0.0712` | `0.901` | `0.082 / 0.078` |
+| | **v2** | `0.1187` | `0.1602` | `0.1742` | `0.1638` | **`+0.502`** | `+0.734` | **`0.1496`** | **`0.1333`** | `0.0532` | `0.0724` | `0.901` | **`0.038 / 0.017`** |
+| **Mixture `P = 2,000`** | v1 | `0.1155` | `0.1512` | `0.1714` | `—` | `+0.492` | `+0.744` | `0.1504` | `0.1332` | `0.0406` | `0.0625` | `0.894` | `0.075 / 0.066` |
+| | **v2** | **`0.1150`** | `0.1512` | `0.1714` | `—` | **`+0.503`** | **`+0.747`** | **`0.1497`** | **`0.1327`** | `0.0412` | `0.0629` | **`0.895`** | **`0.032 / 0.015`** |
+| **`nemotron_design P = 500`** | v1 | `0.1094` | `0.1484` | `0.2785` | `0.2572` | `+0.590` | `+0.761` | `0.1390` | `0.1244` | `0.0424` | `0.0542` | `0.927` | `0.103 / 0.097` |
+| | **v2** | **`0.1077`** | `0.1484` | `0.2785` | `0.2572` | **`+0.602`** | **`+0.769`** | **`0.1373`** | **`0.1238`** | `0.0426` | `0.0562` | **`0.928`** | **`0.043 / 0.017`** |
+| **`nemotron_design P = 2,000`** | v1 | `0.1041` | `0.1426` | `0.2699` | `—` | `+0.533` | `+0.787` | `0.1449` | `0.1172` | `0.0413` | `0.0652` | `0.930` | `0.096 / 0.093` |
+| | **v2** | **`0.1021`** | `0.1426` | `0.2699` | `—` | **`+0.541`** | **`+0.796`** | **`0.1435`** | **`0.1162`** | **`0.0401`** | **`0.0647`** | **`0.931`** | **`0.036 / 0.016`** |
+| **`reequation_calc P = 500`** | v1 | `0.1193` | `0.1601` | `0.1494` | `0.1555` | `+0.472` | `+0.741` | `0.1497` | `0.1344` | `0.0407` | `0.0659` | `0.934` | `0.094 / 0.095` |
+| | **v2** | **`0.1181`** | `0.1601` | `0.1494` | `0.1555` | **`+0.488`** | **`+0.747`** | **`0.1486`** | **`0.1327`** | **`0.0396`** | `0.0669` | **`0.936`** | **`0.044 / 0.030`** |
+| **`reequation_calc P = 2,000`** | v1 | `0.1342` | `0.1762` | `0.1785` | `—` | `+0.529` | `+0.701` | `0.1573` | `0.1394` | `0.0528` | `0.0679` | `0.928` | `0.085 / 0.082` |
+| | **v2** | **`0.1317`** | `0.1762` | `0.1785` | `—` | **`+0.544`** | **`+0.714`** | **`0.1553`** | **`0.1382`** | **`0.0515`** | **`0.0651`** | **`0.930`** | **`0.039 / 0.027`** |
+
+### Diagnostic: Why `cate_rmse ≈ 0.115` at `N_ctx = 800` Even With Strong `within_r` (`+0.50..+0.60`)
+
+Exact MSE decomposition on v2 (`best_checkpoint.pt`, `step 13,000`) over the 128 held-out `P = 500, N_ctx = 800` mixture studies:
+1. **Amplitude calibration is already near-optimal (`slope = 1.077`, vs. `1.000` ideal):**
+   - `Total MSE = 0.01408` (`RMSE = 0.1187`) splits cleanly into `ATE MSE = 0.00282` (`20.1%`, `ATE RMSE = 0.0532`) + `Within-study MSE = 0.01126` (`79.9%`, `Within RMSE = 0.1061`).
+   - Because true within-study CATE heterogeneity in this prior is large (`true_SD = 0.1340` overall, `0.1436` on non-null studies), the theoretical minimum MSE at correlation $r \approx 0.55$ is $\sigma_{\text{true}}\sqrt{1 - r^2} \approx 0.112$ with optimal shrunk prediction SD $r \cdot \sigma_{\text{true}} \approx 0.074$ (v2 predicted SD: **`0.0761`**, within-study RMSE: **`0.1061`**).
+2. **Error by data-pathology regime (`P = 500, N_ctx = 800`):**
+   - Clean complete observational (`no U, no extraction noise, no missingness`, `n=12`): **`0.1011`**
+   - Clean observed (`no U, no extraction noise`, with MAR/MNAR missingness, `n=61`): **`0.1109`**
+   - Stage-1 extraction noise (no U, `n=36`): **`0.1269`** (irreducible Bayes attenuation because `true_ite` is defined on noiseless latents)
+   - Unmeasured confounding (`n=31`): **`0.1234`** (irreducible confounding bias)
+   - Strictly null-HTE (`n=36`): **`0.0724`** | Non-null with extraction noise or U (`n=45`): **`0.1417`**
+3. **Head-to-head vs. Oracle-True-Columns baselines (first 48 `P = 500, N_ctx = 800` studies — baselines handed ONLY the ~12 true causal columns, zero noise/instruments):**
+   - **v2 PFN (blind across all 500 cols):** **`cate_rmse = 0.1162`**, **`within_r = +0.502`**
+   - Oracle-Cols HistGBM T-Learner: `cate_rmse = 0.2212`, `within_r = +0.350`
+   - Oracle-Cols Logistic T-Learner: `cate_rmse = 0.2764`, `within_r = +0.423`
+4. **Sample-size scaling on the same 32 `P = 500` held-out studies (`N_ctx = 800 → 2,500`):**
+   - `N_ctx =   800`: `cate_rmse = 0.1038`, `ate_rmse = 0.0332`, `within_r = +0.469`
+   - `N_ctx = 2,500`: **`cate_rmse = 0.0845`**, **`ate_rmse = 0.0269`**, **`within_r = +0.627`**
 
 ### Run 1 Mid-Training Trajectory (`48` Held-Out 3-Family Studies, `P = 500`, `N_ctx = 800`)
 Reference baselines on this fixed 48-study held-out set: `arm_mean = 0.1541`, `screened_ridge_r = 0.1519`, `dense_ridge_r = 0.1651`.
@@ -135,7 +178,5 @@ Reference baselines on this fixed 48-study held-out set: `arm_mean = 0.1541`, `s
 | 4000 | `58.3m` | `0.1201` | `+0.4763` | `+0.7433` | `+0.7562` | `0.1497` | `0.1373` | `0.0510` | `0.0738` | `0.8552` |
 | **4500** | **`65.3m`** | **`0.1163`** | **`+0.5001`** | **`+0.7568`** | **`+0.7650`** | **`0.1475`** | `0.1367` | **`0.0459`** | `0.0715` | `0.8537` |
 
-### Planned Post-Training Evaluations for Run 1
-1. Held-out 3-family mixture stress tests (`128` studies each, `N_ctx = 800`) at `P = 50, 200, 500, 2,000`.
-2. Dedicated held-out `--family nemotron_design` (1,000 unseen oncology designs) and `--family reequation_calc` evaluations at `P = 500` and `P = 2,000`.
-3. External zero-shot benchmark on real OCI Stage-2 extracted all-evidence candidate catalogs and `sample_size_calculator` reference configurations.
+### Next External Benchmarks
+- Zero-shot evaluation of v2 (`artifacts/tabular_causal_pfn_v2_p2000`) on real OCI Stage-2 extracted all-evidence candidate catalogs and `sample_size_calculator` reference configurations.

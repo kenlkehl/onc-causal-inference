@@ -18,8 +18,8 @@ Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observat
 | **Run 1 (Hybrid)** | `longitudinal_tinybert_hybrid` | Differentiable LOO-CV R-learner (`solver_dim=64`), 8 note slots, trajectory slopes, 2-stage curriculum (`N=64..512` → `100..5000`) | Plain | Complete (1200) | `0.1016` | `+0.1504` | `+0.7156` | `0.1946` | `0.1719` | `0.0410` |
 | **Run 2 (Wide Hybrid)** | `longitudinal_tinybert_wide_hybrid` | Run 1 + `note_slots=16`, `solver_dim=256`, study-adaptive `lexical_dim=128` SVD, 2-stage curriculum | Plain | Complete (1200) | `0.1023` | `+0.1989` | `+0.7024` | `0.1754` | `0.1302` | `0.0375` |
 | **Run 3 (Single-Stage Plain)** | `longitudinal_tinybert_single_stage` | Run 2 + single-stage log-uniform `N_ctx=100..10,000`, `--per-slot-note-temporal`, `--ridge-grid-size 7`, 32-tok overlapping note windows | Plain | Complete (1200 + 1k eval) | **`0.0951`** | **`+0.2169`** | **`+0.7526`** | **`0.1522`** | **`0.1230`** | **`0.0288`** |
-| **Run 4 (Single-Stage Paraphrased)** | `longitudinal_tinybert_paraphrased` | Exact 1-variable ablation of Run 3 with `--paraphrase-bank` (`nemotron_5000_paraphrases.json.gz`, 2,902 findings × ~10 paraphrases + EHR sections + filler) | Paraphrased | Training complete (1200; final 1k eval running) | `0.0987` | `+0.1593` | `+0.7321` | `0.1876` | `0.1697` | `0.0365` |
-| **Run 5 (`TinyOncBERT` v5)** | `longitudinal_tinyoncbert_v5` | `TinyOncBERT` (22.7M) + `--sentence-concept-dim 128` + `--lexical-dim 128` + `--block-ridge` + `--paraphrase-bank` | Paraphrased | Active (launched automatically after Run 3 eval) | `—` | `—` | `—` | `—` | `—` | `—` |
+| **Run 4 (Single-Stage Paraphrased)** | `longitudinal_tinybert_paraphrased` | Exact 1-variable ablation of Run 3 with `--paraphrase-bank` (`nemotron_5000_paraphrases.json.gz`, 2,902 findings × ~10 paraphrases + EHR sections + filler) | Paraphrased | Complete (1200 + 1k eval) | `0.0987` | `+0.1593` | `+0.7321` | `0.1876` | `0.1697` | `0.0365` |
+| **Run 5 (`TinyOncBERT` v5)** | `longitudinal_tinyoncbert_v5` | `TinyOncBERT` (22.7M) + `--sentence-concept-dim 128` + `--lexical-dim 128` + `--block-ridge` + `--paraphrase-bank` | Paraphrased | Active (step 300 / 1200) | **`0.0972`** | `+0.1568` (`+0.1671` s200) | **`+0.7414`** | **`0.1727`** | **`0.1431`** | **`0.0311`** |
 
 ### Learning Trajectories (Run 3 & Run 4 on 32 Held-Out Studies at `N_ctx = 5,000`)
 
@@ -68,6 +68,7 @@ Baselines across all 1,000 held-out studies: `zero = 0.1455`, observational LOO-
 | **Run 1 (Hybrid)** | `0.1060` | `+0.1021` | `+0.6859` | `+0.7411` | `0.2031` | `0.1694` | `0.0471` | `-0.0030` |
 | **Run 2 (Wide Hybrid)** | `0.1028` | `+0.1440` | `+0.7069` | `+0.7584` | `0.1791` | `0.1275` | `0.0395` | `+0.0010` |
 | **Run 3 (Single-Stage Plain)** | **`0.0962`** | **`+0.1870`** | **`+0.7502`** | **`+0.7923`** | **`0.1583`** | **`0.1199`** | **`0.0315`** | **`-0.0023`** |
+| **Run 4 (Single-Stage Paraphrased)** *(eval on paraphrased notes)* | `0.1048` | `+0.1103` | `+0.6924` | `+0.7454` | `0.1988` | `0.1672` | `0.0442` | `-0.0034` |
 
 ### Zero-Shot Generalization to Unseen Cancers (1,000 studies)
 
@@ -77,6 +78,8 @@ Baselines across all 1,000 held-out studies: `zero = 0.1455`, observational LOO-
 | | `unseen_cancer` (3 held-out cancers) | 750 | `0.1028` | `+0.1446` | `+0.7017` | `0.1791` | `0.1276` | `0.0397` |
 | **Run 3** | `seen_cancer_new_question` | 250 | **`0.0966`** | **`+0.1883`** | **`+0.7599`** | **`0.1590`** | **`0.1195`** | **`0.0321`** |
 | | `unseen_cancer` (3 held-out cancers) | 750 | **`0.0961`** | **`+0.1865`** | **`+0.7467`** | **`0.1580`** | **`0.1201`** | **`0.0313`** |
+| **Run 4** | `seen_cancer_new_question` | 250 | `0.1044` | `+0.1163` | `+0.7109` | `0.1997` | `0.1605` | `0.0425` |
+| | `unseen_cancer` (3 held-out cancers) | 750 | `0.1050` | `+0.1084` | `+0.6857` | `0.1985` | `0.1694` | `0.0448` |
 
 ### Performance by Candidate Width (1,000 studies)
 
@@ -90,6 +93,10 @@ Baselines across all 1,000 held-out studies: `zero = 0.1455`, observational LOO-
 | | `21–50` | 308 | **`0.0974`** | **`+0.1900`** | **`0.1554`** | **`0.1154`** | **`0.0301`** |
 | | `51–80` | 295 | **`0.0982`** | **`+0.1815`** | **`0.1642`** | **`0.1285`** | **`0.0330`** |
 | | `81–100` | 202 | **`0.0991`** | **`+0.1936`** | **`0.1701`** | **`0.1354`** | **`0.0333`** |
+| **Run 4** | `3–20` | 195 | `0.1035` | `+0.0755` | `0.1959` | `0.1636` | `0.0502` |
+| | `21–50` | 308 | `0.1065` | `+0.1092` | `0.1996` | `0.1722` | `0.0430` |
+| | `51–80` | 295 | `0.1042` | `+0.1245` | `0.1987` | `0.1643` | `0.0427` |
+| | `81–100` | 202 | `0.1044` | `+0.1249` | `0.2003` | `0.1672` | `0.0419` |
 
 ---
 
