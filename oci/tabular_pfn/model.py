@@ -50,6 +50,7 @@ class TabularModelConfig:
     cate_loss_weight: float = 2.0
     propensity_loss_weight: float = 0.5
     role_loss_weight: float = 0.3
+    decouple_rlearner_propensity: bool = False
 
     def __post_init__(self):
         if (
@@ -93,12 +94,15 @@ class TabularMemory:
     attn_idx: torch.Tensor  # (K_attn,)
     g_e_lin: torch.Tensor  # (K1,)
     g_e_nl: torch.Tensor  # (K1,)
+    g_er_lin: torch.Tensor  # (K1,) outcome-adaptive R-learner propensity gate
+    g_er_nl: torch.Tensor  # (K1,)
     g_m_lin: torch.Tensor  # (K1,)
     g_m_nl: torch.Tensor  # (K1,)
     g_tau_lin: torch.Tensor  # (K2,)
     g_tau_nl: torch.Tensor  # (K2,)
     attn_gate_feats: torch.Tensor  # (K_attn, 3)
     propensity_fit: RidgeFit
+    rlearner_prop_fit: RidgeFit
     outcome_fit: RidgeFit
     cate_fit: RidgeFit
     attn_memories: list
@@ -451,12 +455,16 @@ class SparseTabularCausalPFN(nn.Module):
         self.col_global_blocks = nn.ModuleList([_DeepSetsColumnBlock(c_dim) for _ in range(2)])
         self.nuis_screen_head = nn.Linear(c_dim, 1)
 
-        # 2. Top-K_nuis Correlation-Biased Column Attention -> soft ARD nuisance gates (e, m)
+        # 2. Top-K_nuis Correlation-Biased Column Attention -> soft ARD nuisance gates
         self.nuis_col_layers = nn.ModuleList(
             [_CorrBiasedColumnLayer(c_dim, cfg.heads) for _ in range(cfg.col_attn_layers)]
         )
+        n_nuis_gates = 6 if cfg.decouple_rlearner_propensity else 4
         self.nuis_gate_head = nn.Sequential(
-            nn.LayerNorm(c_dim), nn.Linear(c_dim, c_dim // 2), nn.GELU(), nn.Linear(c_dim // 2, 4)
+            nn.LayerNorm(c_dim),
+            nn.Linear(c_dim, c_dim // 2),
+            nn.GELU(),
+            nn.Linear(c_dim // 2, n_nuis_gates),
         )
         # Initialize linear gates moderately open, nonlinear gates slightly shrunk
         nn.init.constant_(self.nuis_gate_head[-1].bias, 0.0)
@@ -486,6 +494,8 @@ class SparseTabularCausalPFN(nn.Module):
         base_grid = torch.linspace(0.2, 0.2 + 1.5 * (k_grid - 1), k_grid)
         tau_grid = torch.linspace(0.8, 0.8 + 1.5 * (k_grid - 1), k_grid)
         self.log_lam_e = nn.Parameter(base_grid.clone())
+        if cfg.decouple_rlearner_propensity:
+            self.log_lam_er = nn.Parameter(base_grid.clone())
         self.log_lam_m = nn.Parameter(base_grid.clone())
         self.log_lam_tau = nn.Parameter(tau_grid.clone())
         self.log_cv_temp = nn.Parameter(torch.tensor(1.5))
@@ -585,10 +595,12 @@ class SparseTabularCausalPFN(nn.Module):
         return torch.cat([slots, tok], dim=1)
 
     def _attend_queries(self, queries, attn_memories):
-        for layer, memory in zip(self.study_layers, attn_memories, strict=True):
-            queries = layer.slot_mix(queries)
-            queries = layer.sample_mix(queries, memory)
-        return queries[:, -1, :]
+        use_bf16 = queries.is_cuda and torch.cuda.is_bf16_supported()
+        with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_bf16):
+            for layer, memory in zip(self.study_layers, attn_memories, strict=True):
+                queries = layer.slot_mix(queries)
+                queries = layer.sample_mix(queries, memory)
+        return queries[:, -1, :].float()
 
     def condition(
         self,
@@ -633,14 +645,19 @@ class SparseTabularCausalPFN(nn.Module):
             for layer in self.nuis_col_layers:
                 h_nuis = layer(h_nuis, corr_nuis)
             nuis_gates = torch.sigmoid(self.nuis_gate_head(h_nuis)).clamp(1e-3, 1.0)
-            g_e_lin, g_e_nl, g_m_lin, g_m_nl = nuis_gates.unbind(dim=-1)
             v_nuis = valid_col[nuis_idx].float()
+            if self.cfg.decouple_rlearner_propensity:
+                g_e_lin, g_e_nl, g_er_lin, g_er_nl, g_m_lin, g_m_nl = nuis_gates.unbind(dim=-1)
+                g_er_lin = g_er_lin * v_nuis
+                g_er_nl = g_er_nl * v_nuis
+            else:
+                g_e_lin, g_e_nl, g_m_lin, g_m_nl = nuis_gates.unbind(dim=-1)
             g_e_lin = g_e_lin * v_nuis
             g_e_nl = g_e_nl * v_nuis
             g_m_lin = g_m_lin * v_nuis
             g_m_nl = g_m_nl * v_nuis
 
-            # 4. Differentiable ARD Closed-Form LOO-CV Nuisances (e_loo, m_loo)
+            # 4. Differentiable ARD Closed-Form LOO-CV Nuisances (e_loo, e_r_loo, m_loo)
             ones = torch.ones((n_ctx, 1), device=X_s.device, dtype=torch.float32)
             A_e = torch.cat([ones, X_nuis * g_e_lin[None, :], X2_nuis * g_e_nl[None, :]], dim=1)
             A_m = torch.cat([ones, X_nuis * g_m_lin[None, :], X2_nuis * g_m_nl[None, :]], dim=1)
@@ -650,11 +667,22 @@ class SparseTabularCausalPFN(nn.Module):
             prop_fit, e_loo = _fit_ard_loo_cv_ridge(A_e, t_f, lam_e, cv_temp)
             e_loo = e_loo.clamp(0.02, 0.98)
 
+            if self.cfg.decouple_rlearner_propensity:
+                A_er = torch.cat(
+                    [ones, X_nuis * g_er_lin[None, :], X2_nuis * g_er_nl[None, :]], dim=1
+                )
+                lam_er = self.log_lam_er.float().exp().clamp(0.05, 1e5)
+                r_prop_fit, e_r_loo = _fit_ard_loo_cv_ridge(A_er, t_f, lam_er, cv_temp)
+                e_r_loo = e_r_loo.clamp(0.02, 0.98)
+            else:
+                g_er_lin, g_er_nl = g_e_lin, g_e_nl
+                r_prop_fit, e_r_loo = prop_fit, e_loo
+
             lam_m = self.log_lam_m.float().exp().clamp(0.05, 1e5)
             out_fit, m_loo = _fit_ard_loo_cv_ridge(A_m, y_f, lam_m, cv_temp)
 
             # 5. Round-2 ALL-P Adjusted Robinson Interaction Scan -> Role Posteriors & CATE Set
-            t_res = t_f - e_loo
+            t_res = t_f - e_r_loo
             y_res = y_f - m_loo
             rob_feats, raw_mod_prio = _robinson_all_p_stats(X_s, X2_s, t_res, y_res, valid_col)
             h_col2 = h_col + self.rob_update(torch.cat([h_col, rob_feats], dim=-1))
@@ -687,11 +715,11 @@ class SparseTabularCausalPFN(nn.Module):
             lam_tau = self.log_lam_tau.float().exp().clamp(0.05, 1e5)
             cate_fit, _ = _fit_ard_loo_cv_ridge(B_ctx, y_res, lam_tau, cv_temp, intercept_reg=0.05)
 
-            # 7. Select top attn_slots columns across (e, m, tau) gates for residual Two-Way TabPFN
+            # 7. Select top attn_slots columns across (e_r, m, tau) gates for residual Two-Way TabPFN
             full_ge = torch.zeros(p, device=X_s.device, dtype=torch.float32)
             full_gm = torch.zeros(p, device=X_s.device, dtype=torch.float32)
             full_gt = torch.zeros(p, device=X_s.device, dtype=torch.float32)
-            full_ge[nuis_idx] = torch.maximum(g_e_lin, g_e_nl)
+            full_ge[nuis_idx] = torch.maximum(g_er_lin, g_er_nl)
             full_gm[nuis_idx] = torch.maximum(g_m_lin, g_m_nl)
             full_gt[cate_idx] = torch.maximum(g_tau_lin, g_tau_nl)
             attn_prio = (
@@ -703,6 +731,9 @@ class SparseTabularCausalPFN(nn.Module):
             attn_gate_feats = torch.stack(
                 [full_ge[attn_idx], full_gm[attn_idx], full_gt[attn_idx]], dim=-1
             )
+            if self.cfg.decouple_rlearner_propensity:
+                # Keep prop_loss (via attn_prop) completely decoupled from g_er
+                attn_gate_feats = attn_gate_feats.detach()
 
             tmp_mem = TabularMemory(
                 col_mean=col_mean,
@@ -719,12 +750,15 @@ class SparseTabularCausalPFN(nn.Module):
                 attn_idx=attn_idx,
                 g_e_lin=g_e_lin,
                 g_e_nl=g_e_nl,
+                g_er_lin=g_er_lin,
+                g_er_nl=g_er_nl,
                 g_m_lin=g_m_lin,
                 g_m_nl=g_m_nl,
                 g_tau_lin=g_tau_lin,
                 g_tau_nl=g_tau_nl,
                 attn_gate_feats=attn_gate_feats,
                 propensity_fit=prop_fit,
+                rlearner_prop_fit=r_prop_fit,
                 outcome_fit=out_fit,
                 cate_fit=cate_fit,
                 attn_memories=[],
@@ -735,12 +769,14 @@ class SparseTabularCausalPFN(nn.Module):
             ctx_slots = self._build_patient_slots(X_s, X2_s, M_s, tmp_mem)
             context = self._assemble_context(ctx_slots, t_f, y_f, scale)
             attn_memories = []
-            for i, layer in enumerate(self.study_layers):
-                context = layer.slot_mix(context)
-                memory = layer.sample_norm(context).transpose(0, 1)  # (S, N_ctx, D)
-                attn_memories.append(memory)
-                if i + 1 < len(self.study_layers):
-                    context = layer.sample_mix(context, memory)
+            use_bf16 = context.is_cuda and torch.cuda.is_bf16_supported()
+            with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_bf16):
+                for i, layer in enumerate(self.study_layers):
+                    context = layer.slot_mix(context)
+                    memory = layer.sample_norm(context).transpose(0, 1)  # (S, N_ctx, D)
+                    attn_memories.append(memory)
+                    if i + 1 < len(self.study_layers):
+                        context = layer.sample_mix(context, memory)
             tmp_mem.attn_memories = attn_memories
             return tmp_mem, scale
 
@@ -768,9 +804,17 @@ class SparseTabularCausalPFN(nn.Module):
         m_q, h_m = _predict_ridge(mem.outcome_fit, A_m_q)
         tau_q, h_tau = _predict_ridge(mem.cate_fit, A_t_q)
         e_prob = e_q.clamp(0.01, 0.99)
-        y0_raw = (m_q - e_prob * tau_q).clamp(0.01, 0.99)
-        y1_raw = (m_q + (1.0 - e_prob) * tau_q).clamp(0.01, 0.99)
-        return X_s, X2_s, M_s, y0_raw, y1_raw, m_q, e_prob, tau_q, h_m, h_tau, h_e
+        if self.cfg.decouple_rlearner_propensity:
+            A_er_q = torch.cat(
+                [ones_q, X_n * mem.g_er_lin[None, :], X2_n * mem.g_er_nl[None, :]], dim=1
+            )
+            e_r_q, _ = _predict_ridge(mem.rlearner_prop_fit, A_er_q)
+            e_r_prob = e_r_q.clamp(0.01, 0.99)
+        else:
+            e_r_prob = e_prob
+        y0_raw = (m_q - e_r_prob * tau_q).clamp(0.01, 0.99)
+        y1_raw = (m_q + (1.0 - e_r_prob) * tau_q).clamp(0.01, 0.99)
+        return X_s, X2_s, M_s, y0_raw, y1_raw, m_q, e_prob, e_r_prob, tau_q, h_m, h_tau, h_e
 
     def query(
         self,
@@ -783,13 +827,13 @@ class SparseTabularCausalPFN(nn.Module):
         """Predict arm risk histogram logits ``(N_q, 2, bins)`` and propensity logits ``(N_q,)``."""
         device_type = X_q.device.type
         with torch.amp.autocast(device_type=device_type, enabled=False):
-            X_s, X2_s, M_s, y0_raw, y1_raw, m_q, e_prob, tau_q, h_m, h_tau, h_e = (
+            X_s, X2_s, M_s, y0_raw, y1_raw, m_q, e_prob, e_r_prob, tau_q, h_m, h_tau, h_e = (
                 self._query_solver_stats(X_q, M_q, mem)
             )
             n_q = len(X_s)
             log_n = y0_raw.new_full((n_q,), math.log1p(mem.n_ctx))
             arm_feats = torch.stack(
-                [y0_raw, y1_raw, m_q, e_prob, tau_q, h_m.sqrt(), h_tau.sqrt(), log_n], dim=-1
+                [y0_raw, y1_raw, m_q, e_r_prob, tau_q, h_m.sqrt(), h_tau.sqrt(), log_n], dim=-1
             )
             cal = self.arm_cal(arm_feats)
             delta_shift = cal[:, :2]
@@ -940,7 +984,7 @@ class SparseTabularCausalPFN(nn.Module):
         ge = torch.zeros(p, device=mem.col_mean.device)
         gm = torch.zeros(p, device=mem.col_mean.device)
         gt = torch.zeros(p, device=mem.col_mean.device)
-        ge[mem.nuis_idx] = torch.maximum(mem.g_e_lin, mem.g_e_nl)
+        ge[mem.nuis_idx] = torch.maximum(mem.g_er_lin, mem.g_er_nl)
         gm[mem.nuis_idx] = torch.maximum(mem.g_m_lin, mem.g_m_nl)
         gt[mem.cate_idx] = torch.maximum(mem.g_tau_lin, mem.g_tau_nl)
         ge_np, gm_np, gt_np = ge.cpu().numpy(), gm.cpu().numpy(), gt.cpu().numpy()

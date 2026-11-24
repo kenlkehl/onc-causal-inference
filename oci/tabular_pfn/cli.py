@@ -326,8 +326,11 @@ def main(argv=None):
     defaults = TabularModelConfig()
     for key, value in vars(defaults).items():
         flag = "--" + key.replace("_", "-")
-        arg_type = float if isinstance(value, float) else int
-        p_train.add_argument(flag, type=arg_type, default=value)
+        if isinstance(value, bool):
+            p_train.add_argument(flag, action="store_true", default=value)
+        else:
+            arg_type = float if isinstance(value, float) else int
+            p_train.add_argument(flag, type=arg_type, default=value)
 
     p_eval.add_argument("--studies", type=int, default=64)
     p_eval.add_argument("--context-size", type=int, default=800)

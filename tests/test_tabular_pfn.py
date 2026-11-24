@@ -446,3 +446,89 @@ def test_cli_train_resume_evaluate_and_predict(tmp_path):
     assert cal_ps[10:].mean() < 0.05 and cal_ps[10:].mean() < 0.25 * raw_ps[10:].mean()
     # Rank order of p_signal must match raw signal log-odds monotonically
     assert np.corrcoef(np.argsort(np.argsort(raw_ps)), np.argsort(np.argsort(cal_ps)))[0, 1] > 0.9999
+
+
+def test_v2_decoupled_rlearner_propensity_and_v1_compat():
+    # 1. Verify v1 config dicts without decouple_rlearner_propensity still load with default False
+    v1_dict = {
+        "col_dim": 32,
+        "study_width": 32,
+        "study_layers": 1,
+        "col_attn_layers": 1,
+        "heads": 4,
+        "bins": 17,
+        "top_k_nuis": 16,
+        "top_k_cate": 12,
+        "attn_slots": 8,
+    }
+    cfg_v1 = TabularModelConfig(**v1_dict)
+    assert cfg_v1.decouple_rlearner_propensity is False
+    m_v1 = SparseTabularCausalPFN(cfg_v1)
+    assert not hasattr(m_v1, "log_lam_er")
+
+    # 2. Verify v2 decoupled model forward/backward + ZERO prop_loss gradient into g_er / log_lam_er
+    torch.manual_seed(13)
+    cfg_v2 = TabularModelConfig(
+        col_dim=36,
+        study_width=36,
+        study_layers=2,
+        col_attn_layers=2,
+        heads=6,
+        bins=17,
+        top_k_nuis=20,
+        top_k_cate=16,
+        attn_slots=10,
+        decouple_rlearner_propensity=True,
+    )
+    m_v2 = SparseTabularCausalPFN(cfg_v2)
+    ep = sample_tabular_study(505, n_total=90, num_features=60)
+    Xc = torch.from_numpy(ep["X"][:70]); Mc = torch.from_numpy(ep["M"][:70])
+    tc = torch.from_numpy(ep["t"][:70]); yc = torch.from_numpy(ep["y"][:70])
+    Xq = torch.from_numpy(ep["X"][70:]); Mq = torch.from_numpy(ep["M"][70:])
+    ora = torch.from_numpy(np.stack([ep["true_y0"][70:], ep["true_y1"][70:]], axis=1))
+    tp = torch.from_numpy(ep["true_propensity"][70:])
+    roles = torch.from_numpy(ep["roles"])
+
+    # Propensity loss alone must NOT send any gradient to log_lam_er or g_er gate output rows [2:4]
+    ol, pl, sc, mem = m_v2(Xc, tc, yc, Xq, M_ctx=Mc, M_q=Mq)
+    prop_only = torch.nn.functional.binary_cross_entropy_with_logits(pl, tp)
+    prop_only.backward()
+    assert m_v2.log_lam_er.grad is None
+    assert m_v2.nuis_gate_head[-1].weight.grad[2:4].abs().sum().item() == 0.0
+    assert m_v2.log_lam_e.grad is not None and m_v2.log_lam_e.grad.abs().sum().item() > 0.0
+
+    # Full loss must give finite non-zero gradients to 100% of v2 parameters (including log_lam_er!)
+    m_v2.zero_grad(set_to_none=True)
+    ol, pl, sc, mem = m_v2(Xc, tc, yc, Xq, M_ctx=Mc, M_q=Mq)
+    loss, _ = m_v2.loss_components(
+        ol,
+        pl,
+        sc,
+        ora,
+        tp,
+        role_logits=mem.role_logits,
+        nuis_screen_logits=mem.nuis_screen_logits,
+        mod_screen_logits=mem.mod_screen_logits,
+        true_roles=roles,
+    )
+    loss.backward()
+    grads = [p.grad for p in m_v2.parameters() if p.grad is not None]
+    assert len(grads) == sum(1 for _ in m_v2.parameters())
+    assert all(torch.isfinite(g).all() for g in grads)
+    assert m_v2.log_lam_er.grad.abs().sum().item() > 0.0
+
+    # 3. Simultaneous row + column permutation invariance on v2
+    m_v2.eval()
+    rng = np.random.default_rng(19)
+    rp = torch.from_numpy(rng.permutation(70))
+    cp = torch.from_numpy(rng.permutation(60))
+    with torch.no_grad():
+        o1, p1, s1, mem1 = m_v2(Xc, tc, yc, Xq, M_ctx=Mc, M_q=Mq)
+        m1, _ = m_v2.risk_stats(o1, s1)
+        o2, p2, s2, mem2 = m_v2(
+            Xc[rp][:, cp], tc[rp], yc[rp], Xq[:, cp], M_ctx=Mc[rp][:, cp], M_q=Mq[:, cp]
+        )
+        m2, _ = m_v2.risk_stats(o2, s2)
+        torch.testing.assert_close(m1, m2, atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(p1.sigmoid(), p2.sigmoid(), atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(mem1.role_logits[cp], mem2.role_logits, atol=5e-4, rtol=5e-4)

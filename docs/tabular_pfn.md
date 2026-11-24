@@ -25,10 +25,16 @@ Training draws log-uniform $N_{\text{ctx}} \in [80, 3{,}000]$ and $P \in [20, 2{
 
 ## Usage
 
-### Train on 1× H200 (~2–2.5 hours for 12,000 steps / 96,000 studies up to $P = 2{,}000$)
+### Train on 1× H200 or RTX A6000
 ```bash
+# v1 compact (2.11M params, ~2.3 GiB peak VRAM, 12,000 steps)
 ./scripts/run_tabular_pfn_h200.sh
-# Override step budget as desired, e.g. STEPS=20000 ./scripts/run_tabular_pfn_h200.sh
+
+# v2 (7.38M params, ~6-7 GiB peak VRAM with bf16 FlashAttention-2, 15,000 steps):
+# decoupled outcome-adaptive R-learner propensity + 4-layer/192-wide/24-slot TabPFN + wider top-K recall
+./scripts/run_tabular_pfn_v2_h200.sh
+# Override step budget or GPU/workers as desired, e.g.:
+# CUDA_VISIBLE_DEVICES=0 NUM_WORKERS=8 ./scripts/run_tabular_pfn_v2_h200.sh
 ```
 
 ### Zero-Shot Prediction + Calibrated Feature Role Report on Any Tabular Cohort

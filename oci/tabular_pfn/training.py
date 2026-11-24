@@ -284,7 +284,7 @@ def evaluate_tabular(
 
         p_total = mem.n_features
         full_ge = np.zeros(p_total, dtype=np.float32)
-        full_ge[mem.nuis_idx.cpu().numpy()] = torch.maximum(mem.g_e_lin, mem.g_e_nl).cpu().numpy()
+        full_ge[mem.nuis_idx.cpu().numpy()] = torch.maximum(mem.g_er_lin, mem.g_er_nl).cpu().numpy()
         conf_mask = (roles == ROLE_TO_ID["confounder"]) | (roles == ROLE_TO_ID["dual_role"])
         inst_mask = roles == ROLE_TO_ID["instrument"]
         if conf_mask.any():

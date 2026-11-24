@@ -99,6 +99,17 @@ Instead of asking a pure transformer to approximate linear algebra over 2,000 co
 
 - **Clinical Summary & Export (`oci/tabular_pfn/cli.py`, `format_role_summary`):** `predict` now supports `.csv` and `.json` for `--role-report` (with composite `p_signal`, `p_any_confounder`, `p_any_modifier`, and `raw_signal_score` columns) and automatically prints a ranked summary table of top suspected confounders, effect modifiers, and suppressed pure instruments (also available standalone via `--print-roles` / `--role-summary-top-k`).
 
+### Iteration 6 — Step-4,500 Bottleneck Diagnosis & v2 Architecture (`scripts/run_tabular_pfn_v2_h200.sh`)
+- **Live Diagnostic on Run 1 (`step 4,500` checkpoint, 48 held-out `P = 500, N_ctx = 800` 3-family studies):**
+  - Full v1 PFN (`cate_rmse = 0.1163`, `within_r = +0.5001`) already outperformed an **Oracle-Columns Ridge R-learner** handed only the ~12 true causal features (`cate_rmse = 0.1994`, `within_r = +0.4954`).
+  - Zeroing `attn_residual_scale` (which had grown `0.10 → 0.261`) dropped performance back to `cate_rmse = 0.1237, within_r = +0.4599`, proving that **almost all post-step-500 gain came from the residual Two-Way TabPFN layers** capturing nonlinearities and pairwise interactions.
+  - ARD gates by true role showed 50–77× noise suppression (`noise: ge=0.0019, gm=0.0043, gtau=0.0016` vs. `confounder gm=0.233`, `modifier gtau=0.123`, `dual_role gm=0.300`), **except `instrument ge = 0.0876` tied `confounder ge = 0.0821`** because `prop_loss` against `true_propensity` (which includes instruments) fought `cate_loss` through the shared `g_e` gate.
+  - Screener recall at `P = 500`: Top-64 confounder recall `0.828`, Top-48 modifier recall `0.736`.
+- **v2 Architectural Upgrades (100% backward-compatible with v1 checkpoints):**
+  1. **`--decouple-rlearner-propensity`:** Adds dedicated outcome-adaptive propensity gates `(g_er_lin, g_er_nl)` + `log_lam_er` used strictly inside Robinson `e_r_loo` and `(y0_raw, y1_raw)` reconstruction with **zero gradient from `prop_loss`** (verified by unit test), completely separating treatment-model propensity (`g_e`) from outcome-adaptive instrument-suppressing causal propensity (`g_er`).
+  2. **Higher-capacity residual TabPFN & column attention (`7.38M` params):** `col_dim=192`, `col_attn_layers=3`, `study_width=192`, `study_layers=4`, `heads=6`, `attn_slots=24`, plus **bf16 FlashAttention-2 / SDPA autocast** strictly inside `study_layers` on CUDA (keeping Cholesky ARD solvers in exact fp32, cutting worst-case `N_ctx=3,000, P=2,000` VRAM to `~6–7 GiB`).
+  3. **Higher Top-$K$ recall & smoother schedule:** `top_k_nuis=80`, `top_k_cate=64`, `lr=4e-4`, `warmup_steps=300`, `eval_studies=64`, default `STEPS=15000` (`artifacts/tabular_causal_pfn_v2_p2000`).
+
 ---
 
 ## 3. Training Runs Summary
@@ -106,7 +117,8 @@ Instead of asking a pure transformer to approximate linear algebra over 2,000 co
 | Run | Artifact Dir | Prior Version | Budget (`Steps` / `Studies`) | `N_ctx` / `P` Range | Status | Held-Out `P = 500` `cate_rmse` ↓ | Held-Out `P = 2,000` `cate_rmse` ↓ | `P = 2,000` `within_r` ↑ | `P = 2,000` Role / Mod AUROC ↑ | `g_e` (Conf / Inst) |
 |---|---|---|---|---|---|---:|---:|---:|---:|---:|
 | **PoC v1 (A6000)** | *(scratch)* | v1 single-family sparse | `500` / `4,000` (`6.1 min`) | `80..1,200` / `20..2,000` | Complete | `0.1246` (v1) / `0.1192` (3-fam OOD) | `0.1323` | `+0.388` | `0.863 / 0.866` | `0.42 / 0.29` |
-| **Run 1 (Full 3-Family, A6000)** | `artifacts/tabular_causal_pfn_p2000` | v2 3-family OCI mixture (`50/25/25`) | `12,000` / `96,000` | `80..3,000` / `20..2,000` | Active (step `4,500 / 12,000`) | **`0.1163`** (`within_r = +0.500`) | `—` | `—` | `—` | `—` |
+| **Run 1 (v1 2.11M, A6000)** | `artifacts/tabular_causal_pfn_p2000` | v2 3-family OCI mixture (`50/25/25`) | `12,000` / `96,000` | `80..3,000` / `20..2,000` | Active (past step `5,500 / 12,000`) | **`0.1163`** (`within_r = +0.500`, s4500) | `—` | `—` | `—` | `—` |
+| **Run 2 (v2 7.38M, Decoupled)** | `artifacts/tabular_causal_pfn_v2_p2000` | v2 3-family OCI mixture (`50/25/25`) | `15,000` / `120,000` | `80..3,000` / `20..2,000` | Ready (`./scripts/run_tabular_pfn_v2_h200.sh`) | `—` | `—` | `—` | `—` | `—` |
 
 ### Run 1 Mid-Training Trajectory (`48` Held-Out 3-Family Studies, `P = 500`, `N_ctx = 800`)
 Reference baselines on this fixed 48-study held-out set: `arm_mean = 0.1541`, `screened_ridge_r = 0.1519`, `dense_ridge_r = 0.1651`.
