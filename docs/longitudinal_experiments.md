@@ -1,29 +1,87 @@
 # Longitudinal Multimodal Causal Foundation Model — Experiment Log
 
-This document records the training runs, controlled ablations, diagnostic probes, and held-out evaluations for the longitudinal multimodal causal foundation model (`oci.longitudinal`) on the 5,000-design oncology prior (`synthetic_data/designs/nemotron_5000.json.gz`, 1,000 held-out designs spanning 3 unseen cancer types + new clinical questions on seen cancers).
+This document records the architectures, training objectives, multimodal synthetic DGP evolution, training runs, controlled ablations, diagnostic probes, and held-out evaluations for the longitudinal multimodal causal foundation model (`oci.longitudinal`) on the 5,000-design oncology prior (`synthetic_data/designs/nemotron_5000.json.gz`, 1,000 held-out designs spanning 3 unseen cancer types + new clinical questions on seen cancers).
 
 All models and baselines use strictly observational context inputs `(X, T, Y)` with zero oracle leakage.
 
 ---
 
-## 1. Training Runs Summary
+## 1. Architectures, Objectives, & Multimodal DGP Evolution
+
+### 1.1 Side-by-Side Architecture & Training Configuration Matrix
+
+All seven runs share the five-stream multimodal input schema (`notes`, `labs`, `vitals`, `encounters`, `pros` encoded via modality-specific 2-layer `EventTransformer`s + cross-modal timeline transformer, `event_width=128`, `event_layers=2`, `heads=4`, `study_width=192`, `bins=129`). The exact architectural, solver, schedule, and note-DGP settings recorded in each run's checkpoint are:
+
+| Run (Artifact Dir / Script) | Params / Fmt | Note Backbone | Note Pooling & Windowing | Structured & Cross-Modal Encoder | Study Head & Differentiable Solver | Training Schedule (`N_ctx`, `N_q`, `accum`, `steps`, `lr / note_lr`) | Note DGP |
+|---|---|---|---|---|---|---|---|
+| **Baseline (Pure PFN)** (`longitudinal_tinybert_n5000`, `run_longitudinal_h200.sh`) | `20.04M` / `v3` | `TinyBERT_General_4L_312D` (14.5M), **frozen** Phase 1 | `note_slots=4`, single mean-pool per note, non-overlapping 512-tok windows | 5× `EventTransformer` + cross-modal timeline (no explicit trajectory slopes) | **Pure 4-layer `TwoWayStudyLayer`** (`study_layers=4`), **no R-learner solver** | Phase 1: `N=500..5000` (uniform), `N_q=64`, `accum=4`, `lr=3e-4` (warmup 50, cosine), stopped s527 | Plain (`augment_notes`) |
+| **Curriculum (Pure PFN)** (`longitudinal_tinybert_curriculum`, early `run_longitudinal_curriculum_h200.sh`) | `20.04M` / `v3` | `TinyBERT_General_4L_312D`, unfrozen (`note_grad_patients=64 → 128`) | Same as Baseline (`note_slots=4`) | Same as Baseline | **Pure 4-layer `TwoWayStudyLayer`** (`study_layers=4`), **no R-learner solver** | 2-stage: S1 `N=64..256, N_q=32, accum=32, lr=6e-4/3e-5` (1..600) → S2 `N=500..5000, N_q=64, accum=8, lr=2e-4/1e-5` (stopped s723) | Plain (`augment_notes`) |
+| **Run 1 (Hybrid)** (`longitudinal_tinybert_hybrid`, `run_longitudinal_curriculum_h200.sh`) | `19.38M` / `v4` | `TinyBERT_General_4L_312D`, unfrozen (`64 → 128` grad pts) | **`note_slots=8`** multi-query token attn + masked **max** + mean pooling (lossless windows) | Added **explicit per-stream trajectory summaries** (`latest, mean, asinh OLS slope/yr`, counts, recency) | **Hybrid LOO-CV R-learner** (`solver_dim=64`, `ridge_grid_size=5`, fp32 Cholesky) + **2-layer residual `TwoWayStudyLayer`** (`attn/prop_residual_scale` init `0.1`) | 2-stage: S1 `N=64..256, N_q=32, accum=32` (s1..600, 19.2k studies) → S2 `N=500..5000, N_q=64, accum=8` (s601..1200, 4.8k studies) | Plain (`augment_notes`) |
+| **Run 2 (Wide Hybrid)** (`longitudinal_tinybert_wide_hybrid`, `run_longitudinal_wide_hybrid_h200.sh`) | `20.96M` / `v4` | `TinyBERT_General_4L_312D`, unfrozen (`64 → 128` grad pts) | **`note_slots=16`** (2× concept slots) | Same as Run 1 | **`solver_dim=256`** (128 note + 128 struct) + **`lexical_dim=128`** (context-only hashed 1–3gram SVD), `ridge_grid_size=5` + 2-layer residual PFN | Same 2-stage curriculum as Run 1 (s1..600 → s601..1200, 24k total studies) | Plain (`augment_notes`) |
+| **Run 3 (Single-Stage Plain)** (`longitudinal_tinybert_single_stage`, `run_longitudinal_single_stage_h200.sh`) | `21.05M` / `v4` | `TinyBERT_General_4L_312D`, unfrozen (`note_grad_patients=128`) | `note_slots=16` + **`--per-slot-note-temporal`** (per-slot max/latest/delta/time-attn) + **32-tok overlapping** windows | Same as Run 1 | `solver_dim=256` + `lexical_dim=128` + **`ridge_grid_size=7`** (CATE penalty ceiling `~22,000`) + 2-layer residual PFN | **Single-stage log-uniform** `N=100..10,000`, `N_q=64`, `accum=8`, `1,200` steps (`9,600` studies), `lr=4e-4 / note_lr=2e-5`, warmup 30, cosine | Plain (`augment_notes`) |
+| **Run 4 (Single-Stage Paraphrased)** (`longitudinal_tinybert_paraphrased`, `run_longitudinal_paraphrased_h200.sh`) | `21.05M` / `v4` | `TinyBERT_General_4L_312D`, unfrozen (`128` grad pts) | Identical to Run 3 | Identical to Run 3 | Identical to Run 3 (exact 1-variable DGP ablation) | Identical to Run 3 (`1,200` steps, `9,600` studies) | **Paraphrased** (`--paraphrase-bank`) |
+| **Run 5 (`TinyOncBERT` v5)** (`longitudinal_tinyoncbert_v5`, `run_longitudinal_tinyoncbert_h200.sh`) | **`29.45M`** / `v4` | **`TinyOncBERT` (6L/384D/6H, 22.7M, PubMedBERT vocab)**, unfrozen (`128` grad pts) | `note_slots=16`, `per_slot_note_temporal`, 32-tok overlap + **sentence-level MaxSim** | Same as Run 1 | `solver_dim=256` + `lexical_dim=128` + **`sentence_concept_dim=128`** (context-only spherical k-means MaxSim) + **`--block-ridge`** (2D LOO-CV grid shrinking text vs. struct blocks separately), `ridge_grid_size=7` + 2-layer residual PFN | Single-stage log-uniform `N=100..10,000`, `N_q=64`, `accum=8`, `1,200` steps (`9,600` studies), `lr=4e-4 / note_lr=2e-5`, warmup 30, cosine | **Paraphrased** (`--paraphrase-bank`) |
+
+### 1.2 Training Objectives & Loss Functions
+
+1. **Longitudinal Causal Pretraining Objective (`oci/longitudinal/model.py`, `CausalStudyModel.loss_components` — constant weights across all 7 runs):**
+   $$\mathcal{L}_{\text{study}} = \mathcal{L}_{\text{outcome}}^{\text{sinh-129}} + 2.0\,\mathcal{L}_{\text{cate}}^{\text{MSE}} + 0.5\,\mathcal{L}_{\text{prop}}^{\text{BCE}}$$
+   - **$\mathcal{L}_{\text{outcome}}^{\text{sinh-129}}$ (weight `1.0`):** Local-width Gaussian-smoothed cross-entropy over 129 bins on a non-uniform $\sinh$-warped centered logit-offset grid $\delta = \operatorname{logit}(p) - \operatorname{logit}(\hat{p}_t) \in [-6, +6]$ (evaluated on both oracle counterfactual arm risks `true_y0`, `true_y1`), calibrating posterior predictive mean and epistemic SD.
+   - **$\mathcal{L}_{\text{cate}}^{\text{MSE}}$ (weight `2.0`):** Direct MSE between predicted posterior-mean risk difference $(\hat{p}_1 - \hat{p}_0)$ and oracle ITE $(p_1 - p_0)$ on query patients.
+   - **$\mathcal{L}_{\text{prop}}^{\text{BCE}}$ (weight `0.5`):** Binary cross-entropy of the treatment-masked propensity query head against oracle `true_treatment_prob`.
+   - **Optimization & Numerical Precision:** `AdamW` with separate parameter groups (`note_lr` and `backbone_weight_decay = 0.0` on the text backbone; `lr` and `weight_decay = 0.01` on 2D+ downstream matrices only, `0.0` on biases/LayerNorms/embeddings/tokens), cosine LR decay with linear warmup, gradient clipping `1.0`, `bf16` mixed precision for transformer blocks while strictly forcing `fp32` for Cholesky LOO-CV Ridge solvers, SVD/k-means projections, calibration heads, and losses. Partial-gradient context encoding (`--note-grad-patients K`) backpropagates through the text backbone on all queries plus `K` random context patients per episode while encoding the remaining context notes under `no_grad`.
+   - **Key objective-landscape shift (Baseline/Curriculum → Run 1+):** Although the loss formula stayed fixed, embedding exact differentiable closed-form LOO-CV nuisances $(\hat{e}^{(-i)}, \hat{m}^{(-i)})$ and Robinson orthogonalization $(Y - \hat{m}^{(-i)}) \sim (T - \hat{e}^{(-i)}) \cdot [1, \phi(X)]$ inside the forward pass eliminated the zero-gradient cohort-mean saddle that stalled pure attention PFNs (`within_r ≈ 0.00 → +0.217`).
+
+2. **`TinyOncBERT` Distillation & MLM Objective (`oci/longitudinal/tinyoncbert.py`, `scripts/run_tinyoncbert_h200.sh`):**
+   - **Architecture & Init:** 6-layer, 384-hidden, 6-head, 1536-FFN BERT (`22.7M` params, `max_position_embeddings=512`, `BiomedBERT` clinical tokenizer, word embeddings SVD-initialized from `NeuML/pubmedbert-base-embeddings`), distilled from frozen 600M `Qwen/Qwen3-Embedding-0.6B` on 2M curated `split == "train"` oncology sentences + 250k contiguous 512-token note windows from `ksg-dfci/mmai-synthetic-1226/patients/all_synthetic_notes.parquet` (3 epochs, `batch_size=2048`, `lr=5e-4`, AdamW `wd=0.01`, 3% warmup, `7.6 min` on 1× H200).
+   - **Composite 5-Term Objective:**
+     $$\mathcal{L}_{\text{distill}} = 1.0\,\mathcal{L}_{\text{emb}} + 0.5\,\mathcal{L}_{\text{rel}} + 0.5\,\mathcal{L}_{\text{neg}} + 0.1\,\mathcal{L}_{\text{pol}} + 0.25\,\mathcal{L}_{\text{mlm}}$$
+     - $\mathcal{L}_{\text{emb}}$: $(1 - \cos(\text{proj}(s), t)) + \text{MSE}(\text{proj}(s), t)$ aligning projected student sentence embeddings to normalized teacher embeddings.
+     - $\mathcal{L}_{\text{rel}}$: $\text{MSE}(S_{\text{native}} S_{\text{native}}^\top,\, T T^\top)$ transferring pairwise relational geometry directly into the unprojected native 384D space used at inference.
+     - $\mathcal{L}_{\text{neg}}$: $\operatorname{ReLU}(\cos(s, s_{\text{flip}}) - 0.25)$ margin repulsion between synthetically polarity-flipped clinical clauses (pushing `"reports dyspnea"` vs. `"denies dyspnea"` near-orthogonal; achieved `val_neg_flip_cos = 0.066`).
+     - $\mathcal{L}_{\text{pol}}$: 3-class polarity cross-entropy (affirmed / negated / neutral; achieved `val_pol_acc = 99.73%`).
+     - $\mathcal{L}_{\text{mlm}}$: Standard 15% BERT masked language modeling on sentences every step plus 512-token contiguous oncology note windows every 6th step (`--window-mlm-every 6`).
+
+3. **Cross-Fit Episodic Factual Adaptation Objective (`oci/longitudinal/adapt.py`, `adapt-predict`):**
+   - Strictly observable K-fold cross-fitted adaptation on a single applied cohort with **zero oracle inputs**:
+     $$\mathcal{L}_{\text{adapt}} = \operatorname{BCE}(\hat{p}_{T_q}, Y_q) + 0.5\,\operatorname{BCE}(\hat{e}_q, T_q) + \lambda_{\text{anchor}}\|\theta - \theta_0\|_2^2$$
+   - Freezes all CATE shrinkage, calibration, and residual attention heads (`log_lam_tau`, `log_text_mult_tau`, `log_cv_temp`, `arm_cal`, `prop_cal`, `layers`, `head`, `propensity_head`, `attn/prop_residual_scale`) so unobserved treatment-effect heterogeneity cannot overfit factual noise; adapts only solver projections, text channel weights, and nuisance Ridge penalties (default `anchor_weight=1e-2`, `lr=1e-4` cosine, `40` steps × `4` random inner episodes), gated automatically against step-0 zero-shot inner-validation factual loss.
+
+### 1.3 Multimodal Longitudinal DGP & Iteration Changelog
+
+**Base 3-Level Longitudinal DGP (`synthetic_data/longitudinal.py` + `nemotron_5000.json.gz`):**
+- **Level 1 (Design):** Uniformly samples from 4,000 `split == "train"` Nemotron-authored oncology study designs spanning 20 cancers and 100 clinical questions (1,000 `split == "held_out"` designs including 3 completely unseen cancers are strictly isolated for evaluation). Design widths span `3–100` candidate measurements and note findings.
+- **Level 2 (Study Equations):** Draws permitted causal roles per candidate (capping wide designs to `<= 16` active causal variables while keeping all remaining candidates as chart distractors), samples `linear` / `threshold` / `quadratic` terms plus up to `15` pairwise treatment interactions and (in `65%` of studies) `1–6` pairwise outcome interactions (`coef ~ U(-0.35, 0.35)`), and Monte Carlo–calibrates linear predictors (`8%` unconfounded RCTs vs. `tx_std ~ U(0.6, 1.8)`, `out_std ~ U(0.9, 2.0)`, `tx_rate ~ U(0.25, 0.75)`, `ctrl_rate ~ U(0.12, 0.82)`).
+- **Level 3 (5-Stream Patient Histories):** Generates timestamped pretreatment histories (`day_from_index <= 0`) across `notes`, `labs` (CBC/BMP/CMP with longitudinal slopes), `vitals` (including annualized weight loss), `encounters` (settings + ICD-10-CM + CPT codes), and `pros` (11 canonical PRO-CTCAE v1.0 ordinal items), with positive-only charting and note-framing augmentation (`--augment-notes`).
+
+**What Changed Across Iterations (and Why):**
+1. **Baseline Pure PFN → Curriculum Pure PFN (`9c0a42a`):** Unfroze `TinyBERT` and added a 2-stage small-to-large `N_ctx` curriculum (`64..256` with `accum=32` → `500..5000` with `accum=8`). *Result:* Still stuck in the cohort-mean saddle (`within_r = +0.021`), proving attention alone cannot bootstrap orthogonalized CATE estimation from scratch.
+2. **Curriculum Pure PFN → Run 1 Hybrid (`3b392c9`):** Replaced 4 pure attention layers with an exact differentiable fp32 Cholesky LOO-CV R-learner (`solver_dim=64`, `ridge_grid_size=5`) + 2 residual PFN layers, upgraded note pooling from single mean-pool to 8-slot multi-query token attention + masked max + mean, and added explicit per-stream longitudinal trajectory slopes. *Result:* Broke the saddle immediately (`cate_rmse 0.1118 → 0.1016`, `within_r +0.021 → +0.150`).
+3. **Run 1 → Run 2 Wide Hybrid (`6e62bcd`):** Step-450 linear probes revealed a 32-dim note bottleneck; expanded `note_slots 8 → 16`, `solver_dim 64 → 256` (128 note + 128 structured), and added context-only 128-d hashed 1–3gram lexical SVD (`--lexical-dim 128`). *Result:* Huge jump in within-study CATE (`+0.150 → +0.199`), risk (`0.1946 → 0.1754`), and propensity (`0.1719 → 0.1302`), and final 1k-study `cate_rmse 0.1060 → 0.1028`.
+4. **Run 2 → Run 3 Single-Stage Plain (`2df3779`, `4f76e34`):** Replaced the 2-stage split with single-stage **log-uniform `N_ctx = 100..10,000`**, added `--per-slot-note-temporal` (per-slot `max / latest / delta / time-attn` across visits), switched long-note windowing to 32-token overlap, and expanded `--ridge-grid-size 5 → 7` (raising upper CATE shrinkage to `~22k` to prevent 384-d over-spread). *Result:* All-time best plain-note 1k-study performance (`cate_rmse 0.1028 → 0.0962`, `within_r +0.144 → +0.187`, `prop_rmse 0.1275 → 0.1199`).
+5. **Run 3 → Run 4 Single-Stage Paraphrased (`91e911f`, `db41543`):** **Pure DGP upgrade (1-variable ablation)** — added `--paraphrase-bank` (`nemotron_5000_paraphrases.json.gz`: 2,902 clinical findings × ~10 LLM paraphrases, multi-section oncology headers, varied ECOG templates, and benign EHR filler) while holding architecture/objective/schedule fixed. *Result:* Exposed that static 16-slot note attention (`0.52` probe AUROC) + lexical n-grams lose traction under paraphrased/Full-LLM clinical prose (`1k cate_rmse = 0.1048`, `within_r = +0.110`; Full-LLM `0.1233`).
+6. **Run 4 → `TinyOncBERT` + Run 5 (`a62b90e`, `828fc77`):** Guided by the Section 5 representation probe, distilled `TinyOncBERT` (22.7M, PubMedBERT vocab, negation-repulsion), added **study-adaptive sentence-concept MaxSim** (`--sentence-concept-dim 128` via context-only spherical k-means), and upgraded LOO-CV Ridge to **2D block-weighted Ridge (`--block-ridge`)** so propensity, outcome, and CATE independently shrink noisy text blocks relative to structured features. *Result:* Immediately beat plain-text Run 3 on paraphrased notes by step 600–700 (`0.0949` vs. Run 4's `0.0987` and Run 3's `0.0951`).
+
+---
+
+## 2. Training Runs Summary
 
 ### Mid-Training Held-Out Eval (32 fixed held-out studies, `N_ctx = 5,000`, `N_q = 64`)
 Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observational LOO-CV `ridge cate_rmse = 0.1097`.
 
 | Run | Artifact Dir | Architecture / Setup | Note Distribution | Status / Step | `cate_rmse` ↓ | `within_r` ↑ | `pool_r` ↑ | `risk_rmse` ↓ | `prop_rmse` ↓ | `ate_rmse` ↓ |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| **Baseline (Pure PFN)** | `longitudinal_tinybert_n5000` | Pure `TwoWayStudyLayer` (no differentiable R-learner), mean note pooling | Plain | Stopped (527) | `0.1126` | `—` | `+0.6254` | `0.2125` | `—` | `—` |
-| **Curriculum (Pure PFN)** | `longitudinal_tinybert_curriculum` | Pure `TwoWayStudyLayer`, 2-stage small→large N | Plain | Stopped (723) | `0.1118` | `+0.0212` | `+0.6271` | `0.2122` | `0.2008` | `0.0470` |
-| **Run 1 (Hybrid)** | `longitudinal_tinybert_hybrid` | Differentiable LOO-CV R-learner (`solver_dim=64`), 8 note slots, trajectory slopes, 2-stage curriculum (`N=64..512` → `100..5000`) | Plain | Complete (1200) | `0.1016` | `+0.1504` | `+0.7156` | `0.1946` | `0.1719` | `0.0410` |
+| **Baseline (Pure PFN)** | `longitudinal_tinybert_n5000` | Pure `TwoWayStudyLayer` (`4L`, no R-learner), mean note pooling (`4` slots) | Plain | Stopped (527) | `0.1126` | `—` | `+0.6254` | `0.2125` | `—` | `—` |
+| **Curriculum (Pure PFN)** | `longitudinal_tinybert_curriculum` | Pure `TwoWayStudyLayer` (`4L`), 2-stage small→large N | Plain | Stopped (723) | `0.1118` | `+0.0212` | `+0.6271` | `0.2122` | `0.2008` | `0.0470` |
+| **Run 1 (Hybrid)** | `longitudinal_tinybert_hybrid` | Differentiable LOO-CV R-learner (`solver_dim=64`), 8 note slots, trajectory slopes, 2-stage curriculum (`N=64..256` → `500..5000`) | Plain | Complete (1200) | `0.1016` | `+0.1504` | `+0.7156` | `0.1946` | `0.1719` | `0.0410` |
 | **Run 2 (Wide Hybrid)** | `longitudinal_tinybert_wide_hybrid` | Run 1 + `note_slots=16`, `solver_dim=256`, study-adaptive `lexical_dim=128` SVD, 2-stage curriculum | Plain | Complete (1200) | `0.1023` | `+0.1989` | `+0.7024` | `0.1754` | `0.1302` | `0.0375` |
 | **Run 3 (Single-Stage Plain)** | `longitudinal_tinybert_single_stage` | Run 2 + single-stage log-uniform `N_ctx=100..10,000`, `--per-slot-note-temporal`, `--ridge-grid-size 7`, 32-tok overlapping note windows | Plain | Complete (1200 + 1k eval) | **`0.0951`** | **`+0.2169`** | **`+0.7526`** | **`0.1522`** | **`0.1230`** | **`0.0288`** |
 | **Run 4 (Single-Stage Paraphrased)** | `longitudinal_tinybert_paraphrased` | Exact 1-variable ablation of Run 3 with `--paraphrase-bank` (`nemotron_5000_paraphrases.json.gz`, 2,902 findings × ~10 paraphrases + EHR sections + filler) | Paraphrased | Complete (1200 + 1k eval) | `0.0987` | `+0.1593` | `+0.7321` | `0.1876` | `0.1697` | `0.0365` |
-| **Run 5 (`TinyOncBERT` v5)** | `longitudinal_tinyoncbert_v5` | `TinyOncBERT` (22.7M) + `--sentence-concept-dim 128` + `--lexical-dim 128` + `--block-ridge` + `--paraphrase-bank` | Paraphrased | Active (resumed s600 / 1200) | **`0.0949`** | **`+0.1871`** | **`+0.7570`** | **`0.1682`** | **`0.1399`** | **`0.0295`** |
+| **Run 5 (`TinyOncBERT` v5)** | `longitudinal_tinyoncbert_v5` | `TinyOncBERT` (22.7M) + `--sentence-concept-dim 128` + `--lexical-dim 128` + `--block-ridge` + `--paraphrase-bank` | Paraphrased | Active (s752 / 1200) | **`0.0949`** | **`+0.1871`** (s600) / `+0.1843` (s700) | **`+0.7570`** | **`0.1671`** | **`0.1399`** | **`0.0293`** |
 
-*(Run 5 note: The initial Run 5 process was SIGKILLed by the Linux host OOM killer at step 400 entering mid-training evaluation because `_EpisodePrefetcher` with `num_workers=16` buffered `32` paraphrased mega-episodes in the training pool and spawned a nested `16`-worker / `32`-episode eval pool simultaneously (`64` buffered multi-section cohorts + `32` PyTorch worker processes). Fixed in `oci/longitudinal/training.py` by capping `_EpisodePrefetcher._max_inflight` to `6`, capping nested mid-training eval workers/buffer to `4`, and adding explicit `del rows` / `gc.collect()` boundaries; `checkpoint.pt` at step 300 is intact and ready for `resume`.)*
+*(Run 5 host-RAM note: Run 5 was SIGKILLed by the Linux OOM killer at step 400 — fixed by capping `_EpisodePrefetcher._max_inflight` to `6`, nested eval workers to `<= 2`, and adding `del rows` / `gc.collect()` + glibc `malloc_trim(0)` in `oci/longitudinal/training.py` — and again at step 700 while sharing host RAM with Tabular v3's 16 workers; resumed cleanly from step 600 with `--num-workers 6` and passed step 700 cleanly.)*
 
-### Learning Trajectories (Run 3 & Run 4 on 32 Held-Out Studies at `N_ctx = 5,000`)
+### Learning Trajectories (Run 3, Run 4, & Run 5 on 32 Held-Out Studies at `N_ctx = 5,000`)
 
 **Run 3 (Single-Stage Plain):**
 
@@ -59,9 +117,21 @@ Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observat
 | 1100 | `0.0987` | `+0.1595` | `+0.7323` | `0.1876` | `0.1697` | `0.0365` |
 | **1200** | **`0.0987`** | **`+0.1593`** | **`+0.7321`** | **`0.1876`** | **`0.1697`** | **`0.0365`** |
 
+**Run 5 (`TinyOncBERT` v5, evaluated on paraphrased held-out notes — active):**
+
+| Step | `cate_rmse` | `within_r` | `pool_r` | `risk_rmse` | `prop_rmse` | `ate_rmse` |
+|---:|---:|---:|---:|---:|---:|---:|
+| 100 | `0.0988` | `+0.1453` | `+0.7279` | `0.1755` | `0.1452` | `0.0306` |
+| 200 | `0.0973` | `+0.1671` | `+0.7393` | `0.1746` | `0.1439` | `0.0306` |
+| 300 | `0.0972` | `+0.1568` | `+0.7414` | `0.1727` | `0.1431` | `0.0311` |
+| 400 | `0.0969` | `+0.1594` | `+0.7479` | `0.1703` | `0.1411` | `0.0322` |
+| 500 | `0.0957` | `+0.1828` | `+0.7524` | `0.1699` | `0.1417` | `0.0299` |
+| 600 | **`0.0949`** | **`+0.1871`** | **`+0.7570`** | `0.1682` | **`0.1399`** | `0.0295` |
+| **700** | **`0.0949`** | `+0.1843` | `+0.7569` | **`0.1671`** | `0.1402` | **`0.0293`** |
+
 ---
 
-## 2. Final 1,000-Study Held-Out Evaluation (`N_ctx = 5,000`, `64,000` query patients, `seed = 42`)
+## 3. Final 1,000-Study Held-Out Evaluation (`N_ctx = 5,000`, `64,000` query patients, `seed = 42`)
 
 Baselines across all 1,000 held-out studies: `zero = 0.1455`, observational LOO-CV `ridge = 0.1199`, `arm_mean = 0.1140`.
 
@@ -102,7 +172,7 @@ Baselines across all 1,000 held-out studies: `zero = 0.1455`, observational LOO-
 
 ---
 
-## 3. Zero-Shot Plain vs. Paraphrased Distribution-Shift Evaluation
+## 4. Zero-Shot Plain vs. Paraphrased Distribution-Shift Evaluation
 
 Paired evaluation on 8 held-out studies (`N_ctx = 500`, `N_q = 64`, `seed = 42`) with bit-identical ground truth between plain and paraphrased multi-section notes (`arm_mean = 0.0913`, `ridge = 0.0959`):
 
@@ -122,7 +192,7 @@ Paired evaluation on 8 held-out studies (`N_ctx = 500`, `N_q = 64`, `seed = 42`)
 
 ---
 
-## 4. Representation & Pooling Probe (Plain vs. Paraphrased vs. Full-LLM Realistic Notes)
+## 5. Representation & Pooling Probe (Plain vs. Paraphrased vs. Full-LLM Realistic Notes)
 
 Paired notes-only observational probe on `bladder_q05_v036` (21 note findings) and `endometrium_q04_v046` (57 note findings) — 78 total hidden note-only clinical findings, `N_fit = 200`, `N_test = 80`. Full-LLM cohorts were rendered end-to-end with Nemotron 3.5 (`nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4`, NVIDIA sampling profile `temp=1.0, top_p=0.95, top_k=0, enable_thinking=False`).
 
@@ -158,7 +228,7 @@ Metric shown: **mean held-out AUROC across all 78 hidden note-only clinical find
 
 ---
 
-## 5. `TinyOncBERT` Distillation & 16-Cohort Full-LLM Applied vs. Foundation Model Benchmark
+## 6. `TinyOncBERT` Distillation & 16-Cohort Full-LLM Applied vs. Foundation Model Benchmark
 
 ### `TinyOncBERT` (6L / 384D / 6 heads, 22.7M params, PubMedBERT vocab)
 Trained with `scripts/run_tinyoncbert_h200.sh` (`oci/longitudinal/tinyoncbert.py`) on 2M curated `split == "train"` clinical sentences + 250k contiguous 512-token windows from `ksg-dfci/mmai-synthetic-1226/patients/all_synthetic_notes.parquet` (3 epochs, **7.6 min on 1× H200**, `artifacts/tinyoncbert_6l_384d`):
