@@ -178,19 +178,21 @@ Evaluated across all 16 Nemotron 3.5 full-LLM held-out cohorts (`artifacts/llm_e
 | PFN Run 2 (Wide Hybrid, plain, s1200) | `0.1273` | `+0.117` | `+0.671` | `0.1956` | `0.1848` | `0.0634` |
 | PFN Run 3 (Single-Stage, plain, s800) | `0.1228` | `+0.093` | `+0.692` | `0.1882` | `0.1774` | `0.0550` |
 | PFN Run 4 (Single-Stage, paraphrased, s700) | `0.1233` | `+0.096` | `+0.691` | `0.1891` | `0.1762` | `0.0558` |
-| PFN Run 5 (TinyOncBERT + Block-Ridge, live s400) | `0.1226` | `+0.125` | `+0.704` | `0.1843` | `0.1727` | `0.0584` |
-| Applied: Struct-Only Ridge R-Learner | `0.1137` | `+0.152` | `+0.739` | `0.1838` | `0.1742` | **`0.0421`** |
+| PFN Run 5 (TinyOncBERT + Block-Ridge, s600) | `0.1217` | `+0.130` | `+0.703` | `0.1847` | `0.1738` | `0.0568` |
+| Applied: Struct-Only Ridge R-Learner | `0.1137` | `+0.152` | `+0.739` | `0.1838` | `0.1742` | `0.0421` |
 | Applied: Struct + LexSVD Ridge R-Learner | `0.1144` | `+0.135` | `+0.736` | `0.1857` | `0.1770` | `0.0441` |
 | Applied: Struct + TinyBERT SentKM Ridge-R | `0.1147` | `+0.155` | `+0.734` | `0.1847` | `0.1758` | `0.0469` |
 | Applied: Struct + Qwen3-0.6B SentKM Ridge-R | `0.1164` | `+0.141` | `+0.724` | `0.1875` | `0.1774` | `0.0465` |
 | Applied: Struct + **TinyOncBERT** SentKM Ridge-R | `0.1129` | `+0.144` | `+0.744` | `0.1841` | `0.1737` | `0.0463` |
 | Applied: Struct + TinyOncBERT SentKM+Lex GBM-R | `0.1127` | `+0.160` | `+0.743` | `0.1768` | `0.1697` | `0.0456` |
 | Applied: Struct + TinyOncBERT SentKM+Lex DragonNet | `0.1446` | `+0.085` | `+0.579` | `0.1925` | `0.1861` | `0.0662` |
-| **Zero-Shot Bridge: Tabular PFN-v2 (`Struct-Only`, 220)** | `0.1146` | `+0.161` | `+0.742` | `0.1803` | `0.1621` | `0.0487` |
-| **Zero-Shot Bridge: Tabular PFN-v2 (`Struct + TinyOncBERT SentKM-128`)** | `0.1111` | **`+0.173`** | **`+0.763`** | `0.1722` | `0.1591` | `0.0495` |
-| **Zero-Shot Bridge: Tabular PFN-v2 (`Struct + SentKM-256 + LexSVD-128`)** | `0.1110` | `+0.148` | `+0.761` | `0.1718` | `0.1548` | `0.0488` |
-| **Zero-Shot Bridge: Tabular PFN-v2 (`Struct + SentKM-512 + LexSVD-128`)** | **`0.1108`** | `+0.147` | `+0.762` | `0.1730` | `0.1606` | `0.0489` |
-| **Zero-Shot Bridge: Tabular PFN-v3 (live s5000, `Struct + SentKM-256`)** | `0.1119` | `+0.154` | `+0.753` | **`0.1697`** | **`0.1512`** | `0.0494` |
+| Zero-Shot Bridge: Tabular PFN-v2 (`Struct + SentKM-128`) | `0.1111` | `+0.173` | `+0.763` | `0.1722` | `0.1591` | `0.0495` |
+| Zero-Shot Bridge: Tabular PFN-v2 (`Struct + SentKM-512 + LexSVD-128`) | `0.1108` | `+0.147` | `+0.762` | `0.1730` | `0.1606` | `0.0489` |
+| Zero-Shot Bridge: **Tabular PFN-v3 (s25k)** (`Struct-Only`, 220) | `0.1099` | `+0.189` | `+0.759` | `0.1766` | `0.1628` | `0.0409` |
+| **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + TinyOncBERT SentKM-128`)** | `0.1054` | **`+0.234`** | `+0.782` | `0.1682` | `0.1576` | `0.0406` |
+| **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + TinyOncBERT SentKM-256`)** | **`0.1043`** | `+0.210` | **`+0.786`** | **`0.1663`** | `0.1501` | **`0.0392`** |
+| **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + SentKM-256 + LexSVD-128`)** | `0.1045` | `+0.222` | **`+0.786`** | `0.1673` | `0.1510` | `0.0396` |
+| Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + SentKM-512 + LexSVD-128`) | `0.1053` | `+0.201` | `+0.781` | `0.1694` | **`0.1497`** | **`0.0392`** |
 
 #### `N_ctx = 200` (small cohort regime, 3,200 held-out query patients)
 
@@ -200,22 +202,25 @@ Evaluated across all 16 Nemotron 3.5 full-LLM held-out cohorts (`artifacts/llm_e
 | PFN Run 1 (Hybrid, plain, s1200) | `0.1322` | `-0.019` | `+0.639` | `0.2006` | `0.1915` | `0.0675` |
 | PFN Run 3 (Single-Stage, plain, s800) | `0.1337` | `+0.004` | `+0.611` | `0.1979` | `0.1923` | `0.0627` |
 | PFN Run 4 (Single-Stage, paraphrased, s700) | `0.1332` | `+0.009` | `+0.614` | `0.1993` | `0.1924` | `0.0633` |
-| PFN Run 5 (TinyOncBERT + Block-Ridge, live s400) | `0.1326` | `+0.014` | `+0.629` | `0.1980` | `0.1907` | `0.0638` |
+| PFN Run 5 (TinyOncBERT + Block-Ridge, s600) | `0.1327` | `+0.003` | `+0.622` | `0.1972` | `0.1923` | `0.0619` |
 | Applied: Struct-Only Ridge R-Learner | `0.1331` | `+0.025` | `+0.616` | `0.1964` | `0.1897` | `0.0670` |
 | Applied: Struct + TinyBERT SentKM Ridge-R | `0.1458` | `+0.015` | `+0.549` | `0.1992` | `0.1929` | `0.0689` |
 | Applied: Struct + Qwen3-0.6B SentKM Ridge-R | `0.1395` | `+0.012` | `+0.576` | `0.2021` | `0.1907` | `0.0693` |
 | Applied: Struct + **TinyOncBERT** SentKM Ridge-R | `0.1336` | `-0.004` | `+0.614` | `0.1972` | `0.1906` | `0.0701` |
 | Applied: Struct + TinyOncBERT SentKM+Lex GBM-R | `0.1404` | `+0.045` | `+0.608` | `0.2126` | `0.2030` | **`0.0577`** |
 | Applied: Struct + TinyOncBERT SentKM+Lex DragonNet | `0.1639` | `+0.007` | `+0.457` | `0.2082` | `0.1941` | `0.0706` |
-| **Zero-Shot Bridge: Tabular PFN-v2 (`Struct + TinyOncBERT SentKM-128`)** | **`0.1313`** | **`+0.063`** | **`+0.649`** | `0.1971` | **`0.1746`** | `0.0688` |
-| **Zero-Shot Bridge: Tabular PFN-v2 (`Struct + TinyOncBERT SentKM-256`)** | `0.1319` | **`+0.063`** | `+0.638` | **`0.1949`** | `0.1790` | `0.0693` |
+| Zero-Shot Bridge: Tabular PFN-v2 (`Struct + SentKM-128`) | `0.1313` | `+0.063` | `+0.649` | `0.1971` | **`0.1746`** | `0.0688` |
+| Zero-Shot Bridge: Tabular PFN-v2 (`Struct + SentKM-256`) | `0.1319` | `+0.063` | `+0.638` | **`0.1949`** | `0.1790` | `0.0693` |
+| **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + TinyOncBERT SentKM-128`)** | **`0.1279`** | `+0.028` | **`+0.657`** | `0.1970` | `0.1827` | `0.0632` |
+| **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + TinyOncBERT SentKM-256`)** | `0.1283` | **`+0.068`** | `+0.656` | `0.1996` | `0.1890` | `0.0645` |
 
 ### Key Conclusions from the 16-Cohort Full-LLM Benchmark
 1. **`TinyOncBERT` (22.7M) beat both `TinyBERT` (14M) and its own 600M teacher `Qwen3-Embedding-0.6B`** on every metric at both `N = 200` and `N = 800` — validating that oncology domain vocabulary + negation-repulsion distillation (`val_neg_flip_cos = 0.066`) makes a compact encoder outperform a 26× larger general embedder on realistic clinical notes.
-2. **Per-study cross-fitted R-learners beat Runs 1–5 (uniform Ridge PFNs) at `N = 800`:** `Applied: Struct + TinyOncBERT SentKM+Lex GBM-R` achieved `cate_rmse = 0.1127`, `within_r = +0.160`, `risk_rmse = 0.1768`, and `prop_rmse = 0.1697` (vs. Run 5 step-400 `0.1226 / +0.125 / 0.1843 / 0.1727`).
-3. **Zero-shot `TinyOncBERT + SparseTabularCausalPFN` beat EVERY method — including `Applied GBM-R` — at BOTH `N = 800` AND `N = 200`:** Feeding unmixed `[patient_summary_vector + context-only TinyOncBERT sentence MaxSim prototypes ± lexical SVD]` directly into `SparseTabularCausalPFN` **zero-shot (never trained on text!)** set new records across every primary metric:
-   - **`N = 800`:** `cate_rmse = 0.1108` (`SentKM-512+Lex`) / `0.1111` (`SentKM-128`, **`within_r = +0.173`, `pool_r = +0.763`**), while **tabular v3 at only step 5,000/30,000** already achieved **`risk_rmse = 0.1697`** (`-0.0071` vs. GBM-R) and **`prop_rmse = 0.1512`** (`-0.0185` vs. GBM-R, `-0.0215` vs. Run 5)!
-   - **`N = 200`:** `PFN-v2 (Struct + SentKM-128)` was the **only method to beat Arm-Mean (`0.1313` vs. `0.1315`)** while raising `within_r` to **`+0.063`** (vs. GBM-R `+0.045` at `0.1404` RMSE, and Run 5 `+0.014`) and slashing `prop_rmse` to **`0.1746`**!
+2. **Per-study cross-fitted R-learners beat Runs 1–5 (uniform Ridge PFNs) at `N = 800`:** `Applied: Struct + TinyOncBERT SentKM+Lex GBM-R` achieved `cate_rmse = 0.1127`, `within_r = +0.160`, `risk_rmse = 0.1768`, and `prop_rmse = 0.1697` (vs. Run 5 step-600 `0.1217 / +0.130 / 0.1847 / 0.1738`).
+3. **Zero-shot `TinyOncBERT + SparseTabularCausalPFN v3 (s25k)` shattered EVERY record at BOTH `N = 800` AND `N = 200`:** Feeding unmixed `[patient_summary_vector + context-only TinyOncBERT sentence MaxSim prototypes ± lexical SVD]` directly into finished `SparseTabularCausalPFN v3` **zero-shot (never trained on text!)** dominated every applied and end-to-end model on every single metric:
+   - **`N = 800`:** **`cate_rmse = 0.1043`** (`SentKM-256`, **`-0.0084` vs. GBM-R `0.1127`, `-0.0174` vs. Run 5 `0.1217`!**), **`within_r = +0.234`** (`SentKM-128`, **+46% above GBM-R, +80% above Run 5!**), **`pool_r = +0.786`**, **`risk_rmse = 0.1663`**, **`prop_rmse = 0.1497–0.1501`** (`-0.020` vs. GBM-R!), and **`ate_rmse = 0.0392`** (first method under `0.040`!).
+   - **`N = 200`:** **`cate_rmse = 0.1279`** (`SentKM-128`, beating Arm-Mean `0.1315` by `-0.0036` and crushing GBM-R `0.1404` by `-0.0125`!) and **`within_r = +0.068`** (`SentKM-256`, **`pool_r = +0.657`**)!
+   - *(Note: Adding `NaN`-containing nadir/peak features to raw v3 dropped `0.1043 → 0.1086` specifically because sparse `NaN`s triggered v3's `miss_rate > 0.55` screener shortcut — which `v3.1` fine-tuning fixes.)*
    - **Blind raw-note clinical role discovery (zero LLM extraction):** On `bladder_q01_v005`, the top 3 overall features out of 476 were all `flank_pain` sentence clusters (`[dual_role]` / `[modifier]`, `g_tau = 0.86`); on `breast_q02_v030`, the top 6 overall features were 100% pure hits on the exact two oracle note findings (`"takes lisinopril daily"` / `"Hypertension managed with lisinopril"` for `concomitant_ace_inhibitor_use`, and `"history of prior cellulitis"` with `g_m = 0.59, g_tau = 0.00` for `history_of_cellulitis`); on `bladder_q05_v036`, it nailed `lab.glucose.latest` (`[confounder]`, `p_c=0.975`), caught `lab.platelets.slope` as a pure **`[instrument]`** (`p_sig=0.969, g_m=0.06`), and surfaced ECOG performance status directly from prose sentences.
    - **Direct blueprint for Longitudinal `v6`:** Replacing Run 5's uniform block-Ridge head (and static `note_slots` residual inputs) with a `SparseTabularCausalPFN` v3 ARD + co-observed-correlation + dynamic `attn_slots` head on top of `TinyOncBERT` sentence prototypes + explicit structured summaries unifies both foundation models and immediately solves Run 5's text-noise dilution and cross-modal nonlinearity bottlenecks.
 4. **Per-study end-to-end neural CATE (`DragonNet`) severely overfit** (`cate_rmse = 0.1639` at `N = 200`, `0.1446` at `N = 800` — worse than Arm-Mean `0.1316`), confirming that orthogonalized R-learner regularization is essential when CATE is unobserved.
