@@ -1,37 +1,47 @@
-"""Vectorized OCI-aligned 5-family high-dimensional sparse tabular causal prior.
+"""Vectorized OCI-aligned 6-family high-dimensional sparse tabular causal prior.
 
 Generates synthetic observational studies with N up to 10,000+ and P up to 4,000+
-candidate features by mixing five fast vectorized DGP families:
+candidate features by mixing six fast vectorized DGP families:
 
-  1. ``sparse_oci`` (default 30%):
+  1. ``sparse_oci`` (default 20%):
      High-dimensional all-evidence clinical tables with 50–99.5% noise, explicit
      6-class causal roles (``noise``, ``instrument``, ``prognostic``, ``confounder``,
      ``modifier``, ``dual_role``), multi-level mutually exclusive Dirichlet one-hot
      categorical blocks, heavy-tailed labs & zero-inflated counts, optional dense
      weak-confounding regimes, collinear noisy proxies, block-correlated factor
-     noise, rich 1D nonlinearities + pairwise interactions, optional unmeasured
+     noise, rich 1D nonlinearities + confounder×confounder / confounder×modifier /
+     modifier×modifier interactions (20% pure-epistatic), optional unmeasured
      confounding (Z-bias!), Stage-1 LLM extraction noise, fragmented synonymous
      extraction clusters, MCAR/MAR/MNAR + 3-state EHR documentation, occasional
      RCTs, strictly null-HTE studies, and both ``logOR`` and additive ``RD`` scales.
-  2. ``reequation_calc`` (default 15%):
+  2. ``reequation_calc`` (default 12%):
      Exact vectorized implementation of OCI's ``sample_size_calculator/engine.R``
-     and ``synthetic_data/reequation.py`` tabular DGP family embedded inside
+     and ``synthetic_data/reequation.py`` tabular DGP family with optional
+     confounder×confounder and confounder×modifier interactions embedded inside
      ``P = 20..4,000`` realistic Stage-2 noise/proxy/instrument/fragmented columns.
-  3. ``nemotron_design`` (default 20% when bundled ``nemotron_5000.json.gz`` exists):
+  3. ``nemotron_design`` (default 18% when bundled ``nemotron_5000.json.gz`` exists):
      Direct tabular episodes drawn from the 4,000 ``split == "train"`` oncology
-     study designs in ``synthetic_data/designs/nemotron_5000.json.gz`` embedded
-     inside ``P = 20..4,000`` candidate columns. The 1,000 ``split == "held_out"``
-     designs (including 3 unseen cancers) are strictly excluded from training and
-     reserved for zero-shot eval.
+     study designs in ``synthetic_data/designs/nemotron_5000.json.gz`` with rich
+     clinical interactions embedded inside ``P = 20..4,000`` candidate columns.
+     The 1,000 ``split == "held_out"`` designs (including 3 unseen cancers) are
+     strictly excluded from training and reserved for zero-shot eval.
   4. ``tree_subgroup`` (default 18%):
      Clinical decision-tree / multi-way biomarker rule-list subgroup DGP (depth 2–4
-     conjunctions, discontinuous cutoffs, piecewise subgroups, near-positivity pockets)
-     where treatment effect heterogeneity cannot be captured by linear/quadratic
-     additive models alone.
-  5. ``causal_scm`` (default 17%):
+     conjunctions including explicit confounder×modifier rules, discontinuous
+     cutoffs, piecewise subgroups, near-positivity pockets).
+  5. ``causal_scm`` (default 16%):
      General nonlinear Structural Causal Model (layered DAG + 2-layer MLP treatment,
-     prognostic, and HTE surfaces) with explicit observed-parent and latent-parent
-     M-bias colliders, heavy tails, dense weak confounding, and harsh positivity.
+     prognostic, and joint confounder×modifier HTE surfaces) with explicit
+     observed-parent and latent-parent M-bias colliders, heavy tails, dense weak
+     confounding, and harsh positivity.
+  6. ``interacting_clinical`` (default 16%):
+     Interaction-heavy clinical & multimodal-embedding hybrid prior: coupled
+     confounder×confounder propensity interactions, prognostic×confounder outcome
+     interactions, strong confounder×modifier / prognostic×modifier /
+     modifier×modifier HTE (30% pure-epistatic crossover with zero marginal modifier
+     slope!), and in 50% of wide cohorts a bounded correlated cosine-MaxSim
+     embedding block mimicking frozen clinical-text representations (e.g.
+     ``TinyOncBERT SentKM``) coupled with structured covariates.
 """
 
 from dataclasses import dataclass
@@ -59,6 +69,7 @@ DGP_FAMILIES = (
     "nemotron_design",
     "tree_subgroup",
     "causal_scm",
+    "interacting_clinical",
 )
 
 _DEFAULT_DESIGN_BANK = (
@@ -134,8 +145,8 @@ class PriorConfig:
     missing_study_prob: float = 0.75
     max_missing_rate: float = 0.45
     factor_noise_rank: int = 12
-    # OCI-aligned 5-family multi-DGP mixture settings
-    family_weights: tuple[float, ...] = (0.30, 0.15, 0.20, 0.18, 0.17)
+    # OCI-aligned 6-family multi-DGP mixture settings
+    family_weights: tuple[float, ...] = (0.20, 0.12, 0.18, 0.18, 0.16, 0.16)
     design_bank_path: str | None = None
     design_split: str = "train"
     unmeasured_conf_prob: float = 0.25
@@ -146,14 +157,14 @@ class PriorConfig:
     mnar_prob: float = 0.50
     rd_scale_prob: float = 0.25
     rct_prob: float = 0.08
-    max_treatment_logit_std: float = 3.0
+    max_treatment_logit_std: float = 3.2
     categorical_block_prob: float = 0.70
 
     def __post_init__(self):
         fw = tuple(float(w) for w in self.family_weights)
-        # Gracefully pad legacy 3-family checkpoints with zeros for new families
-        if len(fw) == 3 and len(DGP_FAMILIES) == 5:
-            fw = fw + (0.0, 0.0)
+        # Gracefully pad legacy 3-family or 5-family checkpoints with zeros for newer families
+        if len(fw) < len(DGP_FAMILIES) and len(fw) in (3, 5):
+            fw = fw + (0.0,) * (len(DGP_FAMILIES) - len(fw))
         object.__setattr__(self, "family_weights", fw)
         if len(self.family_weights) != len(DGP_FAMILIES) or any(w < 0 for w in self.family_weights):
             raise ValueError(f"family_weights must be {len(DGP_FAMILIES)} non-negative floats")
@@ -890,12 +901,17 @@ def _sample_sparse_oci(
     mod_idx = np.where(roles_core == ROLE_TO_ID["modifier"])[0]
     dual_idx = np.where(roles_core == ROLE_TO_ID["dual_role"])[0]
 
-    # Treatment equation (confounders + dual_role; instruments added during padding)
+    # Treatment equation (confounders + dual_role + optional confounder x confounder interactions)
     t_drivers = np.concatenate([conf_idx, dual_idx])
     t_signal = np.zeros(n_total, dtype=np.float32)
     if len(t_drivers):
         phi_t = _xf(t_drivers)
         t_signal += phi_t @ rng.normal(0.0, 1.0, size=len(t_drivers)).astype(np.float32)
+        if len(t_drivers) >= 2 and rng.random() < 0.45:
+            n_tp = int(rng.integers(1, min(3, len(t_drivers)) + 1))
+            for _ in range(n_tp):
+                a, b = rng.choice(len(t_drivers), size=2, replace=False)
+                t_signal += float(rng.normal(0.0, 0.55)) * _standardize_vec(phi_t[:, a] * phi_t[:, b])
 
     # Outcome baseline (50% pure-crossover modifiers with NO outcome main effect!)
     y_drivers = np.concatenate([conf_idx, prog_idx, dual_idx])
@@ -905,19 +921,36 @@ def _sample_sparse_oci(
     if len(y_drivers):
         phi_y = _xf(y_drivers)
         y_base += phi_y @ rng.normal(0.0, 1.0, size=len(y_drivers)).astype(np.float32)
-        if len(y_drivers) >= 2 and rng.random() < 0.40:
-            a, b = rng.choice(len(y_drivers), size=2, replace=False)
-            y_base += float(rng.normal(0.0, 0.50)) * _standardize_vec(phi_y[:, a] * phi_y[:, b])
+        if len(y_drivers) >= 2 and rng.random() < 0.55:
+            n_yp = int(rng.integers(1, min(4, len(y_drivers)) + 1))
+            for _ in range(n_yp):
+                a, b = rng.choice(len(y_drivers), size=2, replace=False)
+                y_base += float(rng.normal(0.0, 0.50)) * _standardize_vec(phi_y[:, a] * phi_y[:, b])
 
-    # Treatment effect heterogeneity
+    # Treatment effect heterogeneity (including modifier x modifier AND confounder x modifier!)
     ht_drivers = np.concatenate([mod_idx, dual_idx])
     ht_part = np.zeros(n_total, dtype=np.float32)
     if len(ht_drivers):
         phi_ht = _xf(ht_drivers)
-        ht_part += phi_ht @ rng.normal(0.0, 1.0, size=len(ht_drivers)).astype(np.float32)
-        if len(ht_drivers) >= 2 and rng.random() < 0.30:
-            a, b = rng.choice(len(ht_drivers), size=2, replace=False)
-            ht_part += float(rng.normal(0.0, 0.55)) * _standardize_vec(phi_ht[:, a] * phi_ht[:, b])
+        # 20% pure epistatic HTE (weak/zero main linear slope, driven by interactions!)
+        pure_epi = (len(ht_drivers) >= 2 or len(conf_idx) >= 1) and (rng.random() < 0.20)
+        if not pure_epi:
+            ht_part += phi_ht @ rng.normal(0.0, 1.0, size=len(ht_drivers)).astype(np.float32)
+        if len(ht_drivers) >= 2 and (pure_epi or rng.random() < 0.45):
+            n_mp = int(rng.integers(1, min(3, len(ht_drivers)) + 1))
+            for _ in range(n_mp):
+                a, b = rng.choice(len(ht_drivers), size=2, replace=False)
+                ht_part += float(rng.normal(0.0, 0.70)) * _standardize_vec(phi_ht[:, a] * phi_ht[:, b])
+        # Confounder x Modifier HTE interaction (e.g. biomarker benefit gated by age/ECOG!)
+        if len(conf_idx) >= 1 and (pure_epi or rng.random() < 0.45):
+            n_cm = int(rng.integers(1, min(3, len(conf_idx) * len(ht_drivers)) + 1))
+            phi_c_all = _xf(conf_idx)
+            for _ in range(n_cm):
+                ci = int(rng.integers(0, len(conf_idx)))
+                mi = int(rng.integers(0, len(ht_drivers)))
+                ht_part += float(rng.normal(0.0, 0.75)) * _standardize_vec(phi_c_all[:, ci] * phi_ht[:, mi])
+                # Accurate ground-truth role: confounder participating in HTE becomes dual_role
+                roles_core[conf_idx[ci]] = ROLE_TO_ID["dual_role"]
 
     # Optional unmeasured confounding (matches reequation.py -> creates real Z-bias on instruments!)
     n_unmeasured = 0
@@ -1050,7 +1083,9 @@ def _sample_reequation_calc(
 
     cols, bins, col_roles = [], [], []
     group_effects = []
+    group_col_spans: list[tuple[int, int]] = []
     for g_i, role_id in enumerate(group_roles):
+        c_start = len(cols)
         z = latent[:, g_i]
         kind = str(rng.choice(["continuous", "binary", "categorical"], p=[0.40, 0.35, 0.25]))
         if kind == "categorical" and (len(cols) + 4 > p - 1):
@@ -1095,6 +1130,7 @@ def _sample_reequation_calc(
                 bins.append(True)
                 col_roles.append(role_id)
             group_effects.append(_standardize_vec(eff))
+        group_col_spans.append((c_start, len(cols)))
 
     X_core = np.stack(cols, axis=1).astype(np.float32)
     bin_core = np.asarray(bins, dtype=bool)
@@ -1106,12 +1142,14 @@ def _sample_reequation_calc(
     ht_part = np.zeros(n_total, dtype=np.float32)
     mod_main = rng.random() < 0.45
 
-    y_active_g = []
+    conf_g, ht_g, y_active_g = [], [], []
     for g_i, role_id in enumerate(group_roles):
         if role_id in (ROLE_TO_ID["confounder"], ROLE_TO_ID["dual_role"]):
             t_signal += float(rng.uniform(-1.0, 1.0)) * E_mat[:, g_i]
             y_base += float(rng.uniform(-1.0, 1.0)) * E_mat[:, g_i]
             y_active_g.append(g_i)
+            if role_id == ROLE_TO_ID["confounder"]:
+                conf_g.append(g_i)
         elif role_id == ROLE_TO_ID["instrument"]:
             t_signal += float(rng.uniform(-1.5, 1.5)) * E_mat[:, g_i]
         elif role_id == ROLE_TO_ID["prognostic"]:
@@ -1119,14 +1157,40 @@ def _sample_reequation_calc(
             y_active_g.append(g_i)
         if role_id in (ROLE_TO_ID["modifier"], ROLE_TO_ID["dual_role"]):
             ht_part += float(rng.uniform(-1.0, 1.0)) * E_mat[:, g_i]
+            ht_g.append(g_i)
             if role_id == ROLE_TO_ID["modifier"] and mod_main:
                 y_base += float(rng.uniform(-0.7, 0.7)) * E_mat[:, g_i]
                 y_active_g.append(g_i)
 
-    # Pairwise prognostic interactions (matches longitudinal.py / reequation.py)
-    if len(y_active_g) >= 2 and rng.random() < 0.50:
-        a, b = rng.choice(y_active_g, size=2, replace=False)
-        y_base += float(rng.uniform(-0.5, 0.5)) * _standardize_vec(E_mat[:, a] * E_mat[:, b])
+    # Pairwise confounder x confounder propensity interactions
+    t_conf_g = [g for g, r in enumerate(group_roles) if r in (ROLE_TO_ID["confounder"], ROLE_TO_ID["dual_role"])]
+    if len(t_conf_g) >= 2 and rng.random() < 0.40:
+        n_tp = int(rng.integers(1, min(3, len(t_conf_g)) + 1))
+        for _ in range(n_tp):
+            a, b = rng.choice(t_conf_g, size=2, replace=False)
+            t_signal += float(rng.uniform(-0.55, 0.55)) * _standardize_vec(E_mat[:, a] * E_mat[:, b])
+
+    # Pairwise prognostic / confounder outcome interactions
+    if len(y_active_g) >= 2 and rng.random() < 0.55:
+        n_yp = int(rng.integers(1, min(4, len(y_active_g)) + 1))
+        for _ in range(n_yp):
+            a, b = rng.choice(y_active_g, size=2, replace=False)
+            y_base += float(rng.uniform(-0.5, 0.5)) * _standardize_vec(E_mat[:, a] * E_mat[:, b])
+
+    # Pairwise modifier x modifier and confounder x modifier HTE interactions
+    if not is_null_hte and len(ht_g) >= 2 and rng.random() < 0.40:
+        n_mp = int(rng.integers(1, min(3, len(ht_g)) + 1))
+        for _ in range(n_mp):
+            a, b = rng.choice(ht_g, size=2, replace=False)
+            ht_part += float(rng.uniform(-0.65, 0.65)) * _standardize_vec(E_mat[:, a] * E_mat[:, b])
+    if not is_null_hte and len(ht_g) >= 1 and len(conf_g) >= 1 and rng.random() < 0.45:
+        n_cm = int(rng.integers(1, min(3, len(conf_g) * len(ht_g)) + 1))
+        for _ in range(n_cm):
+            cg = int(rng.choice(conf_g))
+            mg = int(rng.choice(ht_g))
+            ht_part += float(rng.uniform(-0.75, 0.75)) * _standardize_vec(E_mat[:, cg] * E_mat[:, mg])
+            s0, s1 = group_col_spans[cg]
+            roles_core[s0:s1] = ROLE_TO_ID["dual_role"]
 
     n_unmeasured = 0
     if rng.random() < prior.unmeasured_conf_prob:
@@ -1303,12 +1367,37 @@ def _sample_nemotron_design(
                 y_base += float(rng.uniform(-0.7, 0.7)) * z
                 y_active.append(idx)
 
+    # Pairwise confounder x confounder propensity interactions
+    t_active = [i for i in range(n_cand) if roles_core[i] in (ROLE_TO_ID["confounder"], ROLE_TO_ID["dual_role"])]
+    if len(t_active) >= 2 and rng.random() < 0.40:
+        n_tp = int(rng.integers(1, min(3, len(t_active)) + 1))
+        for _ in range(n_tp):
+            a, b = rng.choice(t_active, size=2, replace=False)
+            t_signal += float(rng.uniform(-0.45, 0.45)) * _standardize_vec(X_std[:, a] * X_std[:, b])
+
     # Pairwise outcome interactions (matches _calibrate_longitudinal_equations)
     if len(y_active) >= 2 and rng.random() < 0.65:
         n_pairs = int(rng.integers(1, min(4, len(y_active)) + 1))
         for _ in range(n_pairs):
             a, b = rng.choice(y_active, size=2, replace=False)
             y_base += float(rng.uniform(-0.35, 0.35)) * _standardize_vec(X_std[:, a] * X_std[:, b])
+
+    # Pairwise modifier x modifier and confounder x modifier HTE interactions
+    if not is_null_hte:
+        ht_active = [i for i in range(n_cand) if roles_core[i] in (ROLE_TO_ID["modifier"], ROLE_TO_ID["dual_role"])]
+        conf_only = [i for i in range(n_cand) if roles_core[i] == ROLE_TO_ID["confounder"]]
+        if len(ht_active) >= 2 and rng.random() < 0.45:
+            n_mp = int(rng.integers(1, min(3, len(ht_active)) + 1))
+            for _ in range(n_mp):
+                a, b = rng.choice(ht_active, size=2, replace=False)
+                ht_part += float(rng.uniform(-0.65, 0.65)) * _standardize_vec(X_std[:, a] * X_std[:, b])
+        if len(ht_active) >= 1 and len(conf_only) >= 1 and rng.random() < 0.45:
+            n_cm = int(rng.integers(1, min(3, len(conf_only) * len(ht_active)) + 1))
+            for _ in range(n_cm):
+                ci = int(rng.choice(conf_only))
+                mi = int(rng.choice(ht_active))
+                ht_part += float(rng.uniform(-0.70, 0.70)) * _standardize_vec(X_std[:, ci] * X_std[:, mi])
+                roles_core[ci] = ROLE_TO_ID["dual_role"]
 
     n_unmeasured = 0
     if rng.random() < prior.unmeasured_conf_prob:
@@ -1479,7 +1568,7 @@ def _sample_tree_subgroup(
     for c in y_pool:
         used_y.add(int(c))
 
-    # Multi-way subgroup HTE rules (depth 2-4 biomarker/clinical conjunctions!)
+    # Multi-way subgroup HTE rules (depth 2-4 biomarker/clinical conjunctions + confounder x modifier!)
     ht_part = np.zeros(n_total, dtype=np.float32)
     used_tau: set[int] = set()
     if not is_null_hte:
@@ -1489,6 +1578,28 @@ def _sample_tree_subgroup(
         ht_rules, used_tau = _eval_rule_ensemble(
             X_std, tau_pool, int(rng.integers(2, 6)), rng, min_depth=2, max_depth=4
         )
+        # Explicit confounder x modifier cross-role subgroup conjunctions (~55% of studies)
+        if len(conf_pool) > 0 and len(tau_pool) > 0 and rng.random() < 0.55:
+            n_cm_rules = int(rng.integers(1, 4))
+            for _ in range(n_cm_rules):
+                c_idx = int(rng.choice(conf_pool))
+                m_idx = int(rng.choice(tau_pool))
+                if c_idx == m_idx:
+                    continue
+                s1 = 1.0 if rng.random() < 0.5 else -1.0
+                s2 = 1.0 if rng.random() < 0.5 else -1.0
+                cut1 = float(rng.uniform(-0.7, 0.7))
+                cut2 = float(rng.uniform(-0.7, 0.7))
+                if rng.random() < 0.65:
+                    g_cm = ((s1 * (X_std[:, c_idx] - cut1) > 0.0) & (s2 * (X_std[:, m_idx] - cut2) > 0.0)).astype(
+                        np.float32
+                    )
+                else:
+                    g_cm = (_expit(4.0 * s1 * (X_std[:, c_idx] - cut1)) * X_std[:, m_idx]).astype(np.float32)
+                if float(g_cm.std()) > 1e-4:
+                    ht_rules = ht_rules + float(rng.normal(0.0, 0.9)) * _standardize_vec(g_cm)
+                    used_tau.add(c_idx)
+                    used_tau.add(m_idx)
         # Occasional pure subgroup rule (zero linear main term) vs mixed linear + subgroup
         if float(ht_rules.std()) < 1e-4 or rng.random() < 0.35:
             ht_lin = X_std[:, tau_pool] @ rng.normal(0.0, 0.5, size=len(tau_pool)).astype(np.float32)
@@ -1695,11 +1806,18 @@ def _sample_causal_scm(
 
     t_signal = _random_mlp_surface(X_std[:, t_parents], rng, hidden=18)
     y_base = _random_mlp_surface(X_std[:, y_parents], rng, hidden=20)
-    ht_part = (
-        _random_mlp_surface(X_std[:, ht_parents], rng, hidden=14)
-        if len(ht_parents) > 0
-        else np.zeros(n_total, dtype=np.float32)
-    )
+    if len(ht_parents) > 0:
+        # In 45% of non-null SCM studies, confounders jointly modulate modifiers inside the HTE MLP
+        if len(conf_idx) > 0 and rng.random() < 0.45:
+            k_cm = int(rng.integers(1, min(3, len(conf_idx)) + 1))
+            cm_sel = rng.choice(conf_idx, size=k_cm, replace=False)
+            roles_core[cm_sel] = ROLE_TO_ID["dual_role"]
+            ht_in = np.unique(np.concatenate([ht_parents, cm_sel]))
+        else:
+            ht_in = ht_parents
+        ht_part = _random_mlp_surface(X_std[:, ht_in], rng, hidden=18)
+    else:
+        ht_part = np.zeros(n_total, dtype=np.float32)
 
     # Explicit M-bias colliders (both observed-parent Z -> C <- W and latent-parent U_T -> C <- U_Y!)
     n_colliders = 0
@@ -1810,6 +1928,328 @@ def _sample_causal_scm(
     }
 
 
+# ==============================================================================
+# FAMILY 6: INTERACTING CLINICAL & COSINE-MAXSIM EMBEDDING HYBRID PRIOR
+# ==============================================================================
+def _orthogonalize_interaction(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Return a*b projected orthogonal to [1, a, b] (pure crossover interaction)."""
+    a_c = _standardize_vec(a)
+    b_c = _standardize_vec(b)
+    prod = a_c * b_c
+    # Solve 3x3 OLS on [1, a_c, b_c]
+    D = np.stack([np.ones_like(a_c), a_c, b_c], axis=1)
+    gram = D.T @ D + 1e-4 * np.eye(3, dtype=np.float32)
+    coef = np.linalg.solve(gram, D.T @ prod)
+    resid = prod - D @ coef
+    return _standardize_vec(resid)
+
+
+def _sample_interacting_clinical(
+    n_total: int, p: int, prior: PriorConfig, rng: np.random.Generator
+) -> dict:
+    """Interaction-heavy clinical DGP (confounder x confounder, confounder x modifier,
+    pure-epistatic crossover HTE) + 50% correlated cosine-MaxSim embedding feature blocks."""
+    is_null_hte = bool(rng.random() < prior.null_hte_prob)
+    use_emb_block = (p >= 60) and (rng.random() < 0.50)
+
+    max_struct = min(16 if use_emb_block else 22, max(4, p // 3))
+    n_conf = int(rng.integers(2, min(8, max(3, max_struct // 2)) + 1))
+    n_prog = int(rng.integers(1, min(6, max(2, max_struct // 3)) + 1))
+    if is_null_hte:
+        n_mod, n_dual = 0, 0
+    else:
+        n_mod = int(rng.integers(1, min(5, max(2, max_struct // 3)) + 1))
+        n_dual = int(rng.integers(0, min(3, max(1, max_struct // 4)) + 1))
+    while n_conf + n_prog + n_mod + n_dual > max_struct:
+        if n_prog > 1:
+            n_prog -= 1
+        elif n_conf > 2:
+            n_conf -= 1
+        elif n_mod > 1:
+            n_mod -= 1
+        elif n_dual > 0:
+            n_dual -= 1
+        else:
+            break
+    n_struct_base = n_conf + n_prog + n_mod + n_dual
+
+    Z_struct = _generate_factor_latents(n_total, n_struct_base, min(prior.factor_noise_rank, 6), rng)
+    X_s_base, bin_s_base = _realize_column_types(Z_struct, rng)
+    role_s_base = np.concatenate(
+        [
+            np.full(n_conf, ROLE_TO_ID["confounder"], dtype=np.int64),
+            np.full(n_prog, ROLE_TO_ID["prognostic"], dtype=np.int64),
+            np.full(n_mod, ROLE_TO_ID["modifier"], dtype=np.int64),
+            np.full(n_dual, ROLE_TO_ID["dual_role"], dtype=np.int64),
+        ]
+    )
+
+    cols_list, bin_list, role_list = [], [], []
+    use_cats = rng.random() < max(prior.categorical_block_prob, 0.60)
+    cat_budget = p - (36 if use_emb_block else 4)
+    for j in range(n_struct_base):
+        if use_cats and (len(cols_list) + 4 <= cat_budget) and rng.random() < 0.30:
+            n_lvl = int(rng.integers(3, 5))
+            dummies, _ = _make_categorical_dummy_block(Z_struct[:, j], n_lvl, rng)
+            for d_i in range(dummies.shape[1]):
+                cols_list.append(dummies[:, d_i])
+                bin_list.append(True)
+                role_list.append(int(role_s_base[j]))
+        else:
+            cols_list.append(X_s_base[:, j])
+            bin_list.append(bool(bin_s_base[j]))
+            role_list.append(int(role_s_base[j]))
+
+    X_core = np.stack(cols_list, axis=1).astype(np.float32)
+    bin_core = np.asarray(bin_list, dtype=bool)
+    roles_core = np.asarray(role_list, dtype=np.int64)
+    n_struct_cols = X_core.shape[1]
+
+    # Optional correlated cosine-MaxSim embedding block (mimics TinyOncBERT SentKM geometry!)
+    k_emb = 0
+    if use_emb_block and (p - n_struct_cols) >= 32:
+        max_k = min(320, p - n_struct_cols - 4)
+        min_k = min(48, max(24, max_k // 2))
+        k_emb = int(rng.integers(min_k, max(min_k + 1, max_k + 1)))
+        d_lat = int(rng.integers(14, 28))
+        m_sent = int(rng.integers(4, 8))
+
+        # Shared clinical-note direction so cosine similarities lie realistically in ~[0.15, 0.95]
+        u0 = rng.standard_normal(d_lat).astype(np.float32)
+        u0 /= max(float(np.linalg.norm(u0)), 1e-6)
+
+        # Patient latent clinical-note subspace partially correlated with structured severity
+        H_pat = rng.standard_normal((n_total, d_lat)).astype(np.float32)
+        n_link = min(6, Z_struct.shape[1])
+        W_link = rng.normal(0.0, 0.45 / math.sqrt(max(n_link, 1)), size=(n_link, d_lat)).astype(np.float32)
+        H_pat = H_pat + Z_struct[:, :n_link] @ W_link
+        H_pat /= np.maximum(np.linalg.norm(H_pat, axis=1, keepdims=True), 1e-6)
+
+        # Per-patient multi-sentence embeddings (N, m_sent, d_lat), unit normalized
+        c_base = float(rng.uniform(0.55, 0.95))
+        c_pat = float(rng.uniform(0.50, 0.90))
+        c_sent = float(rng.uniform(0.45, 0.85))
+        S_pat = (
+            c_base * u0[None, None, :]
+            + c_pat * H_pat[:, None, :]
+            + c_sent * rng.standard_normal((n_total, m_sent, d_lat)).astype(np.float32)
+        )
+        S_pat /= np.maximum(np.linalg.norm(S_pat, axis=-1, keepdims=True), 1e-6)
+
+        # K unit prototype directions with uniform synonymous clusters (zero role/geometry shortcut!)
+        V_proto = (
+            float(rng.uniform(0.35, 0.80)) * u0[None, :]
+            + rng.standard_normal((k_emb, d_lat)).astype(np.float32)
+        )
+        V_proto /= np.maximum(np.linalg.norm(V_proto, axis=1, keepdims=True), 1e-6)
+        n_syn = int(0.25 * k_emb)
+        if n_syn >= 2 and k_emb >= 8:
+            src_idx = rng.integers(0, k_emb - n_syn, size=n_syn)
+            noise_v = rng.standard_normal((n_syn, d_lat)).astype(np.float32)
+            V_syn = V_proto[src_idx] + float(rng.uniform(0.18, 0.45)) * noise_v
+            V_syn /= np.maximum(np.linalg.norm(V_syn, axis=1, keepdims=True), 1e-6)
+            V_proto[k_emb - n_syn :] = V_syn
+            V_proto = V_proto[rng.permutation(k_emb)]
+
+        # Fast BLAS SGEMM MaxSim: (N*m_sent, d_lat) @ (d_lat, k_emb) -> max over m_sent
+        sims = (S_pat.reshape(n_total * m_sent, d_lat) @ V_proto.T).reshape(n_total, m_sent, k_emb)
+        X_emb = sims.max(axis=1).astype(np.float32)
+
+        # Pick active prototypes uniformly at random so active & noise prototypes are identically distributed
+        n_emb_act = int(rng.integers(2, min(9, max(3, k_emb // 6)) + 1))
+        act_emb = rng.choice(k_emb, size=n_emb_act, replace=False)
+        roles_emb = np.zeros(k_emb, dtype=np.int64)
+        role_choices = (
+            [ROLE_TO_ID["confounder"], ROLE_TO_ID["prognostic"]]
+            if is_null_hte
+            else [
+                ROLE_TO_ID["confounder"],
+                ROLE_TO_ID["prognostic"],
+                ROLE_TO_ID["modifier"],
+                ROLE_TO_ID["dual_role"],
+            ]
+        )
+        for ei in act_emb:
+            roles_emb[ei] = int(rng.choice(role_choices))
+
+        X_core = np.concatenate([X_core, X_emb], axis=1)
+        bin_core = np.concatenate([bin_core, np.zeros(k_emb, dtype=bool)])
+        roles_core = np.concatenate([roles_core, roles_emb])
+
+    X_std = (X_core - X_core.mean(axis=0, keepdims=True)) / np.maximum(
+        X_core.std(axis=0, keepdims=True), 1e-5
+    )
+    mech = str(rng.choice(["linear", "quadratic", "hinge", "saturating", "threshold", "band"]))
+
+    def _phi_col(c: int) -> np.ndarray:
+        if bin_core[c]:
+            return X_std[:, c]
+        m_c = mech if rng.random() < 0.65 else "linear"
+        return _apply_nonlinear(X_std[:, c], m_c, rng)
+
+    conf_idx = np.where(roles_core == ROLE_TO_ID["confounder"])[0]
+    prog_idx = np.where(roles_core == ROLE_TO_ID["prognostic"])[0]
+    mod_idx = np.where(roles_core == ROLE_TO_ID["modifier"])[0]
+    dual_idx = np.where(roles_core == ROLE_TO_ID["dual_role"])[0]
+
+    # 1. Propensity equation: confounders + dual_role + strong confounder x confounder interactions
+    t_drivers = np.concatenate([conf_idx, dual_idx])
+    t_signal = np.zeros(n_total, dtype=np.float32)
+    if len(t_drivers):
+        phi_t = np.stack([_phi_col(int(c)) for c in t_drivers], axis=1)
+        t_signal += phi_t @ rng.normal(0.0, 0.85, size=len(t_drivers)).astype(np.float32)
+        if len(t_drivers) >= 2:
+            n_tp = int(rng.integers(2, min(6, len(t_drivers) * (len(t_drivers) - 1) // 2 + 1) + 1))
+            for _ in range(n_tp):
+                a, b = rng.choice(len(t_drivers), size=2, replace=False)
+                if rng.random() < 0.35:
+                    cut = float(rng.uniform(-0.6, 0.6))
+                    term = ((phi_t[:, a] > cut).astype(np.float32)) * phi_t[:, b]
+                else:
+                    term = phi_t[:, a] * phi_t[:, b]
+                t_signal += float(rng.normal(0.0, 0.70)) * _standardize_vec(term)
+
+    # 2. Baseline outcome equation: confounders + prognostics + dual_role + pairwise interactions
+    y_drivers = np.concatenate([conf_idx, prog_idx, dual_idx])
+    if len(mod_idx) and rng.random() < 0.45:
+        y_drivers = np.concatenate([y_drivers, mod_idx])
+    y_base = np.zeros(n_total, dtype=np.float32)
+    if len(y_drivers):
+        phi_y = np.stack([_phi_col(int(c)) for c in y_drivers], axis=1)
+        y_base += phi_y @ rng.normal(0.0, 0.85, size=len(y_drivers)).astype(np.float32)
+        if len(y_drivers) >= 2:
+            n_yp = int(rng.integers(2, min(7, len(y_drivers) * (len(y_drivers) - 1) // 2 + 1) + 1))
+            for _ in range(n_yp):
+                a, b = rng.choice(len(y_drivers), size=2, replace=False)
+                y_base += float(rng.normal(0.0, 0.65)) * _standardize_vec(phi_y[:, a] * phi_y[:, b])
+
+    # 3. HTE equation: rich confounder x modifier, prognostic x modifier, modifier x modifier
+    ht_drivers = np.concatenate([mod_idx, dual_idx])
+    ht_part = np.zeros(n_total, dtype=np.float32)
+    is_pure_epistatic = False
+    n_hte_inter = 0
+    if not is_null_hte and len(ht_drivers) > 0:
+        phi_ht = {int(c): _phi_col(int(c)) for c in ht_drivers}
+        phi_c = {int(c): _phi_col(int(c)) for c in conf_idx}
+        phi_p = {int(c): _phi_col(int(c)) for c in prog_idx}
+
+        # 30% pure epistatic crossover HTE (ZERO marginal modifier slope!)
+        can_epi = (len(ht_drivers) >= 2) or (len(conf_idx) >= 1) or (len(prog_idx) >= 1)
+        is_pure_epistatic = can_epi and (rng.random() < 0.30)
+        if not is_pure_epistatic:
+            for c in ht_drivers:
+                ht_part += float(rng.normal(0.0, 0.65)) * phi_ht[int(c)]
+
+        # Build 2-5 interaction terms prioritizing confounder x modifier, modifier x modifier, prog x mod
+        n_target_inter = int(rng.integers(2, 6))
+        orth_pure = is_pure_epistatic and (rng.random() < 0.55)
+        for k_i in range(n_target_inter):
+            # Force at least one confounder x modifier interaction when available
+            choices = []
+            if len(conf_idx) >= 1:
+                choices.append("cm")
+                if k_i == 0:
+                    choices = ["cm"]
+            if len(ht_drivers) >= 2 and k_i > 0:
+                choices.append("mm")
+            elif len(ht_drivers) >= 2 and not choices:
+                choices.append("mm")
+            if len(prog_idx) >= 1 and (k_i > 0 or not choices):
+                choices.append("pm")
+            if not choices:
+                break
+            kind = str(rng.choice(choices))
+            if kind == "cm":
+                ca = int(rng.choice(conf_idx))
+                mb = int(rng.choice(ht_drivers))
+                va, vb = phi_c[ca], phi_ht[mb]
+                roles_core[ca] = ROLE_TO_ID["dual_role"]
+            elif kind == "pm":
+                pa = int(rng.choice(prog_idx))
+                mb = int(rng.choice(ht_drivers))
+                va, vb = phi_p[pa], phi_ht[mb]
+                roles_core[pa] = ROLE_TO_ID["modifier"]
+            else:
+                ma, mb = rng.choice(ht_drivers, size=2, replace=False)
+                va, vb = phi_ht[int(ma)], phi_ht[int(mb)]
+
+            if orth_pure:
+                term = _orthogonalize_interaction(va, vb)
+            elif (not is_pure_epistatic) and rng.random() < 0.30:
+                cut = float(rng.uniform(-0.6, 0.6))
+                term = _standardize_vec(((va > cut).astype(np.float32)) * vb)
+            else:
+                term = _standardize_vec(va * vb)
+            if float(term.std()) > 1e-4:
+                ht_part += float(rng.normal(0.0, 0.90)) * term
+                n_hte_inter += 1
+
+        if float(ht_part.std()) < 1e-5:
+            ht_part += phi_ht[int(ht_drivers[0])]
+
+    n_unmeasured = 0
+    if rng.random() < prior.unmeasured_conf_prob:
+        n_unmeasured = int(rng.integers(1, 3))
+        U = rng.standard_normal((n_total, n_unmeasured)).astype(np.float32)
+        u_str = float(rng.uniform(0.25, 0.70))
+        t_signal += u_str * _standardize_vec(U @ rng.normal(0.0, 1.0, size=n_unmeasured).astype(np.float32))
+        y_base += u_str * _standardize_vec(U @ rng.normal(0.0, 1.0, size=n_unmeasured).astype(np.float32))
+
+    # Optional extraction noise on structured columns only (embedding columns are already noisy cosines)
+    has_ext_noise = rng.random() < prior.extraction_noise_prob
+    if has_ext_noise and n_struct_cols > 0:
+        X_core = _inject_extraction_noise(X_core, bin_core, np.arange(n_struct_cols), rng)
+
+    # Fragmented synonym extraction only when ample noise padding remains so noise clusters stay balanced
+    n_frag_dups = 0
+    if (p - X_core.shape[1]) >= 24:
+        X_core, bin_core, roles_core, n_frag_dups = _inject_fragmented_extractions(
+            X_core, bin_core, roles_core, p, prior, rng
+        )
+
+    X_full, _, roles_full, t_signal = _pad_with_noise_proxies_and_instruments(
+        X_core, bin_core, roles_core, t_signal, p, prior, rng
+    )
+    t_obs, y_obs, true_prop, true_y0, true_y1, true_ite, scale_mode = _finalize_outcomes(
+        t_signal, y_base, ht_part, not is_null_hte, prior, rng
+    )
+    X_obs, M, roles_full, miss_mode = _inject_missingness_and_3state(
+        X_full, y_base, roles_full, prior, rng
+    )
+
+    perm = rng.permutation(X_obs.shape[1])
+    return {
+        "X": X_obs[:, perm],
+        "M": M[:, perm],
+        "t": t_obs,
+        "y": y_obs,
+        "true_propensity": true_prop,
+        "true_y0": true_y0,
+        "true_y1": true_y1,
+        "true_ite": true_ite,
+        "roles": roles_full[perm],
+        "meta": {
+            "family": "interacting_clinical",
+            "p": int(X_obs.shape[1]),
+            "n_active": int((roles_full >= 2).sum()),
+            "n_mod": int((roles_full == ROLE_TO_ID["modifier"]).sum()),
+            "n_dual": int((roles_full == ROLE_TO_ID["dual_role"]).sum()),
+            "n_inst": int((roles_full == ROLE_TO_ID["instrument"]).sum()),
+            "n_unmeasured": n_unmeasured,
+            "n_frag_dups": n_frag_dups,
+            "has_embedding_block": bool(k_emb > 0),
+            "k_emb": int(k_emb),
+            "is_pure_epistatic": bool(is_pure_epistatic),
+            "n_hte_interactions": int(n_hte_inter),
+            "has_extraction_noise": has_ext_noise,
+            "is_null_hte": is_null_hte,
+            "mechanism": mech,
+            "scale": scale_mode,
+            "missingness": miss_mode,
+        },
+    }
+
+
 def sample_tabular_study(
     seed: int,
     n_total: int,
@@ -1818,7 +2258,7 @@ def sample_tabular_study(
     prior: PriorConfig = PriorConfig(),
     family: str | None = None,
 ) -> dict:
-    """Sample one synthetic high-dimensional sparse tabular causal study from the 5-family prior.
+    """Sample one synthetic high-dimensional sparse tabular causal study from the 6-family prior.
 
     Returns a dictionary containing:
       - ``X``: ``(N, P)`` float32 array with ``np.nan`` for missing values
@@ -1851,7 +2291,7 @@ def sample_tabular_study(
         if not designs:
             w[2] = 0.0
         if w.sum() <= 0:
-            w = np.array([1.0, 0.0, 0.0, 0.0, 0.0])
+            w = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         w /= w.sum()
         chosen = str(rng.choice(DGP_FAMILIES, p=w))
 
@@ -1863,4 +2303,6 @@ def sample_tabular_study(
         return _sample_tree_subgroup(n_total, p, prior, rng)
     if chosen == "causal_scm":
         return _sample_causal_scm(n_total, p, prior, rng)
+    if chosen == "interacting_clinical":
+        return _sample_interacting_clinical(n_total, p, prior, rng)
     return _sample_sparse_oci(n_total, p, prior, rng)

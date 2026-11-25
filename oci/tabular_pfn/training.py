@@ -1,7 +1,9 @@
 """Training, resuming, and high-P stress-test evaluation for SparseTabularCausalPFN."""
 
 from concurrent.futures import ProcessPoolExecutor
+import ctypes
 from dataclasses import asdict, replace
+import gc
 import json
 import math
 import os
@@ -15,6 +17,15 @@ from torch.nn import functional as F
 
 from .model import CHECKPOINT_FORMAT_VERSION, SparseTabularCausalPFN, TabularModelConfig
 from .prior import DGP_FAMILIES, ROLE_TO_ID, PriorConfig, sample_tabular_study
+
+
+def _release_host_memory() -> None:
+    """Reclaim Python cycles and ask glibc to return unused arena pages to the OS."""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 
 def _sample_episode_worker(args):
@@ -550,7 +561,7 @@ def run_tabular_training(
                     prior=prior,
                     seed=seed + 500_001,
                     compute_baselines=True,
-                    num_workers=min(num_workers, 8),
+                    num_workers=min(num_workers, 4),
                 )
                 for k, v in ev.items():
                     if isinstance(v, (int, float)):
@@ -561,6 +572,9 @@ def run_tabular_training(
                     save_tabular_checkpoint(
                         run_dir / "best_checkpoint.pt", model, optimizer, step, settings, prior
                     )
+                _release_host_memory()
+            elif step % 250 == 0:
+                _release_host_memory()
 
             with metrics_path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row) + "\n")

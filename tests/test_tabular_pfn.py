@@ -535,10 +535,13 @@ def test_v2_decoupled_rlearner_propensity_and_v1_compat():
 
 
 def test_v3_five_family_prior_basis_decoupling_and_invariance():
-    # 1. Legacy 3-tuple family_weights still loads cleanly
+    # 1. Legacy 3-tuple and 5-tuple family_weights still load cleanly
     legacy_prior = PriorConfig(family_weights=(0.5, 0.25, 0.25))
     assert len(legacy_prior.family_weights) == len(DGP_FAMILIES)
-    assert legacy_prior.family_weights[3:] == (0.0, 0.0)
+    assert legacy_prior.family_weights[3:] == (0.0,) * (len(DGP_FAMILIES) - 3)
+    legacy_v3_prior = PriorConfig(family_weights=(0.30, 0.15, 0.20, 0.18, 0.17))
+    assert len(legacy_v3_prior.family_weights) == len(DGP_FAMILIES)
+    assert legacy_v3_prior.family_weights[5:] == (0.0,)
 
     # 2. Verify new families (tree_subgroup, causal_scm) + fragmented dups + M-bias colliders
     ep_tree = sample_tabular_study(
@@ -692,3 +695,170 @@ def test_v3_five_family_prior_basis_decoupling_and_invariance():
         m_loaded, sv = load_tabular_run(dst_dir, "cpu", prefer_best=False)
         assert sv["step"] == 1 and m_loaded.cfg.use_v3_solver_basis is True
         assert sv["settings"]["init_from_step"] == 1
+
+
+def test_v4_six_family_interacting_prior_pairwise_ard_and_invariance():
+    from oci.tabular_pfn.training import _auroc_binary
+
+    # 1. Verify Family 6 (interacting_clinical) generates both embedding blocks and pure-epistatic HTE
+    n_emb = 0
+    n_epi = 0
+    n_inter = 0
+    aucs = []
+    prior_v4 = PriorConfig(null_hte_prob=0.0)
+    for i in range(18):
+        ep = sample_tabular_study(
+            8100 + i, n_total=240, num_features=220, prior=prior_v4, family="interacting_clinical"
+        )
+        assert ep["X"].shape == (240, 220)
+        assert ep["meta"]["family"] == "interacting_clinical"
+        assert np.all(np.isfinite(ep["true_ite"]))
+        if ep["meta"]["has_embedding_block"]:
+            n_emb += 1
+        if ep["meta"]["is_pure_epistatic"]:
+            n_epi += 1
+        if ep["meta"]["n_hte_interactions"] >= 1:
+            n_inter += 1
+        mr = ep["M"].mean(axis=0)
+        if mr.std() > 1e-6 and (ep["roles"] != 0).any() and (ep["roles"] == 0).any():
+            aucs.append(_auroc_binary((ep["roles"] != 0).astype(float), mr))
+    assert n_emb >= 1 and n_epi >= 1 and n_inter >= 12
+    assert len(aucs) >= 8 and 0.40 <= float(np.mean(aucs)) <= 0.62
+
+    # 2. Verify v4 config validation + backward compat with v3 config dicts
+    with pytest.raises(ValueError):
+        TabularModelConfig(use_v3_solver_basis=False, use_v4_interactions=True)
+    v3_dict = {
+        "col_dim": 32,
+        "study_width": 32,
+        "study_layers": 1,
+        "col_attn_layers": 1,
+        "heads": 4,
+        "bins": 17,
+        "top_k_nuis": 16,
+        "top_k_cate": 12,
+        "attn_slots": 8,
+        "decouple_rlearner_propensity": True,
+        "use_v3_solver_basis": True,
+    }
+    cfg_v3 = TabularModelConfig(**v3_dict)
+    assert cfg_v3.use_v4_interactions is False
+    m_v3 = SparseTabularCausalPFN(cfg_v3)
+    assert not hasattr(m_v3, "nuis_pair_gate_head") and not hasattr(m_v3, "cate_pair_gate_head")
+
+    # 3. v4 forward/backward: ZERO prop_loss gradient into g_er[4:8], log_lam_er, AND g_per[1]!
+    torch.manual_seed(43)
+    cfg_v4 = TabularModelConfig(
+        col_dim=32,
+        study_width=32,
+        study_layers=2,
+        col_attn_layers=2,
+        heads=4,
+        bins=17,
+        top_k_nuis=24,
+        top_k_cate=16,
+        attn_slots=12,
+        pair_top_k=8,
+        ridge_grid_size=5,
+        decouple_rlearner_propensity=True,
+        use_v3_solver_basis=True,
+        use_v4_interactions=True,
+    )
+    m_v4 = SparseTabularCausalPFN(cfg_v4)
+    ep_v4 = sample_tabular_study(
+        8201,
+        n_total=140,
+        num_features=160,
+        prior=PriorConfig(null_hte_prob=0.0, fragmented_dup_prob=1.0, missing_study_prob=1.0),
+        family="interacting_clinical",
+    )
+    Xc = torch.from_numpy(ep_v4["X"][:100]); Mc = torch.from_numpy(ep_v4["M"][:100])
+    tc = torch.from_numpy(ep_v4["t"][:100]); yc = torch.from_numpy(ep_v4["y"][:100])
+    Xq = torch.from_numpy(ep_v4["X"][100:]); Mq = torch.from_numpy(ep_v4["M"][100:])
+    ora = torch.from_numpy(np.stack([ep_v4["true_y0"][100:], ep_v4["true_y1"][100:]], axis=1))
+    tp = torch.from_numpy(ep_v4["true_propensity"][100:])
+    roles = torch.from_numpy(ep_v4["roles"])
+
+    ol, pl, sc, mem = m_v4(Xc, tc, yc, Xq, M_ctx=Mc, M_q=Mq)
+    assert mem.g_pe is not None and mem.g_per is not None and mem.g_pm is not None
+    assert mem.g_ptau is not None and len(mem.g_ptau) == 8 * 7 // 2
+    prop_only = torch.nn.functional.binary_cross_entropy_with_logits(pl, tp)
+    prop_only.backward()
+    assert m_v4.log_lam_er.grad is None
+    assert m_v4.nuis_gate_head[-1].weight.grad[4:8].abs().sum().item() == 0.0
+    assert m_v4.nuis_pair_gate_head[-1].weight.grad[1].abs().sum().item() == 0.0
+    assert m_v4.nuis_pair_gate_head[-1].weight.grad[0].abs().sum().item() > 0.0
+    assert m_v4.log_lam_e.grad is not None and m_v4.log_lam_e.grad.abs().sum().item() > 0.0
+
+    # Full loss gives finite non-zero gradients to 100% of v4 parameters
+    m_v4.zero_grad(set_to_none=True)
+    ol, pl, sc, mem = m_v4(Xc, tc, yc, Xq, M_ctx=Mc, M_q=Mq)
+    loss, _ = m_v4.loss_components(
+        ol,
+        pl,
+        sc,
+        ora,
+        tp,
+        role_logits=mem.role_logits,
+        nuis_screen_logits=mem.nuis_screen_logits,
+        mod_screen_logits=mem.mod_screen_logits,
+        true_roles=roles,
+    )
+    assert torch.isfinite(loss)
+    loss.backward()
+    grads = [p.grad for p in m_v4.parameters() if p.grad is not None]
+    assert len(grads) == sum(1 for _ in m_v4.parameters())
+    assert all(torch.isfinite(g).all() for g in grads)
+    assert m_v4.nuis_pair_gate_head[-1].weight.grad[1].abs().sum().item() > 0.0
+    assert m_v4.cate_pair_gate_head[-1].weight.grad.abs().sum().item() > 0.0
+
+    # 4. Exact simultaneous row + column permutation invariance on v4 (pairs + confounder-mod scan!)
+    m_v4.eval()
+    ep_p = sample_tabular_study(
+        8202,
+        n_total=90,
+        num_features=45,
+        prior=PriorConfig(null_hte_prob=0.0, fragmented_dup_prob=1.0, missing_study_prob=1.0),
+        family="interacting_clinical",
+    )
+    Xc2 = torch.from_numpy(ep_p["X"][:70]); Mc2 = torch.from_numpy(ep_p["M"][:70])
+    tc2 = torch.from_numpy(ep_p["t"][:70]); yc2 = torch.from_numpy(ep_p["y"][:70])
+    Xq2 = torch.from_numpy(ep_p["X"][70:]); Mq2 = torch.from_numpy(ep_p["M"][70:])
+    rng = np.random.default_rng(47)
+    rp = torch.from_numpy(rng.permutation(70))
+    cp = torch.from_numpy(rng.permutation(45))
+    with torch.no_grad():
+        o1, p1, s1, mem1 = m_v4(Xc2, tc2, yc2, Xq2, M_ctx=Mc2, M_q=Mq2)
+        m1, sd1 = m_v4.risk_stats(o1, s1)
+        o2, p2, s2, mem2 = m_v4(
+            Xc2[rp][:, cp], tc2[rp], yc2[rp], Xq2[:, cp], M_ctx=Mc2[rp][:, cp], M_q=Mq2[:, cp]
+        )
+        m2, sd2 = m_v4.risk_stats(o2, s2)
+        torch.testing.assert_close(m1, m2, atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(sd1, sd2, atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(p1.sigmoid(), p2.sigmoid(), atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(mem1.role_logits[cp], mem2.role_logits, atol=5e-4, rtol=5e-4)
+        rep = m_v4.column_role_report(mem1)
+        assert len(rep) == 45 and math.isfinite(rep[0]["gate_cate"])
+
+    # 5. CLI end-to-end v4 train + reload smoke test
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as td:
+        v4_dir = Path(td) / "v4_smoke"
+        main(
+            [
+                "train", "--run-dir", str(v4_dir), "--steps", "1",
+                "--min-context-size", "40", "--context-size", "50", "--query-size", "12",
+                "--min-features", "20", "--max-features", "35",
+                "--family-weights", "0.20,0.12,0.18,0.18,0.16,0.16",
+                "--col-dim", "32", "--study-width", "32", "--study-layers", "1",
+                "--col-attn-layers", "1", "--heads", "4", "--top-k-nuis", "16",
+                "--top-k-cate", "12", "--attn-slots", "8", "--pair-top-k", "6", "--bins", "17",
+                "--decouple-rlearner-propensity", "--use-v3-solver-basis", "--use-v4-interactions",
+                "--grad-accum-steps", "1", "--eval-every", "0", "--save-every", "1",
+                "--device", "cpu",
+            ]
+        )
+        m_ld, sv = load_tabular_run(v4_dir, "cpu", prefer_best=False)
+        assert sv["step"] == 1 and m_ld.cfg.use_v4_interactions is True and m_ld.cfg.pair_top_k == 6

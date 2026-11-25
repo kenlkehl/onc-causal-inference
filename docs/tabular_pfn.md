@@ -15,16 +15,17 @@ Unlike vanilla TabPFN / CausalPFN architectures whose $O(N P^2)$ attention and d
 4. **Residual Two-Way TabPFN Study Layers & 129-Bin Sinh Posterior Head**:
    Two lightweight two-way attention layers over the top `attn_slots` (default `16`) gated columns refine pairwise feature interactions and calibrate arm-specific risk means, epistemic SDs, and propensity logits.
 
-## Synthetic 5-Family Causal Prior (`oci/tabular_pfn/prior.py`)
+## Synthetic 6-Family Interacting & Embedding Hybrid Causal Prior (`oci/tabular_pfn/prior.py`)
 
-Training draws log-uniform $N_{\text{ctx}} \in [80, 8{,}000]$ and $P \in [20, 3{,}500]$ (v3) from a 5-family mixture prior with real Stage-1 LLM extraction pathologies:
+Training draws log-uniform $N_{\text{ctx}} \in [80, 8{,}000]$ and $P \in [20, 3{,}500]$ (v3/v4) from a de-aliased 6-family mixture prior with real Stage-1 LLM extraction pathologies and rich confounder/modifier interactions:
 
-1. **`sparse_oci` (30%):** High-dimensional sparse all-evidence tables with mixed clinical types (binary, ordinal, Gaussian, log-normal, heavy-tailed Student-$t$ lab outliers, zero-inflated utilization counts), multi-level Dirichlet one-hot categorical blocks, strong pure instruments, collinear noisy proxies, optional dense weak-confounding regimes (`15%`), rich nonlinearities (including non-monotonic clinical reference bands and asymmetric sigmoids) + pairwise interactions, optional unmeasured confounding (creating Z-bias on instruments), Stage-1 LLM extraction noise, MCAR/MAR/**MNAR** + 3-state EHR documentation, occasional RCTs (8%), 25% strictly null-HTE studies, and both `logOR` and bounded additive `RD` scales.
-2. **`reequation_calc` (15%):** Vectorized implementation of OCI's `synthetic_data/reequation.py` and `sample_size_calculator/engine.R` tabular DGP family embedded in $P = 20\text{–}3{,}500$.
-3. **`nemotron_design` (20%):** Direct tabular studies sampled strictly from the 4,000 `split == "train"` oncology designs in `synthetic_data/designs/nemotron_5000.json.gz` embedded in $P = 20\text{–}3{,}500$. The 1,000 `split == "held_out"` designs (including 3 unseen cancers) are strictly excluded from training and used automatically inside `evaluate`.
-4. **`tree_subgroup` (18%):** Clinical decision-tree / multi-way biomarker rule-list subgroup DGP (depth 2–4 logical conjunctions, crisp/soft cutoffs, piecewise subgroups) requiring genuine nonlinear interaction discovery beyond linear/quadratic ARD Ridge.
-5. **`causal_scm` (17%):** General layered nonlinear Structural Causal Model (DAG + 2-layer MLP treatment, outcome, and HTE surfaces) with explicit observed-parent ($Z \to C \leftarrow W$) and latent-parent ($U_T \to C \leftarrow U_Y$) M-bias colliders, heavy tails, dense confounding, and near-positivity extremes.
-- **Fragmented Stage-1 LLM Extraction Clusters (applied across all 5 families, `55%`):** Splits active causal features into 2–6 synonymous opposite-polarity, coarsened, and partial-coverage (`NaN`-masked) columns so the model learns to pool across fragmented Stage-1 extractions rather than losing signal to missingness.
+1. **`sparse_oci` (20%):** High-dimensional sparse all-evidence tables with mixed clinical types (binary, ordinal, Gaussian, log-normal, heavy-tailed Student-$t$ lab outliers, zero-inflated utilization counts), multi-level Dirichlet one-hot categorical blocks, strong pure instruments, collinear noisy proxies, optional dense weak-confounding regimes (`15%`), rich nonlinearities (including non-monotonic clinical reference bands and asymmetric sigmoids) + confounder×confounder, confounder×modifier, and modifier×modifier interactions (`20%` pure-epistatic HTE), optional unmeasured confounding (creating Z-bias on instruments), Stage-1 LLM extraction noise, MCAR/MAR/**MNAR** + 3-state EHR documentation, occasional RCTs (8%), 25% strictly null-HTE studies, and both `logOR` and bounded additive `RD` scales.
+2. **`reequation_calc` (12%):** Vectorized implementation of OCI's `synthetic_data/reequation.py` and `sample_size_calculator/engine.R` tabular DGP family with optional confounder×confounder and confounder×modifier interactions embedded in $P = 20\text{–}3{,}500$.
+3. **`nemotron_design` (18%):** Direct tabular studies sampled strictly from the 4,000 `split == "train"` oncology designs in `synthetic_data/designs/nemotron_5000.json.gz` (plus clinical pairwise interactions) embedded in $P = 20\text{–}3{,}500$. The 1,000 `split == "held_out"` designs (including 3 unseen cancers) are strictly excluded from training and used automatically inside `evaluate`.
+4. **`tree_subgroup` (18%):** Clinical decision-tree / multi-way biomarker rule-list subgroup DGP (depth 2–4 logical conjunctions including explicit confounder×modifier rules, crisp/soft cutoffs, piecewise subgroups) requiring genuine nonlinear interaction discovery beyond linear/quadratic ARD Ridge.
+5. **`causal_scm` (16%):** General layered nonlinear Structural Causal Model (DAG + 2-layer MLP treatment, outcome, and joint confounder×modifier HTE surfaces) with explicit observed-parent ($Z \to C \leftarrow W$) and latent-parent ($U_T \to C \leftarrow U_Y$) M-bias colliders, heavy tails, dense confounding, and near-positivity extremes.
+6. **`interacting_clinical` (16%):** Interaction-heavy clinical & multimodal-embedding hybrid prior featuring coupled confounder×confounder propensity interactions, prognostic×confounder outcome interactions, strong confounder×modifier / prognostic×modifier / modifier×modifier HTE (`30%` mathematically orthogonal pure-epistatic crossover HTE with zero marginal modifier slope), and in 50% of wide cohorts a bounded correlated cosine-MaxSim embedding block mimicking frozen clinical-text representations (e.g., `TinyOncBERT SentKM`) coupled with structured covariates.
+- **De-Aliased High-Missingness & Fragmented Stage-1 Synonym Clusters (applied across all 6 families, `55%`):** Splits both active and noise features into 2–6 synonymous opposite-polarity, coarsened, and partial-coverage (`NaN`-masked) columns alongside heavy-tailed EHR missingness up to `95%` so the model pools across fragmented Stage-1 extractions with zero missingness-rate shortcut (`miss_rate` AUROC `~0.51–0.53` across all 6 families).
 
 ## Usage
 
@@ -41,8 +42,14 @@ Training draws log-uniform $N_{\text{ctx}} \in [80, 8{,}000]$ and $P \in [20, 3{
 # 5-family prior + fragmented extractions + M-bias colliders + 4-channel ARD basis (X, X^2, tanh, M_c)
 # + 6-d pairwise-complete co-observed correlation attention + 6-layer/256-wide/32-slot TabPFN
 ./scripts/run_tabular_pfn_v3_h200.sh
-# Override step budget or GPU/workers as desired, e.g.:
-# CUDA_VISIBLE_DEVICES=0 NUM_WORKERS=20 ./scripts/run_tabular_pfn_v3_h200.sh
+
+# v4 H200 flagship (34.60M params, N_ctx = 80..8,000, P = 20..3,500, 40,000 steps / 480k studies):
+# de-aliased 6-family interacting + cosine-MaxSim embedding hybrid prior + O(8*N*P) confounder-modulated
+# Robinson scan + symmetric pairwise interaction basis inside closed-form ARD solver (pair_top_k=16 -> 120 pairs)
+# + 8-layer/320-wide/40-slot TabPFN with automatic gradient checkpointing above N_ctx=4,000 (24.19 GiB worst-case VRAM)
+./scripts/run_tabular_pfn_v4_h200.sh
+# Dedicated H200: NUM_WORKERS=16 ./scripts/run_tabular_pfn_v4_h200.sh
+# Sharing host RAM with another training run: NUM_WORKERS=6 ./scripts/run_tabular_pfn_v4_h200.sh
 ```
 
 ### Zero-Shot Prediction + Calibrated Feature Role Report on Any Tabular Cohort
@@ -69,7 +76,7 @@ Every column in `--role-report` (`.csv` or `.json`) reports:
 
 Key CLI flags across subcommands (`python -m oci.tabular_pfn.cli {train,resume,evaluate,predict}`):
 - `predict`: `--cv-folds K` (stratified out-of-fold predictions for all $N$ patients + fold-averaged role report), `--context-size K` or `--queries FILE`, `--role-report PATH.{csv,json}`, `--print-roles` (print summary without writing a file), `--role-summary-top-k 15` (`0` disables stdout table), `--uncalibrated-roles` (disable EM sparsity calibration), `--query-batch-size 512`.
-- `evaluate`: `--num-features P`, `--family {all,sparse_oci,reequation_calc,nemotron_design,tree_subgroup,causal_scm}` (always locks `nemotron_design` to the 1,000 `split == "held_out"` designs), `--no-baselines`.
+- `evaluate`: `--num-features P`, `--family {all,sparse_oci,reequation_calc,nemotron_design,tree_subgroup,causal_scm,interacting_clinical}` (always locks `nemotron_design` to the 1,000 `split == "held_out"` designs), `--no-baselines`.
 - `resume`: `--run-dir DIR --steps TOTAL_STEPS` resumes optimizer state, model config, and saved prior seamlessly.
 
 ## Proof-of-Concept Stress-Test Benchmark (`P = 50, 500, 2,000`)
