@@ -333,6 +333,12 @@ def main(argv=None):
         help="Optional comma-separated DGP family weights matching DGP_FAMILIES.",
     )
     p_train.add_argument("--design-bank", type=str, default=None)
+    p_train.add_argument(
+        "--init-from",
+        type=Path,
+        default=None,
+        help="Optional checkpoint file or run dir to warm-start model weights with a fresh optimizer/schedule.",
+    )
     defaults = TabularModelConfig()
     for key, value in vars(defaults).items():
         flag = "--" + key.replace("_", "-")
@@ -422,6 +428,7 @@ def main(argv=None):
             num_workers=args.num_workers,
             seed=args.seed,
             resume=(args.command == "resume"),
+            init_from=getattr(args, "init_from", None),
         )
     elif args.command == "evaluate":
         model, _ = load_tabular_run(args.run_dir, args.device)

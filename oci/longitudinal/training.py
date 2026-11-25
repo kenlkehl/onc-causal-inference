@@ -3,6 +3,7 @@
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
+import ctypes
 from dataclasses import asdict
 import fcntl
 import gc
@@ -48,6 +49,15 @@ PROPENSITY_COL = "true_treatment_prob"
 DESIGN_BANK_FILENAME = "design_bank.json.gz"
 PARAPHRASE_BANK_FILENAME = "paraphrase_bank.json.gz"
 _WORKER_PARAPHRASE_CACHE: dict[str, dict] = {}
+
+
+def _release_host_memory():
+    """Force cyclic GC and return freed glibc heap arenas back to the OS on Linux."""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 
 def _get_worker_paraphrase_bank(path_or_bank):
@@ -721,9 +731,9 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                 **last_provenance,
             }
             if eval_every > 0 and (step % eval_every == 0 or step == steps) and not tables:
-                gc.collect()
-                # Bound nested eval workers/buffer while training prefetcher stays open
-                eval_workers = min(num_workers, 4)
+                _release_host_memory()
+                # Keep nested eval footprint tiny while the training prefetcher pool stays open
+                eval_workers = min(num_workers, 2)
                 val = evaluate(
                     model,
                     settings["seed"],
@@ -733,10 +743,10 @@ def _train_locked(directory, steps, device, save_every, settings, cfg, resume_ov
                     bank=bank,
                     precision=precision,
                     num_workers=eval_workers,
-                    max_inflight=min(eval_workers, 4) if eval_workers > 0 else None,
+                    max_inflight=min(eval_workers, 2) if eval_workers > 0 else None,
                     paraphrase_bank_path=paraphrase_bank_path,
                 )
-                gc.collect()
+                _release_host_memory()
                 _set_train_modes()
                 record["eval_context_size"] = eval_context
                 record["eval_cate_rmse"] = val["cate_rmse"]

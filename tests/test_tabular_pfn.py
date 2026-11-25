@@ -651,3 +651,44 @@ def test_v3_five_family_prior_basis_decoupling_and_invariance():
         torch.testing.assert_close(mem1.role_logits[cp], mem2.role_logits, atol=5e-4, rtol=5e-4)
         rep = m_v3.column_role_report(mem1)
         assert len(rep) == 50 and math.isfinite(rep[0]["gate_propensity"])
+
+    # 5. Verify no missingness-rate shortcut in the de-aliased prior (noise spans >55% missingness too)
+    hi_noise_fracs = []
+    for s in range(12):
+        ep_m = sample_tabular_study(700 + s, n_total=200, num_features=200, prior=PriorConfig())
+        mr = ep_m["M"].mean(axis=0)
+        noise = ep_m["roles"] == 0
+        hi_noise_fracs.append(float((mr[noise] > 0.55).mean()))
+    assert np.mean(hi_noise_fracs) > 0.10
+
+    # 6. Verify --init-from warm-start loads weights with a fresh step=0 schedule
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as td:
+        src_dir = Path(td) / "src"
+        dst_dir = Path(td) / "dst"
+        main(
+            [
+                "train", "--run-dir", str(src_dir), "--steps", "1",
+                "--min-context-size", "40", "--context-size", "50", "--query-size", "12",
+                "--min-features", "20", "--max-features", "30",
+                "--col-dim", "32", "--study-width", "32", "--study-layers", "1",
+                "--col-attn-layers", "1", "--heads", "4", "--top-k-nuis", "16",
+                "--top-k-cate", "12", "--attn-slots", "8", "--bins", "17",
+                "--decouple-rlearner-propensity", "--use-v3-solver-basis",
+                "--grad-accum-steps", "1", "--eval-every", "0", "--save-every", "1",
+                "--device", "cpu",
+            ]
+        )
+        main(
+            [
+                "train", "--run-dir", str(dst_dir), "--init-from", str(src_dir), "--steps", "1",
+                "--min-context-size", "40", "--context-size", "50", "--query-size", "12",
+                "--min-features", "20", "--max-features", "30",
+                "--grad-accum-steps", "1", "--eval-every", "0", "--save-every", "1",
+                "--device", "cpu",
+            ]
+        )
+        m_loaded, sv = load_tabular_run(dst_dir, "cpu", prefer_best=False)
+        assert sv["step"] == 1 and m_loaded.cfg.use_v3_solver_basis is True
+        assert sv["settings"]["init_from_step"] == 1

@@ -380,6 +380,7 @@ def run_tabular_training(
     num_workers: int = 0,
     seed: int = 42,
     resume: bool = False,
+    init_from: str | Path | None = None,
 ) -> Path:
     """Train or resume SparseTabularCausalPFN on high-P sparse synthetic causal studies."""
     run_dir = Path(run_dir)
@@ -423,7 +424,19 @@ def run_tabular_training(
             optimizer.load_state_dict(saved["optimizer"])
     else:
         torch.manual_seed(seed)
-        model = SparseTabularCausalPFN(cfg).to(dev)
+        if init_from is not None:
+            init_path = Path(init_from)
+            if init_path.is_dir():
+                cand = init_path / "best_checkpoint.pt"
+                init_path = cand if cand.is_file() else (init_path / "checkpoint.pt")
+            src = torch.load(init_path, map_location="cpu", weights_only=False)
+            cfg = TabularModelConfig(**src["model"])
+            model = SparseTabularCausalPFN(cfg).to(dev)
+            model.load_state_dict(src["weights"], strict=True)
+            settings["init_from"] = str(init_path)
+            settings["init_from_step"] = int(src.get("step", 0))
+        else:
+            model = SparseTabularCausalPFN(cfg).to(dev)
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     # Strictly enforce train split for Nemotron oncology designs during training

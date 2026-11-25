@@ -131,7 +131,27 @@ Instead of asking a pure transformer to approximate linear algebra over 2,000 co
 | **PoC v1 (A6000)** | *(scratch)* | v1 single-family sparse | `500` / `4,000` (`6.1 min`) | `80..1,200` / `20..2,000` | Complete | `0.1246` (v1) / `0.1192` (3-fam OOD) | `0.1323` | `+0.388` | `0.863 / 0.866` | `0.42 / 0.29` |
 | **Run 1 (v1 2.11M, A6000)** | `artifacts/tabular_causal_pfn_p2000` | v2 3-family OCI mixture (`50/25/25`) | `12,000` / `96,000` | `80..3,000` / `20..2,000` | **Complete** | `0.1186` (`within_r = +0.491`) | `0.1155` | `+0.492` | `0.894` (sig) | `0.075 / 0.066` (`1.1×`) |
 | **Run 2 (v2 7.38M, Decoupled)** | `artifacts/tabular_causal_pfn_v2_p2000` | v2 3-family OCI mixture (`50/25/25`) | `15,000` / `120,000` | `80..3,000` / `20..2,000` | **Complete** (`best = s13,000`) | `0.1187` (`within_r = +0.502`) | **`0.1150`** | **`+0.503`** | **`0.895`** (sig) | **`0.032 / 0.015` (`2.1×`)** |
-| **Run 3 (v3 18.88M, H200 Flagship)** | `artifacts/tabular_causal_pfn_v3_h200` | v3 5-family + fragmented + colliders (`30/15/20/18/17`) | `30,000` / `360,000` | `80..8,000` / `20..3,500` | **Ready to launch** | `—` | `—` | `—` | `—` | `—` |
+| **Run 3 (v3 18.88M, H200 Flagship)** | `artifacts/tabular_causal_pfn_v3_h200` | v3 5-family + fragmented + colliders (`30/15/20/18/17`) | `30,000` / `360,000` (`16.79h`) | `80..8,000` / `20..3,500` | **Complete** (`best = s25,000`) | `0.1189` (5-fam) / **`0.0979`** (nemotron) | **`0.1149`** (`0.0941` @ `N=4k`) | `+0.437` (**`+0.703`** @ `N=4k`) | **`0.905`** (**`0.959`** @ `N=4k`) | **`0.014 / 0.009` (`1.6×`)** |
+
+### Final Held-Out Stress Tests: v3 (`18.88M`, `30,000` steps / `360k` studies, `best = s25,000`) on 5-Family Suite
+
+Evaluated across `P = 50..3,500` (`N_ctx = 800`, 128 studies), large-cohort `N_ctx = 4,000, P = 2,000` (64 studies), and all 5 individual families (`P = 500` and `P = 2,000`, 96 studies each):
+
+| Benchmark | `cate_rmse` ↓ | Arm-Mean ↓ | Scr-32 Ridge-R ↓ | `within_r` ↑ | `pool_r` ↑ | `risk_rmse` ↓ | `prop_rmse` ↓ | `ate_rmse` ↓ | `null_hte` ↓ | `role_auroc` ↑ | `g_e` (Conf / Inst) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **5-Family Mix `P = 50` (`N=800`)** | **`0.1099`** | `0.1556` | `0.1823` | **`+0.548`** | `+0.765` | `0.1396` | `0.1334` | `0.0454` | `0.0600` | `0.881` | `0.020 / 0.013` |
+| **5-Family Mix `P = 200` (`N=800`)** | **`0.1118`** | `0.1474` | `0.2223` | **`+0.542`** | `+0.772` | `0.1367` | `0.1373` | `0.0376` | `0.0656` | `0.900` | `0.017 / 0.011` |
+| **5-Family Mix `P = 500` (`N=800`)** | **`0.1189`** | `0.1461` | `0.1636` | `+0.456` | `+0.723` | `0.1492` | `0.1380` | `0.0446` | `0.0705` | `0.913` | `0.015 / 0.009` |
+| **5-Family Mix `P = 2,000` (`N=800`)** | **`0.1149`** | `0.1496` | `0.1588` | `+0.437` | `+0.767` | `0.1464` | `0.1466` | `0.0389` | `0.0694` | `0.905` | `0.014 / 0.009` |
+| **5-Family Mix `P = 3,500` (`N=800`)** | **`0.1143`** | `0.1439` | `0.1758` | `+0.465` | `+0.720` | `0.1453` | `0.1441` | `0.0406` | `0.0709` | **`0.913`** | `0.014 / 0.008` |
+| **5-Family Mix `P = 2,000` (`N=4,000`)** | **`0.0941`** | `0.1563` | `0.1708` | **`+0.703`** | **`+0.858`** | **`0.1215`** | **`0.1226`** | **`0.0273`** | **`0.0435`** | **`0.959`** | `0.020 / 0.011` |
+| `nemotron_design P = 500` (`N=800`) | **`0.0979`** | `0.1427` | `0.3286` | **`+0.639`** | **`+0.815`** | **`0.1252`** | `0.1319` | **`0.0361`** | `0.0642` | `0.938` | `0.017 / 0.010` |
+| `nemotron_design P = 2,000` (`N=800`) | **`0.1008`** | `0.1398` | `0.2325` | **`+0.590`** | `+0.793` | **`0.1280`** | `0.1315` | `0.0490` | `0.0596` | **`0.948`** | `0.019 / 0.010` |
+| `reequation_calc P = 500` (`N=800`) | **`0.1173`** | `0.1619` | `0.1865` | **`+0.503`** | `+0.756` | **`0.1386`** | `0.1330` | `0.0462` | `0.0695` | `0.947` | `0.021 / 0.018` |
+| `reequation_calc P = 2,000` (`N=800`) | **`0.1260`** | `0.1719` | `0.1847` | `+0.518` | `+0.735` | **`0.1413`** | `0.1384` | `0.0450` | `0.0594` | `0.944` | `0.017 / 0.014` |
+| `sparse_oci P = 500` / `P = 2,000` | `0.1137` / `0.1194` | `0.1537` / `0.1475` | `0.1616` / `0.1490` | `+0.503` / `+0.441` | `+0.762` / `+0.721` | `0.1369` / `0.1540` | `0.1383` / `0.1509` | `0.0368` / `0.0394` | `0.0617` / `0.0661` | `0.867` / `0.870` | `0.014/0.005` / `0.011/0.005` |
+| `causal_scm P = 500` / `P = 2,000` | `0.1095` / `0.1114` | `0.1399` / `0.1472` | `0.1515` / `0.1595` | **`+0.510` / `+0.512`** | `+0.755` / `+0.781` | `0.1466` / `0.1452` | `0.1577` / `0.1604` | `0.0399` / `0.0447` | `0.0579` / `0.0650` | **`0.956` / `0.955`** | `0.015/0.012` |
+| `tree_subgroup P = 500` / `P = 2,000` | `0.1270` / `0.1266` | `0.1482` / `0.1437` | `0.1567` / `0.1695` | `+0.343` / `+0.304` | `+0.695` / `+0.717` | `0.1530` / `0.1638` | `0.1376` / `0.1605` | `0.0408` / `0.0399` | `0.0532` / `0.0639` | `0.852` / `0.872` | `0.012/0.006` / `0.011/0.005` |
 
 ### Final Held-Out Stress Tests: v1 (`2.11M`, 12k) vs. v2 (`7.38M`, 15k) at `N_ctx = 800`, `N_q = 128`
 
@@ -209,7 +229,9 @@ Evaluated **v1 (`step 12,000`)** and **v2 (`best_checkpoint.pt`, `step 13,000`)*
 | ↳ Stage-2 DINA | `0.1969` | `0.1516` | `+0.0662` | `+0.278` | `+0.272` | `0.1768` | `—` | `—` |
 | Arm-Mean (outer-fold ATE only) | `0.2319` | `0.2058` | `+0.1961` | `+0.047` | `+0.040` | `0.0001` | `—` | `—` |
 | v1 `SparseTabularCausalPFN` (zero-shot) | `0.1220` | `0.0957` | `+0.0455` | `+0.406` | `+0.420` | `0.0560` | `—` | `10.25s` |
-| **v2 `SparseTabularCausalPFN` (zero-shot)** | **`0.1175`** | **`0.0911`** | **`+0.0318`** | **`+0.417`** | **`+0.444`** | `0.0637` | **`0.1904`** | **`9.97s`** |
+| **v2 `SparseTabularCausalPFN` (zero-shot)** | `0.1175` | `0.0911` | **`+0.0318`** | `+0.417` | `+0.444` | `0.0637` | `0.1904` | `9.97s` |
+| v3 `SparseTabularCausalPFN` (raw, *hit `miss>0.55` shortcut*) | `0.2036` | `0.1752` | `+0.1540` | `+0.217` | `+0.277` | `0.0832` | `0.3214` | `10.55s` |
+| **v3 `SparseTabularCausalPFN` (`max_miss <= 0.55`, diagnostic)** | **`0.1150`** | **`0.0864`** | `+0.0414` | **`+0.568`** | **`+0.577`** | `—` | **`0.1843`** | `~10s` |
 
 - **Blind confounder discovery (zero knowledge of column names):** **11 of the top 11** ranked confounders across ~1,600 columns were direct LLM extractions of all 3 true confounders (`neutrophil_to_lymphocyte_ratio (5/5) p_any_c=0.880`, `age (5/5) 0.395`, `biological_sex==female/male`, `age_group==adult/elderly`, `gender==Female/Male`, `sex==female/male`, `age_at_diagnosis`).
 - **Blind modifier discovery:** Weaker at `N_fit = 800` (`p_any_m ≤ 0.095`), though `brain_metastases_progression_status`, `brain_lesion_characteristics`, `chronic_kidney_disease_status`, and `pemetrexed_cycle_status` surfaced in the top 12.
@@ -226,14 +248,17 @@ Evaluated **v1 (`step 12,000`)** and **v2 (`best_checkpoint.pt`, `step 13,000`)*
 | ↳ Stage-2 DINA | `0.2964` | `0.2358` | `+0.1186` | `+0.294` | `+0.298` | `0.2415` | `—` | `—` |
 | Arm-Mean (outer-fold ATE only) | `0.2613` | `0.2046` | `+0.1498` | `+0.031` | `+0.056` | `0.0010` | `—` | `—` |
 | v1 `SparseTabularCausalPFN` (zero-shot) | `0.2015` | `0.1632` | `+0.1215` | **`+0.666`** | **`+0.653`** | `0.1249` | `—` | `9.15s` |
-| **v2 `SparseTabularCausalPFN` (zero-shot)** | **`0.1963`** | **`0.1580`** | **`+0.1091`** | `+0.648` | `+0.640` | `0.1353` | `0.2240` | **`9.65s`** |
+| **v2 `SparseTabularCausalPFN` (zero-shot)** | **`0.1963`** | **`0.1580`** | `+0.1091` | `+0.648` | `+0.640` | `0.1353` | `0.2240` | **`9.65s`** |
+| v3 `SparseTabularCausalPFN` (raw, *hit `miss>0.55` shortcut*) | `0.2225` | `0.1821` | `+0.1420` | `+0.604` | `+0.621` | `0.1441` | `0.3252` | `11.56s` |
+| **v3 `SparseTabularCausalPFN` (`max_miss <= 0.55`, diagnostic)** | `0.1966` | `0.1593` | **`+0.1046`** | `+0.641` | `+0.623` | `—` | `0.2118` | `~10s` |
 
 - **Blind confounder discovery:** Top 12 ranked confounders were again dominated by all 3 true confounders (`neutrophil_to_lymphocyte_ratio (5/5) p_any_c=0.788`, `gender==male/female`, `ecog_components==ECOG 2/1`, `biological_sex`, `activity_tolerance==ECOG 1`, `performance_status==1`, `functional_capacity==impaired`).
 - **Blind modifier discovery:** Top 5 ranked modifiers surfaced `comprehensive_metabolic_panel_status`, `renal_profile_stability`, and **`creatinine_clearance (5/5)`** — which received the **highest `gate_tau = 0.143`** across all ~1,500 columns.
 
-### Takeaways
-1. **Zero-shot `SparseTabularCausalPFN` v2 outperformed OCI's entire Stage-2 ensemble (`multi_model`) AND every single Stage-2 constituent estimator on both real LLM-extracted cohorts** (`0.1175` vs. `0.1344` on `seed101`, cutting ATE bias in half `+0.0637 → +0.0318`; `0.1963` vs. `0.2292` on `seed102`, raising Pearson `r` from `+0.436 → +0.648`), completing all 5 outer folds in **`< 10 seconds`** on 1× A6000.
-2. **Real-world v2 > v1 confirmation:** v2 beat v1 on `CATE RMSE`, `MAE`, and `ATE Bias` on both cohorts (`-0.0045` on `seed101`, `-0.0052` on `seed102`), validating the decoupled outcome-adaptive propensity gates and expanded residual TabPFN capacity on noisy real Stage-1 LLM extractions with hundreds of duplicate/collinear extracted columns.
+### Takeaways & v3 Missingness-Shortcut Diagnosis (Fixed for v3.1)
+1. **Zero-shot `SparseTabularCausalPFN` v2 outperformed OCI's entire Stage-2 ensemble (`multi_model`) AND every single Stage-2 constituent estimator on both real LLM-extracted cohorts** (`0.1175` vs. `0.1344` on `seed101`; `0.1963` vs. `0.2292` on `seed102`) in `< 10 seconds` on 1× A6000.
+2. **Real-World Shortcut Caught on v3 (`miss_rate > 0.55`):** In v3's initial prior, noise columns were capped at `max_missing_rate = 0.45` while fragmented active columns received extra partial-coverage `NaN`s (`0.15..0.68`, stacking to `0.50..0.85`). `nuis_screen_head` exploited that artifact (`scr = +15.1` for any column with `miss_rate > 0.55`), which on real Stage-2 catalogs (where ~35% of noise columns are 65–97% `not_documented`) evicted `age`, `NLR`, and `sex` out of `nuis_idx` (`gate_e = gate_m = 0.000` despite `role_logits` nailing `age=0.900`, `NLR=0.975`, and `creatinine_clearance=0.925`!).
+3. **Diagnostic Proof & v3.1 Fix:** Simply masking `miss_rate > 0.55` immediately snapped v3 to **`RMSE = 0.1150, MAE = 0.0864, Pearson = +0.568 (+0.151 over v2!), Spearman = +0.577, Prop RMSE = 0.1843`** on `seed101`, and **`RMSE = 0.1966, ATEbias = +0.1046, Prop RMSE = 0.2118`** on `seed102`. Fixed permanently in `oci/tabular_pfn/prior.py` by giving noise columns heavy-tailed EHR missingness up to `95%` AND matching noise fragmented synonym clusters (verified `miss_rate` AUROC for active vs. noise = **`0.532`**), plus `--init-from` warm-start fine-tuning (`scripts/run_tabular_pfn_v3_1_finetune_h200.sh`, 4k steps / ~2h H200).
 
 ### Next External Benchmarks
 - Evaluate v2 (`artifacts/tabular_causal_pfn_v2_p2000`) on additional OCI Stage-2 scenarios (e.g., `S1/S2/S3`, larger `N`, unmeasured confounding) and `sample_size_calculator` reference configurations, and assess integrating `SparseTabularCausalPFN` as an optional Stage-2 estimator / candidate screener.

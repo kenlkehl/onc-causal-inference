@@ -521,24 +521,45 @@ def _inject_missingness_and_3state(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
     """Inject realistic MCAR, MAR, or MNAR missingness (and optional 3-state EHR unknown flags).
 
-    Preserves any pre-existing fragmented NaNs in ``X_in`` cleanly.
+    Preserves any pre-existing fragmented NaNs in ``X_in`` cleanly and guarantees that
+    noise columns span the full EHR missingness distribution (including heavy Stage-1
+    extraction missingness up to ~95%) so missingness rate can never act as a role shortcut.
     Returns ``(X_obs, M, roles_out, miss_mode)`` keeping total feature count exact.
     """
     n_total, p = X_in.shape
     X_obs = X_in.copy()
     pre_nan = ~np.isfinite(X_obs)
+    has_pre_nan = bool(pre_nan.any())
     M = pre_nan.astype(np.float32)
     roles_out = roles.copy()
-    if rng.random() >= prior.missing_study_prob:
-        return X_obs, M, roles_out, ("fragmented" if bool(pre_nan.any()) else "none")
+    # Never leave pre-existing fragmented NaNs solely on active columns: whenever any
+    # fragmented NaNs exist, always apply study-wide missingness across ALL columns.
+    if (not has_pre_nan) and rng.random() >= prior.missing_study_prob:
+        return X_obs, M, roles_out, "none"
 
     is_mnar = rng.random() < prior.mnar_prob
     miss_mode = "mnar" if is_mnar else "mar"
-    miss_rates = rng.uniform(0.0, prior.max_missing_rate, size=p).astype(np.float32)
-    miss_rates *= (rng.random(p) < 0.65).astype(np.float32)
+
+    # Mix moderate EHR missingness (up to max_missing_rate) with heavy Stage-1 LLM extraction
+    # missingness (heavy tail up to 0.96 across ALL columns, matching real Stage-2 tables!)
+    heavy_ehr = has_pre_nan or (rng.random() < 0.50)
+    if heavy_ehr:
+        # Realistic bimodal/heavy-tailed missingness across noise & active columns alike
+        u = rng.random(p)
+        miss_rates = np.zeros(p, dtype=np.float32)
+        mod_mask = (u >= 0.20) & (u < 0.55)
+        hi_mask = u >= 0.55
+        if mod_mask.any():
+            miss_rates[mod_mask] = rng.uniform(0.02, prior.max_missing_rate, size=int(mod_mask.sum())).astype(np.float32)
+        if hi_mask.any():
+            miss_rates[hi_mask] = rng.uniform(prior.max_missing_rate, 0.95, size=int(hi_mask.sum())).astype(np.float32)
+    else:
+        miss_rates = rng.uniform(0.0, prior.max_missing_rate, size=p).astype(np.float32)
+        miss_rates *= (rng.random(p) < 0.65).astype(np.float32)
+
     active_miss = np.where(miss_rates > 0.015)[0]
     if len(active_miss) == 0:
-        return X_obs, M, roles_out, ("fragmented" if bool(pre_nan.any()) else "none")
+        return X_obs, M, roles_out, ("fragmented" if has_pre_nan else "none")
 
     b_m = np.log(miss_rates[active_miss] / np.maximum(1.0 - miss_rates[active_miss], 1e-4))
     if is_mnar:
@@ -562,7 +583,8 @@ def _inject_missingness_and_3state(
 
     mask = rng.random((n_total, len(active_miss))) < prob_m
     combined = pre_nan[:, active_miss] | mask
-    valid_mask_cols = combined.sum(axis=0) < (n_total - 2)
+    min_obs = min(6, max(2, n_total // 20))
+    valid_mask_cols = combined.sum(axis=0) <= (n_total - min_obs)
     mask[:, ~valid_mask_cols] = False
     M[:, active_miss] = np.where(mask, 1.0, M[:, active_miss])
     X_obs[:, active_miss] = np.where(mask, np.nan, X_obs[:, active_miss])
@@ -711,6 +733,58 @@ def _pad_with_noise_proxies_and_instruments(
         )
         w_inst = rng.normal(0.0, float(rng.uniform(0.6, 1.8)), size=n_inst).astype(np.float32)
         t_signal = t_signal + X_inst_std @ w_inst
+
+    # Also build fragmented synonymous clusters on pure NOISE columns (matching active fragmented
+    # clusters: opposite-polarity pairs, coarsened cuts, & partial-coverage clones) so synonym
+    # cluster geometry / missingness can never shortcut-predict role != 0!
+    noise_start = n_inst + n_proxies
+    if n_noise >= 6 and rng.random() < max(prior.fragmented_dup_prob, 0.50):
+        n_noise_clusters = int(rng.integers(2, min(14, n_noise // 3) + 1))
+        cur = noise_start
+        for _ in range(n_noise_clusters):
+            if cur + 2 >= X_pad.shape[1]:
+                break
+            parent_c = cur
+            cur += 1
+            k_dup = int(rng.integers(1, min(5, X_pad.shape[1] - cur) + 1))
+            col = X_pad[:, parent_c]
+            mu_c = float(col.mean())
+            sd_c = float(col.std())
+            is_b = bool(bin_pad[parent_c])
+            made_part = False
+            for d_i in range(k_dup):
+                dst = cur
+                cur += 1
+                if is_b and d_i == 0 and rng.random() < 0.55:
+                    dup = (1.0 - col).astype(np.float32)
+                    bin_pad[dst] = True
+                elif (not is_b) and sd_c > 1e-5 and rng.random() < 0.35:
+                    cut = mu_c + float(rng.uniform(-0.7, 0.9)) * sd_c
+                    dup = ((col - cut) > 0.0).astype(np.float32)
+                    bin_pad[dst] = True
+                else:
+                    if is_b:
+                        dup = col.copy()
+                        pos = dup > 0.5
+                        dup[pos & (rng.random(n_total) < float(rng.uniform(0.02, 0.14)))] = 0.0
+                        dup[(~pos) & (rng.random(n_total) < float(rng.uniform(0.01, 0.06)))] = 1.0
+                        bin_pad[dst] = True
+                    else:
+                        dup = (
+                            col + rng.normal(0.0, float(rng.uniform(0.10, 0.35)) * max(sd_c, 1e-4), size=n_total)
+                        ).astype(np.float32)
+                        bin_pad[dst] = False
+                if rng.random() < 0.70:
+                    miss_r = float(rng.uniform(0.20, 0.85))
+                    miss = rng.random(n_total) < miss_r
+                    if (~miss).sum() >= 6:
+                        dup[miss] = np.nan
+                        made_part = True
+                X_pad[:, dst] = dup
+            if made_part and k_dup >= 2 and rng.random() < 0.45:
+                miss_p = rng.random(n_total) < float(rng.uniform(0.30, 0.80))
+                if (~miss_p).sum() >= 6:
+                    X_pad[miss_p, parent_c] = np.nan
 
     X_all = np.concatenate([X_base, X_pad], axis=1)
     bin_all = np.concatenate([is_bin_base, bin_pad])
