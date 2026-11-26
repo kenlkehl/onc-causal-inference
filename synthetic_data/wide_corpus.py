@@ -203,14 +203,414 @@ CLINICAL_FEATURE_CATALOG: Tuple[Dict[str, Any], ...] = (
 )
 
 
-def build_feature_catalog(num_features: int) -> List[Dict[str, Any]]:
-    """Return ``num_features`` clinical feature definitions (extending cleanly beyond 120 if needed)."""
+# Default comparative effectiveness question per oncology context.
+ONCOLOGY_CONTEXT_QUESTIONS: Dict[str, str] = {
+    "nsclc": "Compare vinorelbine to gemcitabine for advanced/metastatic NSCLC.",
+    "myeloma": (
+        "Compare daratumumab+lenalidomide+dexamethasone with "
+        "carfilzomib+lenalidomide+dexamethasone for relapsed/refractory multiple myeloma."
+    ),
+    "hcc": (
+        "Compare atezolizumab+bevacizumab with durvalumab+tremelimumab "
+        "for first-line unresectable hepatocellular carcinoma."
+    ),
+    "mcrc": (
+        "Compare FOLFOX+bevacizumab with FOLFIRI+bevacizumab "
+        "for first-line metastatic colorectal cancer."
+    ),
+    "breast_er_pos": (
+        "Compare letrozole+palbociclib with letrozole+ribociclib "
+        "for first-line metastatic ER-positive HER2-negative breast cancer."
+    ),
+    "mcrpc": (
+        "Compare enzalutamide with abiraterone+prednisone "
+        "for first-line metastatic castration-resistant prostate cancer."
+    ),
+}
+
+# Disease-specific replacements for Blocks 2 (indices 8..16) and 8..13 (indices 56..104)
+# so every oncology context has 120 clinically authentic, distinct features.
+_CONTEXT_SPECIFIC_BLOCKS: Dict[str, Tuple[Tuple[Dict[str, Any], ...], Tuple[Dict[str, Any], ...]]] = {
+    "myeloma": (
+        # Block 2 (8): Vitals, Cardiac & Renal Functional Reserve
+        (
+            _cont("systolic_bp", "Baseline systolic blood pressure", 132.0, 17.0, "mmHg"),
+            _cont("diastolic_bp", "Baseline diastolic blood pressure", 78.0, 10.0, "mmHg"),
+            _cont("heart_rate", "Resting heart rate", 80.0, 12.0, "bpm"),
+            _cont("qtc_interval_ms", "Baseline corrected QT interval (QTcF)", 432.0, 24.0, "ms"),
+            _cont("lvef_pct", "Left ventricular ejection fraction", 57.0, 8.0, "%"),
+            _cont("urine_protein_24h_g", "24-hour urine M-protein excretion", 0.85, 0.90, "g/24h"),
+            _cont("serum_viscosity_cp", "Serum viscosity", 1.9, 0.55, "cP"),
+            _cont("orthostatic_sbp_drop_mmhg", "Orthostatic systolic blood pressure drop", 11.0, 8.0, "mmHg"),
+        ),
+        # Blocks 8-13 (48): Myeloma Staging, Disease Burden, Biomarkers, Cytogenetics, Prior Tx, Comorbidities
+        (
+            # Block 8: Staging & Paraprotein Burden
+            _cat("myeloma_isotype", "Monoclonal immunoglobulin isotype", {"IgG": 0.54, "IgA": 0.24, "Light_chain_only": 0.22}),
+            _cat("r_iss_stage", "Revised International Staging System (R-ISS)", {"Stage_I": 0.22, "Stage_II": 0.56, "Stage_III": 0.22}),
+            _cont("serum_m_protein_g_dl", "Serum monoclonal M-protein", 2.8, 1.9, "g/dL"),
+            _cont("beta2_microglobulin_mg_l", "Serum beta-2 microglobulin", 4.6, 2.8, "mg/L"),
+            _cont("involved_flc_mg_l", "Involved serum free light chain", 480.0, 420.0, "mg/L"),
+            _cont("flc_ratio", "Involved-to-uninvolved free light chain ratio", 42.0, 38.0, "ratio"),
+            _cont("marrow_plasma_cell_pct", "Bone marrow clonal plasma cell percentage", 44.0, 24.0, "%"),
+            _cont("iga_igg_uninvolved_suppression", "Uninvolved immunoglobulin suppression index", 0.65, 0.25, "index"),
+            # Block 9: CRAB & Skeletal / Extramedullary Involvement
+            _cat("lytic_bone_lesions", "Skeletal survey/PET-CT lytic bone lesions", {"None": 0.22, "One_to_three": 0.36, "Extensive_four_plus": 0.42}),
+            _cat("extramedullary_disease", "Extramedullary plasmacytoma", {"Absent": 0.84, "Paraskeletal": 0.10, "True_extramedullary": 0.06}),
+            _cat("pathologic_fracture_history", "Prior vertebral or long-bone pathologic fracture", {"Absent": 0.72, "Present": 0.28}),
+            _cat("hypercalcemia_at_relapse", "Symptomatic hypercalcemia at relapse", {"Absent": 0.85, "Present": 0.15}),
+            _cat("renal_cast_nephropathy", "Myeloma-related renal impairment", {"Absent": 0.74, "Present": 0.26}),
+            _cat("hyperviscosity_symptoms", "Clinical hyperviscosity symptoms", {"Absent": 0.92, "Present": 0.08}),
+            _cat("spinal_cord_compression_risk", "Epidural or paraspinal cord impingement", {"Absent": 0.90, "Present": 0.10}),
+            _cat("amyloidosis_overlap", "Concurrent AL amyloidosis features", {"Absent": 0.91, "Present": 0.09}),
+            # Block 10: Immunophenotype, MRD & Prognostic Assays
+            _cont("circulating_plasma_cells_pct", "Peripheral blood circulating plasma cells", 0.45, 0.55, "%"),
+            _cat("mrd_prior_best_status", "Best prior measurable residual disease status", {"Never_achieved": 0.68, "MRD_negative_relapsed": 0.32}),
+            _cont("cd38_expression_mfi", "Clonal plasma cell CD38 surface density", 18.0, 9.0, "kMFI"),
+            _cont("bcma_soluble_ng_ml", "Serum soluble BCMA level", 145.0, 110.0, "ng/mL"),
+            _cont("ki67_plasma_cell_pct", "Plasma cell Ki-67 proliferation index", 14.0, 10.0, "%"),
+            _cat("pet_ct_fdg_avid_lesions", "FDG-avid focal marrow lesions on PET/CT", {"None": 0.28, "1_to_3": 0.38, "Over_3": 0.34}),
+            _cont("sky92_gene_risk_score", "Myeloma high-risk gene expression score", 0.0, 1.0, "z", positive=False),
+            _cat("immunoparesis_severity", "Polyclonal immunoparesis status", {"None": 0.22, "Partial": 0.43, "Severe": 0.35}),
+            # Block 11: FISH Cytogenetics & Molecular Risk
+            _cat("fish_del17p", "FISH del(17p) / TP53 deletion", {"Absent": 0.86, "Present": 0.14}),
+            _cat("fish_t4_14", "FISH translocation t(4;14)", {"Absent": 0.85, "Present": 0.15}),
+            _cat("fish_t14_16", "FISH translocation t(14;16)", {"Absent": 0.94, "Present": 0.06}),
+            _cat("fish_gain_1q21", "FISH chromosome 1q21 gain/amplification", {"Absent": 0.62, "Gain_3_copies": 0.26, "Amp_4plus": 0.12}),
+            _cat("fish_t11_14", "FISH translocation t(11;14)", {"Absent": 0.81, "Present": 0.19}),
+            _cat("fish_del1p32", "FISH chromosome 1p32 deletion", {"Absent": 0.89, "Present": 0.11}),
+            _cat("hyperdiploid_karyotype", "Hyperdiploid plasma cell karyotype", {"Non_hyperdiploid": 0.48, "Hyperdiploid": 0.52}),
+            _cat("ras_braf_mutation", "KRAS/NRAS/BRAF somatic myeloma mutation", {"Wildtype": 0.56, "Mutated": 0.44}),
+            # Block 12: Prior Myeloma Lines & Refractoriness
+            _cat("prior_lines_therapy", "Prior systemic myeloma therapy lines", {"1": 0.38, "2": 0.34, "3_plus": 0.28}),
+            _cat("prior_asct", "Prior autologous stem cell transplant", {"None": 0.46, "Single_ASCT": 0.44, "Tandem_ASCT": 0.10}),
+            _cat("bortezomib_refractory", "Refractory to prior bortezomib", {"Sensitive_or_naive": 0.64, "Refractory": 0.36}),
+            _cat("lenalidomide_exposure", "Prior lenalidomide exposure status", {"Naive": 0.24, "Exposed_sensitive": 0.44, "Refractory": 0.32}),
+            _cat("anti_cd38_prior", "Prior anti-CD38 monoclonal antibody", {"Naive": 0.72, "Exposed": 0.28}),
+            _cat("prior_palliative_bone_rt", "Prior palliative radiotherapy to bone lesions", {"None": 0.68, "Present": 0.32}),
+            _cont("months_since_diagnosis", "Months since initial myeloma diagnosis", 34.0, 24.0, "months"),
+            _cont("duration_prior_remission_mo", "Duration of immediately preceding remission", 16.0, 12.0, "months"),
+            # Block 13: Myeloma-Specific Comorbidities & Supportive Meds
+            _cat("baseline_peripheral_neuropathy", "Grade of baseline peripheral neuropathy", {"Grade_0": 0.46, "Grade_1": 0.36, "Grade_2_plus": 0.18}),
+            _cat("vte_history", "Prior venous thromboembolism (DVT/PE)", {"Absent": 0.82, "Present": 0.18}),
+            _cat("heart_failure_history", "Prior congestive heart failure or cardiomyopathy", {"Absent": 0.84, "Present": 0.16}),
+            _cat("uncontrolled_hypertension", "Baseline refractory hypertension", {"Absent": 0.72, "Present": 0.28}),
+            _cat("bone_modifying_agent", "Concurrent zoledronic acid or denosumab", {"None": 0.26, "Zoledronate": 0.46, "Denosumab": 0.28}),
+            _cat("vte_prophylaxis_type", "Baseline antithrombotic prophylaxis", {"Aspirin": 0.56, "DOAC_or_LMWH": 0.30, "None": 0.14}),
+            _cat("recurrent_infections_12m", "Serious bacterial/viral infections in past 12m", {"None": 0.66, "One": 0.22, "Two_plus": 0.12}),
+            _cat("diabetes_status", "Diabetes mellitus", {"None": 0.70, "Controlled": 0.20, "Uncontrolled": 0.10}),
+        ),
+    ),
+    "hcc": (
+        # Block 2 (8): Vitals, Hemodynamics & Portal/Hepatic Physiology
+        (
+            _cont("systolic_bp", "Baseline systolic blood pressure", 126.0, 17.0, "mmHg"),
+            _cont("diastolic_bp", "Baseline diastolic blood pressure", 74.0, 10.0, "mmHg"),
+            _cont("heart_rate", "Resting heart rate", 78.0, 12.0, "bpm"),
+            _cont("inr_ratio", "International normalized ratio (INR)", 1.24, 0.26, "ratio"),
+            _cont("meld_na_score", "Model for End-Stage Liver Disease (MELD-Na)", 10.8, 3.8, "points"),
+            _cont("albi_score", "Albumin-Bilirubin (ALBI) linear score", -2.35, 0.55, "score", positive=False),
+            _cont("spleen_length_cm", "Craniocaudal spleen length on CT", 13.4, 2.8, "cm"),
+            _cont("lvef_pct", "Left ventricular ejection fraction", 60.0, 6.5, "%"),
+        ),
+        # Blocks 8-13 (48): HCC Staging, Cirrhosis/Portal Burden, Biomarkers, Etiology/Genomics, Prior Tx, Comorbidities
+        (
+            # Block 8: Staging, Cirrhosis & Tumor Morphology
+            _cat("bclc_stage", "Barcelona Clinic Liver Cancer (BCLC) stage", {"BCLC_B": 0.28, "BCLC_C": 0.72}),
+            _cat("child_pugh_class", "Baseline Child-Pugh liver function class", {"A5": 0.46, "A6": 0.34, "B7": 0.20}),
+            _cat("albi_grade", "Baseline ALBI grade", {"Grade_1": 0.42, "Grade_2": 0.50, "Grade_3": 0.08}),
+            _cat("cirrhosis_etiology", "Underlying chronic liver disease etiology", {"HBV": 0.28, "HCV": 0.26, "Alcohol": 0.22, "MASLD_Other": 0.24}),
+            _cont("largest_hepatic_lesion_cm", "Diameter of largest intrahepatic HCC mass", 6.4, 3.4, "cm"),
+            _cont("hepatic_nodules_count", "Number of intrahepatic tumor nodules", 3.6, 2.4, "nodules"),
+            _cont("liver_tumor_burden_pct", "Estimated percent hepatic parenchymal involvement", 24.0, 18.0, "%"),
+            _cont("sum_target_diameters_mm", "mRECIST sum of viable target lesion diameters", 86.0, 48.0, "mm"),
+            # Block 9: Vascular Invasion, Portal Hypertension & Extrahepatic Spread
+            _cat("portal_vein_thrombus", "Macrovascular portal vein tumor thrombus (PVTT)", {"None": 0.60, "Branch_Vp1_Vp2": 0.22, "Main_Vp3_Vp4": 0.18}),
+            _cat("esophageal_varices", "Esophageal/gastric varices on baseline EGD", {"None": 0.46, "Small_low_risk": 0.34, "Large_or_banded": 0.20}),
+            _cat("prior_variceal_bleed", "History of upper GI variceal hemorrhage", {"Absent": 0.86, "Remote_over_6m": 0.10, "Recent_within_6m": 0.04}),
+            _cat("baseline_ascites", "Baseline radiographic or clinical ascites", {"Absent": 0.74, "Mild_controlled": 0.20, "Moderate": 0.06}),
+            _cat("hepatic_encephalopathy", "History of hepatic encephalopathy", {"Absent": 0.86, "Grade_1_controlled": 0.14}),
+            _cat("extrahepatic_lung_mets", "Extrahepatic pulmonary metastases", {"Absent": 0.70, "Present": 0.30}),
+            _cat("extrahepatic_lymph_nodes", "Extrahepatic malignant lymphadenopathy", {"Absent": 0.68, "Present": 0.32}),
+            _cat("extrahepatic_bone_mets", "Extrahepatic skeletal metastases", {"Absent": 0.84, "Present": 0.16}),
+            # Block 10: Hepatic Tumor Markers & Immune/Vascular Biomarkers
+            _cont("afp_ng_ml", "Serum alpha-fetoprotein (AFP)", 420.0, 680.0, "ng/mL"),
+            _cont("dcp_pivka_ii_mau_ml", "Des-gamma-carboxy prothrombin (PIVKA-II)", 650.0, 820.0, "mAU/mL"),
+            _cont("afp_l3_pct", "AFP-L3 lectin-reactive fraction", 22.0, 18.0, "%"),
+            _cont("ggt_u_l", "Gamma-glutamyl transferase (GGT)", 145.0, 110.0, "U/L"),
+            _cont("urine_protein_creatinine_ratio", "Spot urine protein-to-creatinine ratio", 0.28, 0.30, "mg/mg"),
+            _cont("vegf_plasma_pg_ml", "Circulating plasma VEGF-A", 110.0, 85.0, "pg/mL"),
+            _cont("ctdna_vaf_pct", "Circulating tumor DNA max VAF", 3.8, 3.6, "%"),
+            _cont("interferon_gamma_score", "Hepatic immune inflamed gene signature", 0.0, 1.0, "z", positive=False),
+            # Block 11: HCC Molecular Pathways & Viral Control
+            _cat("hbv_viral_suppression", "Hepatitis B antiviral suppression status", {"HBV_negative": 0.72, "Suppressed_on_NUC": 0.22, "Detectable_DNA": 0.06}),
+            _cat("hcv_svr_status", "Hepatitis C sustained virologic response", {"HCV_negative": 0.74, "Prior_SVR": 0.18, "Active_viremia": 0.08}),
+            _cat("ctnnb1_mutation", "CTNNB1 (beta-catenin) WNT pathway alteration", {"Wildtype": 0.68, "Mutated": 0.32}),
+            _cat("tert_promoter_mutation", "TERT promoter alteration status", {"Wildtype": 0.44, "Mutated": 0.56}),
+            _cat("tp53_mutation", "TP53 somatic alteration status", {"Wildtype": 0.66, "Mutated": 0.34}),
+            _cat("arid1a_mutation", "ARID1A chromatin remodeling mutation", {"Wildtype": 0.86, "Mutated": 0.14}),
+            _cat("fgf19_amplification", "FGF19/CCND1 locus amplification", {"Absent": 0.88, "Present": 0.12}),
+            _cat("fib4_score", "FIB-4 hepatic fibrosis category", {"Low_Intermediate": 0.32, "High_cirrhotic": 0.68}),
+            # Block 12: Prior Locoregional & Surgical Liver Therapy
+            _cat("prior_tace", "Prior transarterial chemoembolization (TACE)", {"None": 0.52, "1_to_2_sessions": 0.32, "3_plus_sessions": 0.16}),
+            _cat("prior_y90_tare", "Prior Y-90 transarterial radioembolization", {"None": 0.76, "Present": 0.24}),
+            _cat("prior_ablation_rfa_mwa", "Prior percutaneous thermal ablation", {"None": 0.78, "Present": 0.22}),
+            _cat("prior_hepatic_resection", "Prior partial hepatectomy", {"None": 0.76, "Resected": 0.24}),
+            _cat("prior_sbrt_liver", "Prior stereotactic body liver radiotherapy", {"None": 0.84, "Present": 0.16}),
+            _cat("prior_tki_adjuvant", "Prior multikinase inhibitor exposure", {"None": 0.88, "Present": 0.12}),
+            _cont("months_since_diagnosis", "Months since initial HCC diagnosis", 12.0, 11.0, "months"),
+            _cont("months_since_locoregional", "Months since last locoregional liver therapy", 4.5, 4.2, "months"),
+            # Block 13: Bleeding, Autoimmune & Cirrhosis Comorbidities
+            _cat("uncontrolled_hypertension", "Baseline refractory hypertension", {"Absent": 0.68, "Present": 0.32}),
+            _cat("arterial_thromboembolism_hx", "Prior MI, ischemic stroke, or arterial thrombosis", {"Absent": 0.86, "Present": 0.14}),
+            _cat("anticoagulation", "Therapeutic anticoagulation or antiplatelet therapy", {"None": 0.78, "Antiplatelet": 0.14, "Anticoagulant": 0.08}),
+            _cat("nonselective_beta_blocker", "Baseline carvedilol/propranolol for portal HTN", {"None": 0.58, "Present": 0.42}),
+            _cat("autoimmune_history", "History of autoimmune disease", {"Absent": 0.90, "Present": 0.10}),
+            _cat("baseline_steroids", "Baseline systemic corticosteroids", {"None": 0.88, "Present": 0.12}),
+            _cat("diabetes_status", "Diabetes mellitus", {"None": 0.56, "Controlled": 0.28, "Uncontrolled": 0.16}),
+            _cat("ppi_use", "Baseline proton pump inhibitor use", {"None": 0.50, "Present": 0.50}),
+        ),
+    ),
+    "mcrc": (
+        # Block 2 (8): Vitals, GI/Vascular & Neurologic Baseline
+        (
+            _cont("systolic_bp", "Baseline systolic blood pressure", 130.0, 16.0, "mmHg"),
+            _cont("diastolic_bp", "Baseline diastolic blood pressure", 77.0, 10.0, "mmHg"),
+            _cont("heart_rate", "Resting heart rate", 79.0, 12.0, "bpm"),
+            _cont("lvef_pct", "Left ventricular ejection fraction", 59.0, 6.8, "%"),
+            _cont("urine_protein_creatinine_ratio", "Spot urine protein-to-creatinine ratio", 0.22, 0.24, "mg/mg"),
+            _cont("stool_frequency_per_day", "Baseline daily bowel movement frequency", 2.4, 1.5, "per day"),
+            _cont("spo2_pct", "Resting oxygen saturation", 97.0, 1.8, "%"),
+            _cont("respiratory_rate", "Baseline respiratory rate", 16.5, 2.4, "breaths/min"),
+        ),
+        # Blocks 8-13 (48): mCRC Sidedness/Staging, Metastatic Sites, GI Biomarkers, RAS/RAF/MSI, Prior Tx, GI Comorbidities
+        (
+            # Block 8: Primary Location, Pathology & Disease Extent
+            _cat("primary_sidedness", "Primary colorectal tumor sidedness", {"Left_colon": 0.44, "Right_colon": 0.30, "Rectum": 0.26}),
+            _cat("mucinous_histology", "Mucinous or signet-ring histologic component", {"Conventional_adeno": 0.80, "Mucinous_or_signet": 0.20}),
+            _cat("tumor_grade", "Histologic differentiation grade", {"Well": 0.16, "Moderate": 0.58, "Poor": 0.26}),
+            _cat("presentation_timing", "Metastatic presentation timing", {"Synchronous": 0.62, "Metachronous": 0.38}),
+            _cat("primary_in_situ", "Unresected primary colorectal tumor in situ", {"Resected": 0.58, "In_situ": 0.42}),
+            _cont("sum_target_diameters_mm", "RECIST sum of target lesion diameters", 82.0, 44.0, "mm"),
+            _cont("liver_met_count", "Number of discrete hepatic metastases", 4.2, 3.1, "lesions"),
+            _cont("metastatic_sites_count", "Number of involved metastatic organ systems", 2.1, 1.1, "sites"),
+            # Block 9: Organ Distribution & Surgical Resectability
+            _cat("liver_limited_disease", "Liver-limited metastatic pattern", {"Non_liver_limited": 0.66, "Liver_limited": 0.34}),
+            _cat("peritoneal_carcinomatosis", "Peritoneal carcinomatosis or omental caking", {"Absent": 0.78, "Present": 0.22}),
+            _cat("lung_metastases", "Baseline pulmonary metastases", {"Absent": 0.64, "Present": 0.36}),
+            _cat("retroperitoneal_nodes", "Distant retroperitoneal/para-aortic nodes", {"Absent": 0.74, "Present": 0.26}),
+            _cat("bone_metastases", "Baseline osseous metastases", {"Absent": 0.90, "Present": 0.10}),
+            _cat("bowel_obstruction_risk", "Partial colonic obstruction or intraluminal stent", {"Absent": 0.84, "Present": 0.16}),
+            _cat("baseline_ascites", "Malignant ascites on staging CT", {"Absent": 0.86, "Present": 0.14}),
+            _cat("conversion_resectability", "Multidisciplinary conversion-to-resection potential", {"Unresectable": 0.76, "Borderline_convertible": 0.24}),
+            # Block 10: GI Tumor Markers & Pharmacogenomics
+            _cont("cea_ng_ml", "Serum carcinoembryonic antigen (CEA)", 68.0, 95.0, "ng/mL"),
+            _cont("ca19_9_u_ml", "Serum CA 19-9", 92.0, 120.0, "U/mL"),
+            _cat("msi_mmr_status", "Microsatellite instability / MMR status", {"MSS_pMMR": 0.94, "MSI_H_dMMR": 0.06}),
+            _cont("tmb_mut_mb", "Tumor mutational burden", 6.2, 4.8, "mut/Mb"),
+            _cont("ctdna_vaf_pct", "Circulating tumor DNA max VAF", 6.5, 5.8, "%"),
+            _cat("ugt1a1_genotype", "UGT1A1*28 irinotecan pharmacogenotype", {"Wildtype_6_6": 0.46, "Heterozygous_6_7": 0.42, "Homozygous_7_7": 0.12}),
+            _cat("dpd_deficiency_variant", "DPYD fluoropyrimidine variant screen", {"Normal": 0.95, "Intermediate": 0.05}),
+            _cont("cms_subtype_score", "Consensus molecular subtype mesenchymal score", 0.0, 1.0, "z", positive=False),
+            # Block 11: Colorectal Somatic Genomics
+            _cat("kras_mutation", "KRAS exon 2/3/4 mutation status", {"Wildtype": 0.56, "Exon2_G12_G13": 0.36, "Exon3_4_or_G12C": 0.08}),
+            _cat("nras_mutation", "NRAS somatic mutation status", {"Wildtype": 0.94, "Mutated": 0.06}),
+            _cat("braf_v600e", "BRAF V600E alteration status", {"Wildtype": 0.91, "V600E": 0.09}),
+            _cat("her2_amplification", "ERBB2/HER2 amplification (IHC/FISH/NGS)", {"Absent": 0.95, "Present": 0.05}),
+            _cat("apc_mutation", "APC tumor suppressor mutation", {"Wildtype": 0.24, "Mutated": 0.76}),
+            _cat("tp53_mutation", "TP53 somatic alteration status", {"Wildtype": 0.34, "Mutated": 0.66}),
+            _cat("pik3ca_mutation", "PIK3CA mutation status", {"Wildtype": 0.82, "Mutated": 0.18}),
+            _cat("smad4_loss", "SMAD4 alteration or loss", {"Intact": 0.85, "Lost": 0.15}),
+            # Block 12: Prior Surgery, Adjuvant Chemo & Pelvic RT
+            _cat("prior_adjuvant_oxaliplatin", "Prior adjuvant oxaliplatin chemotherapy", {"None": 0.66, "Completed_over_12m": 0.22, "Completed_within_12m": 0.12}),
+            _cat("prior_adjuvant_5fu", "Prior adjuvant fluoropyrimidine exposure", {"None": 0.62, "Present": 0.38}),
+            _cat("prior_pelvic_radiation", "Prior neoadjuvant/pelvic radiotherapy", {"None": 0.78, "Present": 0.22}),
+            _cat("prior_colectomy", "Prior primary colorectal surgical resection", {"None": 0.42, "Resected": 0.58}),
+            _cat("prior_liver_metastasectomy", "Prior hepatic resection or ablation", {"None": 0.86, "Present": 0.14}),
+            _cat("ostomy_present", "Baseline ileostomy or colostomy", {"Absent": 0.82, "Present": 0.18}),
+            _cont("months_since_diagnosis", "Months since initial colorectal cancer diagnosis", 11.0, 12.0, "months"),
+            _cont("disease_free_interval_mo", "Disease-free interval after curative therapy", 8.0, 10.0, "months"),
+            # Block 13: Neuropathy, GI/Vascular Risks & Concomitant Meds
+            _cat("baseline_peripheral_neuropathy", "Baseline sensory peripheral neuropathy", {"Grade_0": 0.64, "Grade_1": 0.26, "Grade_2_plus": 0.10}),
+            _cat("uncontrolled_hypertension", "Baseline refractory hypertension", {"Absent": 0.72, "Present": 0.28}),
+            _cat("recent_major_surgery", "Major abdominal surgery within 6 weeks", {"Absent": 0.88, "Present": 0.12}),
+            _cat("arterial_thromboembolism_hx", "Prior MI, ischemic stroke, or arterial clot", {"Absent": 0.88, "Present": 0.12}),
+            _cat("anticoagulation", "Therapeutic anticoagulation", {"None": 0.80, "Present": 0.20}),
+            _cat("ibd_or_gi_bleed_hx", "Inflammatory bowel disease or recent GI bleed", {"Absent": 0.88, "Present": 0.12}),
+            _cat("diabetes_status", "Diabetes mellitus", {"None": 0.70, "Controlled": 0.20, "Uncontrolled": 0.10}),
+            _cat("gilbert_syndrome", "Baseline benign unconjugated hyperbilirubinemia", {"Absent": 0.92, "Present": 0.08}),
+        ),
+    ),
+    "breast_er_pos": (
+        # Block 2 (8): Vitals, Cardiac QTc & Endocrine Physiology
+        (
+            _cont("systolic_bp", "Baseline systolic blood pressure", 126.0, 15.0, "mmHg"),
+            _cont("diastolic_bp", "Baseline diastolic blood pressure", 76.0, 9.5, "mmHg"),
+            _cont("heart_rate", "Resting heart rate", 76.0, 11.0, "bpm"),
+            _cont("qtc_interval_ms", "Baseline Fridericia QTc interval (QTcF)", 424.0, 22.0, "ms"),
+            _cont("lvef_pct", "Left ventricular ejection fraction", 61.0, 6.0, "%"),
+            _cont("estradiol_pg_ml", "Serum estradiol level", 16.0, 14.0, "pg/mL"),
+            _cont("bone_mineral_density_tscore", "Lumbar spine DEXA T-score", -1.4, 1.1, "T-score", positive=False),
+            _cont("spo2_pct", "Resting oxygen saturation", 97.5, 1.5, "%"),
+        ),
+        # Blocks 8-13 (48): Breast Histology/Receptors, Metastatic Pattern, Endocrine Biomarkers, Genomics, Prior Tx, Comorbidities
+        (
+            # Block 8: Histology, Hormone Receptors & Presentation
+            _cat("breast_histology", "Breast carcinoma histologic subtype", {"Invasive_ductal": 0.76, "Invasive_lobular": 0.18, "Mixed_or_other": 0.06}),
+            _cat("tumor_grade", "Nottingham histologic grade", {"Grade_1": 0.18, "Grade_2": 0.54, "Grade_3": 0.28}),
+            _cont("er_expression_pct", "Estrogen receptor nuclear staining percentage", 82.0, 18.0, "%"),
+            _cont("pr_expression_pct", "Progesterone receptor nuclear staining percentage", 48.0, 32.0, "%"),
+            _cat("her2_ihc_status", "HER2 immunohistochemistry status", {"IHC_0": 0.42, "HER2_low_1plus": 0.38, "HER2_low_2plus_ISH_neg": 0.20}),
+            _cat("menopausal_status", "Menopausal status at metastatic index", {"Postmenopausal": 0.78, "Premenopausal_on_OFS": 0.22}),
+            _cat("metastatic_presentation", "De novo vs recurrent metastatic presentation", {"De_novo": 0.32, "Recurrent": 0.68}),
+            _cont("sum_target_diameters_mm", "RECIST sum of measurable target lesions", 54.0, 34.0, "mm"),
+            # Block 9: Organ Metastasis Distribution
+            _cat("bone_only_disease", "Bone-only metastatic involvement", {"Non_bone_only": 0.66, "Bone_only": 0.34}),
+            _cat("liver_metastases", "Baseline hepatic metastases", {"Absent": 0.70, "Present": 0.30}),
+            _cat("lung_metastases", "Baseline pulmonary metastases", {"Absent": 0.68, "Present": 0.32}),
+            _cat("brain_metastases", "Baseline CNS/brain metastases", {"Absent": 0.92, "Present": 0.08}),
+            _cat("pleural_effusion", "Malignant pleural effusion", {"Absent": 0.84, "Present": 0.16}),
+            _cat("soft_tissue_node_mets", "Distant lymph node or chest wall recurrence", {"Absent": 0.62, "Present": 0.38}),
+            _cont("metastatic_sites_count", "Number of involved metastatic organ systems", 2.0, 1.1, "sites"),
+            _cat("visceral_crisis", "Impending or clinical visceral crisis", {"Absent": 0.90, "Present": 0.10}),
+            # Block 10: Breast Tumor Markers & Proliferation Assays
+            _cont("ca15_3_u_ml", "Serum CA 15-3 tumor marker", 76.0, 82.0, "U/mL"),
+            _cont("ca27_29_u_ml", "Serum CA 27.29 tumor marker", 88.0, 90.0, "U/mL"),
+            _cont("cea_ng_ml", "Serum CEA level", 14.0, 20.0, "ng/mL"),
+            _cont("ki67_pct", "Tumor Ki-67 proliferation index", 26.0, 16.0, "%"),
+            _cont("ctdna_vaf_pct", "Circulating tumor DNA max VAF", 3.6, 3.8, "%"),
+            _cat("endocrine_sensitivity", "Prior endocrine therapy sensitivity category", {"De_novo_or_sensitive": 0.62, "Secondary_resistant": 0.28, "Primary_resistant": 0.10}),
+            _cont("pam50_luminal_b_score", "Luminal B proliferation signature score", 0.0, 1.0, "z", positive=False),
+            _cont("tmb_mut_mb", "Tumor mutational burden", 4.4, 3.2, "mut/Mb"),
+            # Block 11: Breast Cancer Somatic & Germline Genomics
+            _cat("pik3ca_mutation", "PIK3CA activating mutation", {"Wildtype": 0.62, "Mutated": 0.38}),
+            _cat("esr1_mutation", "ESR1 ligand-binding domain mutation", {"Wildtype": 0.86, "Mutated": 0.14}),
+            _cat("germline_brca", "Germline BRCA1/BRCA2 pathogenic variant", {"Wildtype": 0.91, "BRCA2": 0.07, "BRCA1": 0.02}),
+            _cat("tp53_mutation", "TP53 somatic alteration status", {"Wildtype": 0.72, "Mutated": 0.28}),
+            _cat("akt1_pten_alteration", "AKT1 E17K or PTEN loss", {"Absent": 0.88, "Present": 0.12}),
+            _cat("rb1_loss", "RB1 loss-of-function alteration", {"Intact": 0.94, "Lost": 0.06}),
+            _cat("fgfr1_amplification", "FGFR1 amplification", {"Absent": 0.86, "Present": 0.14}),
+            _cat("ccnd1_amplification", "CCND1 / 11q13 amplification", {"Absent": 0.80, "Present": 0.20}),
+            # Block 12: Prior Adjuvant Endocrine, Chemo & Surgery
+            _cat("prior_adjuvant_ai", "Prior adjuvant aromatase inhibitor", {"None": 0.54, "Completed_over_12m": 0.28, "Relapsed_on_or_within_12m": 0.18}),
+            _cat("prior_adjuvant_tamoxifen", "Prior adjuvant tamoxifen exposure", {"None": 0.68, "Present": 0.32}),
+            _cat("prior_adjuvant_chemo", "Prior neoadjuvant/adjuvant chemotherapy", {"None": 0.48, "Anthracycline_taxane": 0.36, "Non_anthracycline": 0.16}),
+            _cat("prior_breast_surgery", "Prior primary breast surgery", {"None": 0.32, "Lumpectomy": 0.36, "Mastectomy": 0.32}),
+            _cat("prior_radiation", "Prior breast/chest wall or bone radiotherapy", {"None": 0.42, "Present": 0.58}),
+            _cat("bone_modifying_agent", "Concurrent bisphosphonate or denosumab", {"None": 0.48, "Present": 0.52}),
+            _cont("months_since_diagnosis", "Months since initial breast cancer diagnosis", 42.0, 36.0, "months"),
+            _cont("disease_free_interval_mo", "Disease-free interval before metastasis", 36.0, 32.0, "months"),
+            # Block 13: Cardiac QTc, CYP3A4, Hepatic & Bone Comorbidities
+            _cat("qt_prolonging_conmeds", "Concurrent QT-prolonging medications", {"None": 0.76, "Present": 0.24}),
+            _cat("arrhythmia_or_cad_hx", "Prior arrhythmia, conduction block, or CAD", {"Absent": 0.84, "Present": 0.16}),
+            _cat("cyp3a4_modulator_use", "Concurrent moderate CYP3A4 inhibitor/inducer", {"None": 0.88, "Present": 0.12}),
+            _cat("interstitial_lung_disease_hx", "Baseline interstitial lung disease/pneumonitis", {"Absent": 0.94, "Present": 0.06}),
+            _cat("baseline_fatty_liver", "Baseline hepatic steatosis / transaminitis risk", {"Absent": 0.76, "Present": 0.24}),
+            _cat("vte_history", "Prior venous thromboembolism", {"Absent": 0.88, "Present": 0.12}),
+            _cat("diabetes_status", "Diabetes mellitus", {"None": 0.76, "Controlled": 0.17, "Uncontrolled": 0.07}),
+            _cat("ppi_use", "Baseline proton pump inhibitor use", {"None": 0.68, "Present": 0.32}),
+        ),
+    ),
+    "mcrpc": (
+        # Block 2 (8): Vitals, Cardiometabolic & Endocrine Reserve
+        (
+            _cont("systolic_bp", "Baseline systolic blood pressure", 134.0, 16.0, "mmHg"),
+            _cont("diastolic_bp", "Baseline diastolic blood pressure", 78.0, 10.0, "mmHg"),
+            _cont("heart_rate", "Resting heart rate", 76.0, 11.0, "bpm"),
+            _cont("lvef_pct", "Left ventricular ejection fraction", 57.0, 8.0, "%"),
+            _cont("serum_testosterone_ng_dl", "Castrate serum testosterone", 14.0, 8.0, "ng/dL"),
+            _cont("qtc_interval_ms", "Baseline corrected QT interval (QTcF)", 428.0, 22.0, "ms"),
+            _cont("bone_mineral_density_tscore", "Hip DEXA bone density T-score", -1.6, 1.1, "T-score", positive=False),
+            _cont("spo2_pct", "Resting oxygen saturation", 96.5, 1.9, "%"),
+        ),
+        # Blocks 8-13 (48): Prostate Pathology/PSA, Skeletal/Visceral Burden, Biomarkers, HRR Genomics, Prior Tx, CNS/CV Comorbidities
+        (
+            # Block 8: Gleason Grade, PSA Kinetics & Disease Volume
+            _cat("gleason_grade_group", "Primary biopsy Gleason Grade Group", {"GG1_GG2": 0.16, "GG3": 0.24, "GG4": 0.26, "GG5": 0.34}),
+            _cont("psa_ng_ml", "Baseline serum prostate-specific antigen (PSA)", 42.0, 58.0, "ng/mL"),
+            _cont("psa_doubling_time_mo", "PSA doubling time prior to index", 4.8, 3.6, "months"),
+            _cat("chaarted_volume", "Metastatic disease volume classification", {"Low_volume": 0.38, "High_volume": 0.62}),
+            _cat("de_novo_metastatic", "De novo vs recurrent metastatic history", {"Recurrent": 0.56, "De_novo": 0.44}),
+            _cont("bone_scan_lesion_count", "Number of bone metastases on scintigraphy/PSMA", 7.5, 6.0, "lesions"),
+            _cont("sum_target_diameters_mm", "RECIST soft-tissue target diameter sum", 44.0, 32.0, "mm"),
+            _cont("metastatic_sites_count", "Number of involved metastatic organ systems", 1.8, 0.95, "sites"),
+            # Block 9: Skeletal, Nodal & Visceral Involvement
+            _cat("bone_only_disease", "Bone-only metastatic pattern", {"Non_bone_only": 0.44, "Bone_only": 0.56}),
+            _cat("liver_metastases", "Baseline hepatic metastases", {"Absent": 0.88, "Present": 0.12}),
+            _cat("lung_metastases", "Baseline pulmonary metastases", {"Absent": 0.84, "Present": 0.16}),
+            _cat("distant_lymph_nodes", "Retroperitoneal or distant nodal metastases", {"Absent": 0.54, "Present": 0.46}),
+            _cat("prior_skeletal_event", "Prior symptomatic skeletal-related event (SRE)", {"Absent": 0.74, "Present": 0.26}),
+            _cat("urinary_obstruction", "Symptomatic bladder outlet obstruction/hydronephrosis", {"Absent": 0.84, "Present": 0.16}),
+            _cat("neuroendocrine_features", "Treatment-emergent neuroendocrine features", {"Absent": 0.93, "Present": 0.07}),
+            _cat("opioid_analgesia_use", "Baseline opioid requirement for cancer bone pain", {"None": 0.66, "Intermittent": 0.20, "Scheduled": 0.14}),
+            # Block 10: Prostate Biomarkers & Imaging/Liquid Biopsy
+            _cont("psma_pet_suv_mean", "PSMA PET/CT mean lesion SUV", 14.5, 7.5, "SUV"),
+            _cont("ctc_count_per_7_5ml", "Circulating tumor cells per 7.5 mL blood", 8.0, 12.0, "cells"),
+            _cont("ctdna_vaf_pct", "Circulating tumor DNA max VAF", 4.5, 4.8, "%"),
+            _cont("chromogranin_a_ng_ml", "Serum chromogranin A", 110.0, 95.0, "ng/mL"),
+            _cat("ar_v7_status", "Circulating AR-V7 splice variant status", {"Negative": 0.86, "Positive": 0.14}),
+            _cont("tmb_mut_mb", "Tumor mutational burden", 3.6, 2.8, "mut/Mb"),
+            _cat("msi_status", "Microsatellite instability status", {"MSS": 0.96, "MSI_High": 0.04}),
+            _cont("decipher_genomic_score", "Genomic classifier aggressiveness score", 0.62, 0.22, "score"),
+            # Block 11: Prostate HRR & Tumor Suppressor Genomics
+            _cat("brca2_alteration", "Germline or somatic BRCA2 alteration", {"Wildtype": 0.88, "Mutated": 0.12}),
+            _cat("brca1_atm_hrr", "BRCA1, ATM, CDK12, or PALB2 HRR alteration", {"Wildtype": 0.86, "Mutated": 0.14}),
+            _cat("pten_loss", "PTEN deletion or loss", {"Intact": 0.64, "Lost": 0.36}),
+            _cat("tp53_mutation", "TP53 somatic alteration status", {"Wildtype": 0.62, "Mutated": 0.38}),
+            _cat("rb1_loss", "RB1 loss-of-function alteration", {"Intact": 0.86, "Lost": 0.14}),
+            _cat("ar_amplification", "Androgen receptor gene amplification/mutation", {"Absent": 0.64, "Present": 0.36}),
+            _cat("spop_mutation", "SPOP somatic mutation", {"Wildtype": 0.89, "Mutated": 0.11}),
+            _cat("erg_fusion", "TMPRSS2-ERG gene fusion", {"Absent": 0.56, "Present": 0.44}),
+            # Block 12: Prior ADT, Taxane & Local Prostate Therapy
+            _cat("prior_docetaxel_mhspc", "Prior docetaxel for metastatic hormone-sensitive disease", {"None": 0.62, "Completed": 0.38}),
+            _cat("prior_prostatectomy", "Prior radical prostatectomy", {"None": 0.64, "Present": 0.36}),
+            _cat("prior_prostate_rt", "Prior definitive or salvage pelvic radiotherapy", {"None": 0.54, "Present": 0.46}),
+            _cat("prior_bicalutamide", "Prior first-generation antiandrogen exposure", {"None": 0.48, "Present": 0.52}),
+            _cat("prior_bone_radiation", "Prior palliative bone radiotherapy", {"None": 0.72, "Present": 0.28}),
+            _cat("bone_modifying_agent", "Concurrent zoledronic acid or denosumab", {"None": 0.42, "Present": 0.58}),
+            _cont("months_on_adt_to_crpc", "Months on ADT before castration resistance", 22.0, 16.0, "months"),
+            _cont("months_since_diagnosis", "Months since initial prostate cancer diagnosis", 48.0, 34.0, "months"),
+            # Block 13: CNS/Fall Risk vs Mineralocorticoid/CV Comorbidities
+            _cat("seizure_or_cns_risk", "Prior seizure, stroke, or seizure-lowering medications", {"Absent": 0.88, "Present": 0.12}),
+            _cat("cognitive_fall_risk", "Baseline cognitive impairment or recent falls", {"Absent": 0.80, "Present": 0.20}),
+            _cat("heart_failure_history", "Prior congestive heart failure or fluid overload", {"Absent": 0.82, "Present": 0.18}),
+            _cat("uncontrolled_hypertension", "Baseline refractory hypertension", {"Absent": 0.66, "Present": 0.34}),
+            _cat("coronary_artery_disease", "Coronary artery disease", {"Absent": 0.70, "Present": 0.30}),
+            _cat("diabetes_status", "Diabetes mellitus", {"None": 0.64, "Controlled": 0.24, "Uncontrolled": 0.12}),
+            _cat("baseline_steroids", "Prior corticosteroid intolerance or baseline steroid use", {"None": 0.86, "Present": 0.14}),
+            _cat("anticoagulation", "Therapeutic anticoagulation", {"None": 0.76, "Present": 0.24}),
+        ),
+    ),
+}
+
+ONCOLOGY_CONTEXTS = tuple(ONCOLOGY_CONTEXT_QUESTIONS.keys())
+
+
+def build_feature_catalog(
+    num_features: int, *, clinical_context: str = "nsclc"
+) -> List[Dict[str, Any]]:
+    """Return ``num_features`` clinical feature definitions for ``clinical_context``."""
     if num_features < 1:
         raise ValueError("num_features must be at least 1")
-    catalog = [dict(item) for item in CLINICAL_FEATURE_CATALOG[:num_features]]
+    if clinical_context not in ONCOLOGY_CONTEXT_QUESTIONS:
+        raise ValueError(
+            f"unknown clinical_context {clinical_context!r}; choose from {list(ONCOLOGY_CONTEXTS)}"
+        )
+    if clinical_context == "nsclc":
+        base_catalog: Sequence[Dict[str, Any]] = CLINICAL_FEATURE_CATALOG
+    else:
+        block2, blocks_8_to_13 = _CONTEXT_SPECIFIC_BLOCKS[clinical_context]
+        base_catalog = (
+            CLINICAL_FEATURE_CATALOG[:8]
+            + block2
+            + CLINICAL_FEATURE_CATALOG[16:56]
+            + blocks_8_to_13
+            + CLINICAL_FEATURE_CATALOG[104:120]
+        )
+    catalog = [dict(item) for item in base_catalog[:num_features]]
     if len(catalog) < num_features:
         for idx in range(len(catalog), num_features):
-            panel_idx = idx - len(CLINICAL_FEATURE_CATALOG) + 1
+            panel_idx = idx - len(base_catalog) + 1
             if panel_idx % 3 == 0:
                 catalog.append(
                     _cat(
@@ -352,7 +752,8 @@ def generate_wide_source_cohort(
     within_block_corr: float = 0.30,
     cross_block_corr: float = 0.04,
     dgp_mode: str = "composite",
-    clinical_question: str = DEFAULT_CLINICAL_QUESTION,
+    clinical_context: str = "nsclc",
+    clinical_question: Optional[str] = None,
     render_text: bool = True,
     structured_data_enabled: bool = False,
     min_events_per_patient: int = 15,
@@ -394,7 +795,12 @@ def generate_wide_source_cohort(
         raise ValueError("Invalid num_confounders / num_effect_modifiers for num_features")
 
     rng = np.random.default_rng(int(seed))
-    catalog = build_feature_catalog(num_features)
+    catalog = build_feature_catalog(num_features, clinical_context=clinical_context)
+    resolved_question = (
+        clinical_question
+        if clinical_question is not None
+        else ONCOLOGY_CONTEXT_QUESTIONS[clinical_context]
+    )
     columns, summary_stats = _sample_wide_covariates(
         catalog,
         num_patients,
@@ -523,7 +929,7 @@ def generate_wide_source_cohort(
 
     frame = pd.DataFrame(data)
     config = SyntheticDataConfig(
-        clinical_question=clinical_question,
+        clinical_question=resolved_question,
         dataset_size=num_patients,
         num_features=num_features,
         num_confounders=n_conf,
@@ -556,6 +962,7 @@ def generate_wide_source_cohort(
         "documentation": None,
         "post_treatment": None,
         "wide_corpus": {
+            "clinical_context": clinical_context,
             "num_features": num_features,
             "within_block_corr": within_block_corr,
             "cross_block_corr": cross_block_corr,
@@ -598,7 +1005,13 @@ def wide_corpus_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--within-block-corr", type=float, default=0.30)
     parser.add_argument("--cross-block-corr", type=float, default=0.04)
     parser.add_argument("--dgp-mode", default="composite")
-    parser.add_argument("--clinical-question", default=DEFAULT_CLINICAL_QUESTION)
+    parser.add_argument(
+        "--clinical-context",
+        choices=list(ONCOLOGY_CONTEXTS),
+        default="nsclc",
+        help="Oncology clinical context profile (default: nsclc)",
+    )
+    parser.add_argument("--clinical-question", default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--structured-data", action="store_true", help="Enable structured_data flag in saved config (for LLM expansion)")
     parser.add_argument("--min-events", type=int, default=15, help="min_events_per_patient recorded in generation_config.json")
@@ -621,6 +1034,7 @@ def wide_corpus_main(argv: Optional[Sequence[str]] = None) -> int:
         within_block_corr=args.within_block_corr,
         cross_block_corr=args.cross_block_corr,
         dgp_mode=args.dgp_mode,
+        clinical_context=args.clinical_context,
         clinical_question=args.clinical_question,
         render_text=not args.no_text,
         structured_data_enabled=args.structured_data,

@@ -645,11 +645,14 @@ To stress-test variable or high-dimensional DGPs (such as `S12a` with 5–50 con
 
 ```bash
 python -m synthetic_data.cli wide-corpus \
+  --clinical-context myeloma \
   --num-patients 5000 --num-features 120 --seed 42 \
-  --output-dir ./synthetic_output/wide_120
+  --output-dir ./synthetic_output/wide_myeloma_120
 ```
 
-This writes a standard re-equation-ready source directory (`dataset.parquet`, `metadata.json` with `scenario: null`, `generation_config.json`) with block-correlated Gaussian-copula covariates drawn from a 120-feature oncology catalog (extending cleanly beyond 120 if requested) and deterministic pretreatment clinical notes, ready for `python -m synthetic_data.cli reequation` or `python scripts/benchmark.py materialize --scenarios S12a --generated ./synthetic_output/wide_120`.
+Available `--clinical-context` profiles (each providing 120 distinct, disease-authentic features — 64 shared core labs/vitals/PROs/utilization plus 56 context-specific biomarkers, staging, genomics, organ physiology, and prior therapies): `nsclc`, `myeloma`, `hcc`, `mcrc`, `breast_er_pos`, and `mcrpc`.
+
+This writes a standard re-equation-ready source directory (`dataset.parquet`, `metadata.json` with `scenario: null`, `generation_config.json`) with block-correlated Gaussian-copula covariates and deterministic pretreatment clinical notes, ready for `python -m synthetic_data.cli reequation` or `python scripts/benchmark.py materialize --scenarios S12a --generated ./synthetic_output/wide_myeloma_120`.
 
 Unknown keys, unknown variable names, a variable in two groups, a proxy given a
 role, and counts larger than the unassigned variables are errors. Variables left

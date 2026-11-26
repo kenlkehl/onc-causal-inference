@@ -18,7 +18,11 @@ from synthetic_data import reequation as rq
 from synthetic_data.config import LLMConfig
 from synthetic_data.dgp_terms import NONLINEARITIES, feature_terms, nonlinear_array, nonlinear_value
 from synthetic_data.llm_client import LLMClient, is_nemotron_3_5
-from synthetic_data.wide_corpus import generate_wide_source_cohort
+from synthetic_data.wide_corpus import (
+    ONCOLOGY_CONTEXTS,
+    build_feature_catalog,
+    generate_wide_source_cohort,
+)
 
 
 BUNDLED_NSCLC = (
@@ -415,3 +419,24 @@ def test_nemotron_3_5_sampling_profile_in_llm_client():
     assert other_kwargs["temperature"] == 0.5
     assert "extra_body" not in other_kwargs
     other_client.close()
+
+
+def test_wide_corpus_supports_all_six_oncology_contexts(tmp_path):
+    assert set(ONCOLOGY_CONTEXTS) >= {"nsclc", "myeloma", "hcc", "mcrc", "breast_er_pos", "mcrpc"}
+    for idx, context in enumerate(ONCOLOGY_CONTEXTS):
+        catalog = build_feature_catalog(120, clinical_context=context)
+        names = [f["name"] for f in catalog]
+        assert len(names) == 120
+        assert len(set(names)) == 120, f"duplicate names in {context}"
+        out = generate_wide_source_cohort(
+            tmp_path / context,
+            num_patients=50,
+            num_features=120,
+            clinical_context=context,
+            seed=10 + idx,
+            render_text=False,
+        )
+        frame, meta = _read(out)
+        assert len(frame) == 50
+        assert meta["wide_corpus"]["clinical_context"] == context
+        assert len(meta["features"]) == 120
