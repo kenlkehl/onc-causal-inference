@@ -14,6 +14,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from .config import SyntheticDataConfig, LLMConfig, StructuredDataConfig, DEFAULT_CLINICAL_QUESTION
+from .dgp_terms import NONLINEARITIES
 from .generator import generate_synthetic_dataset
 
 logger = logging.getLogger(__name__)
@@ -630,8 +631,18 @@ def _add_dgp_factor_arguments(parser: argparse.ArgumentParser) -> None:
         help="Give effect-modifier-only variables an outcome main effect too",
     )
     roles.add_argument(
-        "--nonlinearity", choices=["none", "threshold", "quadratic"], default=None,
+        "--nonlinearity", choices=list(NONLINEARITIES), default=None,
         help="Shape of continuous outcome main terms and treatment interactions (default: none)",
+    )
+    roles.add_argument(
+        "--dgp-mode",
+        choices=["parametric", "interacting", "subgroup", "nonparametric", "composite"],
+        default=None,
+        help="Equation complexity mode: parametric (default), interacting, subgroup, nonparametric, or composite",
+    )
+    roles.add_argument(
+        "--max-treatment-interactions", type=int, default=None,
+        help="Optional cap on pairwise confounder interactions in the treatment equation",
     )
     roles.add_argument(
         "--treatment-logit-std", type=float, default=None,
@@ -694,6 +705,8 @@ _FACTOR_ARGUMENTS = (
     "num_prognostic",
     "modifier_main_effects",
     "nonlinearity",
+    "dgp_mode",
+    "max_treatment_interactions",
     "treatment_logit_std",
     "outcome_logit_std",
     "modifier_strength",
@@ -747,6 +760,9 @@ def main(argv: Optional[List[str]] = None):
     if argv and argv[0] == "reequation":
         from .reequation import reequation_main
         return reequation_main(argv[1:])
+    if argv and argv[0] == "wide-corpus":
+        from .wide_corpus import wide_corpus_main
+        return wide_corpus_main(argv[1:])
 
     parser = argparse.ArgumentParser(
         description="Generate synthetic clinical datasets with known causal structure using LLM.",

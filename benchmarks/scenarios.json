@@ -1,6 +1,6 @@
 {
   "schema_version": "oci_benchmark_registry_v1",
-  "description": "Benchmark scenarios for scripts/benchmark.py. S0 is the baseline; each other scenario switches on one factor family relative to it. Re-equation scenarios recompute treatment and outcome on an existing text corpus through synthetic_data.reequation.reequation_cohort; S5 and S6 need text written with generation-time switches. See docs/benchmarks.md.",
+  "description": "Benchmark scenarios for scripts/benchmark.py. S0 is the baseline; S1-S6 isolate single factor families; S7-S12b add null-HTE, epistatic/interacting HTE, multi-way subgroups with rare rates, out-of-family non-parametric (RFF + rational) surfaces, combined EHR stress, and variable/high-dimensional (5 to 50 confounders and 5 to 50 modifiers) complex DGPs. See docs/benchmarks.md.",
   "scenarios": [
     {
       "id": "S0",
@@ -271,6 +271,363 @@
           }
         }
       ]
+    },
+    {
+      "id": "S7",
+      "family": "S7",
+      "label": "Strictly null treatment effect and null HTE",
+      "factor": "Zero treatment main effect and zero modifier strength under a nonlinear, interacting confounded baseline (tests Type-I error and CATE shrinkage)",
+      "materialization": "reequation",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 5000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 8 features; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S7_strict_null_hte",
+        "roles": {"confounder": 3, "effect_modifier": 3, "prognostic": 2},
+        "role_assignment": "random",
+        "modifier_main_effects": false,
+        "nonlinearity": "mixed",
+        "treatment_nonlinearity": "mixed",
+        "outcome_interactions": 3,
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.0,
+        "modifier_strength": 0.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.5,
+        "target_control_outcome_rate": 0.5,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S8",
+      "family": "S8",
+      "label": "Pure-epistatic and interacting HTE",
+      "factor": "Zero 1-D linear modifier main terms in the treatment effect; all HTE comes from centered higher-order M x M and dual-role C x M interactions alongside mixed nonlinearities and baseline interactions",
+      "materialization": "reequation",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 5000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 8 features; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S8_pure_epistatic_interacting_hte",
+        "roles": {"confounder": 3, "effect_modifier": 3, "dual_role": 2},
+        "role_assignment": "random",
+        "dgp_mode": "interacting",
+        "modifier_main_effects": true,
+        "nonlinearity": "mixed",
+        "treatment_nonlinearity": "mixed",
+        "outcome_interactions": 4,
+        "hte_interactions": 6,
+        "pure_epistatic_hte": true,
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.5,
+        "target_control_outcome_rate": 0.5,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S9",
+      "family": "S9",
+      "label": "Multi-way subgroups and imbalanced/rare rates",
+      "factor": "Crisp depth 2-3 biomarker conjunction rules in propensity, baseline outcome, and HTE with imbalanced treatment (25%) and rare control outcome (15%)",
+      "materialization": "reequation",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 5000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 10 features; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S9_multiway_subgroups_rare_events",
+        "roles": {"confounder": 3, "effect_modifier": 3, "dual_role": 2, "prognostic": 2},
+        "role_assignment": "random",
+        "dgp_mode": "subgroup",
+        "modifier_main_effects": true,
+        "nonlinearity": "hinge",
+        "treatment_nonlinearity": "hinge",
+        "subgroup_rules": {
+          "treatment": 3,
+          "outcome": 3,
+          "hte": 4,
+          "min_depth": 2,
+          "max_depth": 3,
+          "soft_slope": null
+        },
+        "treatment_logit_std": 2.2,
+        "outcome_logit_std": 2.2,
+        "treatment_effect": 0.25,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.25,
+        "target_control_outcome_rate": 0.15,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S10",
+      "family": "S10",
+      "label": "Arbitrary non-parametric (out-of-family) surface",
+      "factor": "Smooth Random Fourier Feature GP-like surfaces, bounded rational/ratio terms, and mixed 1-D nonlinearities for propensity, baseline outcome, and HTE",
+      "materialization": "reequation",
+      "sizes": [1000, 5000, 10000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 10000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 10 features; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S10_nonparametric_rff_rational",
+        "roles": {"confounder": 3, "effect_modifier": 3, "dual_role": 2, "prognostic": 2},
+        "role_assignment": "random",
+        "dgp_mode": "nonparametric",
+        "modifier_main_effects": true,
+        "nonlinearity": "mixed",
+        "treatment_nonlinearity": "mixed",
+        "rff_components": {
+          "treatment": 32,
+          "outcome": 32,
+          "hte": 32,
+          "lengthscale": 1.1,
+          "max_terms": 16
+        },
+        "rational_terms": {
+          "treatment": 2,
+          "outcome": 2,
+          "hte": 2
+        },
+        "component_weights": {
+          "linear": 0.35,
+          "interaction": 0.4,
+          "subgroup": 0.0,
+          "rff": 1.0,
+          "rational": 0.6
+        },
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.5,
+        "target_control_outcome_rate": 0.5,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S11",
+      "family": "S11",
+      "label": "Combined realistic EHR stress",
+      "factor": "Instruments, dual-role variables, prognostic variables, mixed nonlinearities, higher-order interactions, subgroup rules, RFF and rational surfaces, imbalanced/rare rates, and mild unmeasured confounding",
+      "materialization": "reequation",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "reequation_source",
+        "minimum_patients": 5000,
+        "requirements": "dataset.parquet, metadata.json and generation_config.json; a true_<variable> column for every metadata feature; at least 10 features; no post-treatment notes"
+      },
+      "dgp": {
+        "name": "S11_combined_realistic_ehr_stress",
+        "roles": {"confounder": 3, "effect_modifier": 2, "dual_role": 2, "instrument": 1, "prognostic": 2},
+        "role_assignment": "random",
+        "dgp_mode": "composite",
+        "modifier_main_effects": true,
+        "nonlinearity": "mixed",
+        "treatment_nonlinearity": "mixed",
+        "outcome_interactions": 3,
+        "hte_interactions": 4,
+        "subgroup_rules": {
+          "treatment": 2,
+          "outcome": 2,
+          "hte": 2,
+          "min_depth": 2,
+          "max_depth": 3,
+          "soft_slope": null
+        },
+        "rff_components": {
+          "treatment": 24,
+          "outcome": 24,
+          "hte": 24,
+          "lengthscale": 1.2,
+          "max_terms": 14
+        },
+        "rational_terms": {
+          "treatment": 1,
+          "outcome": 1,
+          "hte": 1
+        },
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 1,
+        "unmeasured_strength": 0.4,
+        "target_treatment_rate": 0.3,
+        "target_control_outcome_rate": 0.2,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S12a",
+      "family": "S12",
+      "label": "Variable-dimensionality complex DGP (5-50 confounders, 5-50 modifiers)",
+      "factor": "Seeded random counts spanning 5 to 50 confounders and 5 to 50 effect modifiers (plus dual-role, instruments, prognostic) under a composite nonlinear/interacting/subgroup/RFF/rational DGP on a correlated 120-feature corpus",
+      "materialization": "reequation_of_generated",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "generated_corpus",
+        "minimum_patients": 5000,
+        "requirements": "a wide 120-feature correlated corpus (generated via LLM or python -m synthetic_data.cli wide-corpus --num-features 120 --num-patients 5000); re-equated with seeded variable role counts spanning 5-50 confounders and 5-50 modifiers"
+      },
+      "generation": {
+        "clinical_question": "Compare vinorelbine to gemcitabine for advanced/metastatic NSCLC.",
+        "dataset_size": 5000,
+        "num_features": 120,
+        "num_confounders": 60,
+        "num_effect_modifiers": 60,
+        "outcome_type": "binary",
+        "continuous_covariate_distribution": "positive_lognormal",
+        "covariate_correlation": 0.25,
+        "structured_data": {"enabled": true},
+        "dgp_mode": "composite",
+        "seed": 42
+      },
+      "dgp": {
+        "name": "S12a_variable_width_5_to_50_complex",
+        "roles": {
+          "confounder": {"min": 5, "max": 50},
+          "effect_modifier": {"min": 5, "max": 50},
+          "dual_role": {"min": 0, "max": 10},
+          "instrument": {"min": 0, "max": 5},
+          "prognostic": {"min": 0, "max": 5}
+        },
+        "role_assignment": "random",
+        "dgp_mode": "composite",
+        "modifier_main_effects": true,
+        "nonlinearity": "mixed",
+        "treatment_nonlinearity": "mixed",
+        "outcome_interactions": {"min": 4, "max": 15},
+        "hte_interactions": {"min": 4, "max": 15},
+        "subgroup_rules": {
+          "treatment": 3,
+          "outcome": 3,
+          "hte": 4,
+          "min_depth": 2,
+          "max_depth": 3,
+          "soft_slope": null
+        },
+        "rff_components": {
+          "treatment": 28,
+          "outcome": 28,
+          "hte": 28,
+          "lengthscale": 1.15,
+          "max_terms": 14
+        },
+        "rational_terms": {
+          "treatment": 2,
+          "outcome": 2,
+          "hte": 2
+        },
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.35,
+        "target_control_outcome_rate": 0.25,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
+    },
+    {
+      "id": "S12b",
+      "family": "S12",
+      "label": "Dense high-dimensional complex DGP (50 confounders, 50 modifiers)",
+      "factor": "Fixed high-dimensional causal structure with 50 confounders, 50 effect modifiers, 5 instruments, and 5 prognostic variables under a composite nonlinear/interacting/subgroup/RFF/rational DGP on a correlated 120-feature corpus",
+      "materialization": "reequation_of_generated",
+      "sizes": [1000, 5000],
+      "source": {
+        "kind": "generated_corpus",
+        "minimum_patients": 5000,
+        "requirements": "a wide 120-feature correlated corpus (generated via LLM or python -m synthetic_data.cli wide-corpus --num-features 120 --num-patients 5000); re-equated with 50 confounders and 50 effect modifiers"
+      },
+      "generation": {
+        "clinical_question": "Compare vinorelbine to gemcitabine for advanced/metastatic NSCLC.",
+        "dataset_size": 5000,
+        "num_features": 120,
+        "num_confounders": 60,
+        "num_effect_modifiers": 60,
+        "outcome_type": "binary",
+        "continuous_covariate_distribution": "positive_lognormal",
+        "covariate_correlation": 0.25,
+        "structured_data": {"enabled": true},
+        "dgp_mode": "composite",
+        "seed": 42
+      },
+      "dgp": {
+        "name": "S12b_dense_50_confounders_50_modifiers_complex",
+        "roles": {
+          "confounder": 50,
+          "effect_modifier": 50,
+          "instrument": 5,
+          "prognostic": 5
+        },
+        "role_assignment": "random",
+        "dgp_mode": "composite",
+        "modifier_main_effects": true,
+        "nonlinearity": "mixed",
+        "treatment_nonlinearity": "mixed",
+        "outcome_interactions": 15,
+        "hte_interactions": 15,
+        "subgroup_rules": {
+          "treatment": 4,
+          "outcome": 4,
+          "hte": 5,
+          "min_depth": 2,
+          "max_depth": 3,
+          "soft_slope": null
+        },
+        "rff_components": {
+          "treatment": 32,
+          "outcome": 32,
+          "hte": 32,
+          "lengthscale": 1.2,
+          "max_terms": 14
+        },
+        "rational_terms": {
+          "treatment": 3,
+          "outcome": 3,
+          "hte": 3
+        },
+        "treatment_logit_std": 2.0,
+        "outcome_logit_std": 2.0,
+        "treatment_effect": 0.2,
+        "modifier_strength": 2.0,
+        "unmeasured_confounders": 0,
+        "unmeasured_strength": 1.0,
+        "target_treatment_rate": 0.35,
+        "target_control_outcome_rate": 0.25,
+        "outcome_noise_std": 1.0
+      },
+      "run_variants": [{"name": "default", "description": "the cohort's clinical_text column"}]
     }
   ]
 }

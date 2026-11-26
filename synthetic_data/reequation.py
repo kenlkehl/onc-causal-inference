@@ -35,11 +35,14 @@ from .dgp_terms import (
     CONFOUNDER,
     EFFECT_MODIFIER,
     INSTRUMENT,
+    MIXED_NONLINEARITY_SHAPES,
     NONLINEARITIES,
     PROGNOSTIC,
     ROLE_GROUPS,
     canonical_category,
+    category_probabilities,
     draw_main_coefficients,
+    equation_nonlinear_terms,
     feature_terms,
     outcome_nonlinear_terms,
     role_group,
@@ -57,6 +60,9 @@ OUTPUT_FILES = ("dataset.parquet", "metadata.json", "generation_config.json", MA
 # Same number of Monte Carlo draws as the generator's rescaling and calibration.
 MONTE_CARLO_DRAWS = 10000
 
+DGP_MODES = ("parametric", "interacting", "subgroup", "nonparametric", "composite")
+EFFECT_SCALES = ("log_or", "risk_difference")
+
 SCENARIO_KEYS = frozenset({
     "name",
     "roles",
@@ -72,6 +78,19 @@ SCENARIO_KEYS = frozenset({
     "target_treatment_rate",
     "target_control_outcome_rate",
     "outcome_noise_std",
+    # Complex & variable-dimensionality DGP controls (all optional; defaults preserve legacy S0-S6)
+    "dgp_mode",
+    "treatment_nonlinearity",
+    "max_treatment_interactions",
+    "outcome_interactions",
+    "hte_interactions",
+    "pure_epistatic_hte",
+    "subgroup_rules",
+    "rff_components",
+    "rational_terms",
+    "effect_scale",
+    "component_weights",
+    "balance_hte_scale",
 })
 
 # Columns recomputed from the scenario's equations; every other source column
@@ -162,6 +181,173 @@ def _count(value: Any, label: str) -> int:
     return int(value)
 
 
+def _count_range(value: Any, label: str) -> Tuple[int, int]:
+    """Validate an exact non-negative integer or a ``{"min": lo, "max": hi}`` count range."""
+    if isinstance(value, Mapping):
+        unknown = sorted(set(value) - {"min", "max"})
+        if unknown or "min" not in value or "max" not in value:
+            raise ValueError(
+                f"scenario {label} range must be an object with exact keys 'min' and 'max'"
+            )
+        lo = _count(value["min"], f"{label}.min")
+        hi = _count(value["max"], f"{label}.max")
+        if lo > hi:
+            raise ValueError(f"scenario {label}.min ({lo}) cannot exceed {label}.max ({hi})")
+        return lo, hi
+    exact = _count(value, label)
+    return exact, exact
+
+
+def _resolve_count_spec(value: Any, label: str, rng: np.random.Generator) -> int:
+    lo, hi = _count_range(value, label)
+    if lo == hi:
+        return lo
+    return int(rng.integers(lo, hi + 1))
+
+
+def _validate_subgroup_rules(value: Any) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("scenario subgroup_rules must be a JSON object or null")
+    allowed = {"treatment", "outcome", "hte", "min_depth", "max_depth", "soft_slope"}
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise ValueError(f"unknown scenario subgroup_rules keys: {unknown}")
+    min_depth = _count(value.get("min_depth", 2), "subgroup_rules.min_depth")
+    max_depth = _count(value.get("max_depth", 3), "subgroup_rules.max_depth")
+    if min_depth < 1 or max_depth < min_depth:
+        raise ValueError("scenario subgroup_rules requires 1 <= min_depth <= max_depth")
+    soft_slope = value.get("soft_slope", None)
+    if soft_slope is not None:
+        soft_slope = _number(soft_slope, "subgroup_rules.soft_slope", positive=True)
+    return {
+        "treatment": _count(value.get("treatment", 0), "subgroup_rules.treatment"),
+        "outcome": _count(value.get("outcome", 0), "subgroup_rules.outcome"),
+        "hte": _count(value.get("hte", 0), "subgroup_rules.hte"),
+        "min_depth": min_depth,
+        "max_depth": max_depth,
+        "soft_slope": soft_slope,
+    }
+
+
+def _validate_rff_components(value: Any) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("scenario rff_components must be a JSON object or null")
+    allowed = {"treatment", "outcome", "hte", "lengthscale", "max_terms"}
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise ValueError(f"unknown scenario rff_components keys: {unknown}")
+    max_terms = _count(value.get("max_terms", 16), "rff_components.max_terms")
+    if max_terms < 1:
+        raise ValueError("scenario rff_components.max_terms must be at least 1")
+    return {
+        "treatment": _count(value.get("treatment", 0), "rff_components.treatment"),
+        "outcome": _count(value.get("outcome", 0), "rff_components.outcome"),
+        "hte": _count(value.get("hte", 0), "rff_components.hte"),
+        "lengthscale": _number(
+            value.get("lengthscale", 1.15), "rff_components.lengthscale", positive=True
+        ),
+        "max_terms": max_terms,
+    }
+
+
+def _validate_rational_terms(value: Any) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("scenario rational_terms must be a JSON object or null")
+    allowed = {"treatment", "outcome", "hte"}
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise ValueError(f"unknown scenario rational_terms keys: {unknown}")
+    return {
+        "treatment": _count(value.get("treatment", 0), "rational_terms.treatment"),
+        "outcome": _count(value.get("outcome", 0), "rational_terms.outcome"),
+        "hte": _count(value.get("hte", 0), "rational_terms.hte"),
+    }
+
+
+def _validate_component_weights(value: Any) -> Optional[Dict[str, float]]:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("scenario component_weights must be a JSON object or null")
+    allowed = {"linear", "interaction", "subgroup", "rff", "rational"}
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise ValueError(f"unknown scenario component_weights keys: {unknown}")
+    return {
+        key: _number(value.get(key, 1.0), f"component_weights.{key}", nonnegative=True)
+        for key in ("linear", "interaction", "subgroup", "rff", "rational")
+    }
+
+
+def _dgp_mode_defaults(dgp_mode: str) -> Dict[str, Any]:
+    if dgp_mode == "interacting":
+        return {
+            "outcome_interactions": 4,
+            "hte_interactions": 6,
+            "subgroup_rules": None,
+            "rff_components": None,
+            "rational_terms": None,
+            "component_weights": {
+                "linear": 1.0, "interaction": 1.0, "subgroup": 0.0, "rff": 0.0, "rational": 0.0
+            },
+        }
+    if dgp_mode == "subgroup":
+        return {
+            "outcome_interactions": 0,
+            "hte_interactions": 0,
+            "subgroup_rules": {
+                "treatment": 3, "outcome": 3, "hte": 4, "min_depth": 2, "max_depth": 3, "soft_slope": None
+            },
+            "rff_components": None,
+            "rational_terms": None,
+            "component_weights": {
+                "linear": 0.8, "interaction": 0.5, "subgroup": 1.0, "rff": 0.0, "rational": 0.0
+            },
+        }
+    if dgp_mode == "nonparametric":
+        return {
+            "outcome_interactions": 0,
+            "hte_interactions": 0,
+            "subgroup_rules": None,
+            "rff_components": {
+                "treatment": 32, "outcome": 32, "hte": 32, "lengthscale": 1.1, "max_terms": 16
+            },
+            "rational_terms": {"treatment": 2, "outcome": 2, "hte": 2},
+            "component_weights": {
+                "linear": 0.4, "interaction": 0.4, "subgroup": 0.0, "rff": 1.0, "rational": 0.6
+            },
+        }
+    if dgp_mode == "composite":
+        return {
+            "outcome_interactions": 4,
+            "hte_interactions": 5,
+            "subgroup_rules": {
+                "treatment": 2, "outcome": 2, "hte": 3, "min_depth": 2, "max_depth": 3, "soft_slope": None
+            },
+            "rff_components": {
+                "treatment": 24, "outcome": 24, "hte": 24, "lengthscale": 1.2, "max_terms": 14
+            },
+            "rational_terms": {"treatment": 2, "outcome": 2, "hte": 2},
+            "component_weights": {
+                "linear": 0.7, "interaction": 0.8, "subgroup": 0.8, "rff": 0.9, "rational": 0.6
+            },
+        }
+    return {
+        "outcome_interactions": 0,
+        "hte_interactions": 0,
+        "subgroup_rules": None,
+        "rff_components": None,
+        "rational_terms": None,
+        "component_weights": None,
+    }
+
+
 def resolve_scenario(
     scenario: Mapping[str, Any],
     features: Sequence[Mapping[str, Any]],
@@ -171,11 +357,13 @@ def resolve_scenario(
     """Validate a scenario and fill omitted keys with the generator's defaults.
 
     ``roles`` maps role groups (``confounder``, ``effect_modifier``,
-    ``dual_role``, ``instrument``, ``prognostic``) to a count or a list of
-    variable names. With ``role_assignment: "named"`` every value must be a
-    list; with ``"random"`` (the default) lists are fixed first and counts are
-    drawn, with a seeded RNG, from the remaining variables in group order. A
-    scenario without ``roles`` keeps the source's roles. Proxies take no role.
+    ``dual_role``, ``instrument``, ``prognostic``) to a count, a
+    ``{"min": lo, "max": hi}`` count range, or a list of variable names.
+    With ``role_assignment: "named"`` every value must be a list; with
+    ``"random"`` (the default) lists are fixed first and counts (or ranged
+    counts) are drawn, with a seeded RNG, from the remaining variables in
+    group order. A scenario without ``roles`` keeps the source's roles.
+    Proxies take no role.
     """
 
     if not isinstance(scenario, Mapping):
@@ -209,8 +397,56 @@ def resolve_scenario(
     nonlinearity = scenario.get("nonlinearity", defaults.nonlinearity)
     if nonlinearity not in NONLINEARITIES:
         raise ValueError(f"scenario nonlinearity must be one of {list(NONLINEARITIES)}")
+    dgp_mode = scenario.get("dgp_mode", "parametric")
+    if dgp_mode not in DGP_MODES:
+        raise ValueError(f"scenario dgp_mode must be one of {list(DGP_MODES)}")
+    treatment_nonlinearity = scenario.get("treatment_nonlinearity", "none")
+    if treatment_nonlinearity not in NONLINEARITIES:
+        raise ValueError(f"scenario treatment_nonlinearity must be one of {list(NONLINEARITIES)}")
+    effect_scale = scenario.get("effect_scale", "log_or")
+    if effect_scale not in EFFECT_SCALES:
+        raise ValueError(f"scenario effect_scale must be one of {list(EFFECT_SCALES)}")
+    pure_epistatic_hte = scenario.get("pure_epistatic_hte", False)
+    if not isinstance(pure_epistatic_hte, bool):
+        raise ValueError("scenario pure_epistatic_hte must be true or false")
+    max_tx_inter = scenario.get("max_treatment_interactions", None)
+    if max_tx_inter is not None:
+        max_tx_inter = _count(max_tx_inter, "max_treatment_interactions")
+    balance_hte_scale = scenario.get("balance_hte_scale", None)
+    if balance_hte_scale is not None and not isinstance(balance_hte_scale, bool):
+        raise ValueError("scenario balance_hte_scale must be true, false, or null")
+
+    mode_defaults = _dgp_mode_defaults(dgp_mode)
+    count_rng = _rng(seed, "roles") if any(
+        isinstance(scenario.get(k), Mapping) for k in ("outcome_interactions", "hte_interactions")
+    ) else None
+    raw_out_inter = scenario.get("outcome_interactions", mode_defaults["outcome_interactions"])
+    raw_hte_inter = scenario.get("hte_interactions", mode_defaults["hte_interactions"])
+    outcome_interactions = (
+        _resolve_count_spec(raw_out_inter, "outcome_interactions", count_rng)
+        if count_rng is not None
+        else _count(raw_out_inter, "outcome_interactions")
+    )
+    hte_interactions = (
+        _resolve_count_spec(raw_hte_inter, "hte_interactions", count_rng)
+        if count_rng is not None
+        else _count(raw_hte_inter, "hte_interactions")
+    )
+    subgroup_rules = _validate_subgroup_rules(
+        scenario.get("subgroup_rules", mode_defaults["subgroup_rules"])
+    )
+    rff_components = _validate_rff_components(
+        scenario.get("rff_components", mode_defaults["rff_components"])
+    )
+    rational_terms = _validate_rational_terms(
+        scenario.get("rational_terms", mode_defaults["rational_terms"])
+    )
+    component_weights = _validate_component_weights(
+        scenario.get("component_weights", mode_defaults["component_weights"])
+    )
+
     treatment_std, outcome_std = defaults.logit_stds()
-    return {
+    resolved: Dict[str, Any] = {
         "name": name,
         "roles": groups,
         "role_assignment": role_source,
@@ -251,6 +487,30 @@ def resolve_scenario(
         ),
     }
 
+    # Include extended DGP settings only when used so legacy S0-S6 resolved dicts stay clean.
+    extended = {
+        "dgp_mode": dgp_mode if dgp_mode != "parametric" or "dgp_mode" in scenario else None,
+        "treatment_nonlinearity": (
+            treatment_nonlinearity
+            if treatment_nonlinearity != "none" or "treatment_nonlinearity" in scenario
+            else None
+        ),
+        "max_treatment_interactions": max_tx_inter,
+        "outcome_interactions": outcome_interactions if outcome_interactions or "outcome_interactions" in scenario else None,
+        "hte_interactions": hte_interactions if hte_interactions or "hte_interactions" in scenario else None,
+        "pure_epistatic_hte": True if pure_epistatic_hte else (False if "pure_epistatic_hte" in scenario else None),
+        "subgroup_rules": subgroup_rules,
+        "rff_components": rff_components,
+        "rational_terms": rational_terms,
+        "effect_scale": effect_scale if effect_scale != "log_or" or "effect_scale" in scenario else None,
+        "component_weights": component_weights,
+        "balance_hte_scale": balance_hte_scale,
+    }
+    for key, val in extended.items():
+        if val is not None:
+            resolved[key] = val
+    return resolved
+
 
 def _resolve_role_groups(
     roles: Any,
@@ -267,7 +527,8 @@ def _resolve_role_groups(
     proxies = {feature["name"] for feature in features if feature.get("proxy_of")}
     groups: Dict[str, List[str]] = {group: [] for group in ROLE_GROUPS}
     taken: Dict[str, str] = {}
-    counts: Dict[str, int] = {}
+    ranges: Dict[str, Tuple[int, int]] = {}
+    has_range = False
     for group in ROLE_GROUPS:
         if group not in roles:
             continue
@@ -292,15 +553,53 @@ def _resolve_role_groups(
                 f"role_assignment 'named' needs a list of names for roles.{group}, got {value!r}"
             )
         else:
-            counts[group] = _count(value, f"roles.{group}")
+            lo, hi = _count_range(value, f"roles.{group}")
+            ranges[group] = (lo, hi)
+            if isinstance(value, Mapping):
+                has_range = True
     remaining = [name for name in eligible if name not in taken]
-    requested = sum(counts.values())
-    if requested > len(remaining):
+    min_requested = sum(lo for lo, _ in ranges.values())
+    if min_requested > len(remaining):
         raise ValueError(
-            f"scenario roles request {requested} randomly assigned variables but only "
+            f"scenario roles request at least {min_requested} randomly assigned variables but only "
             f"{len(remaining)} unassigned variables remain"
         )
-    order = [remaining[index] for index in _rng(seed, "roles").permutation(len(remaining))]
+    rng = _rng(seed, "roles")
+    counts: Dict[str, int] = {}
+    if not has_range:
+        counts = {group: lo for group, (lo, _) in ranges.items()}
+    else:
+        for group in ROLE_GROUPS:
+            if group not in ranges:
+                continue
+            lo, hi = ranges[group]
+            counts[group] = lo if lo == hi else int(rng.integers(lo, hi + 1))
+        # If sampled upper-end counts exceed available features, trim only the
+        # slack above each group's minimum so every group stays inside [min, max].
+        excess = sum(counts.values()) - len(remaining)
+        if excess > 0:
+            adjustable = [group for group in ROLE_GROUPS if group in ranges and counts[group] > ranges[group][0]]
+            total_slack = sum(counts[g] - ranges[g][0] for g in adjustable)
+            if total_slack > 0:
+                trimmed = 0
+                for group in adjustable:
+                    slack = counts[group] - ranges[group][0]
+                    cut = min(slack, int(math.floor(excess * (slack / total_slack))))
+                    counts[group] -= cut
+                    trimmed += cut
+                # Trim any rounding remainder one-by-one from groups with remaining slack.
+                while trimmed < excess:
+                    progressed = False
+                    for group in adjustable:
+                        if trimmed >= excess:
+                            break
+                        if counts[group] > ranges[group][0]:
+                            counts[group] -= 1
+                            trimmed += 1
+                            progressed = True
+                    if not progressed:
+                        break
+    order = [remaining[index] for index in rng.permutation(len(remaining))]
     position = 0
     for group in ROLE_GROUPS:
         for name in order[position:position + counts.get(group, 0)]:
@@ -344,6 +643,528 @@ def _reference_rms(coefficients: Mapping[str, float], terms: Sequence[str], fall
     return float(math.sqrt(sum(value * value for value in values) / len(values)))
 
 
+def _term_centers_map(
+    features: Sequence[Mapping[str, Any]],
+    summary_stats: Optional[Mapping[str, Any]],
+) -> Dict[str, float]:
+    """Expected marginal value of each equation term (0.0 for standardized continuous, p_k for dummies)."""
+    centers: Dict[str, float] = {}
+    stats = summary_stats or {}
+    for feature in features:
+        if feature["type"] == "continuous":
+            centers[feature["name"]] = 0.0
+        else:
+            probs = category_probabilities(feature, stats)
+            for idx, cat in enumerate(feature["categories"][1:], start=1):
+                centers[f"{feature['name']}_{cat}"] = float(probs[idx])
+    return centers
+
+
+def _sample_distinct_interactions(
+    term_pairs_pool: Sequence[Tuple[str, str]],
+    count: int,
+    rng: np.random.Generator,
+    *,
+    term_centers: Mapping[str, float],
+    scale: float,
+    allow_triplets: bool = True,
+    center_factors: bool = True,
+) -> List[Dict[str, Any]]:
+    """Sample distinct cross-variable 2-way (and optional 3-way) centered product interactions."""
+    if count <= 0 or not term_pairs_pool:
+        return []
+    by_owner: Dict[str, List[str]] = {}
+    for owner, term in term_pairs_pool:
+        by_owner.setdefault(owner, []).append(term)
+    owners = list(by_owner.keys())
+    if len(owners) < 2:
+        return []
+
+    # Enumerate candidate 2-way cross-variable pairs when pool is moderate; sample directly when huge.
+    results: List[Dict[str, Any]] = []
+    seen: set = set()
+    n_triplets = int(round(0.25 * count)) if (allow_triplets and count >= 4 and len(owners) >= 3) else 0
+    n_pairs = count - n_triplets
+
+    # Draw 2-way pairs
+    max_attempts = max(200, n_pairs * 20)
+    attempts = 0
+    while len(results) < n_pairs and attempts < max_attempts:
+        attempts += 1
+        chosen_owners = rng.choice(len(owners), size=2, replace=False)
+        o1, o2 = owners[int(chosen_owners[0])], owners[int(chosen_owners[1])]
+        t1 = by_owner[o1][int(rng.integers(len(by_owner[o1])))]
+        t2 = by_owner[o2][int(rng.integers(len(by_owner[o2])))]
+        key = tuple(sorted((t1, t2)))
+        if key in seen:
+            continue
+        seen.add(key)
+        entry: Dict[str, Any] = {
+            "terms": [t1, t2],
+            "coefficient": float(rng.uniform(-1.0, 1.0)) * scale,
+        }
+        if center_factors:
+            c1, c2 = float(term_centers.get(t1, 0.0)), float(term_centers.get(t2, 0.0))
+            if c1 != 0.0 or c2 != 0.0:
+                entry["term_centers"] = [c1, c2]
+        results.append(entry)
+
+    # Draw 3-way triplets (only when n_triplets > 0 and >= 3 distinct owners exist)
+    if n_triplets > 0 and len(owners) >= 3:
+        target_total = len(results) + n_triplets
+        attempts = 0
+        max_trip_attempts = max(200, n_triplets * 25)
+        while len(results) < target_total and attempts < max_trip_attempts:
+            attempts += 1
+            chosen_owners = rng.choice(len(owners), size=3, replace=False)
+            picked = [
+                by_owner[owners[int(idx)]][int(rng.integers(len(by_owner[owners[int(idx)]])))]
+                for idx in chosen_owners
+            ]
+            key = tuple(sorted(picked))
+            if key in seen:
+                continue
+            seen.add(key)
+            entry = {
+                "terms": picked,
+                "coefficient": float(rng.uniform(-1.0, 1.0)) * scale * 0.85,
+            }
+            if center_factors:
+                centers = [float(term_centers.get(t, 0.0)) for t in picked]
+                if any(c != 0.0 for c in centers):
+                    entry["term_centers"] = centers
+            results.append(entry)
+
+    return results
+
+
+def _sample_subgroup_rules(
+    eligible_features: Sequence[Mapping[str, Any]],
+    count: int,
+    rng: np.random.Generator,
+    *,
+    min_depth: int,
+    max_depth: int,
+    soft_slope: Optional[float],
+    summary_stats: Optional[Mapping[str, Any]],
+    scale: float,
+    treatment_only: bool,
+) -> List[Dict[str, Any]]:
+    """Sample multi-way conjunctive decision-tree subgroup rules over eligible features."""
+    if count <= 0 or not eligible_features:
+        return []
+    stats = summary_stats or {}
+    eff_max = min(max_depth, len(eligible_features))
+    eff_min = min(min_depth, eff_max)
+    rules: List[Dict[str, Any]] = []
+    for _ in range(count):
+        depth = eff_min if eff_min == eff_max else int(rng.integers(eff_min, eff_max + 1))
+        chosen_idx = rng.choice(len(eligible_features), size=depth, replace=False)
+        conditions = []
+        expected_prob = 1.0
+        for idx in chosen_idx:
+            feat = eligible_features[int(idx)]
+            if feat["type"] == "continuous":
+                cut = float(rng.uniform(-0.75, 0.75))
+                op = ">" if rng.random() < 0.5 else "<"
+                # Standard normal tail probability approximation for centering
+                cdf = 0.5 * (1.0 + math.erf(cut / math.sqrt(2.0)))
+                prob = (1.0 - cdf) if op == ">" else cdf
+                conditions.append({"term": feat["name"], "op": op, "cut": round(cut, 4), "slope": soft_slope})
+                expected_prob *= max(0.05, min(0.95, prob))
+            else:
+                probs = category_probabilities(feat, stats)
+                dummies = [
+                    (f"{feat['name']}_{cat}", float(probs[i]))
+                    for i, cat in enumerate(feat["categories"][1:], start=1)
+                ]
+                preferred = [d for d in dummies if d[1] >= 0.12]
+                pool = preferred if preferred else dummies
+                term, p_cat = pool[int(rng.integers(len(pool)))]
+                op = ">" if (p_cat >= 0.25 or rng.random() < 0.5) else "<"
+                prob = p_cat if op == ">" else (1.0 - p_cat)
+                conditions.append({"term": term, "op": op, "cut": 0.5, "slope": soft_slope})
+                expected_prob *= max(0.05, min(0.95, prob))
+        gate_sd = math.sqrt(max(0.04, expected_prob * (1.0 - expected_prob)))
+        coef = float(rng.uniform(-1.0, 1.0)) * (scale / gate_sd)
+        rules.append({
+            "conditions": conditions,
+            "coefficient": coef,
+            "treatment_only": bool(treatment_only),
+            "center": round(expected_prob, 6),
+        })
+    return rules
+
+
+def _sample_rff_components(
+    eligible_terms: Sequence[str],
+    n_rff: int,
+    rng: np.random.Generator,
+    *,
+    lengthscale: float,
+    max_terms: int,
+    scale: float,
+    treatment_only: bool,
+) -> List[Dict[str, Any]]:
+    """Sample Bochner Random Fourier Feature GP surfaces covering ``eligible_terms``."""
+    if n_rff <= 0 or not eligible_terms:
+        return []
+    terms = list(eligible_terms)
+    n_blocks = max(1, min(5, math.ceil(len(terms) / max_terms)))
+    block_scale = scale / math.sqrt(n_blocks)
+    components: List[Dict[str, Any]] = []
+    for block_idx in range(n_blocks):
+        if len(terms) <= max_terms:
+            sub_terms = list(terms)
+        else:
+            # Deterministic overlapping coverage so every active region participates
+            order = rng.permutation(len(terms))
+            sub_terms = [terms[int(i)] for i in sorted(order[:max_terms])]
+        d = len(sub_terms)
+        # Scale frequency variance by 1/(lengthscale^2 * d) so w^T z has SD = 1/lengthscale
+        # regardless of dimensionality (5..50 features).
+        freq_std = 1.0 / (float(lengthscale) * math.sqrt(max(1, d)))
+        weights = rng.normal(0.0, freq_std, size=(n_rff, d))
+        phases = rng.uniform(0.0, 2.0 * math.pi, size=n_rff)
+        basis = rng.normal(0.0, 1.0, size=n_rff)
+        norm = float(np.linalg.norm(basis))
+        if norm > 0:
+            basis = basis * (math.sqrt(n_rff / 2.0) / norm)
+        components.append({
+            "terms": sub_terms,
+            "weights": [[round(float(x), 6) for x in row] for row in weights],
+            "phases": [round(float(p), 6) for p in phases],
+            "basis_weights": [round(float(b), 6) for b in basis],
+            "coefficient": float(block_scale),
+            "treatment_only": bool(treatment_only),
+            "center": 0.0,
+        })
+    return components
+
+
+def _sample_rational_terms(
+    eligible_terms: Sequence[str],
+    count: int,
+    rng: np.random.Generator,
+    *,
+    scale: float,
+    treatment_only: bool,
+) -> List[Dict[str, Any]]:
+    """Sample smooth bounded rational/ratio interaction terms ``(a^T z) / (1 + sum((b_j z_j)^2))``."""
+    if count <= 0 or not eligible_terms:
+        return []
+    terms = list(eligible_terms)
+    items: List[Dict[str, Any]] = []
+    per_scale = scale / math.sqrt(max(1, count))
+    for _ in range(count):
+        n_num = min(len(terms), int(rng.integers(2, 5)) if len(terms) >= 2 else 1)
+        n_den = min(len(terms), int(rng.integers(1, 4)))
+        num_idx = rng.choice(len(terms), size=n_num, replace=False)
+        num_terms = [terms[int(i)] for i in sorted(num_idx)]
+        remaining_idx = [i for i in range(len(terms)) if i not in set(num_idx.tolist())]
+        if len(remaining_idx) >= n_den:
+            den_idx = rng.choice(remaining_idx, size=n_den, replace=False)
+        else:
+            den_idx = rng.choice(len(terms), size=n_den, replace=False)
+        den_terms = [terms[int(i)] for i in sorted(den_idx)]
+        num_w = rng.uniform(-1.0, 1.0, size=n_num)
+        num_norm = float(np.linalg.norm(num_w)) or 1.0
+        num_w = num_w / num_norm
+        den_w = rng.uniform(0.4, 1.0, size=n_den)
+        den_norm = float(np.linalg.norm(den_w)) or 1.0
+        den_w = den_w / den_norm
+        items.append({
+            "num_terms": num_terms,
+            "num_weights": [round(float(w), 6) for w in num_w],
+            "den_terms": den_terms,
+            "den_weights": [round(float(w), 6) for w in den_w],
+            "den_bias": 1.0,
+            "coefficient": float(rng.uniform(-1.0, 1.0)) * per_scale * 1.4,
+            "treatment_only": bool(treatment_only),
+            "center": 0.0,
+        })
+    return items
+
+
+def augment_complex_equations(
+    features: Sequence[Mapping[str, Any]],
+    treatment_eq: Dict[str, Any],
+    outcome_eq: Dict[str, Any],
+    resolved: Mapping[str, Any],
+    rng: np.random.Generator,
+    *,
+    summary_stats: Optional[Mapping[str, Any]] = None,
+    main_coefficient_scale: float = 0.3,
+    interaction_coefficient_scale: float = 0.1,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Augment treatment and outcome equations with complex nonlinear, interacting, subgroup, RFF, and rational blocks.
+
+    Strictly preserves causal role boundaries:
+    - treatment-equation terms use only ``confounder`` and ``instrument`` features;
+    - baseline outcome terms use only ``confounder`` and ``prognostic`` features
+      (plus ``effect_modifier`` main terms only when ``modifier_main_effects`` is True);
+    - HTE terms use only ``effect_modifier`` features (including ``dual_role`` variables).
+    """
+    confounders = [f for f in features if CONFOUNDER in roles_of(f)]
+    instruments = [f for f in features if INSTRUMENT in roles_of(f)]
+    prognostic = [f for f in features if PROGNOSTIC in roles_of(f)]
+    modifiers = [f for f in features if EFFECT_MODIFIER in roles_of(f)]
+
+    tx_features = confounders + instruments
+    out_base_features = confounders + prognostic
+    if resolved.get("modifier_main_effects"):
+        mod_only = [f for f in modifiers if roles_of(f) == [EFFECT_MODIFIER]]
+        out_base_features = out_base_features + mod_only
+
+    tx_terms = [t for f in tx_features for t in feature_terms(f)]
+    out_base_terms_paired = [(f["name"], t) for f in out_base_features for t in feature_terms(f)]
+    out_base_terms = [t for _, t in out_base_terms_paired]
+    mod_terms_paired = [(f["name"], t) for f in modifiers for t in feature_terms(f)]
+    mod_terms = [t for _, t in mod_terms_paired]
+
+    weights = resolved.get("component_weights") or {
+        "linear": 1.0, "interaction": 1.0, "subgroup": 1.0, "rff": 1.0, "rational": 1.0,
+    }
+    w_lin = float(weights.get("linear", 1.0))
+    w_int = float(weights.get("interaction", 1.0))
+    w_sub = float(weights.get("subgroup", 1.0))
+    w_rff = float(weights.get("rff", 1.0))
+    w_rat = float(weights.get("rational", 1.0))
+
+    # Reference scale matched to the equation's baseline linear RMS so complex blocks
+    # remain well-balanced whether there are 5 or 50 active variables.
+    tx_ref = max(
+        main_coefficient_scale / math.sqrt(3.0),
+        float(math.sqrt(sum(v * v for v in treatment_eq.get("coefficients", {}).values()))),
+    )
+    out_ref = max(
+        main_coefficient_scale / math.sqrt(3.0),
+        float(math.sqrt(sum(v * v for v in outcome_eq.get("coefficients", {}).values()))),
+    )
+    modifier_strength = float(resolved.get("modifier_strength", 2.0))
+    hte_ref = out_ref * modifier_strength * 0.45 if modifier_strength > 0.0 else 0.0
+
+    # Apply linear weight multiplier if requested (< 1 lets non-parametric terms dominate)
+    if w_lin != 1.0:
+        treatment_eq["coefficients"] = {
+            k: float(v * w_lin) for k, v in treatment_eq.get("coefficients", {}).items()
+        }
+        outcome_eq["coefficients"] = {
+            k: float(v * w_lin) for k, v in outcome_eq.get("coefficients", {}).items()
+        }
+        outcome_eq["treatment_interactions"] = [
+            {**item, "coefficient": float(item.get("coefficient", 0.0) * w_lin)}
+            for item in outcome_eq.get("treatment_interactions", ())
+        ]
+
+    centers = _term_centers_map(features, summary_stats)
+
+    # 1. Baseline outcome interactions (C x C, C x P, P x P, optional 3-way)
+    n_out_inter = int(resolved.get("outcome_interactions") or 0)
+    if n_out_inter > 0 and w_int > 0.0 and len(out_base_features) >= 2:
+        inter_scale = (out_ref * 0.70 * w_int) / math.sqrt(max(1, n_out_inter))
+        outcome_eq.setdefault("interactions", []).extend(
+            _sample_distinct_interactions(
+                out_base_terms_paired,
+                n_out_inter,
+                rng,
+                term_centers=centers,
+                scale=inter_scale,
+                allow_triplets=True,
+                center_factors=True,
+            )
+        )
+
+    # 2. Higher-order HTE interactions (M x M, Dual x M, optional 3-way)
+    pure_epistatic = bool(resolved.get("pure_epistatic_hte", False))
+    if pure_epistatic or modifier_strength == 0.0:
+        if pure_epistatic:
+            outcome_eq["treatment_interactions"] = []
+    n_hte_inter = int(resolved.get("hte_interactions") or 0)
+    if n_hte_inter > 0 and modifier_strength > 0.0 and w_int > 0.0 and modifiers:
+        hte_inter_scale = (hte_ref * 0.85 * w_int) / math.sqrt(max(1, n_hte_inter))
+        hte_items = _sample_distinct_interactions(
+            mod_terms_paired,
+            n_hte_inter,
+            rng,
+            term_centers=centers,
+            scale=hte_inter_scale,
+            allow_triplets=True,
+            center_factors=True,
+        )
+        if not hte_items and len(modifiers) == 1 and modifiers[0]["type"] == "continuous":
+            # Single continuous modifier fallback: centered quadratic epistasis z^2 - 1
+            t0 = modifiers[0]["name"]
+            hte_items = [{
+                "terms": [t0, t0],
+                "center": 1.0,
+                "coefficient": float(rng.uniform(-1.0, 1.0)) * hte_inter_scale,
+            }]
+        if hte_items:
+            outcome_eq.setdefault("hte_interactions", []).extend(hte_items)
+
+    # 3. Multi-way subgroup / decision-tree conjunction rules
+    sub_cfg = resolved.get("subgroup_rules")
+    if sub_cfg and w_sub > 0.0:
+        min_d, max_d = int(sub_cfg["min_depth"]), int(sub_cfg["max_depth"])
+        slope = sub_cfg.get("soft_slope")
+        if sub_cfg["treatment"] > 0 and tx_features:
+            tx_rules = _sample_subgroup_rules(
+                tx_features,
+                int(sub_cfg["treatment"]),
+                rng,
+                min_depth=min_d,
+                max_depth=max_d,
+                soft_slope=slope,
+                summary_stats=summary_stats,
+                scale=(tx_ref * 0.75 * w_sub) / math.sqrt(int(sub_cfg["treatment"])),
+                treatment_only=False,
+            )
+            if tx_rules:
+                treatment_eq.setdefault("subgroup_rules", []).extend(tx_rules)
+        if sub_cfg["outcome"] > 0 and out_base_features:
+            out_rules = _sample_subgroup_rules(
+                out_base_features,
+                int(sub_cfg["outcome"]),
+                rng,
+                min_depth=min_d,
+                max_depth=max_d,
+                soft_slope=slope,
+                summary_stats=summary_stats,
+                scale=(out_ref * 0.75 * w_sub) / math.sqrt(int(sub_cfg["outcome"])),
+                treatment_only=False,
+            )
+            if out_rules:
+                outcome_eq.setdefault("subgroup_rules", []).extend(out_rules)
+        if sub_cfg["hte"] > 0 and modifier_strength > 0.0 and modifiers:
+            hte_rules = _sample_subgroup_rules(
+                modifiers,
+                int(sub_cfg["hte"]),
+                rng,
+                min_depth=min_d,
+                max_depth=max_d,
+                soft_slope=slope,
+                summary_stats=summary_stats,
+                scale=(hte_ref * 0.90 * w_sub) / math.sqrt(int(sub_cfg["hte"])),
+                treatment_only=True,
+            )
+            if hte_rules:
+                outcome_eq.setdefault("subgroup_rules", []).extend(hte_rules)
+
+    # 4. Random Fourier Feature GP-like non-parametric multivariate surfaces
+    rff_cfg = resolved.get("rff_components")
+    if rff_cfg and w_rff > 0.0:
+        lengthscale = float(rff_cfg["lengthscale"])
+        max_terms = int(rff_cfg["max_terms"])
+        if rff_cfg["treatment"] > 0 and tx_terms:
+            tx_rff = _sample_rff_components(
+                tx_terms,
+                int(rff_cfg["treatment"]),
+                rng,
+                lengthscale=lengthscale,
+                max_terms=max_terms,
+                scale=tx_ref * 0.90 * w_rff,
+                treatment_only=False,
+            )
+            if tx_rff:
+                treatment_eq.setdefault("rff_components", []).extend(tx_rff)
+        if rff_cfg["outcome"] > 0 and out_base_terms:
+            out_rff = _sample_rff_components(
+                out_base_terms,
+                int(rff_cfg["outcome"]),
+                rng,
+                lengthscale=lengthscale,
+                max_terms=max_terms,
+                scale=out_ref * 0.90 * w_rff,
+                treatment_only=False,
+            )
+            if out_rff:
+                outcome_eq.setdefault("rff_components", []).extend(out_rff)
+        if rff_cfg["hte"] > 0 and modifier_strength > 0.0 and mod_terms:
+            hte_rff = _sample_rff_components(
+                mod_terms,
+                int(rff_cfg["hte"]),
+                rng,
+                lengthscale=lengthscale,
+                max_terms=max_terms,
+                scale=hte_ref * 0.95 * w_rff,
+                treatment_only=True,
+            )
+            if hte_rff:
+                outcome_eq.setdefault("rff_components", []).extend(hte_rff)
+
+    # 5. Bounded rational / ratio interactions
+    rat_cfg = resolved.get("rational_terms")
+    if rat_cfg and w_rat > 0.0:
+        if rat_cfg["treatment"] > 0 and tx_terms:
+            tx_rat = _sample_rational_terms(
+                tx_terms,
+                int(rat_cfg["treatment"]),
+                rng,
+                scale=tx_ref * 0.70 * w_rat,
+                treatment_only=False,
+            )
+            if tx_rat:
+                treatment_eq.setdefault("rational_terms", []).extend(tx_rat)
+        if rat_cfg["outcome"] > 0 and out_base_terms:
+            out_rat = _sample_rational_terms(
+                out_base_terms,
+                int(rat_cfg["outcome"]),
+                rng,
+                scale=out_ref * 0.70 * w_rat,
+                treatment_only=False,
+            )
+            if out_rat:
+                outcome_eq.setdefault("rational_terms", []).extend(out_rat)
+        if rat_cfg["hte"] > 0 and modifier_strength > 0.0 and mod_terms:
+            hte_rat = _sample_rational_terms(
+                mod_terms,
+                int(rat_cfg["hte"]),
+                rng,
+                scale=hte_ref * 0.80 * w_rat,
+                treatment_only=True,
+            )
+            if hte_rat:
+                outcome_eq.setdefault("rational_terms", []).extend(hte_rat)
+
+    # 6. Treatment-side 1-D nonlinearities (when enabled)
+    tx_nl = resolved.get("treatment_nonlinearity", "none")
+    if tx_nl and tx_nl != "none":
+        treatment_eq["nonlinearity"] = tx_nl
+        tx_nl_terms = equation_nonlinear_terms(features, treatment_eq)
+        treatment_eq["nonlinear_terms"] = tx_nl_terms
+        if tx_nl == "mixed":
+            treatment_eq["term_nonlinearities"] = {
+                term: str(MIXED_NONLINEARITY_SHAPES[int(rng.integers(len(MIXED_NONLINEARITY_SHAPES)))])
+                for term in tx_nl_terms
+            }
+
+    # 7. Effect scale metadata for binary outcomes
+    effect_scale = resolved.get("effect_scale", "log_or")
+    if effect_scale and effect_scale != "log_or":
+        outcome_eq["effect_scale"] = effect_scale
+
+    return treatment_eq, outcome_eq
+
+
+def _has_complex_settings(resolved: Mapping[str, Any]) -> bool:
+    return any([
+        resolved.get("dgp_mode", "parametric") != "parametric",
+        resolved.get("treatment_nonlinearity", "none") != "none",
+        resolved.get("max_treatment_interactions") is not None,
+        int(resolved.get("outcome_interactions") or 0) > 0,
+        int(resolved.get("hte_interactions") or 0) > 0,
+        bool(resolved.get("pure_epistatic_hte", False)),
+        bool(resolved.get("subgroup_rules")),
+        bool(resolved.get("rff_components")),
+        bool(resolved.get("rational_terms")),
+        resolved.get("effect_scale", "log_or") != "log_or",
+        resolved.get("component_weights") is not None,
+        resolved.get("balance_hte_scale") is True,
+        resolved.get("nonlinearity", "none") == "mixed",
+    ])
+
+
 def draw_equations(
     features: Sequence[Mapping[str, Any]],
     resolved: Mapping[str, Any],
@@ -351,6 +1172,7 @@ def draw_equations(
     *,
     main_coefficient_scale: float,
     interaction_coefficient_scale: float,
+    summary_stats: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], Dict[str, float]]:
     """Python-drawn treatment and outcome equations (before rescaling and calibration).
 
@@ -358,16 +1180,24 @@ def draw_equations(
     and interaction coefficients ``uniform(-1, 1) *
     interaction_coefficient_scale``, as the generator draws its Python terms:
 
-    - treatment equation: confounder and instrument main terms, and the
-      pairwise interactions of confounder terms from different variables;
+    - treatment equation: confounder and instrument main terms, and pairwise
+      interactions of confounder terms from different variables (bounded
+      automatically when >20 confounder terms or ``max_treatment_interactions``
+      is set);
     - outcome equation: confounder and prognostic main terms, effect-modifier
       main terms when ``modifier_main_effects`` is on, the treatment main
       effect, and treatment interactions for every effect-modifier term,
       scaled by ``modifier_strength``.
 
-    Each unmeasured confounder ``u_k`` enters both equations with coefficient
-    ``±unmeasured_strength`` times the root mean square of that equation's
-    measured confounder main coefficients (random sign per equation).
+    When complex DGP controls are set (``dgp_mode``, ``outcome_interactions``,
+    ``hte_interactions``, ``pure_epistatic_hte``, ``subgroup_rules``,
+    ``rff_components``, ``rational_terms``, ``treatment_nonlinearity``,
+    ``nonlinearity="mixed"``, ``effect_scale``), the corresponding blocks are
+    added while keeping all causal role boundaries intact.
+
+    Each unmeasured confounder ``u_k`` enters both equations linearly with
+    coefficient ``±unmeasured_strength`` times the root mean square of that
+    equation's measured confounder main coefficients (random sign per equation).
     Returns the two equations, the unmeasured-confounder pseudo-features, and
     the reference root mean squares.
     """
@@ -379,6 +1209,18 @@ def draw_equations(
     modifiers = [feature for feature in features if EFFECT_MODIFIER in roles_of(feature)]
     modifier_only = [feature for feature in modifiers if roles_of(feature) == [EFFECT_MODIFIER]]
 
+    confounder_terms = [
+        (feature["name"], term) for feature in confounders for term in feature_terms(feature)
+    ]
+    is_complex = _has_complex_settings(resolved)
+    is_wide = len(confounder_terms) > 20 or len(confounders) > 10 or len(modifiers) > 10
+
+    # Balance HTE vs baseline main scale automatically on wide or complex DGPs
+    # so 50 confounders do not drown out 5 modifiers (or vice versa), while keeping
+    # legacy S0-S6 (<=10 each, parametric) bit-identical.
+    balance_setting = resolved.get("balance_hte_scale")
+    balance_hte = bool(balance_setting) if balance_setting is not None else (is_complex or is_wide)
+
     treatment_eq: Dict[str, Any] = {"intercept": 0.0, "coefficients": {}, "interactions": []}
     treatment_eq["coefficients"].update(
         draw_main_coefficients(confounders, rng.uniform, main_coefficient_scale)
@@ -386,16 +1228,36 @@ def draw_equations(
     treatment_eq["coefficients"].update(
         draw_main_coefficients(instruments, rng.uniform, main_coefficient_scale)
     )
-    confounder_terms = [
-        (feature["name"], term) for feature in confounders for term in feature_terms(feature)
-    ]
-    for index, (owner, term) in enumerate(confounder_terms):
-        for other_owner, other in confounder_terms[index + 1:]:
-            if owner != other_owner:
-                treatment_eq["interactions"].append({
-                    "terms": [term, other],
-                    "coefficient": float(rng.uniform(-1.0, 1.0)) * interaction_coefficient_scale,
-                })
+
+    max_tx_inter = resolved.get("max_treatment_interactions")
+    if max_tx_inter is None and len(confounder_terms) <= 20:
+        for index, (owner, term) in enumerate(confounder_terms):
+            for other_owner, other in confounder_terms[index + 1:]:
+                if owner != other_owner:
+                    treatment_eq["interactions"].append({
+                        "terms": [term, other],
+                        "coefficient": float(rng.uniform(-1.0, 1.0)) * interaction_coefficient_scale,
+                    })
+    else:
+        limit = (
+            int(max_tx_inter)
+            if max_tx_inter is not None
+            else max(30, 2 * len(confounders))
+        )
+        if limit > 0 and len(confounders) >= 2:
+            tx_pair_scale = (
+                interaction_coefficient_scale
+                / math.sqrt(max(1.0, limit / max(1, len(confounders))))
+            )
+            treatment_eq["interactions"] = _sample_distinct_interactions(
+                confounder_terms,
+                limit,
+                rng,
+                term_centers=_term_centers_map(confounders, summary_stats),
+                scale=tx_pair_scale,
+                allow_triplets=False,
+                center_factors=False,
+            )
 
     outcome_eq: Dict[str, Any] = {"intercept": 0.0, "coefficients": {}, "interactions": []}
     outcome_eq["coefficients"].update(
@@ -409,17 +1271,29 @@ def draw_equations(
             draw_main_coefficients(modifier_only, rng.uniform, main_coefficient_scale)
         )
     outcome_eq["treatment_coefficient"] = float(resolved["treatment_effect"])
+
+    mod_term_list = [term for feature in modifiers for term in feature_terms(feature)]
+    if balance_hte and mod_term_list and float(resolved["modifier_strength"]) > 0.0:
+        n_out_main = max(1, len(outcome_eq["coefficients"]))
+        balanced_mod_scale = (
+            main_coefficient_scale
+            * math.sqrt(n_out_main / len(mod_term_list))
+            * 0.35
+            * float(resolved["modifier_strength"])
+        )
+    else:
+        balanced_mod_scale = interaction_coefficient_scale * float(resolved["modifier_strength"])
+
     outcome_eq["treatment_interactions"] = [
         {
             "term": term,
-            "coefficient": float(rng.uniform(-1.0, 1.0))
-            * interaction_coefficient_scale
-            * float(resolved["modifier_strength"]),
+            "coefficient": float(rng.uniform(-1.0, 1.0)) * balanced_mod_scale,
         }
-        for feature in modifiers
-        for term in feature_terms(feature)
+        for term in mod_term_list
     ]
 
+    # Save unscaled reference RMS BEFORE complex component_weights shrink linear weights
+    # so unmeasured confounder strength stays anchored cleanly to the measured confounder scale.
     unmeasured = _unmeasured_features(
         resolved["unmeasured_confounders"], [feature["name"] for feature in features]
     )
@@ -429,6 +1303,19 @@ def draw_equations(
         "treatment": _reference_rms(treatment_eq["coefficients"], terms, fallback),
         "outcome": _reference_rms(outcome_eq["coefficients"], terms, fallback),
     }
+
+    if is_complex:
+        treatment_eq, outcome_eq = augment_complex_equations(
+            features,
+            treatment_eq,
+            outcome_eq,
+            resolved,
+            rng,
+            summary_stats=summary_stats,
+            main_coefficient_scale=main_coefficient_scale,
+            interaction_coefficient_scale=interaction_coefficient_scale,
+        )
+
     strength = float(resolved["unmeasured_strength"])
     for feature in unmeasured:
         for key, equation in (("treatment", treatment_eq), ("outcome", outcome_eq)):
@@ -437,7 +1324,13 @@ def draw_equations(
 
     if resolved["nonlinearity"] != "none":
         outcome_eq["nonlinearity"] = resolved["nonlinearity"]
-        outcome_eq["nonlinear_terms"] = outcome_nonlinear_terms(features, outcome_eq)
+        nl_terms = outcome_nonlinear_terms(features, outcome_eq)
+        outcome_eq["nonlinear_terms"] = nl_terms
+        if resolved["nonlinearity"] == "mixed":
+            outcome_eq["term_nonlinearities"] = {
+                term: str(MIXED_NONLINEARITY_SHAPES[int(rng.integers(len(MIXED_NONLINEARITY_SHAPES)))])
+                for term in nl_terms
+            }
     return treatment_eq, outcome_eq, unmeasured, reference
 
 
@@ -583,17 +1476,24 @@ def _linear_predictors(
     summary_stats: Mapping[str, Any],
     equation: Mapping[str, Any],
     treatment: Optional[int],
+    *,
+    term_matrix: Optional[Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]] = None,
 ) -> np.ndarray:
-    features = list(features)
-    return np.array([
-        g._compute_logit(chars, features, summary_stats, equation, treatment=treatment)
-        for chars in characteristics
-    ], dtype=float)
+    return g._compute_logits_batch(
+        list(characteristics),
+        list(features),
+        dict(summary_stats),
+        dict(equation),
+        treatment=treatment,
+        term_matrix=term_matrix,
+    )
 
 
 def _with_unmeasured(
     characteristics: Sequence[Mapping[str, Any]], unmeasured: Sequence[Mapping[str, Any]], draws: np.ndarray
 ) -> List[Dict[str, Any]]:
+    if not unmeasured:
+        return list(characteristics)
     names = [feature["name"] for feature in unmeasured]
     return [
         {**chars, **{name: float(draws[row, column]) for column, name in enumerate(names)}}
@@ -692,6 +1592,7 @@ def reequation_cohort(
         seed,
         main_coefficient_scale=main_scale,
         interaction_coefficient_scale=interaction_scale,
+        summary_stats=summary_stats,
     )
     equation_features = assigned + unmeasured
     equation_stats = {
@@ -729,18 +1630,30 @@ def reequation_cohort(
         target_control_outcome_rate=resolved["target_control_outcome_rate"],
         sampled_chars=calibration_draws,
     )
+    cal_matrix = g._build_term_matrix(calibration_draws, equation_features, equation_stats)
     achieved_treatment = float(_sigmoid(_linear_predictors(
-        calibration_draws, equation_features, equation_stats, treatment_eq, None)).mean())
+        calibration_draws, equation_features, equation_stats, treatment_eq, None,
+        term_matrix=cal_matrix,
+    )).mean())
     achieved_control = float(_sigmoid(_linear_predictors(
-        calibration_draws, equation_features, equation_stats, outcome_eq, 0)).mean())
+        calibration_draws, equation_features, equation_stats, outcome_eq, 0,
+        term_matrix=cal_matrix,
+    )).mean())
 
     # Every source row gets its unmeasured confounders, treatment, and outcome
     # from streams indexed by source row, so they do not depend on ``size``.
     latent = _rng(seed, "unmeasured").standard_normal((n_source, len(unmeasured)))
     full = _with_unmeasured(characteristics, unmeasured, latent)
-    treatment_lp = _linear_predictors(full, equation_features, equation_stats, treatment_eq, None)
-    lp0 = _linear_predictors(full, equation_features, equation_stats, outcome_eq, 0)
-    lp1 = _linear_predictors(full, equation_features, equation_stats, outcome_eq, 1)
+    full_matrix = g._build_term_matrix(full, equation_features, equation_stats)
+    treatment_lp = _linear_predictors(
+        full, equation_features, equation_stats, treatment_eq, None, term_matrix=full_matrix
+    )
+    lp0 = _linear_predictors(
+        full, equation_features, equation_stats, outcome_eq, 0, term_matrix=full_matrix
+    )
+    lp1 = _linear_predictors(
+        full, equation_features, equation_stats, outcome_eq, 1, term_matrix=full_matrix
+    )
     propensity = _sigmoid(treatment_lp)
     treatment = (_rng(seed, "treatment").random(n_source) < propensity).astype("int64")
     lp_observed = np.where(treatment == 1, lp1, lp0)
@@ -754,7 +1667,8 @@ def reequation_cohort(
             "true_ite": lp1 - lp0,
         }
     else:
-        p0, p1, p_observed = _sigmoid(lp0), _sigmoid(lp1), _sigmoid(lp_observed)
+        p0, p1 = g.potential_outcome_probabilities(lp0, lp1, outcome_eq)
+        p_observed = np.where(treatment == 1, p1, p0)
         outcome = (outcome_rng.random(n_source) < p_observed).astype("int64")
         oracle = {
             "true_treatment_prob": propensity,

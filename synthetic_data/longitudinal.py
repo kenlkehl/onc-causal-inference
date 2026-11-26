@@ -27,7 +27,12 @@ from .designed_history import (
     sanitized_design_candidates,
 )
 from .dgp_terms import nonlinear_value, role_lists
-from .generator import oracle_dataset_statistics
+from .generator import (
+    _compute_logit,
+    oracle_dataset_statistics,
+    potential_outcome_probabilities,
+    scale_equation_coefficients,
+)
 from .llm_client import LLMClient
 from .longitudinal_history import (
     DAYS_PER_YEAR,
@@ -191,65 +196,7 @@ _CALIBRATION_DRAWS = 512
 
 def _fast_compute_logit(characteristics, features, summary_stats, equation, treatment=None):
     """O(1)-lookup equivalent of ``synthetic_data.generator._compute_logit``."""
-    logit = float(equation.get("intercept", 0.0))
-    coefficients = equation.get("coefficients", {})
-    nonlinearity = equation.get("nonlinearity", "none")
-    nonlinear_terms = (
-        set(equation.get("nonlinear_terms") or []) if nonlinearity != "none" else set()
-    )
-
-    z_values = {}
-    cat_values = {}
-    for feature in features:
-        name = feature["name"]
-        if feature["type"] == "continuous":
-            stats = summary_stats.get(name, {})
-            mean = stats.get("mean", 0.0)
-            std = stats.get("std", 1.0) or 1.0
-            z_values[name] = (characteristics[name] - mean) / std
-        else:
-            val = characteristics.get(name)
-            for cat in feature["categories"][1:]:
-                cat_values.setdefault(f"{name}_{cat}", 1.0 if val == cat else 0.0)
-
-    for coef_name, coef_value in coefficients.items():
-        if coef_name in z_values:
-            z = z_values[coef_name]
-            if coef_name in nonlinear_terms:
-                z = nonlinear_value(z, nonlinearity)
-            logit += coef_value * z
-        elif coef_name in cat_values and cat_values[coef_name]:
-            logit += coef_value
-
-    for interaction in equation.get("interactions", ()):
-        terms = interaction.get("terms", ())
-        coef = interaction.get("coefficient", 0.0)
-        product = 1.0
-        for term in terms:
-            if term in z_values:
-                value = z_values[term]
-            elif term in cat_values:
-                value = cat_values[term]
-            else:
-                product = 0.0
-                break
-            product *= value
-        logit += coef * product
-
-    if treatment is not None:
-        logit += equation.get("treatment_coefficient", 0.0) * treatment
-        for interaction in equation.get("treatment_interactions", ()):
-            term = interaction.get("term", "")
-            coef = interaction.get("coefficient", 0.0)
-            if term in z_values:
-                value = z_values[term]
-                if term in nonlinear_terms:
-                    value = nonlinear_value(value, nonlinearity)
-                logit += coef * treatment * value
-            elif term in cat_values:
-                logit += coef * treatment * cat_values[term]
-
-    return logit
+    return _compute_logit(characteristics, features, summary_stats, equation, treatment=treatment)
 
 
 def _calibration_samples(features, reference, rng, n_draws=_CALIBRATION_DRAWS):
@@ -280,20 +227,7 @@ def _calibration_samples(features, reference, rng, n_draws=_CALIBRATION_DRAWS):
 
 
 def _scale_equation(equation, scale):
-    eq = dict(equation)
-    if "coefficients" in eq:
-        eq["coefficients"] = {k: float(v * scale) for k, v in eq["coefficients"].items()}
-    if "interactions" in eq:
-        eq["interactions"] = [
-            {**inter, "coefficient": float(inter.get("coefficient", 0.0) * scale)}
-            for inter in eq["interactions"]
-        ]
-    if "treatment_interactions" in eq:
-        eq["treatment_interactions"] = [
-            {**inter, "coefficient": float(inter.get("coefficient", 0.0) * scale)}
-            for inter in eq["treatment_interactions"]
-        ]
-    return eq
+    return scale_equation_coefficients(equation, scale)
 
 
 def _calibrate_intercept(lps, target_rate):
@@ -330,7 +264,7 @@ def _calibrate_longitudinal_equations(features, reference, treatment, outcome, r
         for j in range(i + 1, len(out_terms))
         if owner_of[out_terms[i]] != owner_of[out_terms[j]]
     ]
-    if candidate_pairs and rng.random() < 0.65:
+    if not outcome.get("interactions") and candidate_pairs and rng.random() < 0.65:
         n_pairs = int(rng.integers(1, min(_MAX_OUTCOME_INTERACTIONS, len(candidate_pairs)) + 1))
         chosen = rng.choice(len(candidate_pairs), size=n_pairs, replace=False)
         outcome = {
@@ -468,7 +402,14 @@ class LongitudinalDGP:
 
 
 def draw_longitudinal_dgp(
-    dgp_seed, prior=None, *, schema_version=2, design=None, paraphrase_bank=None
+    dgp_seed,
+    prior=None,
+    *,
+    schema_version=2,
+    design=None,
+    paraphrase_bank=None,
+    dgp_mode="parametric",
+    max_active=None,
 ):
     """One reproducible study, shared by its context and query patients."""
     if schema_version not in (1, 2):
@@ -486,7 +427,10 @@ def draw_longitudinal_dgp(
         if prior != "design" or schema_version != 2:
             raise ValueError("A study design requires the design prior and five-stream schema")
         roles_rng = np.random.default_rng([dgp_seed, 981])
-        available, reference = candidate_features(design, roles_rng)
+        if max_active is None:
+            available, reference = candidate_features(design, roles_rng)
+        else:
+            available, reference = candidate_features(design, roles_rng, max_active=max_active)
     if prior in ("mixed", "design"):
         rng = np.random.default_rng([dgp_seed, 923])
         settings.update(
@@ -503,6 +447,10 @@ def draw_longitudinal_dgp(
             }
     elif prior != "fixed_roles":
         raise ValueError(f"Unknown longitudinal prior: {prior}")
+    if dgp_mode != "parametric":
+        settings["dgp_mode"] = dgp_mode
+        settings["nonlinearity"] = "mixed"
+        settings["treatment_nonlinearity"] = "mixed"
     scenario = resolve_scenario(settings, available, seed=dgp_seed)
     features = _features_with_roles(available, scenario["roles"])
     treatment, outcome, _, _ = draw_equations(
@@ -511,6 +459,7 @@ def draw_longitudinal_dgp(
         dgp_seed,
         main_coefficient_scale=0.85,
         interaction_coefficient_scale=0.30,
+        summary_stats=reference,
     )
     if prior in ("mixed", "design"):
         treatment, outcome = _calibrate_longitudinal_equations(
@@ -580,10 +529,9 @@ def sample_longitudinal_patient(
     propensity = float(
         expit(_fast_compute_logit(features, dgp.features, dgp.reference, dgp.treatment))
     )
-    p0, p1 = [
-        float(expit(_fast_compute_logit(features, dgp.features, dgp.reference, dgp.outcome, t)))
-        for t in (0, 1)
-    ]
+    lp0 = _fast_compute_logit(features, dgp.features, dgp.reference, dgp.outcome, 0)
+    lp1 = _fast_compute_logit(features, dgp.features, dgp.reference, dgp.outcome, 1)
+    p0, p1 = potential_outcome_probabilities(lp0, lp1, dgp.outcome)
     treatment = int(rng.random() < propensity)
     observed_p = p1 if treatment else p0
     return dict(

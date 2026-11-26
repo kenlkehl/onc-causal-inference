@@ -65,9 +65,7 @@ BENCH/
 
 ## Scenario registry
 
-`benchmarks/scenarios.json` lists a baseline and six factor families. Each
-scenario changes one factor family relative to S0; the roles count source
-features, and features without a role still appear in the text.
+`benchmarks/scenarios.json` lists the baseline (`S0`), six single-factor families (`S1`–`S6`), and six complex / out-of-family / variable-dimensionality stress families (`S7`–`S12b`). `S0`–`S6` are frozen for backward compatibility; `S7`–`S12b` stress-test null HTE, pure epistasis, multi-way subgroups with rare events, non-parametric GP/RFF + rational surfaces, combined EHR realism, and wide variable dimensionality from 5 to 50 confounders and 5 to 50 effect modifiers.
 
 | Scenario | Factor | DGP relative to S0 | Sizes | Corpus |
 |---|---|---|---|---|
@@ -78,6 +76,13 @@ features, and features without a role still appear in the text.
 | S4a, S4b | One unmeasured confounder U | one latent standard-normal U in both equations, at `unmeasured_strength` 0.5 (S4a) and 1.0 (S4b); U never appears in the text | 1,000, 5,000, 10,000 | Re-equation source, at least 10,000 patients |
 | S5 | MNAR documentation | the S0 DGP, re-equated on a corpus whose note writer saw each characteristic with a value-dependent probability | 1,000, 5,000 | Generated corpus, at least 5,000 patients |
 | S6 | Post-treatment leak | the generator's own DGP; notes dated after the index date describe a treatment-caused event | 1,000, 5,000 | Generated corpus, at least 5,000 patients |
+| S7 | Strictly null treatment effect & null HTE | `treatment_effect: 0.0`, `modifier_strength: 0.0`, mixed nonlinearities & baseline interactions (`true_ite == 0` identically; tests Type-I error and CATE shrinkage) | 1,000, 5,000 | Re-equation source, at least 5,000 patients and 8 features |
+| S8 | Pure-epistatic & interacting HTE | `pure_epistatic_hte: true` (zero 1-D linear modifier main terms in HTE), 6 centered higher-order `M × M` / dual-role `C × M` HTE interactions, 4 baseline interactions, mixed nonlinearities on both equations | 1,000, 5,000 | Re-equation source, at least 5,000 patients and 8 features |
+| S9 | Multi-way subgroups & rare/imbalanced rates | crisp depth 2–3 biomarker conjunction rules in propensity, baseline outcome, and HTE, `hinge` nonlinearity, `target_treatment_rate: 0.25`, `target_control_outcome_rate: 0.15` | 1,000, 5,000 | Re-equation source, at least 5,000 patients and 10 features |
+| S10 | Arbitrary non-parametric (out-of-family) surface | Bochner Random Fourier Feature GP surfaces (`rff_components: 32`) + bounded rational/ratio terms (`rational_terms`) + mixed 1-D nonlinearities for propensity, baseline outcome, and HTE | 1,000, 5,000, 10,000 | Re-equation source, at least 10,000 patients and 10 features |
+| S11 | Combined realistic EHR stress | instruments + dual-role + prognostic + composite interactions/subgroups/RFF/rational + mixed nonlinearities + imbalanced rates (0.30 / 0.20) + mild linear `U` (`strength: 0.4`) | 1,000, 5,000 | Re-equation source, at least 5,000 patients and 10 features |
+| S12a | Variable-dimensionality complex DGP (5–50 each) | seeded random counts `confounder: {"min": 5, "max": 50}`, `effect_modifier: {"min": 5, "max": 50}`, `dual_role: {"min": 0, "max": 10}`, instruments & prognostic under full `composite` complex DGP | 1,000, 5,000 | Wide 120-feature correlated corpus (LLM or `synthetic_data.cli wide-corpus`), at least 5,000 patients |
+| S12b | Dense high-dimensional complex DGP (50 + 50) | fixed 50 confounders, 50 effect modifiers, 5 instruments, 5 prognostic (110 active variables + 10 distractors) under full `composite` complex DGP | 1,000, 5,000 | Wide 120-feature correlated corpus (LLM or `synthetic_data.cli wide-corpus`), at least 5,000 patients |
 
 Every re-equation DGP pins all of its settings (role counts with random seeded
 assignment, logit standard deviations of 2.0, a treatment effect of 0.2,

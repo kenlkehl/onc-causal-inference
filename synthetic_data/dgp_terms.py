@@ -23,6 +23,8 @@ import re
 import unicodedata
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+import numpy as np
+
 CONFOUNDER = "confounder"
 EFFECT_MODIFIER = "effect_modifier"
 INSTRUMENT = "instrument"
@@ -50,7 +52,29 @@ ROLE_METADATA_KEYS = {
     PROGNOSTIC: "prognostic_variables",
 }
 
-NONLINEARITIES = ("none", "threshold", "quadratic")
+NONLINEARITIES = (
+    "none",
+    "threshold",
+    "quadratic",
+    "hinge",
+    "saturating",
+    "sinusoidal",
+    "band",
+    "cubic",
+    "mixed",
+)
+# Per-term shapes sampled when ``nonlinearity == "mixed"``.
+MIXED_NONLINEARITY_SHAPES = (
+    "none",
+    "threshold",
+    "quadratic",
+    "hinge",
+    "saturating",
+    "sinusoidal",
+    "band",
+    "cubic",
+)
+_INV_SQRT_6 = 1.0 / math.sqrt(6.0)
 
 # Hyphen/dash look-alikes that LLMs emit interchangeably (U+2010 hyphen,
 # U+2011 non-breaking hyphen, U+2012 figure dash, U+2013 en dash, U+2014 em
@@ -195,14 +219,85 @@ def role_lists(features: Sequence[Mapping[str, Any]]) -> Dict[str, List[Dict[str
     return {key: features_with_role(features, role) for role, key in ROLE_METADATA_KEYS.items()}
 
 
+def resolve_term_nonlinearity(
+    term: str,
+    nonlinearity: str,
+    term_nonlinearities: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Effective 1-D nonlinear shape for ``term`` under an equation's nonlinearity settings."""
+
+    if term_nonlinearities and term in term_nonlinearities:
+        return str(term_nonlinearities[term])
+    if nonlinearity == "mixed":
+        return "none"
+    return nonlinearity
+
+
 def nonlinear_value(z: float, nonlinearity: str) -> float:
-    """Shape of a standardized continuous term: ``z``, ``1[z > 0]``, or ``z**2``."""
+    """Shape of a standardized continuous term.
+
+    Legacy shapes ``"none"`` (``z``), ``"threshold"`` (``1[z > 0]``), and
+    ``"quadratic"`` (``z**2``) keep their exact historical definitions.
+    Additional shapes support smooth/non-monotonic/piecewise responses:
+    ``"hinge"`` (``max(0, z)``), ``"saturating"`` (``tanh(z)``),
+    ``"sinusoidal"`` (``sin(1.5 * z)``), ``"band"`` (``exp(-0.5 * z**2)``),
+    and ``"cubic"`` (clipped standardized Hermite ``(z**3 - 3*z) / sqrt(6)``).
+    """
 
     if nonlinearity == "threshold":
         return 1.0 if z > 0 else 0.0
     if nonlinearity == "quadratic":
         return z * z
+    if nonlinearity == "hinge":
+        return z if z > 0.0 else 0.0
+    if nonlinearity == "saturating":
+        return math.tanh(z)
+    if nonlinearity == "sinusoidal":
+        return math.sin(1.5 * z)
+    if nonlinearity == "band":
+        return math.exp(-0.5 * z * z)
+    if nonlinearity == "cubic":
+        val = (z * z * z - 3.0 * z) * _INV_SQRT_6
+        if val > 4.0:
+            return 4.0
+        if val < -4.0:
+            return -4.0
+        return val
     return z
+
+
+def nonlinear_array(z: np.ndarray, nonlinearity: str) -> np.ndarray:
+    """Vectorized NumPy equivalent of :func:`nonlinear_value`."""
+
+    arr = np.asarray(z, dtype=float)
+    if nonlinearity == "threshold":
+        return np.where(arr > 0.0, 1.0, 0.0)
+    if nonlinearity == "quadratic":
+        return arr * arr
+    if nonlinearity == "hinge":
+        return np.where(arr > 0.0, arr, 0.0)
+    if nonlinearity == "saturating":
+        return np.tanh(arr)
+    if nonlinearity == "sinusoidal":
+        return np.sin(1.5 * arr)
+    if nonlinearity == "band":
+        return np.exp(-0.5 * arr * arr)
+    if nonlinearity == "cubic":
+        return np.clip((arr * arr * arr - 3.0 * arr) * _INV_SQRT_6, -4.0, 4.0)
+    return arr
+
+
+def equation_nonlinear_terms(
+    features: Sequence[Mapping[str, Any]], equation: Mapping[str, Any]
+) -> List[str]:
+    """Continuous features that appear in an equation's main terms or treatment interactions."""
+
+    continuous = [feature["name"] for feature in features if feature["type"] == "continuous"]
+    used = set((equation.get("coefficients") or {}).keys())
+    used.update(
+        str(item.get("term", "")) for item in equation.get("treatment_interactions") or []
+    )
+    return [name for name in continuous if name in used]
 
 
 def outcome_nonlinear_terms(
@@ -210,12 +305,7 @@ def outcome_nonlinear_terms(
 ) -> List[str]:
     """Continuous features that appear in the outcome main terms or treatment interactions."""
 
-    continuous = [feature["name"] for feature in features if feature["type"] == "continuous"]
-    used = set((outcome_equation.get("coefficients") or {}).keys())
-    used.update(
-        str(item.get("term", "")) for item in outcome_equation.get("treatment_interactions") or []
-    )
-    return [name for name in continuous if name in used]
+    return equation_nonlinear_terms(features, outcome_equation)
 
 
 def draw_main_coefficients(

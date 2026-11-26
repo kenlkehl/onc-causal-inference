@@ -108,8 +108,15 @@ class SyntheticDataConfig:
     # Give effect-modifier-only variables an outcome main effect as well.
     modifier_main_effects: bool = False
     # Shape of continuous terms in the outcome main terms and the treatment
-    # interactions: "none" (linear z), "threshold" (1[z > 0]), "quadratic" (z^2).
+    # interactions: "none" (linear z), "threshold" (1[z > 0]), "quadratic" (z^2),
+    # "hinge", "saturating", "sinusoidal", "band", "cubic", or "mixed".
     nonlinearity: str = "none"
+    # Optional complexity mode for generated equations: "parametric" (legacy),
+    # "interacting", "subgroup", "nonparametric", or "composite".
+    dgp_mode: str = "parametric"
+    # Optional cap on pairwise confounder interactions in the treatment equation
+    # (None keeps exact enumeration up to 20 confounder terms and caps wider sets).
+    max_treatment_interactions: Optional[int] = None
     # Separate logit SDs; None uses ``target_logit_std``.
     treatment_logit_std: Optional[float] = None
     outcome_logit_std: Optional[float] = None
@@ -274,6 +281,18 @@ class SyntheticDataConfig:
             raise ValueError(
                 f"nonlinearity must be one of {list(NONLINEARITIES)}, got {self.nonlinearity!r}"
             )
+        valid_dgp_modes = ("parametric", "interacting", "subgroup", "nonparametric", "composite")
+        if self.dgp_mode not in valid_dgp_modes:
+            raise ValueError(
+                f"dgp_mode must be one of {list(valid_dgp_modes)}, got {self.dgp_mode!r}"
+            )
+        if self.max_treatment_interactions is not None:
+            if (
+                isinstance(self.max_treatment_interactions, bool)
+                or not isinstance(self.max_treatment_interactions, int)
+                or self.max_treatment_interactions < 0
+            ):
+                raise ValueError("max_treatment_interactions must be a non-negative integer or None")
         for field_name in ("treatment_logit_std", "outcome_logit_std"):
             value = getattr(self, field_name)
             if value is not None and not value > 0:

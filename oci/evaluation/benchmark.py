@@ -248,13 +248,18 @@ class Scenario:
         return _float(self.dgp.get("unmeasured_strength", 1.0))
 
     def role_feature_count(self) -> int:
-        """Source features the DGP's roles require."""
+        """Source features the DGP's roles require (upper bound when count ranges are used)."""
 
         roles = (self.dgp or {}).get("roles") or {}
-        return sum(
-            len(value) if isinstance(value, (list, tuple)) else int(value)
-            for value in roles.values()
-        )
+        total = 0
+        for value in roles.values():
+            if isinstance(value, (list, tuple)):
+                total += len(value)
+            elif isinstance(value, Mapping):
+                total += int(value.get("max", value.get("min", 0)))
+            else:
+                total += int(value)
+        return total
 
 
 @dataclass(frozen=True)

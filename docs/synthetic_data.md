@@ -343,7 +343,9 @@ python -m synthetic_data.cli \
 | `--num-instruments N` | 0 | Variables in the treatment equation only |
 | `--num-prognostic N` | 0 | Variables in the outcome equation only |
 | `--modifier-main-effects` | off | Give effect-modifier-only variables an outcome main term |
-| `--nonlinearity` | `none` | `none`, `threshold`, or `quadratic` shape of continuous outcome main terms and treatment interactions |
+| `--nonlinearity` | `none` | `none`, `threshold`, `quadratic`, `hinge`, `saturating`, `sinusoidal`, `band`, `cubic`, or `mixed` (per-term shape) for continuous outcome main terms and treatment interactions |
+| `--dgp-mode` | `parametric` | `parametric` (legacy), `interacting`, `subgroup`, `nonparametric` (RFF + rational), or `composite` |
+| `--max-treatment-interactions N` | auto | Cap on pairwise confounder interactions in the treatment equation (exact enumeration up to 20 terms; bounded automatically for wider sets) |
 | `--treatment-logit-std S`, `--outcome-logit-std S` | `--target-logit-std` | Standard deviation of each linear predictor separately |
 | `--modifier-strength X` | 2.0 | Multiplier for the treatment × effect-modifier coefficients |
 
@@ -613,17 +615,41 @@ default, and the outcome type (binary or continuous) comes from the source.
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | required | Scenario name |
-| `roles` | the source's roles | Disjoint groups `confounder`, `effect_modifier`, `dual_role` (both roles), `instrument`, and `prognostic`, each a count or a list of variable names |
-| `role_assignment` | `random` | `random`: lists are fixed first, then counts are drawn with a seeded RNG from the remaining variables in the group order above. `named`: every group must be a list |
+| `roles` | the source's roles | Disjoint groups `confounder`, `effect_modifier`, `dual_role` (both roles), `instrument`, and `prognostic`, each an integer count, a `{"min": lo, "max": hi}` seeded count range (e.g., `{"min": 5, "max": 50}`), or a list of variable names |
+| `role_assignment` | `random` | `random`: lists are fixed first, then counts (or ranged counts) are drawn with a seeded RNG from the remaining variables in the group order above. `named`: every group must be a list |
 | `modifier_main_effects` | `false` | Give effect-modifier-only variables an outcome main term |
-| `nonlinearity` | `none` | `none`, `threshold`, or `quadratic` (see [How a cohort is generated](#how-a-cohort-is-generated)) |
+| `nonlinearity` | `none` | `none`, `threshold`, `quadratic`, `hinge`, `saturating`, `sinusoidal`, `band`, `cubic`, or `mixed` (per-term shapes) for continuous outcome main terms and treatment interactions |
+| `treatment_nonlinearity` | `none` | Optional 1-D nonlinearity shape for continuous terms in the treatment equation |
+| `dgp_mode` | `parametric` | Optional complexity preset: `parametric` (legacy), `interacting`, `subgroup`, `nonparametric`, or `composite` |
+| `max_treatment_interactions` | auto | Optional cap on pairwise confounder interactions in the treatment equation (exact up to 20 confounder terms; bounded automatically for wider high-dimensional sets) |
+| `outcome_interactions` | `0` | Count or `{"min": lo, "max": hi}` range of centered 2-way/3-way baseline outcome interactions (`C × C`, `C × P`, `P × P`) |
+| `hte_interactions` | `0` | Count or `{"min": lo, "max": hi}` range of centered 2-way/3-way treatment-effect interactions (`M × M`, dual-role `C × M`) |
+| `pure_epistatic_hte` | `false` | When `true`, omits 1-D linear `treatment_interactions` so all HTE comes from centered higher-order interactions, subgroup rules, or non-parametric blocks |
+| `subgroup_rules` | `null` | Optional `{"treatment": k, "outcome": k, "hte": k, "min_depth": 2, "max_depth": 3, "soft_slope": null}` multi-way decision-tree / biomarker conjunction rules |
+| `rff_components` | `null` | Optional `{"treatment": m, "outcome": m, "hte": m, "lengthscale": 1.15, "max_terms": 16}` Bochner Random Fourier Feature GP surfaces |
+| `rational_terms` | `null` | Optional `{"treatment": k, "outcome": k, "hte": k}` bounded rational/ratio interaction terms |
+| `effect_scale` | `log_or` | Binary-outcome effect scale: `log_or` (default logistic) or `risk_difference` |
+| `component_weights` | `null` | Optional relative weights `{"linear", "interaction", "subgroup", "rff", "rational"}` before final logit-SD rescaling |
+| `balance_hte_scale` | auto | Automatically balances HTE vs baseline scale across asymmetric/wide confounder & modifier counts (off by default for legacy small parametric scenarios) |
 | `treatment_logit_std`, `outcome_logit_std` | 2.0 | Standard deviations of the linear predictors |
 | `treatment_effect` | 0.2 | Treatment main-effect coefficient |
-| `modifier_strength` | 2.0 | Multiplier for the treatment interaction coefficients |
-| `unmeasured_confounders` | 0 | Number of unmeasured confounders U |
+| `modifier_strength` | 2.0 | Multiplier for the treatment interaction coefficients (`0.0` yields strictly zero HTE across all HTE blocks) |
+| `unmeasured_confounders` | 0 | Number of unmeasured confounders U (always enter linearly so Gauss-Hermite sensitivity bounds remain exact) |
 | `unmeasured_strength` | 1.0 | Size of U's coefficients relative to the measured confounders |
 | `target_treatment_rate`, `target_control_outcome_rate` | 0.5, 0.5 | Calibration targets |
 | `outcome_noise_std` | 1.0 | Noise standard deviation for continuous outcomes |
+
+### Wide-feature synthetic corpora (10 to 150+ features)
+
+To stress-test variable or high-dimensional DGPs (such as `S12a` with 5–50 confounders and 5–50 effect modifiers, or `S12b` with 50 + 50 active variables) without waiting for LLM note generation over 120 variables, use the deterministic wide-corpus generator:
+
+```bash
+python -m synthetic_data.cli wide-corpus \
+  --num-patients 5000 --num-features 120 --seed 42 \
+  --output-dir ./synthetic_output/wide_120
+```
+
+This writes a standard re-equation-ready source directory (`dataset.parquet`, `metadata.json` with `scenario: null`, `generation_config.json`) with block-correlated Gaussian-copula covariates drawn from a 120-feature oncology catalog (extending cleanly beyond 120 if requested) and deterministic pretreatment clinical notes, ready for `python -m synthetic_data.cli reequation` or `python scripts/benchmark.py materialize --scenarios S12a --generated ./synthetic_output/wide_120`.
 
 Unknown keys, unknown variable names, a variable in two groups, a proxy given a
 role, and counts larger than the unassigned variables are errors. Variables left

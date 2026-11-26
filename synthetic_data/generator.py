@@ -37,12 +37,15 @@ from .dgp_terms import (
     EFFECT_MODIFIER,
     INSTRUMENT,
     LLM_ROLES,
+    MIXED_NONLINEARITY_SHAPES,
     PROGNOSTIC,
     category_lookup_key,
     category_probabilities,
     draw_main_coefficients,
+    nonlinear_array,
     nonlinear_value,
     outcome_nonlinear_terms,
+    resolve_term_nonlinearity,
     role_lists,
     roles_of,
     validate_role_combination,
@@ -97,6 +100,8 @@ DGP_FACTOR_FIELDS = (
     "post_treatment_notes",
     "num_proxy_variables",
     "proxy_correlation",
+    "dgp_mode",
+    "max_treatment_interactions",
 )
 
 
@@ -420,6 +425,7 @@ def _design_dgp(client: LLMClient, config: SyntheticDataConfig) -> Dict[str, Any
         modifier_strength=config.modifier_strength,
         modifier_main_effects=config.modifier_main_effects,
         nonlinearity=config.nonlinearity,
+        max_treatment_interactions=config.max_treatment_interactions,
     )
     logger.info(f"Treatment equation has {len(treatment_eq['coefficients'])} terms")
     logger.info(f"Outcome equation has {len(outcome_eq['coefficients'])} terms")
@@ -427,6 +433,33 @@ def _design_dgp(client: LLMClient, config: SyntheticDataConfig) -> Dict[str, Any
     # Step 3: Generate summary statistics
     logger.info("Step 3/6: Generating summary statistics...")
     summary_stats = _generate_summary_statistics(client, config.clinical_question, confounders)
+
+    # Optional non-parametric / interacting / subgroup complexity augmentation
+    if getattr(config, "dgp_mode", "parametric") != "parametric":
+        from .reequation import augment_complex_equations, resolve_scenario
+
+        resolved_complex = resolve_scenario(
+            {
+                "name": f"generated_{config.dgp_mode}",
+                "dgp_mode": config.dgp_mode,
+                "nonlinearity": config.nonlinearity,
+                "modifier_main_effects": config.modifier_main_effects,
+                "treatment_effect": config.treatment_effect_prob,
+                "modifier_strength": config.modifier_strength,
+            },
+            confounders,
+            seed=config.seed,
+        )
+        treatment_eq, outcome_eq = augment_complex_equations(
+            confounders,
+            treatment_eq,
+            outcome_eq,
+            resolved_complex,
+            np.random.default_rng([int(config.seed), 31]),
+            summary_stats=summary_stats,
+            main_coefficient_scale=config.main_coefficient_scale,
+            interaction_coefficient_scale=config.interaction_coefficient_scale,
+        )
     
     # Step 4: Rescale coefficients first to achieve target logit std
     # (Order matters: rescaling changes the linear predictor, so intercepts must be calibrated afterward)
@@ -693,18 +726,80 @@ def _enforce_feature_count_request(
             )
             return features[:resolved_num_features]
 
-        import itertools
-        for indices in itertools.combinations(range(len(features)), resolved_num_features):
-            subset = [features[i] for i in indices]
-            if _feature_counts_match_request(
-                subset, resolved_num_features, num_confounders, num_effect_modifiers
-            ):
-                logger.warning(
-                    "LLM feature counts %s did not match request; selected ordered subset "
-                    "with requested counts",
-                    _count_features_by_role(features),
-                )
-                return subset
+        # Exact O(P) role-bucket selection preserving LLM order (and avoiding
+        # combinatorial explosion when num_confounders / num_effect_modifiers are large).
+        both_idx: List[int] = []
+        conf_only_idx: List[int] = []
+        mod_only_idx: List[int] = []
+        none_idx: List[int] = []
+        for idx, feature in enumerate(features):
+            roles = set(feature.get("roles", []))
+            has_c = CONFOUNDER in roles
+            has_m = EFFECT_MODIFIER in roles
+            if has_c and has_m:
+                both_idx.append(idx)
+            elif has_c:
+                conf_only_idx.append(idx)
+            elif has_m:
+                mod_only_idx.append(idx)
+            else:
+                none_idx.append(idx)
+
+        best_indices: Optional[List[int]] = None
+        if num_confounders is not None and num_effect_modifiers is not None:
+            for k_none in range(min(len(none_idx), resolved_num_features) + 1):
+                active_total = resolved_num_features - k_none
+                k_both = num_confounders + num_effect_modifiers - active_total
+                k_conf = num_confounders - k_both
+                k_mod = num_effect_modifiers - k_both
+                if (
+                    0 <= k_both <= len(both_idx)
+                    and 0 <= k_conf <= len(conf_only_idx)
+                    and 0 <= k_mod <= len(mod_only_idx)
+                ):
+                    cand = sorted(
+                        both_idx[:k_both]
+                        + conf_only_idx[:k_conf]
+                        + mod_only_idx[:k_mod]
+                        + none_idx[:k_none]
+                    )
+                    if best_indices is None or cand < best_indices:
+                        best_indices = cand
+        elif num_confounders is not None:
+            non_conf_idx = sorted(mod_only_idx + none_idx)
+            k_non_conf = resolved_num_features - num_confounders
+            if 0 <= k_non_conf <= len(non_conf_idx):
+                min_both = max(0, num_confounders - len(conf_only_idx))
+                max_both = min(len(both_idx), num_confounders)
+                for k_both in range(min_both, max_both + 1):
+                    k_conf = num_confounders - k_both
+                    cand = sorted(
+                        both_idx[:k_both] + conf_only_idx[:k_conf] + non_conf_idx[:k_non_conf]
+                    )
+                    if best_indices is None or cand < best_indices:
+                        best_indices = cand
+        elif num_effect_modifiers is not None:
+            non_mod_idx = sorted(conf_only_idx + none_idx)
+            k_non_mod = resolved_num_features - num_effect_modifiers
+            if 0 <= k_non_mod <= len(non_mod_idx):
+                min_both = max(0, num_effect_modifiers - len(mod_only_idx))
+                max_both = min(len(both_idx), num_effect_modifiers)
+                for k_both in range(min_both, max_both + 1):
+                    k_mod = num_effect_modifiers - k_both
+                    cand = sorted(
+                        both_idx[:k_both] + mod_only_idx[:k_mod] + non_mod_idx[:k_non_mod]
+                    )
+                    if best_indices is None or cand < best_indices:
+                        best_indices = cand
+
+        if best_indices is not None:
+            subset = [features[i] for i in best_indices]
+            logger.warning(
+                "LLM feature counts %s did not match request; selected ordered subset "
+                "with requested counts",
+                _count_features_by_role(features),
+            )
+            return subset
 
     raise ValueError(
         "LLM-generated feature counts do not satisfy request. "
@@ -919,6 +1014,7 @@ def _generate_equations(
     modifier_strength: float = 2.0,
     modifier_main_effects: bool = False,
     nonlinearity: str = "none",
+    max_treatment_interactions: Optional[int] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Generate treatment and outcome regression equations with scaled coefficients.
 
@@ -1003,27 +1099,61 @@ def _generate_equations(
     # Add pairwise confounder-role interactions to treatment equation.
     # Get all coefficient names (continuous names + categorical dummies)
     coef_names = []
-    for conf in _filter_features_by_role(confounders, "confounder"):
+    owner_of = {}
+    confounder_features = _filter_features_by_role(confounders, "confounder")
+    for conf in confounder_features:
         name = conf["name"]
         if conf["type"] == "continuous":
             coef_names.append(name)
+            owner_of[name] = name
         else:
             for cat in conf["categories"][1:]:  # Skip reference category
-                coef_names.append(f"{name}_{cat}")
+                dummy = f"{name}_{cat}"
+                coef_names.append(dummy)
+                owner_of[dummy] = name
 
-    # Create all pairwise interactions
+    # Create pairwise interactions (exact legacy enumeration up to 20 terms when uncapped;
+    # bounded random subset for wider high-dimensional confounder sets).
     existing_interactions = treatment_eq.get("interactions", [])
     existing_pairs = {tuple(sorted(inter.get("terms", []))) for inter in existing_interactions}
 
     new_interactions = []
-    for i, term1 in enumerate(coef_names):
-        for term2 in coef_names[i+1:]:
-            pair = tuple(sorted([term1, term2]))
-            if pair not in existing_pairs:
-                coef = np.random.uniform(-1.0, 1.0) * interaction_coef_scale
+    if max_treatment_interactions is None and len(coef_names) <= 20:
+        for i, term1 in enumerate(coef_names):
+            for term2 in coef_names[i+1:]:
+                pair = tuple(sorted([term1, term2]))
+                if pair not in existing_pairs:
+                    coef = np.random.uniform(-1.0, 1.0) * interaction_coef_scale
+                    new_interactions.append({
+                        "terms": [term1, term2],
+                        "coefficient": coef
+                    })
+    else:
+        limit = (
+            max_treatment_interactions
+            if max_treatment_interactions is not None
+            else max(30, 2 * len(confounder_features))
+        )
+        candidate_pairs = [
+            (term1, term2)
+            for i, term1 in enumerate(coef_names)
+            for term2 in coef_names[i + 1:]
+            if owner_of[term1] != owner_of[term2]
+            and tuple(sorted([term1, term2])) not in existing_pairs
+        ]
+        if limit > 0 and candidate_pairs:
+            if len(candidate_pairs) > limit:
+                chosen_idx = sorted(
+                    np.random.choice(len(candidate_pairs), size=limit, replace=False).tolist()
+                )
+                selected_pairs = [candidate_pairs[idx] for idx in chosen_idx]
+            else:
+                selected_pairs = candidate_pairs
+            pair_scale = interaction_coef_scale / math.sqrt(max(1.0, len(selected_pairs) / max(1, len(confounder_features))))
+            for term1, term2 in selected_pairs:
                 new_interactions.append({
                     "terms": [term1, term2],
-                    "coefficient": coef
+                    "coefficient": float(np.random.uniform(-1.0, 1.0)) * pair_scale,
                 })
 
     treatment_eq["interactions"] = existing_interactions + new_interactions
@@ -1047,7 +1177,12 @@ def _generate_equations(
         )
     if nonlinearity != "none":
         outcome_eq["nonlinearity"] = nonlinearity
-        outcome_eq["nonlinear_terms"] = outcome_nonlinear_terms(confounders, outcome_eq)
+        nl_terms = outcome_nonlinear_terms(confounders, outcome_eq)
+        outcome_eq["nonlinear_terms"] = nl_terms
+        if nonlinearity == "mixed":
+            outcome_eq["term_nonlinearities"] = {
+                term: str(np.random.choice(MIXED_NONLINEARITY_SHAPES)) for term in nl_terms
+            }
 
     return treatment_eq, outcome_eq
 
@@ -1125,56 +1260,55 @@ def _calibrate_intercepts(
     
     def sigmoid(x):
         return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
-    
-    def compute_linear_predictor(characteristics, equation, confounders, summary_stats, treatment=None):
-        """Compute linear predictor WITHOUT intercept."""
-        # Temporarily set intercept to 0
-        original_intercept = equation.get("intercept", 0.0)
-        equation["intercept"] = 0.0
-        logit = _compute_logit(characteristics, confounders, summary_stats, equation, treatment=treatment)
-        equation["intercept"] = original_intercept
-        return logit
-    
-    # Compute linear predictors for all samples (without intercept)
-    treatment_lps = np.array([
-        compute_linear_predictor(chars, treatment_eq, confounders, summary_stats)
-        for chars in sampled_chars
-    ])
-    
-    outcome_lps = np.array([
-        compute_linear_predictor(chars, outcome_eq, confounders, summary_stats, treatment=0)
-        for chars in sampled_chars
-    ])
-    
+
+    # Compute linear predictors for all samples (without intercept) using vectorized matrix eval.
+    term_matrix = _build_term_matrix(sampled_chars, confounders, summary_stats)
+    treatment_lps = _compute_logits_batch(
+        sampled_chars,
+        confounders,
+        summary_stats,
+        {**treatment_eq, "intercept": 0.0},
+        treatment=None,
+        term_matrix=term_matrix,
+    )
+    outcome_lps = _compute_logits_batch(
+        sampled_chars,
+        confounders,
+        summary_stats,
+        {**outcome_eq, "intercept": 0.0},
+        treatment=0,
+        term_matrix=term_matrix,
+    )
+
     # Calibrate treatment intercept
     def treatment_rate_error(intercept):
         probs = sigmoid(intercept + treatment_lps)
         return probs.mean() - target_treatment_rate
-    
+
     try:
-        # Search for intercept in reasonable range
-        calibrated_treatment_intercept = brentq(treatment_rate_error, -10, 10)
+        # Search for intercept in a wide range (supports imbalanced/rare target rates)
+        calibrated_treatment_intercept = brentq(treatment_rate_error, -16.0, 16.0)
     except ValueError:
         # If target is outside achievable range, use boundary
         logger.warning(f"Could not achieve target treatment rate {target_treatment_rate}, using closest achievable")
-        if treatment_rate_error(-10) > 0:
-            calibrated_treatment_intercept = -10
+        if treatment_rate_error(-16.0) > 0:
+            calibrated_treatment_intercept = -16.0
         else:
-            calibrated_treatment_intercept = 10
-    
+            calibrated_treatment_intercept = 16.0
+
     # Calibrate outcome intercept (for control group)
     def outcome_rate_error(intercept):
         probs = sigmoid(intercept + outcome_lps)
         return probs.mean() - target_control_outcome_rate
-    
+
     try:
-        calibrated_outcome_intercept = brentq(outcome_rate_error, -10, 10)
+        calibrated_outcome_intercept = brentq(outcome_rate_error, -16.0, 16.0)
     except ValueError:
         logger.warning(f"Could not achieve target control outcome rate {target_control_outcome_rate}, using closest achievable")
-        if outcome_rate_error(-10) > 0:
-            calibrated_outcome_intercept = -10
+        if outcome_rate_error(-16.0) > 0:
+            calibrated_outcome_intercept = -16.0
         else:
-            calibrated_outcome_intercept = 10
+            calibrated_outcome_intercept = 16.0
     
     # Update equations with calibrated intercepts
     original_treatment_intercept = treatment_eq.get("intercept", 0.0)
@@ -1196,6 +1330,66 @@ def _calibrate_intercepts(
     logger.info(f"Achieved control outcome rate: {achieved_outcome_rate:.3f} (target: {target_control_outcome_rate:.3f})")
     
     return treatment_eq, outcome_eq
+
+
+def scale_equation_coefficients(equation: Dict[str, Any], scale: float) -> Dict[str, Any]:
+    """Scale all covariate-dependent coefficients in an equation (except intercept and treatment_coefficient)."""
+    eq = equation.copy()
+
+    # Scale main coefficients
+    if "coefficients" in eq:
+        eq["coefficients"] = {k: float(v * scale) for k, v in eq["coefficients"].items()}
+
+    # Scale interactions
+    if "interactions" in eq:
+        eq["interactions"] = [
+            {**inter, "coefficient": float(inter.get("coefficient", 0.0) * scale)}
+            for inter in eq["interactions"]
+        ]
+
+    # Scale 1-D treatment interactions (for outcome equation)
+    if "treatment_interactions" in eq:
+        eq["treatment_interactions"] = [
+            {**inter, "coefficient": float(inter.get("coefficient", 0.0) * scale)}
+            for inter in eq["treatment_interactions"]
+        ]
+
+    # Scale higher-order HTE interactions (C x M, M x M, etc.)
+    if "hte_interactions" in eq:
+        eq["hte_interactions"] = [
+            {**inter, "coefficient": float(inter.get("coefficient", 0.0) * scale)}
+            for inter in eq["hte_interactions"]
+        ]
+
+    # Scale multi-way subgroup rules
+    if "subgroup_rules" in eq:
+        eq["subgroup_rules"] = [
+            {**rule, "coefficient": float(rule.get("coefficient", 0.0) * scale)}
+            for rule in eq["subgroup_rules"]
+        ]
+
+    # Scale Random Fourier Feature GP components
+    if "rff_components" in eq:
+        scaled_rff = []
+        for comp in eq["rff_components"]:
+            item = dict(comp)
+            if "coefficient" in item:
+                item["coefficient"] = float(item["coefficient"] * scale)
+            else:
+                item["coefficients"] = [float(c * scale) for c in item.get("coefficients", ())]
+                if "center" in item:
+                    item["center"] = float(item["center"] * scale)
+            scaled_rff.append(item)
+        eq["rff_components"] = scaled_rff
+
+    # Scale bounded rational / ratio terms
+    if "rational_terms" in eq:
+        eq["rational_terms"] = [
+            {**term, "coefficient": float(term.get("coefficient", 0.0) * scale)}
+            for term in eq["rational_terms"]
+        ]
+
+    return eq
 
 
 def _rescale_for_target_logit_std(
@@ -1235,58 +1429,39 @@ def _rescale_for_target_logit_std(
             for _ in range(n_samples)
         ]
 
-    def compute_logit_without_intercept(characteristics, equation, treatment=None):
-        """Compute logit with intercept temporarily set to 0."""
-        original_intercept = equation.get("intercept", 0.0)
-        equation["intercept"] = 0.0
-        logit = _compute_logit(characteristics, confounders, summary_stats, equation, treatment=treatment)
-        equation["intercept"] = original_intercept
-        return logit
-
+    term_matrix = _build_term_matrix(sampled_chars, confounders, summary_stats)
     # Compute current logit stds
-    treatment_logits = np.array([
-        compute_logit_without_intercept(chars, treatment_eq)
-        for chars in sampled_chars
-    ])
-    outcome_logits_0 = np.array([
-        compute_logit_without_intercept(chars, outcome_eq, treatment=0)
-        for chars in sampled_chars
-    ])
-    outcome_logits_1 = np.array([
-        compute_logit_without_intercept(chars, outcome_eq, treatment=1)
-        for chars in sampled_chars
-    ])
+    treatment_logits = _compute_logits_batch(
+        sampled_chars,
+        confounders,
+        summary_stats,
+        {**treatment_eq, "intercept": 0.0},
+        treatment=None,
+        term_matrix=term_matrix,
+    )
+    outcome_logits_0 = _compute_logits_batch(
+        sampled_chars,
+        confounders,
+        summary_stats,
+        {**outcome_eq, "intercept": 0.0},
+        treatment=0,
+        term_matrix=term_matrix,
+    )
+    outcome_logits_1 = _compute_logits_batch(
+        sampled_chars,
+        confounders,
+        summary_stats,
+        {**outcome_eq, "intercept": 0.0},
+        treatment=1,
+        term_matrix=term_matrix,
+    )
 
-    treatment_std = np.std(treatment_logits)
-    outcome_std_0 = np.std(outcome_logits_0)
-    outcome_std_1 = np.std(outcome_logits_1)
+    treatment_std = float(np.std(treatment_logits))
+    outcome_std_0 = float(np.std(outcome_logits_0))
+    outcome_std_1 = float(np.std(outcome_logits_1))
     outcome_std = max(outcome_std_0, outcome_std_1)  # Use the larger one
 
     logger.info(f"Current logit std - treatment: {treatment_std:.2f}, outcome: {outcome_std:.2f}")
-
-    def scale_equation_coefficients(equation: Dict, scale: float) -> Dict:
-        """Scale all coefficients in an equation (except intercept and treatment_coefficient)."""
-        eq = equation.copy()
-
-        # Scale main coefficients
-        if "coefficients" in eq:
-            eq["coefficients"] = {k: v * scale for k, v in eq["coefficients"].items()}
-
-        # Scale interactions
-        if "interactions" in eq:
-            eq["interactions"] = [
-                {**inter, "coefficient": inter.get("coefficient", 0) * scale}
-                for inter in eq["interactions"]
-            ]
-
-        # Scale treatment interactions (for outcome equation)
-        if "treatment_interactions" in eq:
-            eq["treatment_interactions"] = [
-                {**inter, "coefficient": inter.get("coefficient", 0) * scale}
-                for inter in eq["treatment_interactions"]
-            ]
-
-        return eq
 
     # Compute scale factors
     if treatment_std > 0:
@@ -1300,14 +1475,22 @@ def _rescale_for_target_logit_std(
         logger.info(f"Scaled outcome coefficients by {outcome_scale:.3f}")
 
     # Verify new stds
-    treatment_logits_new = np.array([
-        compute_logit_without_intercept(chars, treatment_eq)
-        for chars in sampled_chars
-    ])
-    outcome_logits_new = np.array([
-        compute_logit_without_intercept(chars, outcome_eq, treatment=0)
-        for chars in sampled_chars
-    ])
+    treatment_logits_new = _compute_logits_batch(
+        sampled_chars,
+        confounders,
+        summary_stats,
+        {**treatment_eq, "intercept": 0.0},
+        treatment=None,
+        term_matrix=term_matrix,
+    )
+    outcome_logits_new = _compute_logits_batch(
+        sampled_chars,
+        confounders,
+        summary_stats,
+        {**outcome_eq, "intercept": 0.0},
+        treatment=0,
+        term_matrix=term_matrix,
+    )
 
     logger.info(f"New logit std - treatment: {np.std(treatment_logits_new):.2f}, outcome: {np.std(outcome_logits_new):.2f}")
 
@@ -1653,6 +1836,277 @@ def _apply_drug_perturbation(text: str, rng=None) -> str:
     return text
 
 
+def _eval_rule_condition_scalar(val: float, op: str, cut: float, slope: Optional[float]) -> float:
+    if slope is None:
+        if op == ">":
+            return 1.0 if val > cut else 0.0
+        if op == ">=":
+            return 1.0 if val >= cut else 0.0
+        if op == "<":
+            return 1.0 if val < cut else 0.0
+        if op == "<=":
+            return 1.0 if val <= cut else 0.0
+        raise ValueError(f"unsupported subgroup rule operator: {op!r}")
+    signed = (val - cut) * float(slope) if op in (">", ">=") else (cut - val) * float(slope)
+    if signed > 500.0:
+        signed = 500.0
+    elif signed < -500.0:
+        signed = -500.0
+    return 1.0 / (1.0 + math.exp(-signed))
+
+
+def _eval_rule_condition_array(arr: np.ndarray, op: str, cut: float, slope: Optional[float]) -> np.ndarray:
+    if slope is None:
+        if op == ">":
+            return np.where(arr > cut, 1.0, 0.0)
+        if op == ">=":
+            return np.where(arr >= cut, 1.0, 0.0)
+        if op == "<":
+            return np.where(arr < cut, 1.0, 0.0)
+        if op == "<=":
+            return np.where(arr <= cut, 1.0, 0.0)
+        raise ValueError(f"unsupported subgroup rule operator: {op!r}")
+    signed = (arr - cut) * float(slope) if op in (">", ">=") else (cut - arr) * float(slope)
+    return 1.0 / (1.0 + np.exp(-np.clip(signed, -500.0, 500.0)))
+
+
+def potential_outcome_probabilities(
+    lp0: Any,
+    lp1: Any,
+    outcome_eq: Dict[str, Any],
+) -> Tuple[Any, Any]:
+    """Convert outcome linear predictors ``(lp0, lp1)`` into binary potential-outcome probabilities.
+
+    Under the default ``effect_scale == "log_or"`` (or when omitted), returns
+    ``(sigmoid(lp0), sigmoid(lp1))``. Under ``effect_scale == "risk_difference"``,
+    returns ``p0 = sigmoid(lp0)`` and ``p1 = clip(p0 + amplitude * tanh((lp1 - lp0) / rd_scale), 0.01, 0.99)``.
+    Works on both Python scalars and NumPy arrays.
+    """
+    is_scalar = np.ndim(lp0) == 0 and np.ndim(lp1) == 0
+    arr0 = np.asarray(lp0, dtype=float)
+    arr1 = np.asarray(lp1, dtype=float)
+    p0 = 1.0 / (1.0 + np.exp(-np.clip(arr0, -500.0, 500.0)))
+    effect_scale = outcome_eq.get("effect_scale", "log_or")
+    if effect_scale == "risk_difference":
+        amplitude = float(outcome_eq.get("rd_amplitude", 0.5))
+        rd_scale = float(outcome_eq.get("rd_scale", 1.5))
+        delta = amplitude * np.tanh((arr1 - arr0) / rd_scale)
+        p1 = np.clip(p0 + delta, 0.01, 0.99)
+    else:
+        p1 = 1.0 / (1.0 + np.exp(-np.clip(arr1, -500.0, 500.0)))
+    if is_scalar:
+        return float(p0), float(p1)
+    return p0, p1
+
+
+def _build_term_matrix(
+    characteristics_list: List[Dict[str, Any]],
+    confounders: List[Dict[str, Any]],
+    summary_stats: Dict[str, Any],
+) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+    """Precompute vectorized standardized continuous and categorical dummy columns for a cohort."""
+    n = len(characteristics_list)
+    z_cols: Dict[str, np.ndarray] = {}
+    cat_cols: Dict[str, np.ndarray] = {}
+    if n == 0:
+        return z_cols, cat_cols
+    for conf in confounders:
+        name = conf["name"]
+        if conf["type"] == "continuous":
+            stats = summary_stats.get(name, {}) or {}
+            mean = float(stats.get("mean", 0.0))
+            std = float(stats.get("std", 1.0))
+            if std == 0:
+                std = 1.0
+            vals = np.fromiter((float(row[name]) for row in characteristics_list), dtype=float, count=n)
+            z_cols[name] = (vals - mean) / std
+        else:
+            raw_vals = [row.get(name) for row in characteristics_list]
+            for cat in conf["categories"][1:]:
+                dummy_name = f"{name}_{cat}"
+                if dummy_name not in cat_cols:
+                    cat_cols[dummy_name] = np.fromiter(
+                        (1.0 if v == cat else 0.0 for v in raw_vals), dtype=float, count=n
+                    )
+    return z_cols, cat_cols
+
+
+def _compute_logits_batch(
+    characteristics_list: List[Dict[str, Any]],
+    confounders: List[Dict[str, Any]],
+    summary_stats: Dict[str, Any],
+    equation: Dict[str, Any],
+    treatment: Optional[int] = None,
+    *,
+    term_matrix: Optional[Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]] = None,
+) -> np.ndarray:
+    """Vectorized NumPy equivalent of :func:`_compute_logit` over a sequence of patients."""
+    n = len(characteristics_list)
+    if n == 0:
+        return np.empty(0, dtype=float)
+    z_cols, cat_cols = (
+        term_matrix
+        if term_matrix is not None
+        else _build_term_matrix(characteristics_list, confounders, summary_stats)
+    )
+    logits = np.full(n, float(equation.get("intercept", 0.0)), dtype=float)
+    coefficients = equation.get("coefficients", {})
+    nonlinearity = equation.get("nonlinearity", "none")
+    nonlinear_terms = (
+        set(equation.get("nonlinear_terms") or []) if nonlinearity != "none" else set()
+    )
+    term_nonlinearities = equation.get("term_nonlinearities") or {}
+
+    def lookup(term: str) -> Optional[np.ndarray]:
+        if term in z_cols:
+            return z_cols[term]
+        if term in cat_cols:
+            return cat_cols[term]
+        return None
+
+    # Main terms
+    for coef_name, coef_value in coefficients.items():
+        if coef_name in z_cols:
+            arr = z_cols[coef_name]
+            if coef_name in term_nonlinearities or coef_name in nonlinear_terms:
+                shape = resolve_term_nonlinearity(coef_name, nonlinearity, term_nonlinearities)
+                arr = nonlinear_array(arr, shape)
+            logits += float(coef_value) * arr
+        elif coef_name in cat_cols:
+            logits += float(coef_value) * cat_cols[coef_name]
+
+    # Covariate-by-covariate (and higher-order) interactions
+    for interaction in equation.get("interactions", ()):
+        terms = interaction.get("terms", ())
+        coef = float(interaction.get("coefficient", 0.0))
+        if not coef or not terms:
+            continue
+        term_centers = interaction.get("term_centers")
+        product = np.ones(n, dtype=float)
+        missing = False
+        for idx, term in enumerate(terms):
+            col = lookup(term)
+            if col is None:
+                missing = True
+                break
+            c_val = float(term_centers[idx]) if term_centers and idx < len(term_centers) else 0.0
+            product = product * (col - c_val if c_val != 0.0 else col)
+        if not missing:
+            center = float(interaction.get("center", 0.0))
+            logits += coef * (product - center if center != 0.0 else product)
+
+    # Multi-way subgroup / decision-tree conjunction rules
+    for rule in equation.get("subgroup_rules", ()):
+        tx_only = bool(rule.get("treatment_only", False))
+        if tx_only and treatment is None:
+            continue
+        mult = float(rule.get("coefficient", 0.0)) * (float(treatment) if tx_only else 1.0)
+        if mult == 0.0:
+            continue
+        conditions = rule.get("conditions", ())
+        if not conditions:
+            continue
+        gate = np.ones(n, dtype=float)
+        missing = False
+        for cond in conditions:
+            col = lookup(str(cond.get("term", "")))
+            if col is None:
+                missing = True
+                break
+            gate = gate * _eval_rule_condition_array(
+                col, str(cond.get("op", ">")), float(cond.get("cut", 0.0)), cond.get("slope")
+            )
+        if not missing:
+            center = float(rule.get("center", 0.0))
+            logits += mult * (gate - center if center != 0.0 else gate)
+
+    # Random Fourier Feature (RFF) GP-like non-parametric surfaces
+    for comp in equation.get("rff_components", ()):
+        tx_only = bool(comp.get("treatment_only", False))
+        if tx_only and treatment is None:
+            continue
+        mult = float(comp.get("coefficient", 1.0)) * (float(treatment) if tx_only else 1.0)
+        if mult == 0.0:
+            continue
+        terms = comp.get("terms", ())
+        weights = np.asarray(comp.get("weights", ()), dtype=float)
+        phases = np.asarray(comp.get("phases", ()), dtype=float)
+        basis_weights = np.asarray(
+            comp.get("basis_weights", comp.get("coefficients", ())), dtype=float
+        )
+        if weights.size == 0 or basis_weights.size == 0 or not terms:
+            continue
+        cols = [lookup(str(term)) for term in terms]
+        X_sub = np.column_stack([col if col is not None else np.zeros(n, dtype=float) for col in cols])
+        proj = X_sub @ weights.T + phases[None, :]
+        raw = math.sqrt(2.0 / len(basis_weights)) * (np.cos(proj) @ basis_weights)
+        center = float(comp.get("center", 0.0))
+        logits += mult * (raw - center if center != 0.0 else raw)
+
+    # Bounded rational / ratio interaction terms
+    for rterm in equation.get("rational_terms", ()):
+        tx_only = bool(rterm.get("treatment_only", False))
+        if tx_only and treatment is None:
+            continue
+        mult = float(rterm.get("coefficient", 0.0)) * (float(treatment) if tx_only else 1.0)
+        if mult == 0.0:
+            continue
+        num = np.zeros(n, dtype=float)
+        for term, w in zip(rterm.get("num_terms", ()), rterm.get("num_weights", ())):
+            col = lookup(str(term))
+            if col is not None:
+                num += float(w) * col
+        den = np.full(n, float(rterm.get("den_bias", 1.0)), dtype=float)
+        for term, w in zip(rterm.get("den_terms", ()), rterm.get("den_weights", ())):
+            col = lookup(str(term))
+            if col is not None:
+                scaled = float(w) * col
+                den += scaled * scaled
+        ratio = num / den
+        center = float(rterm.get("center", 0.0))
+        logits += mult * (ratio - center if center != 0.0 else ratio)
+
+    # Treatment main effect and treatment-by-covariate HTE terms
+    if treatment is not None:
+        t_val = float(treatment)
+        logits += float(equation.get("treatment_coefficient", 0.0)) * t_val
+        if t_val != 0.0:
+            for interaction in equation.get("treatment_interactions", ()):
+                term = interaction.get("term", "")
+                coef = float(interaction.get("coefficient", 0.0))
+                if not coef:
+                    continue
+                if term in z_cols:
+                    arr = z_cols[term]
+                    if term in term_nonlinearities or term in nonlinear_terms:
+                        shape = resolve_term_nonlinearity(term, nonlinearity, term_nonlinearities)
+                        arr = nonlinear_array(arr, shape)
+                    logits += coef * t_val * arr
+                elif term in cat_cols:
+                    logits += coef * t_val * cat_cols[term]
+
+            for interaction in equation.get("hte_interactions", ()):
+                terms = interaction.get("terms", ())
+                coef = float(interaction.get("coefficient", 0.0))
+                if not coef or not terms:
+                    continue
+                term_centers = interaction.get("term_centers")
+                product = np.ones(n, dtype=float)
+                missing = False
+                for idx, term in enumerate(terms):
+                    col = lookup(term)
+                    if col is None:
+                        missing = True
+                        break
+                    c_val = float(term_centers[idx]) if term_centers and idx < len(term_centers) else 0.0
+                    product = product * (col - c_val if c_val != 0.0 else col)
+                if not missing:
+                    center = float(interaction.get("center", 0.0))
+                    logits += coef * t_val * (product - center if center != 0.0 else product)
+
+    return logits
+
+
 def _compute_logit(
     characteristics: Dict[str, Any],
     confounders: List[Dict[str, Any]],
@@ -1665,8 +2119,11 @@ def _compute_logit(
     
     For continuous variables: coefficient * (value - mean) / std (z-scored)
     For categorical variables: coefficient of the dummy for selected category
+    Supports optional per-term nonlinearities, higher-order baseline and HTE
+    interactions, multi-way subgroup rules, Random Fourier Feature GP surfaces,
+    and bounded rational interaction terms.
     """
-    logit = equation.get("intercept", 0.0)
+    logit = float(equation.get("intercept", 0.0))
     coefficients = equation.get("coefficients", {})
     # Optional nonlinear shape of continuous main terms and treatment
     # interactions (pairwise interactions stay linear).
@@ -1674,91 +2131,176 @@ def _compute_logit(
     nonlinear_terms = (
         set(equation.get("nonlinear_terms") or []) if nonlinearity != "none" else set()
     )
-    
-    # Build z-scored continuous values map
-    z_values = {}
+    term_nonlinearities = equation.get("term_nonlinearities") or {}
+
+    # Build z-scored continuous and categorical dummy lookup maps in O(P).
+    z_values: Dict[str, float] = {}
+    cat_values: Dict[str, float] = {}
     for conf in confounders:
         name = conf["name"]
         if conf["type"] == "continuous":
-            stats = summary_stats.get(name, {})
-            mean = stats.get("mean", 0.0)
-            std = stats.get("std", 1.0)
+            stats = summary_stats.get(name, {}) or {}
+            mean = float(stats.get("mean", 0.0))
+            std = float(stats.get("std", 1.0))
             if std == 0:
                 std = 1.0
-            z_values[name] = (characteristics[name] - mean) / std
+            z_values[name] = (float(characteristics[name]) - mean) / std
+        else:
+            val = characteristics.get(name)
+            for cat in conf["categories"][1:]:
+                cat_values.setdefault(f"{name}_{cat}", 1.0 if val == cat else 0.0)
 
     def term_value(term: str) -> Optional[float]:
         """Return the numeric value for a coefficient or interaction term."""
         if term in z_values:
             return z_values[term]
-        for conf in confounders:
-            if conf["type"] != "categorical":
-                continue
-            name = conf["name"]
-            for cat in conf["categories"][1:]:
-                if term == f"{name}_{cat}":
-                    return 1.0 if characteristics.get(name) == cat else 0.0
+        if term in cat_values:
+            return cat_values[term]
         return None
-    
+
     # Apply coefficients
     for coef_name, coef_value in coefficients.items():
-        # Check if this is a base continuous variable
         if coef_name in z_values:
             z = z_values[coef_name]
-            if coef_name in nonlinear_terms:
-                z = nonlinear_value(z, nonlinearity)
-            logit += coef_value * z
+            if coef_name in term_nonlinearities or coef_name in nonlinear_terms:
+                shape = resolve_term_nonlinearity(coef_name, nonlinearity, term_nonlinearities)
+                z = nonlinear_value(z, shape)
+            logit += float(coef_value) * z
+        elif coef_name in cat_values:
+            if cat_values[coef_name]:
+                logit += float(coef_value)
+
+    # Apply covariate interactions
+    for interaction in equation.get("interactions", ()):
+        terms = interaction.get("terms", ())
+        coef = float(interaction.get("coefficient", 0.0))
+        if not coef or not terms:
             continue
-        
-        # Check if this is a categorical dummy (format: varname_category)
-        matched = False
-        for conf in confounders:
-            if conf["type"] == "categorical":
-                name = conf["name"]
-                for cat in conf["categories"][1:]:  # Skip reference category
-                    dummy_name = f"{name}_{cat}"
-                    if coef_name == dummy_name:
-                        # Add coefficient if this category is selected
-                        if characteristics.get(name) == cat:
-                            logit += coef_value
-                        matched = True
-                        break
-            if matched:
-                break
-    
-    # Apply interactions
-    interactions = equation.get("interactions", [])
-    for interaction in interactions:
-        terms = interaction.get("terms", [])
-        coef = interaction.get("coefficient", 0.0)
-        
-        # Compute product of continuous z-scores and categorical dummy indicators
+        term_centers = interaction.get("term_centers")
         product = 1.0
-        for term in terms:
+        for idx, term in enumerate(terms):
             value = term_value(term)
             if value is None:
                 product = 0.0
                 break
-            product *= value
-        
-        logit += coef * product
-    
+            c_val = float(term_centers[idx]) if term_centers and idx < len(term_centers) else 0.0
+            product *= value - c_val
+        else:
+            center = float(interaction.get("center", 0.0))
+            logit += coef * (product - center)
+
+    # Apply multi-way subgroup / decision-tree conjunction rules
+    for rule in equation.get("subgroup_rules", ()):
+        tx_only = bool(rule.get("treatment_only", False))
+        if tx_only and treatment is None:
+            continue
+        mult = float(rule.get("coefficient", 0.0)) * (float(treatment) if tx_only else 1.0)
+        if mult == 0.0:
+            continue
+        conditions = rule.get("conditions", ())
+        if not conditions:
+            continue
+        gate = 1.0
+        for cond in conditions:
+            val = term_value(str(cond.get("term", "")))
+            if val is None:
+                break
+            gate *= _eval_rule_condition_scalar(
+                val, str(cond.get("op", ">")), float(cond.get("cut", 0.0)), cond.get("slope")
+            )
+        else:
+            center = float(rule.get("center", 0.0))
+            logit += mult * (gate - center)
+
+    # Apply Random Fourier Feature GP-like non-parametric surfaces
+    for comp in equation.get("rff_components", ()):
+        tx_only = bool(comp.get("treatment_only", False))
+        if tx_only and treatment is None:
+            continue
+        mult = float(comp.get("coefficient", 1.0)) * (float(treatment) if tx_only else 1.0)
+        if mult == 0.0:
+            continue
+        terms = comp.get("terms", ())
+        weights = comp.get("weights", ())
+        phases = comp.get("phases", ())
+        basis_weights = comp.get("basis_weights", comp.get("coefficients", ()))
+        if not weights or not basis_weights or not terms:
+            continue
+        x_vec = [term_value(str(t)) for t in terms]
+        x_vec = [0.0 if v is None else v for v in x_vec]
+        total = 0.0
+        for w_row, phase, bw in zip(weights, phases, basis_weights):
+            dot = sum(float(wj) * xj for wj, xj in zip(w_row, x_vec))
+            total += float(bw) * math.cos(dot + float(phase))
+        raw = math.sqrt(2.0 / len(basis_weights)) * total
+        center = float(comp.get("center", 0.0))
+        logit += mult * (raw - center)
+
+    # Apply bounded rational / ratio interaction terms
+    for rterm in equation.get("rational_terms", ()):
+        tx_only = bool(rterm.get("treatment_only", False))
+        if tx_only and treatment is None:
+            continue
+        mult = float(rterm.get("coefficient", 0.0)) * (float(treatment) if tx_only else 1.0)
+        if mult == 0.0:
+            continue
+        num = 0.0
+        for term, w in zip(rterm.get("num_terms", ()), rterm.get("num_weights", ())):
+            val = term_value(str(term))
+            if val is not None:
+                num += float(w) * val
+        den = float(rterm.get("den_bias", 1.0))
+        for term, w in zip(rterm.get("den_terms", ()), rterm.get("den_weights", ())):
+            val = term_value(str(term))
+            if val is not None:
+                scaled = float(w) * val
+                den += scaled * scaled
+        ratio = num / den
+        center = float(rterm.get("center", 0.0))
+        logit += mult * (ratio - center)
+
     # Add treatment effect if provided
     if treatment is not None:
-        treatment_coef = equation.get("treatment_coefficient", 0.0)
-        logit += treatment_coef * treatment
-        
-        # Apply treatment-confounder interactions (for heterogeneous treatment effects)
-        treatment_interactions = equation.get("treatment_interactions", [])
-        for interaction in treatment_interactions:
-            term = interaction.get("term", "")
-            coef = interaction.get("coefficient", 0.0)
-            value = term_value(term)
-            if value is not None and term in nonlinear_terms and term in z_values:
-                value = nonlinear_value(value, nonlinearity)
-            if value is not None:
-                logit += coef * treatment * value
-    
+        t_val = float(treatment)
+        treatment_coef = float(equation.get("treatment_coefficient", 0.0))
+        logit += treatment_coef * t_val
+
+        # Apply 1-D treatment-modifier interactions
+        if t_val != 0.0:
+            for interaction in equation.get("treatment_interactions", ()):
+                term = interaction.get("term", "")
+                coef = float(interaction.get("coefficient", 0.0))
+                value = term_value(term)
+                if value is not None and term in z_values and (
+                    term in term_nonlinearities or term in nonlinear_terms
+                ):
+                    shape = resolve_term_nonlinearity(term, nonlinearity, term_nonlinearities)
+                    value = nonlinear_value(value, shape)
+                if value is not None:
+                    logit += coef * t_val * value
+
+            # Apply higher-order HTE interactions (C x M, M x M, etc.)
+            for interaction in equation.get("hte_interactions", ()):
+                terms = interaction.get("terms", ())
+                coef = float(interaction.get("coefficient", 0.0))
+                if not coef or not terms:
+                    continue
+                term_centers = interaction.get("term_centers")
+                product = 1.0
+                for idx, term in enumerate(terms):
+                    value = term_value(term)
+                    if value is None:
+                        break
+                    c_val = (
+                        float(term_centers[idx])
+                        if term_centers and idx < len(term_centers)
+                        else 0.0
+                    )
+                    product *= value - c_val
+                else:
+                    center = float(interaction.get("center", 0.0))
+                    logit += coef * t_val * (product - center)
+
     return logit
 
 
@@ -1817,26 +2359,23 @@ def _build_patient_scaffold_record(
 
     treatment = int(np.random.random() < treatment_prob)
 
-    outcome_logit = _compute_logit(
-        characteristics, confounders, summary_stats, outcome_eq, treatment=treatment
-    )
-    outcome_type = getattr(config, "outcome_type", "binary")
-    if outcome_type == "continuous":
-        noise_std = getattr(config, "outcome_noise_std", 1.0)
-        outcome = outcome_logit + np.random.normal(0, noise_std)
-    else:
-        outcome_prob_for_sample = 1.0 / (1.0 + np.exp(-outcome_logit))
-        outcome = int(np.random.random() < outcome_prob_for_sample)
-
     outcome_logit_0 = _compute_logit(
         characteristics, confounders, summary_stats, outcome_eq, treatment=0
     )
     outcome_logit_1 = _compute_logit(
         characteristics, confounders, summary_stats, outcome_eq, treatment=1
     )
-    outcome_prob_0 = 1.0 / (1.0 + np.exp(-outcome_logit_0))
-    outcome_prob_1 = 1.0 / (1.0 + np.exp(-outcome_logit_1))
-    outcome_prob = 1.0 / (1.0 + np.exp(-outcome_logit))
+    outcome_logit = outcome_logit_1 if treatment == 1 else outcome_logit_0
+    outcome_prob_0, outcome_prob_1 = potential_outcome_probabilities(
+        outcome_logit_0, outcome_logit_1, outcome_eq
+    )
+    outcome_prob = outcome_prob_1 if treatment == 1 else outcome_prob_0
+    outcome_type = getattr(config, "outcome_type", "binary")
+    if outcome_type == "continuous":
+        noise_std = getattr(config, "outcome_noise_std", 1.0)
+        outcome = outcome_logit + np.random.normal(0, noise_std)
+    else:
+        outcome = int(np.random.random() < outcome_prob)
 
     factors = factors or {}
     documentation = factors.get("documentation")
