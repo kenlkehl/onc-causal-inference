@@ -15,7 +15,9 @@ from synthetic_data import cli as synthetic_cli
 from synthetic_data import generator as g
 from synthetic_data import longitudinal as long_sim
 from synthetic_data import reequation as rq
+from synthetic_data.config import LLMConfig
 from synthetic_data.dgp_terms import NONLINEARITIES, feature_terms, nonlinear_array, nonlinear_value
+from synthetic_data.llm_client import LLMClient, is_nemotron_3_5
 from synthetic_data.wide_corpus import generate_wide_source_cohort
 
 
@@ -380,3 +382,36 @@ def test_risk_difference_effect_scale_and_longitudinal_complex_mode(tmp_path):
     lp1 = g._compute_logit(chars, dgp.features, dgp.reference, dgp.outcome, treatment=1)
     p0, p1 = g.potential_outcome_probabilities(lp0, lp1, dgp.outcome)
     assert patient["true_ite"] == pytest.approx(p1 - p0)
+
+
+def test_nemotron_3_5_sampling_profile_in_llm_client():
+    assert is_nemotron_3_5("nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4")
+    assert not is_nemotron_3_5("openai/gpt-oss-120b")
+
+    nem_client = LLMClient(
+        LLMConfig(
+            api_base_url="http://127.0.0.1:8000/v1",
+            model_name="nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4",
+            max_tokens=4096,
+        )
+    )
+    kwargs = nem_client._request_sampling_kwargs(temperature=0.5, max_tokens=2048)
+    assert kwargs["temperature"] == 1.0
+    assert kwargs["max_tokens"] == 2048
+    assert kwargs["extra_body"]["top_p"] == 0.95
+    assert kwargs["extra_body"]["top_k"] == 0
+    assert kwargs["extra_body"]["min_p"] == 0.0
+    assert kwargs["extra_body"]["chat_template_kwargs"] == {"enable_thinking": False}
+    nem_client.close()
+
+    other_client = LLMClient(
+        LLMConfig(
+            api_base_url="http://127.0.0.1:8000/v1",
+            model_name="openai/gpt-oss-120b",
+            max_tokens=4096,
+        )
+    )
+    other_kwargs = other_client._request_sampling_kwargs(temperature=0.5, max_tokens=2048)
+    assert other_kwargs["temperature"] == 0.5
+    assert "extra_body" not in other_kwargs
+    other_client.close()

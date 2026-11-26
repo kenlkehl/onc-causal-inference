@@ -17,6 +17,26 @@ from .config import LLMConfig
 
 logger = logging.getLogger(__name__)
 
+_NEMOTRON_3_5_RE = re.compile(r"nemotron[-_ ]?3[._]5(?![0-9])", re.IGNORECASE)
+
+
+def is_nemotron_3_5(model_name: Optional[str]) -> bool:
+    """True for NVIDIA Nemotron 3.5 Super models (which require temp=1.0, top_p=0.95)."""
+    return bool(model_name and _NEMOTRON_3_5_RE.search(str(model_name)))
+
+
+def nemotron_3_5_extra_body(*, enable_thinking: bool = False) -> Dict[str, Any]:
+    """NVIDIA recommended sampling profile for Nemotron 3.5."""
+    return {
+        "top_p": 0.95,
+        "top_k": 0,
+        "min_p": 0.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
+        "repetition_penalty": 1.0,
+        "chat_template_kwargs": {"enable_thinking": enable_thinking},
+    }
+
 
 class LLMClient:
     """Client for OpenAI-compatible LLM APIs (works with vLLM, local models, etc.)."""
@@ -68,6 +88,24 @@ class LLMClient:
                 raise ValueError(f"Incomplete generation: finish_reason={choice.finish_reason!r}")
         return choice.message.content
     
+    def _request_sampling_kwargs(
+        self, temperature: Optional[float], max_tokens: Optional[int]
+    ) -> Dict[str, Any]:
+        """Build sampling arguments, applying NVIDIA's recommended profile for Nemotron 3.5."""
+        if is_nemotron_3_5(self.config.model_name):
+            eff_temp = 1.0
+            extra = {**nemotron_3_5_extra_body(enable_thinking=False), **(self.config.extra_body or {})}
+        else:
+            eff_temp = temperature if temperature is not None else self.config.temperature
+            extra = dict(self.config.extra_body) if self.config.extra_body else {}
+        kwargs: Dict[str, Any] = {
+            "temperature": eff_temp,
+            "max_tokens": max_tokens if max_tokens is not None else self.config.max_tokens,
+        }
+        if extra:
+            kwargs["extra_body"] = extra
+        return kwargs
+
     def generate(
         self,
         prompt: str,
@@ -91,13 +129,11 @@ class LLMClient:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        
+
         response = self._replica().chat.completions.create(
             model=self.config.model_name,
             messages=messages,
-            temperature=temperature if temperature is not None else self.config.temperature,
-            max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
-            **({"extra_body": self.config.extra_body} if self.config.extra_body else {}),
+            **self._request_sampling_kwargs(temperature, max_tokens),
         )
         return self._content(response)
     
@@ -138,15 +174,14 @@ class LLMClient:
         for attempt in range(1, max_retries + 1):
             client = self._replica()
             try:
+                sampling = self._request_sampling_kwargs(temperature, max_tokens)
                 try:
                     # Try with JSON response format (OpenAI compatible)
                     response = client.chat.completions.create(
                         model=self.config.model_name,
                         messages=messages,
-                        temperature=temperature if temperature is not None else self.config.temperature,
-                        max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
                         response_format={"type": "json_object"},
-                        **({"extra_body": self.config.extra_body} if self.config.extra_body else {}),
+                        **sampling,
                     )
                 except Exception as e:
                     # Fall back to regular generation if JSON mode not supported
@@ -154,9 +189,7 @@ class LLMClient:
                     response = client.chat.completions.create(
                         model=self.config.model_name,
                         messages=messages,
-                        temperature=temperature if temperature is not None else self.config.temperature,
-                        max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
-                        **({"extra_body": self.config.extra_body} if self.config.extra_body else {}),
+                        **sampling,
                     )
 
                 # Parse JSON from response

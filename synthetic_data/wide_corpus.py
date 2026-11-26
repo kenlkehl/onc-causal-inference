@@ -26,7 +26,7 @@ import pandas as pd
 from scipy.special import ndtr
 
 from . import generator as g
-from .config import DEFAULT_CLINICAL_QUESTION, SyntheticDataConfig
+from .config import DEFAULT_CLINICAL_QUESTION, StructuredDataConfig, SyntheticDataConfig
 from .dgp_terms import CONFOUNDER, EFFECT_MODIFIER, role_lists
 from .reequation import (
     _features_with_roles,
@@ -354,6 +354,9 @@ def generate_wide_source_cohort(
     dgp_mode: str = "composite",
     clinical_question: str = DEFAULT_CLINICAL_QUESTION,
     render_text: bool = True,
+    structured_data_enabled: bool = False,
+    min_events_per_patient: int = 15,
+    max_events_per_patient: int = 30,
 ) -> Path:
     """Write a wide-feature, re-equation-ready synthetic clinical cohort to ``output_dir``.
 
@@ -529,6 +532,9 @@ def generate_wide_source_cohort(
         continuous_covariate_distribution=continuous_distribution,
         covariate_correlation=within_block_corr,
         dgp_mode=dgp_mode,
+        structured_data=StructuredDataConfig(enabled=structured_data_enabled),
+        min_events_per_patient=min_events_per_patient,
+        max_events_per_patient=max_events_per_patient,
         seed=int(seed),
         output_dir=str(output_dir),
     )
@@ -592,7 +598,11 @@ def wide_corpus_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--within-block-corr", type=float, default=0.30)
     parser.add_argument("--cross-block-corr", type=float, default=0.04)
     parser.add_argument("--dgp-mode", default="composite")
+    parser.add_argument("--clinical-question", default=DEFAULT_CLINICAL_QUESTION)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--structured-data", action="store_true", help="Enable structured_data flag in saved config (for LLM expansion)")
+    parser.add_argument("--min-events", type=int, default=15, help="min_events_per_patient recorded in generation_config.json")
+    parser.add_argument("--max-events", type=int, default=30, help="max_events_per_patient recorded in generation_config.json")
     parser.add_argument("--no-text", action="store_true", help="Write minimal text placeholders for tabular-only runs")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args(argv)
@@ -611,7 +621,11 @@ def wide_corpus_main(argv: Optional[Sequence[str]] = None) -> int:
         within_block_corr=args.within_block_corr,
         cross_block_corr=args.cross_block_corr,
         dgp_mode=args.dgp_mode,
+        clinical_question=args.clinical_question,
         render_text=not args.no_text,
+        structured_data_enabled=args.structured_data,
+        min_events_per_patient=args.min_events,
+        max_events_per_patient=args.max_events,
     )
     print(path)
     return 0
