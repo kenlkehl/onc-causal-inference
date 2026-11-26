@@ -181,7 +181,7 @@ $$\mathcal{L} = \mathcal{L}_{\text{outcome}}^{\text{sinh-129}} + 2.0\,\mathcal{L
 | **Run 1 (v1 2.11M, A6000)** | `artifacts/tabular_causal_pfn_p2000` | v2 3-family OCI mixture (`50/25/25`) | `12,000` / `96,000` | `80..3,000` / `20..2,000` | **Complete** | `0.1186` (`within_r = +0.491`) | `0.1155` | `+0.492` | `0.894` (sig) | `0.075 / 0.066` (`1.1×`) |
 | **Run 2 (v2 7.38M, Decoupled)** | `artifacts/tabular_causal_pfn_v2_p2000` | v2 3-family OCI mixture (`50/25/25`) | `15,000` / `120,000` | `80..3,000` / `20..2,000` | **Complete** (`best = s13,000`) | `0.1187` (`within_r = +0.502`) | **`0.1150`** | **`+0.503`** | **`0.895`** (sig) | **`0.032 / 0.015` (`2.1×`)** |
 | **Run 3 (v3 18.88M, H200 Flagship)** | `artifacts/tabular_causal_pfn_v3_h200` | v3 5-family + fragmented + colliders (`30/15/20/18/17`) | `30,000` / `360,000` (`16.79h`) | `80..8,000` / `20..3,500` | **Complete** (`best = s25,000`) | `0.1189` (5-fam) / **`0.0979`** (nemotron) | **`0.1149`** (`0.0941` @ `N=4k`) | `+0.437` (**`+0.703`** @ `N=4k`) | **`0.905`** (**`0.959`** @ `N=4k`) | **`0.014 / 0.009` (`1.6×`)** |
-| **Run 4 (v4 34.60M, H200 Pairwise-ARD)** | `artifacts/tabular_causal_pfn_v4_h200` | v4 de-aliased 6-family interacting + cosine-MaxSim (`20/12/18/18/16/16`) | `40,000` / `480,000` | `80..8,000` / `20..3,500` | **Active (s3,757 / 40,000)** | `0.1348` *(s3k, 6-fam; Arm `0.1512`, ScrR `0.2093`, wr `+0.254`, null `0.0547`)* | `—` | `—` | `—` | `0.027 / 0.011` (`2.4×` @ s3k) |
+| **Run 4 (v4 34.60M, H200 Pairwise-ARD)** | `artifacts/tabular_causal_pfn_v4_h200` | v4 de-aliased 6-family interacting + cosine-MaxSim (`20/12/18/18/16/16`) | `40,000` / `480,000` | `80..8,000` / `20..3,500` | **Active (s13,647 / 40,000, best = s13k)** | `0.1314` *(s13k, 6-fam; Arm `0.1512`, ScrR `0.2093`, wr `+0.300`, ate `0.0472`)* | `—` | `—` | `—` | `0.019 / 0.010` (`1.9×` @ s13k) |
 
 ### Final Held-Out Stress Tests: v3 (`18.88M`, `30,000` steps / `360k` studies, `best = s25,000`) on 5-Family Suite
 
@@ -282,6 +282,7 @@ Evaluated **v1 (`step 12,000`)** and **v2 (`best_checkpoint.pt`, `step 13,000`)*
 | **v2 `SparseTabularCausalPFN` (zero-shot)** | `0.1175` | `0.0911` | **`+0.0318`** | `+0.417` | `+0.444` | `0.0637` | `0.1904` | `9.97s` |
 | v3 `SparseTabularCausalPFN` (raw, *hit `miss>0.55` shortcut*) | `0.2036` | `0.1752` | `+0.1540` | `+0.217` | `+0.277` | `0.0832` | `0.3214` | `10.55s` |
 | **v3 `SparseTabularCausalPFN` (`max_miss <= 0.55`, diagnostic)** | **`0.1150`** | **`0.0864`** | `+0.0414` | **`+0.568`** | **`+0.577`** | `—` | **`0.1843`** | `~10s` |
+| **v4 `SparseTabularCausalPFN` (s13k, *32.5% trained*, raw unmasked)** | `0.1214` | `0.0940` | `+0.0456` | `+0.451` | `+0.447` | `0.0770` | `0.1845` | `11.27s` |
 
 - **Blind confounder discovery (zero knowledge of column names):** **11 of the top 11** ranked confounders across ~1,600 columns were direct LLM extractions of all 3 true confounders (`neutrophil_to_lymphocyte_ratio (5/5) p_any_c=0.880`, `age (5/5) 0.395`, `biological_sex==female/male`, `age_group==adult/elderly`, `gender==Female/Male`, `sex==female/male`, `age_at_diagnosis`).
 - **Blind modifier discovery:** Weaker at `N_fit = 800` (`p_any_m ≤ 0.095`), though `brain_metastases_progression_status`, `brain_lesion_characteristics`, `chronic_kidney_disease_status`, and `pemetrexed_cycle_status` surfaced in the top 12.
@@ -301,6 +302,7 @@ Evaluated **v1 (`step 12,000`)** and **v2 (`best_checkpoint.pt`, `step 13,000`)*
 | **v2 `SparseTabularCausalPFN` (zero-shot)** | **`0.1963`** | **`0.1580`** | `+0.1091` | `+0.648` | `+0.640` | `0.1353` | `0.2240` | **`9.65s`** |
 | v3 `SparseTabularCausalPFN` (raw, *hit `miss>0.55` shortcut*) | `0.2225` | `0.1821` | `+0.1420` | `+0.604` | `+0.621` | `0.1441` | `0.3252` | `11.56s` |
 | **v3 `SparseTabularCausalPFN` (`max_miss <= 0.55`, diagnostic)** | `0.1966` | `0.1593` | **`+0.1046`** | `+0.641` | `+0.623` | `—` | `0.2118` | `~10s` |
+| **v4 `SparseTabularCausalPFN` (s13k, *32.5% trained*, raw unmasked)** | `0.2176` | `0.1747` | `+0.1298` | `+0.585` | `+0.570` | `0.1430` | `0.2163` | `9.36s` |
 
 - **Blind confounder discovery:** Top 12 ranked confounders were again dominated by all 3 true confounders (`neutrophil_to_lymphocyte_ratio (5/5) p_any_c=0.788`, `gender==male/female`, `ecog_components==ECOG 2/1`, `biological_sex`, `activity_tolerance==ECOG 1`, `performance_status==1`, `functional_capacity==impaired`).
 - **Blind modifier discovery:** Top 5 ranked modifiers surfaced `comprehensive_metabolic_panel_status`, `renal_profile_stability`, and **`creatinine_clearance (5/5)`** — which received the **highest `gate_tau = 0.143`** across all ~1,500 columns.

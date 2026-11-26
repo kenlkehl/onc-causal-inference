@@ -77,7 +77,7 @@ Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observat
 | **Run 2 (Wide Hybrid)** | `longitudinal_tinybert_wide_hybrid` | Run 1 + `note_slots=16`, `solver_dim=256`, study-adaptive `lexical_dim=128` SVD, 2-stage curriculum | Plain | Complete (1200) | `0.1023` | `+0.1989` | `+0.7024` | `0.1754` | `0.1302` | `0.0375` |
 | **Run 3 (Single-Stage Plain)** | `longitudinal_tinybert_single_stage` | Run 2 + single-stage log-uniform `N_ctx=100..10,000`, `--per-slot-note-temporal`, `--ridge-grid-size 7`, 32-tok overlapping note windows | Plain | Complete (1200 + 1k eval) | **`0.0951`** | **`+0.2169`** | **`+0.7526`** | **`0.1522`** | **`0.1230`** | **`0.0288`** |
 | **Run 4 (Single-Stage Paraphrased)** | `longitudinal_tinybert_paraphrased` | Exact 1-variable ablation of Run 3 with `--paraphrase-bank` (`nemotron_5000_paraphrases.json.gz`, 2,902 findings × ~10 paraphrases + EHR sections + filler) | Paraphrased | Complete (1200 + 1k eval) | `0.0987` | `+0.1593` | `+0.7321` | `0.1876` | `0.1697` | `0.0365` |
-| **Run 5 (`TinyOncBERT` v5)** | `longitudinal_tinyoncbert_v5` | `TinyOncBERT` (22.7M) + `--sentence-concept-dim 128` + `--lexical-dim 128` + `--block-ridge` + `--paraphrase-bank` | Paraphrased | Active (s752 / 1200) | **`0.0949`** | **`+0.1871`** (s600) / `+0.1843` (s700) | **`+0.7570`** | **`0.1671`** | **`0.1399`** | **`0.0293`** |
+| **Run 5 (`TinyOncBERT` v5)** | `longitudinal_tinyoncbert_v5` | `TinyOncBERT` (22.7M) + `--sentence-concept-dim 128` + `--lexical-dim 128` + `--block-ridge` + `--paraphrase-bank` | Paraphrased | Active (resumed s971 / 1200) | **`0.0945`** (s800) | **`+0.1880`** (s800) | **`+0.7600`** (s800) | **`0.1667`** (s900) | **`0.1391`** (s900) | **`0.0288`** (s800) |
 
 *(Run 5 host-RAM note: Run 5 was SIGKILLed by the Linux OOM killer at step 400 — fixed by capping `_EpisodePrefetcher._max_inflight` to `6`, nested eval workers to `<= 2`, and adding `del rows` / `gc.collect()` + glibc `malloc_trim(0)` in `oci/longitudinal/training.py` — and again at step 700 while sharing host RAM with Tabular v3's 16 workers; resumed cleanly from step 600 with `--num-workers 6` and passed step 700 cleanly.)*
 
@@ -127,7 +127,9 @@ Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observat
 | 400 | `0.0969` | `+0.1594` | `+0.7479` | `0.1703` | `0.1411` | `0.0322` |
 | 500 | `0.0957` | `+0.1828` | `+0.7524` | `0.1699` | `0.1417` | `0.0299` |
 | 600 | **`0.0949`** | **`+0.1871`** | **`+0.7570`** | `0.1682` | **`0.1399`** | `0.0295` |
-| **700** | **`0.0949`** | `+0.1843` | `+0.7569` | **`0.1671`** | `0.1402` | **`0.0293`** |
+| 700 | `0.0949` | `+0.1843` | `+0.7569` | `0.1671` | `0.1402` | `0.0293` |
+| **800** | **`0.0945`** | **`+0.1880`** | **`+0.7600`** | `0.1679` | `0.1398` | **`0.0288`** |
+| 900 | `0.0947` | `+0.1852` | `+0.7590` | **`0.1667`** | **`0.1391`** | `0.0292` |
 
 ---
 
@@ -249,6 +251,7 @@ Evaluated across all 16 Nemotron 3.5 full-LLM held-out cohorts (`artifacts/llm_e
 | PFN Run 3 (Single-Stage, plain, s800) | `0.1228` | `+0.093` | `+0.692` | `0.1882` | `0.1774` | `0.0550` |
 | PFN Run 4 (Single-Stage, paraphrased, s700) | `0.1233` | `+0.096` | `+0.691` | `0.1891` | `0.1762` | `0.0558` |
 | PFN Run 5 (TinyOncBERT + Block-Ridge, s600) | `0.1217` | `+0.130` | `+0.703` | `0.1847` | `0.1738` | `0.0568` |
+| PFN Run 5 (TinyOncBERT + Block-Ridge, s800) | `0.1205` | `+0.129` | `+0.708` | `0.1835` | `0.1719` | `0.0552` |
 | Applied: Struct-Only Ridge R-Learner | `0.1137` | `+0.152` | `+0.739` | `0.1838` | `0.1742` | `0.0421` |
 | Applied: Struct + LexSVD Ridge R-Learner | `0.1144` | `+0.135` | `+0.736` | `0.1857` | `0.1770` | `0.0441` |
 | Applied: Struct + TinyBERT SentKM Ridge-R | `0.1147` | `+0.155` | `+0.734` | `0.1847` | `0.1758` | `0.0469` |
@@ -262,7 +265,10 @@ Evaluated across all 16 Nemotron 3.5 full-LLM held-out cohorts (`artifacts/llm_e
 | **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + TinyOncBERT SentKM-128`)** | `0.1054` | **`+0.234`** | `+0.782` | `0.1682` | `0.1576` | `0.0406` |
 | **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + TinyOncBERT SentKM-256`)** | **`0.1043`** | `+0.210` | **`+0.786`** | **`0.1663`** | `0.1501` | **`0.0392`** |
 | **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + SentKM-256 + LexSVD-128`)** | `0.1045` | `+0.222` | **`+0.786`** | `0.1673` | `0.1510` | `0.0396` |
-| Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + SentKM-512 + LexSVD-128`) | `0.1053` | `+0.201` | `+0.781` | `0.1694` | **`0.1497`** | **`0.0392`** |
+| Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + SentKM-512 + LexSVD-128`) | `0.1053` | `+0.201` | `+0.781` | `0.1694` | `0.1497` | **`0.0392`** |
+| Zero-Shot Bridge: Tabular PFN-v4 (s13k, *32.5% trained*) (`Struct + SentKM-256`) | `0.1102` | `+0.204` | `+0.767` | `0.1689` | **`0.1484`** | `0.0489` |
+| Zero-Shot Bridge: Tabular PFN-v4 (s13k) (`Struct + SentKM-256 + LexSVD-128`) | `0.1097` | `+0.211` | `+0.769` | `0.1690` | `0.1501` | `0.0488` |
+| Zero-Shot Bridge: Tabular PFN-v4 (s13k) (`Option-A: +Nadir/Peak +ICD64 +TempSent256 +Lex128`) | `0.1147` | **`+0.236`** | `+0.743` | `0.1702` | `0.1538` | `0.0485` |
 
 #### `N_ctx = 200` (small cohort regime, 3,200 held-out query patients)
 
@@ -273,6 +279,7 @@ Evaluated across all 16 Nemotron 3.5 full-LLM held-out cohorts (`artifacts/llm_e
 | PFN Run 3 (Single-Stage, plain, s800) | `0.1337` | `+0.004` | `+0.611` | `0.1979` | `0.1923` | `0.0627` |
 | PFN Run 4 (Single-Stage, paraphrased, s700) | `0.1332` | `+0.009` | `+0.614` | `0.1993` | `0.1924` | `0.0633` |
 | PFN Run 5 (TinyOncBERT + Block-Ridge, s600) | `0.1327` | `+0.003` | `+0.622` | `0.1972` | `0.1923` | `0.0619` |
+| PFN Run 5 (TinyOncBERT + Block-Ridge, s800) | `0.1311` | `+0.012` | `+0.632` | `0.1959` | `0.1892` | `0.0606` |
 | Applied: Struct-Only Ridge R-Learner | `0.1331` | `+0.025` | `+0.616` | `0.1964` | `0.1897` | `0.0670` |
 | Applied: Struct + TinyBERT SentKM Ridge-R | `0.1458` | `+0.015` | `+0.549` | `0.1992` | `0.1929` | `0.0689` |
 | Applied: Struct + Qwen3-0.6B SentKM Ridge-R | `0.1395` | `+0.012` | `+0.576` | `0.2021` | `0.1907` | `0.0693` |
@@ -282,7 +289,10 @@ Evaluated across all 16 Nemotron 3.5 full-LLM held-out cohorts (`artifacts/llm_e
 | Zero-Shot Bridge: Tabular PFN-v2 (`Struct + SentKM-128`) | `0.1313` | `+0.063` | `+0.649` | `0.1971` | **`0.1746`** | `0.0688` |
 | Zero-Shot Bridge: Tabular PFN-v2 (`Struct + SentKM-256`) | `0.1319` | `+0.063` | `+0.638` | **`0.1949`** | `0.1790` | `0.0693` |
 | **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + TinyOncBERT SentKM-128`)** | **`0.1279`** | `+0.028` | **`+0.657`** | `0.1970` | `0.1827` | `0.0632` |
-| **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + TinyOncBERT SentKM-256`)** | `0.1283` | **`+0.068`** | `+0.656` | `0.1996` | `0.1890` | `0.0645` |
+| **Zero-Shot Bridge: Tabular PFN-v3 (s25k) (`Struct + TinyOncBERT SentKM-256`)** | `0.1283` | `+0.068` | `+0.656` | `0.1996` | `0.1890` | `0.0645` |
+| Zero-Shot Bridge: Tabular PFN-v4 (s13k, *32.5% trained*) (`Struct + SentKM-256`) | `0.1296` | `+0.072` | **`+0.669`** | `0.1937` | `0.1829` | `0.0663` |
+| Zero-Shot Bridge: Tabular PFN-v4 (s13k) (`Struct + SentKM-512 + LexSVD-128`) | `0.1304` | `+0.064` | `+0.659` | **`0.1923`** | `0.1812` | `0.0667` |
+| Zero-Shot Bridge: Tabular PFN-v4 (s13k) (`Option-A: +Nadir/Peak +ICD64 +TempSent256 +Lex128`) | `0.1315` | **`+0.075`** | `+0.649` | `0.1940` | `0.1853` | `0.0688` |
 
 ### Key Conclusions from the 16-Cohort Full-LLM Benchmark
 1. **`TinyOncBERT` (22.7M) beat both `TinyBERT` (14M) and its own 600M teacher `Qwen3-Embedding-0.6B`** on every metric at both `N = 200` and `N = 800` — validating that oncology domain vocabulary + negation-repulsion distillation (`val_neg_flip_cos = 0.066`) makes a compact encoder outperform a 26× larger general embedder on realistic clinical notes.
