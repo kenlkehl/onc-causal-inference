@@ -77,7 +77,7 @@ Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observat
 | **Run 2 (Wide Hybrid)** | `longitudinal_tinybert_wide_hybrid` | Run 1 + `note_slots=16`, `solver_dim=256`, study-adaptive `lexical_dim=128` SVD, 2-stage curriculum | Plain | Complete (1200) | `0.1023` | `+0.1989` | `+0.7024` | `0.1754` | `0.1302` | `0.0375` |
 | **Run 3 (Single-Stage Plain)** | `longitudinal_tinybert_single_stage` | Run 2 + single-stage log-uniform `N_ctx=100..10,000`, `--per-slot-note-temporal`, `--ridge-grid-size 7`, 32-tok overlapping note windows | Plain | Complete (1200 + 1k eval) | **`0.0951`** | **`+0.2169`** | **`+0.7526`** | **`0.1522`** | **`0.1230`** | **`0.0288`** |
 | **Run 4 (Single-Stage Paraphrased)** | `longitudinal_tinybert_paraphrased` | Exact 1-variable ablation of Run 3 with `--paraphrase-bank` (`nemotron_5000_paraphrases.json.gz`, 2,902 findings × ~10 paraphrases + EHR sections + filler) | Paraphrased | Complete (1200 + 1k eval) | `0.0987` | `+0.1593` | `+0.7321` | `0.1876` | `0.1697` | `0.0365` |
-| **Run 5 (`TinyOncBERT` v5)** | `longitudinal_tinyoncbert_v5` | `TinyOncBERT` (22.7M) + `--sentence-concept-dim 128` + `--lexical-dim 128` + `--block-ridge` + `--paraphrase-bank` | Paraphrased | Active (resumed s971 / 1200) | **`0.0945`** (s800) | **`+0.1880`** (s800) | **`+0.7600`** (s800) | **`0.1667`** (s900) | **`0.1391`** (s900) | **`0.0288`** (s800) |
+| **Run 5 (`TinyOncBERT` v5)** | `longitudinal_tinyoncbert_v5` | `TinyOncBERT` (22.7M) + `--sentence-concept-dim 128` + `--lexical-dim 128` + `--block-ridge` + `--paraphrase-bank` | Paraphrased | **Complete (1200 + 1k eval)** | **`0.0941`** (s1200) | **`+0.2078`** (s1000) / **`+0.2030`** (s1200) | **`+0.7631`** (s1200) | **`0.1662`** (s1000) / `0.1665` (s1200) | **`0.1387`** (s1000) / `0.1388` (s1200) | **`0.0287`** (s1200) |
 
 *(Run 5 host-RAM note: Run 5 was SIGKILLed by the Linux OOM killer at step 400 — fixed by capping `_EpisodePrefetcher._max_inflight` to `6`, nested eval workers to `<= 2`, and adding `del rows` / `gc.collect()` + glibc `malloc_trim(0)` in `oci/longitudinal/training.py` — and again at step 700 while sharing host RAM with Tabular v3's 16 workers; resumed cleanly from step 600 with `--num-workers 6` and passed step 700 cleanly.)*
 
@@ -117,7 +117,7 @@ Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observat
 | 1100 | `0.0987` | `+0.1595` | `+0.7323` | `0.1876` | `0.1697` | `0.0365` |
 | **1200** | **`0.0987`** | **`+0.1593`** | **`+0.7321`** | **`0.1876`** | **`0.1697`** | **`0.0365`** |
 
-**Run 5 (`TinyOncBERT` v5, evaluated on paraphrased held-out notes — active):**
+**Run 5 (`TinyOncBERT` v5, evaluated on paraphrased held-out notes — complete):**
 
 | Step | `cate_rmse` | `within_r` | `pool_r` | `risk_rmse` | `prop_rmse` | `ate_rmse` |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -126,10 +126,13 @@ Reference baselines on these 32 studies: `arm_mean cate_rmse = 0.1160`, observat
 | 300 | `0.0972` | `+0.1568` | `+0.7414` | `0.1727` | `0.1431` | `0.0311` |
 | 400 | `0.0969` | `+0.1594` | `+0.7479` | `0.1703` | `0.1411` | `0.0322` |
 | 500 | `0.0957` | `+0.1828` | `+0.7524` | `0.1699` | `0.1417` | `0.0299` |
-| 600 | **`0.0949`** | **`+0.1871`** | **`+0.7570`** | `0.1682` | **`0.1399`** | `0.0295` |
+| 600 | `0.0949` | `+0.1871` | `+0.7570` | `0.1682` | `0.1399` | `0.0295` |
 | 700 | `0.0949` | `+0.1843` | `+0.7569` | `0.1671` | `0.1402` | `0.0293` |
-| **800** | **`0.0945`** | **`+0.1880`** | **`+0.7600`** | `0.1679` | `0.1398` | **`0.0288`** |
-| 900 | `0.0947` | `+0.1852` | `+0.7590` | **`0.1667`** | **`0.1391`** | `0.0292` |
+| 800 | `0.0945` | `+0.1880` | `+0.7600` | `0.1679` | `0.1398` | `0.0288` |
+| 900 | `0.0947` | `+0.1852` | `+0.7590` | `0.1667` | `0.1391` | `0.0292` |
+| 1000 | `0.0942` | **`+0.2078`** | `0.7629` | **`0.1662`** | **`0.1387`** | `0.0291` |
+| 1100 | `0.0942` | `+0.2071` | `0.7628` | `0.1665` | `0.1392` | `0.0293` |
+| **1200** | **`0.0941`** | `+0.2030` | **`+0.7631`** | `0.1665` | `0.1388` | **`0.0287`** |
 
 ---
 
@@ -143,6 +146,7 @@ Baselines across all 1,000 held-out studies: `zero = 0.1455`, observational LOO-
 | **Run 2 (Wide Hybrid)** | `0.1028` | `+0.1440` | `+0.7069` | `+0.7584` | `0.1791` | `0.1275` | `0.0395` | `+0.0010` |
 | **Run 3 (Single-Stage Plain)** | **`0.0962`** | **`+0.1870`** | **`+0.7502`** | **`+0.7923`** | **`0.1583`** | **`0.1199`** | **`0.0315`** | **`-0.0023`** |
 | **Run 4 (Single-Stage Paraphrased)** *(eval on paraphrased notes)* | `0.1048` | `+0.1103` | `+0.6924` | `+0.7454` | `0.1988` | `0.1672` | `0.0442` | `-0.0034` |
+| **Run 5 (`TinyOncBERT` v5)** *(eval on paraphrased notes)* | **`0.0987`** | **`+0.1553`** | **`+0.7344`** | **`+0.7841`** | **`0.1748`** | **`0.1391`** | **`0.0352`** | **`-0.0014`** |
 
 ### Zero-Shot Generalization to Unseen Cancers (1,000 studies)
 
@@ -154,6 +158,8 @@ Baselines across all 1,000 held-out studies: `zero = 0.1455`, observational LOO-
 | | `unseen_cancer` (3 held-out cancers) | 750 | **`0.0961`** | **`+0.1865`** | **`+0.7467`** | **`0.1580`** | **`0.1201`** | **`0.0313`** |
 | **Run 4** | `seen_cancer_new_question` | 250 | `0.1044` | `+0.1163` | `+0.7109` | `0.1997` | `0.1605` | `0.0425` |
 | | `unseen_cancer` (3 held-out cancers) | 750 | `0.1050` | `+0.1084` | `+0.6857` | `0.1985` | `0.1694` | `0.0448` |
+| **Run 5** | `seen_cancer_new_question` | 250 | `0.0991` | `+0.1522` | `+0.7454` | `0.1754` | `0.1348` | `0.0345` |
+| *(paraphrased)* | `unseen_cancer` (3 held-out cancers) | 750 | **`0.0986`** | **`+0.1563`** | `+0.7305` | **`0.1746`** | `0.1405` | `0.0355` |
 
 ### Performance by Candidate Width (1,000 studies)
 
@@ -171,6 +177,10 @@ Baselines across all 1,000 held-out studies: `zero = 0.1455`, observational LOO-
 | | `21–50` | 308 | `0.1065` | `+0.1092` | `0.1996` | `0.1722` | `0.0430` |
 | | `51–80` | 295 | `0.1042` | `+0.1245` | `0.1987` | `0.1643` | `0.0427` |
 | | `81–100` | 202 | `0.1044` | `+0.1249` | `0.2003` | `0.1672` | `0.0419` |
+| **Run 5** | `3–20` | 195 | **`0.0927`** | `+0.1488` | **`0.1589`** | **`0.1157`** | `0.0356` |
+| *(paraphrased)* | `21–50` | 308 | `0.1001` | `+0.1623` | `0.1743` | `0.1415` | **`0.0345`** |
+| | `51–80` | 295 | `0.1000` | `+0.1444` | `0.1793` | `0.1430` | `0.0351` |
+| | `81–100` | 202 | `0.1005` | **`+0.1668`** | `0.1833` | `0.1499` | `0.0362` |
 
 ---
 
