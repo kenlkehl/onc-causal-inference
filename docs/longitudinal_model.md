@@ -231,7 +231,7 @@ types. Output columns are `patient_id`, `risk_control`, `risk_treated`,
 `outside_overlap`. If either arm has fewer than five context patients, `predict` warns
 on `stderr`.
 
-## Multimodal Tabular Composition (Option A) and Continued Multimodal Pre-Training (Option B / v6)
+## Multimodal Tabular Composition (Option A) and Continued Multimodal Pre-Training (Option B / v6–v7)
 
 In addition to end-to-end `CausalStudyModel` training, `oci/longitudinal/option_b.py`
 provides two **zero-shot** multimodal causal foundation-model architectures built on top of
@@ -256,7 +256,7 @@ frozen `TinyOncBERT` (`artifacts/tinyoncbert_6l_384d`) and `SparseTabularCausalP
      `S7`–`S12b` stress cohorts head-to-head against Run 5 (and optionally an Option B
      checkpoint via `--option-b-run-dir`).
 
-2. **Option B (`v6`) — Continued Multimodal Pre-Training for Zero-Shot Use (`MultimodalTabularPFN`):**
+2. **Option B (`v6 / v7`) — Continued Multimodal Pre-Training for Zero-Shot Use (`MultimodalTabularPFN`):**
    Option B is **not** per-dataset applied fitting (compare `oci/longitudinal/adapt.py`
    for single-dataset factual adaptation); it is a second phase of **synthetic foundation-model
    pre-training** that produces a general zero-shot multimodal checkpoint:
@@ -270,28 +270,51 @@ frozen `TinyOncBERT` (`artifacts/tinyoncbert_6l_384d`) and `SparseTabularCausalP
      exact differentiable hybrid forward pass (preserving `NaN` handling on explicit columns
      with zero `NaN` grads while backpropagating cleanly through the ARD LOO-CV ridge solvers
      and residual Two-Way TabPFN into `StructuredTemporalEncoder`).
-   - Trains on a **50/50 mixed synthetic episode stream** (`nemotron_5000.json.gz`
-     `split == "train"` + `nemotron_5000_paraphrases.json.gz` longitudinal episodes with
-     outcome/CATE/propensity loss, interleaved with 50% pure-tabular replay episodes using the
-     tabular checkpoint's exact `PriorConfig` with full 6-class role/screener supervision)
-     plus differential LRs (`temporal_lr=2e-4`, `tabular_lr=3e-5`) and proximal L2-SP anchor
-     regularization (`1e-4`) toward the initial tabular checkpoint.
+   - Supports **2-way (`v6`)** or **3-way (`v7`) mixed synthetic episode streams** with
+     differential LRs (`temporal_lr=2e-4`, `tabular_lr=3e-5`) and proximal L2-SP anchor
+     regularization (`1e-4`) toward the initial tabular checkpoint:
+     - **Long-note pan-cancer MMAI v23 (`oci/longitudinal/mmai_v23.py`, optional 35% in `v7`):**
+       Enforces exact patient-disjointness from `TinyOncBERT`'s curated note cutoff
+       (`notes_read = 564,224` in `artifacts/tinyoncbert_6l_384d/work/curated/manifest.json`),
+       isolating the `37,631` `v23` `train` patients never read by `TinyOncBERT`
+       (`train_unseen`) while keeping `validation` (`8,470`) and `test` (`8,340`) strictly
+       reserved for zero-shot evaluation. Uses balanced round-robin head/tail multi-note
+       sentence extraction (`note_sentences_balanced`, cap `320` clauses across all ~14
+       notes/patient) pre-embedded once into a memory-mapped fp16 cache, paired with
+       train-only clinical factors (~147 covariates extracted from `mmai-clinical-extraction-v4`)
+       and GPU chunked context-only SentKM MaxSim (`< 50 MB` VRAM) re-equated on the fly
+       across single-cancer (65%) and pan-cancer (35%) cohorts in notes-only (55%) and
+       hybrid structured+long-note (45%) modes across 4 causal DGP regimes (`sparse_clinical`,
+       `null_hte`, `epistatic_subgroup`, `dense_nonlinear`).
+     - **5-stream longitudinal simulator (`nemotron_5000.json.gz` `split == "train"` +
+       `nemotron_5000_paraphrases.json.gz`; 50% in `v6`, 25% in `v7`):** outcome, CATE, and
+       propensity losses across labs, vitals, encounters, PROs, and notes.
+     - **Pure-tabular replay (`oci.tabular_pfn.prior.sample_tabular_study`; 50% in `v6`, 40%
+       in `v7`):** matches the initial tabular checkpoint's exact `PriorConfig` with full
+       6-class role and screener supervision to prevent tabular forgetting.
 
 ```bash
 # Option A zero-shot benchmark suite (default lean sent_256 + ablations)
 ./scripts/run_option_a_eval_h200.sh
 
-# Option B continued multimodal pre-training (lean sent_256 + 24 learned temporal = 500 cols)
-TABULAR_INIT_DIR=artifacts/tabular_causal_pfn_v5_h200 ./scripts/run_longitudinal_option_b_lean_h200.sh
+# 1. One-time TinyOncBERT-disjoint MMAI v23 pre-embedding & factor cache (~5-7 min on 1x H200)
+./scripts/prepare_mmai_v23_cache_h200.sh
 
-# Direct CLI
-python -m oci.longitudinal.option_b train --run-dir artifacts/opt_b_run \
-  --tabular-init-dir artifacts/tabular_causal_pfn_v4_h200 \
+# 2. Option B v7 continued multimodal pre-training (Tabular v5 + lean sent_256 + 3-way v23 mixing)
+./scripts/run_longitudinal_option_b_lean_h200.sh
+
+# Direct CLI (3-way v23 + nemotron_5000 + tabular replay)
+python -m oci.longitudinal.option_b train --run-dir artifacts/longitudinal_option_b_v7 \
+  --tabular-init-dir artifacts/tabular_causal_pfn_v5_h200 \
   --backbone-path artifacts/tinyoncbert_6l_384d \
   --structured-init-dir artifacts/longitudinal_tinyoncbert_v5 \
   --paraphrase-bank synthetic_data/designs/nemotron_5000_paraphrases.json.gz \
-  --feature-preset sent_256 --steps 1200 --device cuda
+  --v23-cache-dir artifacts/mmai_v23_option_b_cache --v23-prob 0.35 --multimodal-prob 0.25 \
+  --feature-preset sent_256 --steps 1200 --num-workers 3 --device cuda
 
-python -m oci.longitudinal.option_b evaluate --run-dir artifacts/opt_b_run \
-  --studies 1000 --context-size 5000 --query-size 64 --seed 42 --device cuda
+# Zero-shot evaluation on strictly held-out MMAI v23 test split
+python -m oci.longitudinal.mmai_v23 evaluate \
+  --cache-dir artifacts/mmai_v23_option_b_cache --split test \
+  --tabular-run-dir artifacts/tabular_causal_pfn_v5_h200 \
+  --option-b-run-dir artifacts/longitudinal_option_b_v7 --device cuda
 ```

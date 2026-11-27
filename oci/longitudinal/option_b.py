@@ -2036,6 +2036,17 @@ def train_option_b(
     structured_init_dir: str | Path | None = None,
     design_bank_path: str | Path | None = DEFAULT_BANK,
     paraphrase_bank_path: str | Path | None = None,
+    v23_cache_dir: str | Path | None = None,
+    v23_prob: float = 0.0,
+    v23_train_split: str = "train_unseen",
+    v23_eval_split: str = "validation",
+    v23_eval_studies: int = 32,
+    v23_eval_context: int = 800,
+    v23_min_context: int = 120,
+    v23_max_context: int = 4000,
+    v23_query_size: int = 128,
+    v23_notes_only_prob: float = 0.55,
+    v23_within_cancer_prob: float = 0.65,
     option_b_cfg: OptionBConfig = OptionBConfig(),
     feature_cfg: OptionAFeatureConfig = OptionAFeatureConfig(),
     steps: int = 1200,
@@ -2071,7 +2082,7 @@ def train_option_b(
     device: str = "cuda",
     resume: bool = True,
 ) -> dict:
-    """Train Option B (v6) hybrid multimodal CausalPFN with 50/50 tabular replay & resume."""
+    """Train Option B (v6/v7) hybrid multimodal CausalPFN with tabular replay, optional v23, & resume."""
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     dev = torch.device(device)
@@ -2079,7 +2090,7 @@ def train_option_b(
     best_path = run_dir / "best_checkpoint.pt"
     metrics_path = run_dir / "metrics.jsonl"
 
-    # Load Tabular v4 init (always needed for initial weights and/or anchor snapshot!)
+    # Load Tabular init (always needed for initial weights and/or anchor snapshot!)
     tab_init_model, tab_init_saved = load_tabular_run(tabular_init_dir, device="cpu", prefer_best=True)
     prior_dict = dict(tab_init_saved.get("prior") or asdict(PriorConfig()))
     prior_dict["design_split"] = "train"  # strictly enforce train-only designs during training!
@@ -2146,6 +2157,12 @@ def train_option_b(
             "steps": steps,
             "grad_accum_steps": grad_accum_steps,
             "multimodal_prob": multimodal_prob,
+            "v23_cache_dir": str(v23_cache_dir) if v23_cache_dir is not None else None,
+            "v23_prob": float(v23_prob) if v23_cache_dir is not None else 0.0,
+            "v23_train_split": v23_train_split if v23_cache_dir is not None else None,
+            "v23_eval_split": v23_eval_split if v23_cache_dir is not None else None,
+            "v23_notes_only_prob": v23_notes_only_prob if v23_cache_dir is not None else None,
+            "v23_within_cancer_prob": v23_within_cancer_prob if v23_cache_dir is not None else None,
             "min_context_size": min_context_size,
             "context_size": context_size,
             "query_size": query_size,
@@ -2171,6 +2188,36 @@ def train_option_b(
             settings["paraphrase_bank_sha256"] = sha_p
             pbank_local = run_dir / PARAPHRASE_BANK_FILENAME
 
+    # Optional MMAI v23 long-note pan-cancer episode store (strictly TinyOncBERT-disjoint train_unseen)
+    v23_train_store = None
+    v23_val_store = None
+    evaluate_on_v23_fn = None
+    v23_sent_km_k = model.feature_cfg.sent_km_k if model.feature_cfg.sent_km_k > 0 else 256
+    if v23_cache_dir is not None:
+        from .mmai_v23 import MMAIv23EpisodeStore, evaluate_on_v23 as _eval_v23
+
+        evaluate_on_v23_fn = _eval_v23
+        v23_cache_path = Path(v23_cache_dir)
+        if v23_prob > 0.0:
+            v23_train_store = MMAIv23EpisodeStore(v23_cache_path, split=v23_train_split)
+            print(
+                f"[option_b] Loaded MMAI v23 train store ({v23_train_split}: "
+                f"{v23_train_store.num_patients:,} patients, "
+                f"cutoff={v23_train_store.manifest.get('tinyoncbert_notes_cutoff', 0):,}, "
+                f"disjoint_train_only={v23_train_store.manifest.get('disjoint_train_only')}, "
+                f"sent_km_k={v23_sent_km_k})",
+                file=sys.stderr,
+                flush=True,
+            )
+        if v23_eval_studies > 0 and (v23_cache_path / v23_eval_split).is_dir():
+            v23_val_store = MMAIv23EpisodeStore(v23_cache_path, split=v23_eval_split)
+            print(
+                f"[option_b] Loaded MMAI v23 eval store ({v23_eval_split}: "
+                f"{v23_val_store.num_patients:,} patients, studies={v23_eval_studies})",
+                file=sys.stderr,
+                flush=True,
+            )
+
     del tab_init_model
     anchor_snapshot = (
         {k: v.to(dev) for k, v in anchor_snapshot_cpu.items()}
@@ -2179,7 +2226,7 @@ def train_option_b(
     )
     del anchor_snapshot_cpu
 
-    # Separate parameter groups: faster LR for lightweight temporal encoder, gentle LR for Tabular v4 head
+    # Separate parameter groups: faster LR for lightweight temporal encoder, gentle LR for Tabular head
     param_groups = []
     if model.temporal_encoder is not None:
         temp_params = [p for p in model.temporal_encoder.parameters() if p.requires_grad]
@@ -2245,8 +2292,27 @@ def train_option_b(
                 num_workers=eval_workers,
             )
             _release_host_memory()
+        v23_ev = None
+        if v23_val_store is not None and evaluate_on_v23_fn is not None and v23_eval_studies > 0:
+            v23_ev = evaluate_on_v23_fn(
+                model.tabular_head,
+                v23_val_store,
+                studies=v23_eval_studies,
+                context_size=v23_eval_context,
+                query_size=v23_query_size,
+                sent_km_k=v23_sent_km_k,
+                seed=777_001,
+                notes_only_prob=v23_notes_only_prob,
+                prior=prior,
+            )
+            _release_host_memory()
         if dev.type == "cuda":
             torch.cuda.empty_cache()
+        sel_cate = (
+            0.5 * (float(long_ev["cate_rmse"]) + float(v23_ev["cate_rmse"]))
+            if v23_ev is not None
+            else float(long_ev["cate_rmse"])
+        )
         ev_rec = {
             "step": cur_step,
             "event": "eval",
@@ -2261,9 +2327,22 @@ def train_option_b(
             "tab_cate_rmse": tab_ev["cate_rmse"] if tab_ev else None,
             "tab_within_r": tab_ev.get("within_study_cate_pearson") if tab_ev else None,
             "tab_role_auroc": tab_ev.get("role_signal_auroc") if tab_ev else None,
+            "v23_cate_rmse": v23_ev["cate_rmse"] if v23_ev else None,
+            "v23_within_r": v23_ev["within_r"] if v23_ev else None,
+            "v23_pool_r": v23_ev["pool_r"] if v23_ev else None,
+            "v23_prop_rmse": v23_ev["prop_rmse"] if v23_ev else None,
+            "v23_ate_rmse": v23_ev["ate_rmse"] if v23_ev else None,
+            "selection_cate_rmse": sel_cate,
         }
         with metrics_path.open("a", encoding="utf-8") as mf:
             mf.write(json.dumps(ev_rec) + "\n")
+        v23_str = (
+            f" | v23_cate={ev_rec['v23_cate_rmse']:.4f} "
+            f"v23_wr={ev_rec['v23_within_r'] or 0.0:+.3f} "
+            f"v23_prop={ev_rec['v23_prop_rmse'] or 0.0:.4f}"
+            if v23_ev is not None
+            else ""
+        )
         print(
             f"[option_b eval step={cur_step}] "
             f"long_cate={ev_rec['eval_cate_rmse']:.4f} "
@@ -2272,7 +2351,8 @@ def train_option_b(
             f"prop={ev_rec['eval_prop_rmse'] or 0.0:.4f} | "
             f"tab_cate={ev_rec['tab_cate_rmse'] or 0.0:.4f} "
             f"tab_wr={ev_rec['tab_within_r'] or 0.0:+.3f} "
-            f"role_auc={ev_rec['tab_role_auroc'] or 0.0:.4f} "
+            f"role_auc={ev_rec['tab_role_auroc'] or 0.0:.4f}"
+            f"{v23_str} "
             f"({ev_rec['eval_time_s']:.1f}s)",
             file=sys.stderr,
             flush=True,
@@ -2282,25 +2362,44 @@ def train_option_b(
     t_start = time.monotonic()
     if start_step == 0 and eval_step_zero and eval_studies > 0:
         ev0 = _run_dual_eval(0, 0.0)
-        if ev0["eval_cate_rmse"] < best_eval_cate:
-            best_eval_cate = float(ev0["eval_cate_rmse"])
+        if ev0["selection_cate_rmse"] < best_eval_cate:
+            best_eval_cate = float(ev0["selection_cate_rmse"])
             settings["best_eval_cate_rmse"] = best_eval_cate
             save_option_b_checkpoint(best_path, model, optimizer, scheduler, 0, settings, prior)
 
     if start_step >= steps:
         return {"step": start_step, "best_eval_cate_rmse": best_eval_cate}
 
-    # Build deterministic job stream for steps (start_step + 1) .. steps
-    n_mm_per_step = int(round(grad_accum_steps * multimodal_prob))
-    n_mm_per_step = max(0, min(grad_accum_steps, n_mm_per_step))
+    # Build deterministic 2-way or 3-way micro-step schedule per gradient accumulation step
+    if v23_train_store is not None and v23_prob > 0.0:
+        n_v23_per_step = max(0, min(grad_accum_steps, int(round(grad_accum_steps * v23_prob))))
+        n_mm_per_step = max(
+            0, min(grad_accum_steps - n_v23_per_step, int(round(grad_accum_steps * multimodal_prob)))
+        )
+        n_tab_per_step = grad_accum_steps - n_v23_per_step - n_mm_per_step
+    else:
+        n_v23_per_step = 0
+        n_mm_per_step = max(0, min(grad_accum_steps, int(round(grad_accum_steps * multimodal_prob))))
+        n_tab_per_step = grad_accum_steps - n_mm_per_step
+
+    def _step_kinds(cur_step: int) -> list[str]:
+        step_rng = np.random.default_rng([seed, cur_step, 4099])
+        kinds = (
+            ["v23"] * n_v23_per_step
+            + ["multimodal"] * n_mm_per_step
+            + ["tabular"] * n_tab_per_step
+        )
+        step_rng.shuffle(kinds)
+        return kinds
 
     def _train_jobs():
+        # Only CPU-simulated multimodal & pure-tabular episodes enter the worker prefetcher;
+        # memory-mapped GPU v23 episodes execute directly in the main process (zero worker RAM).
         for step in range(start_step + 1, steps + 1):
-            step_rng = np.random.default_rng([seed, step, 4099])
-            # Exact deterministic interleaved schedule per gradient accumulation step
-            kinds = ["multimodal"] * n_mm_per_step + ["tabular"] * (grad_accum_steps - n_mm_per_step)
-            step_rng.shuffle(kinds)
+            kinds = _step_kinds(step)
             for micro_idx, kind in enumerate(kinds):
+                if kind == "v23":
+                    continue
                 ep_rng = np.random.default_rng([seed, step, micro_idx, 7919])
                 if kind == "multimodal":
                     n_ctx_ep = _sample_log_uniform_int(ep_rng, min_context_size, context_size)
@@ -2345,19 +2444,56 @@ def train_option_b(
                         ),
                     )
 
+    prefetch_workers = num_workers if (n_mm_per_step + n_tab_per_step) > 0 else 0
     model.train()
     with _MixedEpisodePrefetcher(
-        _train_jobs(), num_workers=num_workers, max_inflight=max_inflight
+        _train_jobs(), num_workers=prefetch_workers, max_inflight=max_inflight
     ) as prefetcher:
         for step in range(start_step + 1, steps + 1):
             optimizer.zero_grad(set_to_none=True)
-            mm_losses, tab_losses = [], []
-            mm_cates, tab_cates = [], []
-            mm_props, tab_roles = [], []
+            mm_losses, tab_losses, v23_losses = [], [], []
+            mm_cates, tab_cates, v23_cates = [], [], []
+            mm_props, tab_roles, v23_props = [], [], []
             mm_n_list, tab_n_list, tab_p_list = [], [], []
+            v23_n_list, v23_p_list = [], []
             valid_micros = 0
 
-            for _ in range(grad_accum_steps):
+            kinds = _step_kinds(step)
+            for micro_idx, kind_sched in enumerate(kinds):
+                if kind_sched == "v23":
+                    assert v23_train_store is not None
+                    ep_rng = np.random.default_rng([seed, step, micro_idx, 7919])
+                    n_ctx_ep = _sample_log_uniform_int(ep_rng, v23_min_context, v23_max_context)
+                    v23_seed = 2 * (seed * 100_000 + step * 100 + micro_idx + 1)
+                    ep = v23_train_store.sample_episode(
+                        v23_seed,
+                        n_ctx_ep,
+                        v23_query_size,
+                        dev,
+                        sent_km_k=v23_sent_km_k,
+                        within_cancer_prob=v23_within_cancer_prob,
+                        notes_only_prob=v23_notes_only_prob,
+                        prior=prior,
+                    )
+                    oracle = torch.stack([ep["true_y0_q"], ep["true_y1_q"]], dim=1)
+                    ol, pl, sc, _ = model.forward_tabular(
+                        ep["X_ctx"], ep["t_ctx"], ep["y_ctx"], ep["X_q"]
+                    )
+                    ep_loss, parts = model.tabular_head.loss_components(
+                        ol, pl, sc, oracle, ep["true_prop_q"], true_roles=None
+                    )
+                    ep_meta = ep["meta"]
+                    del ep
+                    if torch.isfinite(ep_loss):
+                        (ep_loss / grad_accum_steps).backward()
+                        valid_micros += 1
+                        v23_losses.append(float(ep_loss.detach().item()))
+                        v23_cates.append(float(parts["cate_loss"]))
+                        v23_props.append(float(parts["propensity_loss"]))
+                        v23_n_list.append(int(ep_meta["n_ctx"]))
+                        v23_p_list.append(int(ep_meta["p"]))
+                    continue
+
                 meta, kind, payload, prov = prefetcher.next_item()
                 _, _, n_ctx_ep = meta
                 if kind == "multimodal":
@@ -2451,12 +2587,17 @@ def train_option_b(
                 "mm_loss": float(np.mean(mm_losses)) if mm_losses else None,
                 "mm_cate_loss": float(np.mean(mm_cates)) if mm_cates else None,
                 "mm_prop_loss": float(np.mean(mm_props)) if mm_props else None,
+                "v23_loss": float(np.mean(v23_losses)) if v23_losses else None,
+                "v23_cate_loss": float(np.mean(v23_cates)) if v23_cates else None,
+                "v23_prop_loss": float(np.mean(v23_props)) if v23_props else None,
                 "tab_loss": float(np.mean(tab_losses)) if tab_losses else None,
                 "tab_cate_loss": float(np.mean(tab_cates)) if tab_cates else None,
                 "tab_role_loss": float(np.mean(tab_roles)) if tab_roles else None,
                 "anchor_loss": anchor_val,
                 "head_drift_rms": drift_rms,
                 "mean_mm_n": float(np.mean(mm_n_list)) if mm_n_list else None,
+                "mean_v23_n": float(np.mean(v23_n_list)) if v23_n_list else None,
+                "mean_v23_p": float(np.mean(v23_p_list)) if v23_p_list else None,
                 "mean_tab_n": float(np.mean(tab_n_list)) if tab_n_list else None,
                 "mean_tab_p": float(np.mean(tab_p_list)) if tab_p_list else None,
                 "elapsed_s": round(elapsed, 2),
@@ -2465,10 +2606,17 @@ def train_option_b(
                 mf.write(json.dumps(rec) + "\n")
 
             if step == 1 or step % 10 == 0 or step == steps:
+                v23_msg = (
+                    f"v23_loss={rec['v23_loss'] or 0.0:.3f} "
+                    f"v23_cate={rec['v23_cate_loss'] or 0.0:.4f} | "
+                    if v23_losses
+                    else ""
+                )
                 print(
                     f"[option_b step={step:4d}/{steps}] "
                     f"mm_loss={rec['mm_loss'] or 0.0:.3f} "
                     f"mm_cate={rec['mm_cate_loss'] or 0.0:.4f} | "
+                    f"{v23_msg}"
                     f"tab_loss={rec['tab_loss'] or 0.0:.3f} "
                     f"tab_role={rec['tab_role_loss'] or 0.0:.3f} | "
                     f"drift={drift_rms:.5f} ({elapsed:.1f}s)",
@@ -2488,8 +2636,8 @@ def train_option_b(
 
             if eval_every > 0 and eval_studies > 0 and (step % eval_every == 0 or step == steps):
                 ev = _run_dual_eval(step, elapsed)
-                if ev["eval_cate_rmse"] < best_eval_cate:
-                    best_eval_cate = float(ev["eval_cate_rmse"])
+                if ev["selection_cate_rmse"] < best_eval_cate:
+                    best_eval_cate = float(ev["selection_cate_rmse"])
                     settings["best_eval_cate_rmse"] = best_eval_cate
                     save_option_b_checkpoint(
                         best_path, model, optimizer, scheduler, step, settings, prior
@@ -2519,6 +2667,17 @@ def _build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--structured-init-dir", default=None, type=Path)
     tr.add_argument("--design-bank", default=str(DEFAULT_BANK))
     tr.add_argument("--paraphrase-bank", default=None)
+    tr.add_argument("--v23-cache-dir", default=None, type=Path)
+    tr.add_argument("--v23-prob", type=float, default=0.0)
+    tr.add_argument("--v23-train-split", default="train_unseen")
+    tr.add_argument("--v23-eval-split", default="validation")
+    tr.add_argument("--v23-eval-studies", type=int, default=32)
+    tr.add_argument("--v23-eval-context", type=int, default=800)
+    tr.add_argument("--v23-min-context", type=int, default=120)
+    tr.add_argument("--v23-max-context", type=int, default=4000)
+    tr.add_argument("--v23-query-size", type=int, default=128)
+    tr.add_argument("--v23-notes-only-prob", type=float, default=0.55)
+    tr.add_argument("--v23-within-cancer-prob", type=float, default=0.65)
     tr.add_argument("--learned-temporal-dim", type=int, default=24)
     tr.add_argument("--event-width", type=int, default=128)
     tr.add_argument("--event-layers", type=int, default=2)
@@ -2596,6 +2755,17 @@ def main(argv: list[str] | None = None) -> None:
             structured_init_dir=args.structured_init_dir,
             design_bank_path=args.design_bank,
             paraphrase_bank_path=args.paraphrase_bank,
+            v23_cache_dir=args.v23_cache_dir,
+            v23_prob=args.v23_prob,
+            v23_train_split=args.v23_train_split,
+            v23_eval_split=args.v23_eval_split,
+            v23_eval_studies=args.v23_eval_studies,
+            v23_eval_context=args.v23_eval_context,
+            v23_min_context=args.v23_min_context,
+            v23_max_context=args.v23_max_context,
+            v23_query_size=args.v23_query_size,
+            v23_notes_only_prob=args.v23_notes_only_prob,
+            v23_within_cancer_prob=args.v23_within_cancer_prob,
             option_b_cfg=opt_b_cfg,
             feature_cfg=feat_cfg,
             steps=args.steps,

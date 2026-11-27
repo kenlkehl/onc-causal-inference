@@ -138,6 +138,70 @@ def note_sentences(notes, *, max_sentences=128, min_chars=8):
     return sentences
 
 
+def note_sentences_balanced(notes, *, max_sentences=320, min_chars=12):
+    """Balanced multi-note sentence extractor that never drops late notes on long charts.
+
+    For each note, orders clauses alternating from end (Assessment/Impression/Plan) and
+    beginning (headers/pathology/biomarkers), then round-robins across all notes so every
+    note in a long multi-note longitudinal history (e.g., 14+ notes, 5,000+ words) is
+    represented before hitting ``max_sentences``.
+    """
+    per_note_ordered: list[list[str]] = []
+    for note in notes or ():
+        text = note.get("text") if isinstance(note, dict) else note
+        if not text:
+            continue
+        raw: list[str] = []
+        for chunk in _SENTENCE_SPLIT_RE.split(str(text)):
+            clause = chunk.strip(" \t\r\n*-•:|#`")
+            if len(clause) < min_chars or not any(ch.isalpha() for ch in clause):
+                continue
+            raw.append(clause)
+        if not raw:
+            continue
+        # Alternate tail (impressions/conclusions) and head (diagnosis/findings) within each note
+        lo, hi = 0, len(raw) - 1
+        ordered: list[str] = []
+        take_tail = True
+        while lo <= hi:
+            if take_tail:
+                ordered.append(raw[hi])
+                hi -= 1
+            else:
+                ordered.append(raw[lo])
+                lo += 1
+            take_tail = not take_tail
+        per_note_ordered.append(ordered)
+
+    if not per_note_ordered:
+        return []
+
+    seen: set[str] = set()
+    sentences: list[str] = []
+    # Reverse note order so when max_sentences is tight, most recent notes get tie-break priority
+    # while still giving every note across the full history equal round-robin slots.
+    note_lists = list(reversed(per_note_ordered))
+    cursors = [0] * len(note_lists)
+    active = len(note_lists)
+    while active > 0 and len(sentences) < max_sentences:
+        active = 0
+        for idx, clauses in enumerate(note_lists):
+            c = cursors[idx]
+            while c < len(clauses) and clauses[c] in seen:
+                c += 1
+            if c < len(clauses):
+                cl = clauses[c]
+                seen.add(cl)
+                sentences.append(cl)
+                cursors[idx] = c + 1
+                active += 1
+                if len(sentences) >= max_sentences:
+                    return sentences
+            else:
+                cursors[idx] = len(clauses)
+    return sentences
+
+
 def note_lexical_vector(notes):
     """Deterministic hashed 1-3gram log-count vector across a patient's pretreatment notes."""
     counts = [0.0] * LEXICAL_BUCKETS
