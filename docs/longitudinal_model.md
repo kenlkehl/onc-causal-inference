@@ -37,9 +37,10 @@ projected `log1p(code_count)` term so norms remain stable on real EHR encounters
 many codes.
 
 Each submitted PRO form encodes the 11 canonical adult PRO-CTCAE v1.0 items via a
-presence indicator and four cumulative ordinal thresholds, while additional PRO-CTCAE
-items or other instruments (such as EORTC QLQ-C30) map into open-vocabulary hashed
-embeddings.
+presence indicator and four cumulative ordinal thresholds (accepting both integers and
+Parquet-promoted integer-valued floats `0.0..4.0` while rejecting fractional or out-of-range
+values), while additional PRO-CTCAE items or other instruments (such as EORTC QLQ-C30) map
+into open-vocabulary hashed embeddings.
 
 Five modality-specific transformers summarize the five event streams using a learned
 clock embedding of `log1p(-day_from_index)`, `log1p(elapsed_days)`, and a first-event
@@ -229,3 +230,68 @@ types. Output columns are `patient_id`, `risk_control`, `risk_treated`,
 `risk_difference`, `risk_control_sd`, `risk_treated_sd`, `propensity_score`, and
 `outside_overlap`. If either arm has fewer than five context patients, `predict` warns
 on `stderr`.
+
+## Multimodal Tabular Composition (Option A) and Continued Multimodal Pre-Training (Option B / v6)
+
+In addition to end-to-end `CausalStudyModel` training, `oci/longitudinal/option_b.py`
+provides two **zero-shot** multimodal causal foundation-model architectures built on top of
+frozen `TinyOncBERT` (`artifacts/tinyoncbert_6l_384d`) and `SparseTabularCausalPFN`
+(`oci.tabular_pfn`):
+
+1. **Option A — Zero-Shot Composition (`extract_option_a_features`):**
+   Converts each study's longitudinal records strictly on context rows into an unmixed
+   tabular matrix and runs a single zero-shot forward pass of a frozen tabular PFN
+   (v4 or v5) with zero multimodal training.
+   - **Default lean preset (`sent_256`, `476` cols):** `220`-d `patient_summary_vector` +
+     `256`-d context-fitted frozen `TinyOncBERT` spherical k-means sentence MaxSim.
+     Empirically outperformed wider collinear tables zero-shot on Full-LLM cohorts at
+     `N_ctx = 800`.
+   - **Optional ablations (`OPTION_A_PRESETS`):** `struct_only` (`220`), `sent_256_lex_128`
+     (`604`), `option_a_temp128` (`693`), and `option_a_full` (`1,077` = `220` summary +
+     `153` NaN-preserving nadir/peak/delta + `64` ICD/CPT SVD + `256` all-note SentKM +
+     `256` latest-note SentKM + `128` LexSVD).
+   - **Production benchmark suite:** `scripts/eval_option_a_v4.py` /
+     `scripts/run_option_a_eval_h200.sh` evaluates real OCI Stage-2 catalogs, Full-LLM
+     realistic cohorts, complex out-of-family Full-LLM cohorts, and complex tabular
+     `S7`–`S12b` stress cohorts head-to-head against Run 5 (and optionally an Option B
+     checkpoint via `--option-b-run-dir`).
+
+2. **Option B (`v6`) — Continued Multimodal Pre-Training for Zero-Shot Use (`MultimodalTabularPFN`):**
+   Option B is **not** per-dataset applied fitting (compare `oci/longitudinal/adapt.py`
+   for single-dataset factual adaptation); it is a second phase of **synthetic foundation-model
+   pre-training** that produces a general zero-shot multimodal checkpoint:
+   - Keeps `TinyOncBERT` permanently frozen in `eval()` mode (preserving Full-LLM prose
+     generalization and avoiding 10× BERT backprop overhead).
+   - Keeps all explicit Option-A columns unmixed and appends `24` trainable temporal columns
+     produced by a lightweight `StructuredTemporalEncoder` (4 structured stream
+     `EventTransformer`s + `CrossModalTimeline` over `labs`, `vitals`, `encounters`, `pros`,
+     warm-started from all 203 structured tensors of Run 5 `best_checkpoint.pt`).
+   - Warm-starts a `SparseTabularCausalPFN` head (`v4` or `v5`) and trains jointly via an
+     exact differentiable hybrid forward pass (preserving `NaN` handling on explicit columns
+     with zero `NaN` grads while backpropagating cleanly through the ARD LOO-CV ridge solvers
+     and residual Two-Way TabPFN into `StructuredTemporalEncoder`).
+   - Trains on a **50/50 mixed synthetic episode stream** (`nemotron_5000.json.gz`
+     `split == "train"` + `nemotron_5000_paraphrases.json.gz` longitudinal episodes with
+     outcome/CATE/propensity loss, interleaved with 50% pure-tabular replay episodes using the
+     tabular checkpoint's exact `PriorConfig` with full 6-class role/screener supervision)
+     plus differential LRs (`temporal_lr=2e-4`, `tabular_lr=3e-5`) and proximal L2-SP anchor
+     regularization (`1e-4`) toward the initial tabular checkpoint.
+
+```bash
+# Option A zero-shot benchmark suite (default lean sent_256 + ablations)
+./scripts/run_option_a_eval_h200.sh
+
+# Option B continued multimodal pre-training (lean sent_256 + 24 learned temporal = 500 cols)
+TABULAR_INIT_DIR=artifacts/tabular_causal_pfn_v5_h200 ./scripts/run_longitudinal_option_b_lean_h200.sh
+
+# Direct CLI
+python -m oci.longitudinal.option_b train --run-dir artifacts/opt_b_run \
+  --tabular-init-dir artifacts/tabular_causal_pfn_v4_h200 \
+  --backbone-path artifacts/tinyoncbert_6l_384d \
+  --structured-init-dir artifacts/longitudinal_tinyoncbert_v5 \
+  --paraphrase-bank synthetic_data/designs/nemotron_5000_paraphrases.json.gz \
+  --feature-preset sent_256 --steps 1200 --device cuda
+
+python -m oci.longitudinal.option_b evaluate --run-dir artifacts/opt_b_run \
+  --studies 1000 --context-size 5000 --query-size 64 --seed 42 --device cuda
+```
