@@ -9,7 +9,7 @@ import hashlib
 import math
 import re
 from functools import lru_cache
-from numbers import Integral
+from numbers import Integral, Real
 
 import pyarrow.dataset as ds
 import torch
@@ -164,6 +164,24 @@ def _numeric(value, mean, scale):
     return math.asinh((value - mean) / scale)
 
 
+def _ordinal_pro_score(score, key):
+    """Validate an ordinal 0..4 PRO-CTCAE score, accepting Parquet-promoted integer floats."""
+    if isinstance(score, bool):
+        raise ValueError(f"Expected an ordinal PRO-CTCAE score from 0 to 4 for {key}")
+    if isinstance(score, Integral):
+        ival = int(score)
+    elif isinstance(score, Real):
+        fval = float(score)
+        if not math.isfinite(fval) or not fval.is_integer():
+            raise ValueError(f"Expected an ordinal PRO-CTCAE score from 0 to 4 for {key}")
+        ival = int(fval)
+    else:
+        raise ValueError(f"Expected an ordinal PRO-CTCAE score from 0 to 4 for {key}")
+    if not 0 <= ival <= 4:
+        raise ValueError(f"Expected an ordinal PRO-CTCAE score from 0 to 4 for {key}")
+    return ival
+
+
 def pro_features(event, *, strict=False):
     """Return dense canonical PRO-CTCAE vector plus open-vocabulary ``(bucket, value)`` items."""
     instrument = str(event.get("instrument", PRO_INSTRUMENT))
@@ -183,10 +201,9 @@ def pro_features(event, *, strict=False):
         if key in PRO_INDEX and is_canonical_pro_ctcae:
             if score is None:
                 continue
-            if isinstance(score, bool) or not isinstance(score, Integral) or not 0 <= score <= 4:
-                raise ValueError(f"Expected an ordinal PRO-CTCAE score from 0 to 4 for {key}")
+            ival = _ordinal_pro_score(score, key)
             offset = 5 * PRO_INDEX[key]
-            values[offset : offset + 5] = [float(score >= threshold) for threshold in range(5)]
+            values[offset : offset + 5] = [float(ival >= threshold) for threshold in range(5)]
         else:
             if strict:
                 raise ValueError(f"Unknown PRO-CTCAE item: {key}")
@@ -194,11 +211,12 @@ def pro_features(event, *, strict=False):
                 continue
             if isinstance(score, bool):
                 raise ValueError(f"Expected a numeric PRO score for {key}")
-            fval = float(score)
-            if not math.isfinite(fval):
-                raise ValueError(f"Nonfinite PRO score for {key}")
-            if instrument == PRO_INSTRUMENT and (not isinstance(score, Integral) or not 0 <= score <= 4):
-                raise ValueError(f"Expected an ordinal PRO-CTCAE score from 0 to 4 for {key}")
+            if instrument == PRO_INSTRUMENT:
+                fval = float(_ordinal_pro_score(score, key))
+            else:
+                fval = float(score)
+                if not math.isfinite(fval):
+                    raise ValueError(f"Nonfinite PRO score for {key}")
             bucket = _hash_bucket(
                 f"pro:{instrument}:{key[0]}:{key[1]}", EXTRA_PRO_BUCKETS
             )

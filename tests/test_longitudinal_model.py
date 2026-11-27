@@ -237,9 +237,14 @@ def test_pro_scores_timing_and_empty_history(model):
         )
 
     offset = 5 * PRO_INDEX["fatigue", "interference"]
-    for score, expected in [(None, [0, 0, 0, 0, 0]), (0, [1, 0, 0, 0, 0]), (2, [1, 1, 1, 0, 0])]:
+    for score, expected in [
+        (None, [0, 0, 0, 0, 0]),
+        (0, [1, 0, 0, 0, 0]),
+        (2, [1, 1, 1, 0, 0]),
+        (2.0, [1, 1, 1, 0, 0]),
+    ]:
         assert pro_vector(form(score))[offset : offset + 5] == expected
-    for score in (-1, 5, 2.5, True):
+    for score in (-1, 5, 2.5, float("nan"), True):
         with pytest.raises(ValueError, match="ordinal"):
             pro_vector(form(score))
     with pytest.raises(ValueError, match="[Dd]uplicate"):
