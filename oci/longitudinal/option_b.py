@@ -1837,12 +1837,16 @@ class _MixedEpisodePrefetcher:
         elif max_inflight is not None:
             self._max_inflight = max(1, int(max_inflight))
         else:
-            self._max_inflight = min(max(self._num_workers, 4), 8)
+            # Cap buffered episodes tightly so large paraphrased N=5,000 studies keep host RAM low
+            self._max_inflight = min(max(self._num_workers, 2), 4)
 
     def __enter__(self):
         if self._num_workers > 0:
             ctx = multiprocessing.get_context("spawn")
-            self._executor = ProcessPoolExecutor(max_workers=self._num_workers, mp_context=ctx)
+            pool_kwargs = {"max_workers": self._num_workers, "mp_context": ctx}
+            if "max_tasks_per_child" in inspect.signature(ProcessPoolExecutor.__init__).parameters:
+                pool_kwargs["max_tasks_per_child"] = 64
+            self._executor = ProcessPoolExecutor(**pool_kwargs)
             self._fill()
         return self
 
@@ -1971,6 +1975,8 @@ def evaluate_option_b(
             rec = _score_option_b_episode(model, rows, context_size, precision=precision)
             del rows
             records.append(rec)
+            if done_idx % 16 == 0:
+                _release_host_memory()
             if designs:
                 by_design.setdefault(prov["design_id"], []).append(rec)
                 by_width.setdefault(_width_bucket(prov["width"]), []).append(rec)
@@ -2206,6 +2212,12 @@ def train_option_b(
 
     def _run_dual_eval(cur_step: int, elapsed_s: float) -> dict:
         t_ev = time.monotonic()
+        _release_host_memory()
+        if dev.type == "cuda":
+            torch.cuda.empty_cache()
+        # Keep nested eval footprint small while the training prefetcher pool stays open
+        eval_workers = min(num_workers, 2)
+        eval_inflight = min(eval_workers, 2) if eval_workers > 0 else None
         long_ev = evaluate_option_b(
             model,
             seed=seed,
@@ -2214,9 +2226,11 @@ def train_option_b(
             query_size=eval_query_size,
             bank=bank,
             precision=precision,
-            num_workers=min(num_workers, 4),
+            num_workers=eval_workers,
+            max_inflight=eval_inflight,
             paraphrase_bank_path=pbank_local,
         )
+        _release_host_memory()
         tab_ev = None
         if tabular_eval_studies > 0:
             tab_ev = evaluate_tabular(
@@ -2228,8 +2242,11 @@ def train_option_b(
                 prior=prior,
                 seed=900_001,
                 compute_baselines=False,
-                num_workers=min(num_workers, 4),
+                num_workers=eval_workers,
             )
+            _release_host_memory()
+        if dev.type == "cuda":
+            torch.cuda.empty_cache()
         ev_rec = {
             "step": cur_step,
             "event": "eval",
@@ -2459,8 +2476,15 @@ def train_option_b(
                     flush=True,
                 )
 
-            if step % 25 == 0:
+            if step % 10 == 0:
                 _release_host_memory()
+
+            need_save = save_every > 0 and (step % save_every == 0 or step == steps)
+            if need_save:
+                # Save before running nested eval so an interrupted eval never loses training steps
+                save_option_b_checkpoint(
+                    ckpt_path, model, optimizer, scheduler, step, settings, prior
+                )
 
             if eval_every > 0 and eval_studies > 0 and (step % eval_every == 0 or step == steps):
                 ev = _run_dual_eval(step, elapsed)
@@ -2470,12 +2494,11 @@ def train_option_b(
                     save_option_b_checkpoint(
                         best_path, model, optimizer, scheduler, step, settings, prior
                     )
+                    if need_save:
+                        save_option_b_checkpoint(
+                            ckpt_path, model, optimizer, scheduler, step, settings, prior
+                        )
                 model.train()
-
-            if save_every > 0 and (step % save_every == 0 or step == steps):
-                save_option_b_checkpoint(
-                    ckpt_path, model, optimizer, scheduler, step, settings, prior
-                )
 
     return {"step": steps, "best_eval_cate_rmse": best_eval_cate}
 
