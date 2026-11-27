@@ -36,6 +36,7 @@ COL_STAT_DIM_V3 = 32
 ROB_STAT_DIM = 6
 ROB_STAT_DIM_V3 = 12
 ROB_STAT_DIM_V4 = 16
+ROB_STAT_DIM_V5 = 20
 NUIS_PAIR_STAT_DIM = 6
 CATE_PAIR_STAT_DIM = 4
 NUM_ROLES = len(ROLE_NAMES)
@@ -60,6 +61,8 @@ class TabularModelConfig:
     use_v3_solver_basis: bool = False
     use_v4_interactions: bool = False
     pair_top_k: int = 16
+    use_v5_epistasis: bool = False
+    epi_pair_k: int = 32
 
     def __post_init__(self):
         if (
@@ -75,6 +78,7 @@ class TabularModelConfig:
             )
             < 1
             or self.pair_top_k < 2
+            or self.epi_pair_k < 0
             or self.ridge_grid_size < 2
             or self.bins < 3
             or self.cate_loss_weight < 0
@@ -86,6 +90,8 @@ class TabularModelConfig:
             raise ValueError("col_dim and study_width must be divisible by heads")
         if self.use_v4_interactions and not self.use_v3_solver_basis:
             raise ValueError("use_v4_interactions requires use_v3_solver_basis=True")
+        if self.use_v5_epistasis and not self.use_v4_interactions:
+            raise ValueError("use_v5_epistasis requires use_v4_interactions=True")
 
 
 @dataclass
@@ -586,6 +592,113 @@ def _robinson_confounder_mod_stats(
     return cm_feats, 0.45 * torch.log1p(max_z)
 
 
+@torch.no_grad()
+def _robinson_epistasis_all_pairs(
+    X_s: torch.Tensor,
+    t_res: torch.Tensor,
+    y_res: torch.Tensor,
+    valid_col: torch.Tensor,
+    *,
+    top_pairs: int = 64,
+    block_size: int = 1024,
+):
+    """Memory-bounded exact all-pairs symmetric Robinson epistasis scan over all P*(P-1)/2 pairs.
+
+    Detects pure M1 x M2 crossover HTE pairs even when neither variable has any main effect on
+    treatment, baseline outcome, or 1D marginal HTE, while using smooth C^inf orthogonal
+    deduplication (sqrt(1 - corr^2)) and Bonferroni excess calibration so high-P noise stays quiet.
+    """
+    n, p = X_s.shape
+    device = X_s.device
+    empty_idx = torch.empty((0,), device=device, dtype=torch.long)
+    if p < 2 or int(valid_col.sum().item()) < 2:
+        return X_s.new_zeros((p, 4)), X_s.new_zeros((p,)), empty_idx, empty_idx
+
+    ty = t_res * y_res
+    ty_sum = ty.sum()
+    t2 = t_res * t_res
+    y_var = y_res.square().mean().clamp_min(1e-5)
+    inv_n = 1.0 / max(float(n), 1.0)
+    row_s = ((X_s * X_s) * t2[:, None]).sum(dim=0).clamp_min(1e-6).sqrt()  # (P,)
+    X_ty = X_s * ty[:, None]
+    col_arange = torch.arange(p, device=device)
+
+    max_z = X_s.new_zeros((p,))
+    second_z = X_s.new_zeros((p,))
+    rms_z = X_s.new_zeros((p,))
+    best_scores = X_s.new_empty((0,))
+    best_a = empty_idx
+    best_b = empty_idx
+
+    for r0 in range(0, p, block_size):
+        r1 = min(r0 + block_size, p)
+        b_len = r1 - r0
+        X_blk = X_s[:, r0:r1]
+        X_ty_blk = X_ty[:, r0:r1]
+
+        corr_blk = (X_blk.T @ X_s) * inv_n  # (b, P)
+        num_blk = X_ty_blk.T @ X_s - ty_sum * corr_blk
+        den_blk = (row_s[r0:r1, None] * row_s[None, :] * y_var).clamp_min(1e-8).sqrt()
+        w_orth = (1.0 - corr_blk.clamp(-1.0, 1.0).square()).clamp_min(1e-6).sqrt()
+        z_blk = (num_blk / den_blk).abs().clamp(0.0, 25.0) * w_orth
+
+        row_ids = torch.arange(r0, r1, device=device)
+        diag_mask = row_ids[:, None] == col_arange[None, :]
+        valid_mask = (valid_col[r0:r1, None] & valid_col[None, :]) & (~diag_mask)
+        z_blk = torch.where(valid_mask, z_blk, z_blk.new_zeros(()))
+
+        k_row = min(2, p)
+        top2 = torch.topk(z_blk, k=k_row, dim=1, largest=True).values
+        max_z[r0:r1] = top2[:, 0]
+        if k_row > 1:
+            second_z[r0:r1] = top2[:, 1]
+        rms_z[r0:r1] = (z_blk.square().sum(dim=1) / max(float(p - 1), 1.0) + 1e-8).sqrt() * valid_col[
+            r0:r1
+        ].float()
+
+        if top_pairs > 0:
+            upper_mask = (col_arange[None, :] > row_ids[:, None]) & valid_mask
+            z_upper = torch.where(upper_mask, z_blk, z_blk.new_full((), -1e5)).reshape(-1)
+            k_take = min(top_pairs, int(upper_mask.sum().item()))
+            if k_take > 0:
+                vals, flat_idx = torch.topk(z_upper, k=k_take, largest=True)
+                pos = vals > 0.0
+                if pos.any():
+                    vals = vals[pos]
+                    flat_idx = flat_idx[pos]
+                    pa = r0 + torch.div(flat_idx, p, rounding_mode="floor")
+                    pb = flat_idx % p
+                    if len(best_scores) == 0:
+                        best_scores, best_a, best_b = vals, pa, pb
+                    else:
+                        cat_s = torch.cat([best_scores, vals], dim=0)
+                        cat_a = torch.cat([best_a, pa], dim=0)
+                        cat_b = torch.cat([best_b, pb], dim=0)
+                        k_keep = min(top_pairs, len(cat_s))
+                        top_s, keep = torch.topk(cat_s, k=k_keep, largest=True)
+                        best_scores, best_a, best_b = top_s, cat_a[keep], cat_b[keep]
+
+    bonf_thr = math.sqrt(4.0 * math.log(max(float(p), 2.0)))
+    bonf_z = F.softplus(max_z - bonf_thr) * valid_col.float()
+    epi_feats = torch.stack([max_z / 5.0, bonf_z / 3.0, second_z / 5.0, rms_z / 3.0], dim=-1)
+    epi_prio = 0.40 * torch.log1p(bonf_z)
+    return epi_feats, epi_prio, best_a, best_b
+
+
+@torch.no_grad()
+def _pair_empirical_corr(X_s: torch.Tensor, col_a: torch.Tensor, col_b: torch.Tensor) -> torch.Tensor:
+    """Vectorized empirical Pearson correlation for arbitrary column pairs (col_a[m], col_b[m])."""
+    if len(col_a) == 0:
+        return X_s.new_empty((0,))
+    xa = X_s[:, col_a]
+    xb = X_s[:, col_b]
+    xa_c = xa - xa.mean(dim=0, keepdim=True)
+    xb_c = xb - xb.mean(dim=0, keepdim=True)
+    num = (xa_c * xb_c).sum(dim=0)
+    den = (xa_c.square().sum(dim=0).clamp_min(1e-8) * xb_c.square().sum(dim=0).clamp_min(1e-8)).sqrt()
+    return (num / den).clamp(-1.0, 1.0)
+
+
 class _DeepSetsColumnBlock(nn.Module):
     """O(P) permutation-equivariant global context exchange across all P columns."""
 
@@ -681,8 +794,13 @@ class SparseTabularCausalPFN(nn.Module):
         s_dim = cfg.study_width
         v3 = bool(cfg.use_v3_solver_basis)
         v4 = bool(cfg.use_v4_interactions)
+        v5 = bool(cfg.use_v5_epistasis)
         col_stat_dim = COL_STAT_DIM_V3 if v3 else COL_STAT_DIM
-        rob_stat_dim = ROB_STAT_DIM_V4 if v4 else (ROB_STAT_DIM_V3 if v3 else ROB_STAT_DIM)
+        rob_stat_dim = (
+            ROB_STAT_DIM_V5
+            if v5
+            else (ROB_STAT_DIM_V4 if v4 else (ROB_STAT_DIM_V3 if v3 else ROB_STAT_DIM))
+        )
         corr_in_dim = 6 if v3 else 3
         basis_k = 4 if v3 else 2
 
@@ -972,6 +1090,7 @@ class SparseTabularCausalPFN(nn.Module):
             # 1. Context-only standardization & O(N * P) observational column stats
             v3 = bool(self.cfg.use_v3_solver_basis)
             v4 = bool(self.cfg.use_v4_interactions)
+            v5 = bool(self.cfg.use_v5_epistasis)
             X_s, X2_s, M_s, col_mean, col_sd, x2_mean, x2_sd, valid_col = _standardize_context(
                 X_ctx, M_ctx
             )
@@ -1159,6 +1278,7 @@ class SparseTabularCausalPFN(nn.Module):
             rob_feats, raw_mod_prio = _robinson_all_p_stats(
                 X_s, X2_s, t_res, y_res, valid_col, X_sat=X_sat, M_c=M_c
             )
+            epi_cand_a = epi_cand_b = None
             if v4:
                 r_ref = min(8, k1)
                 ref_score = (
@@ -1175,6 +1295,19 @@ class SparseTabularCausalPFN(nn.Module):
                 raw_mod_prio = torch.where(
                     valid_col, raw_mod_prio + cm_prio, raw_mod_prio.new_full((), -1e4)
                 )
+                if v5:
+                    k_cand = (
+                        self.cfg.epi_pair_k + self.cfg.pair_top_k * (self.cfg.pair_top_k - 1) // 2
+                        if self.cfg.epi_pair_k > 0
+                        else 0
+                    )
+                    epi_feats, epi_prio, epi_cand_a, epi_cand_b = _robinson_epistasis_all_pairs(
+                        X_s, t_res, y_res, valid_col, top_pairs=k_cand
+                    )
+                    rob_feats = torch.cat([rob_feats, epi_feats], dim=-1)
+                    raw_mod_prio = torch.where(
+                        valid_col, raw_mod_prio + epi_prio, raw_mod_prio.new_full((), -1e4)
+                    )
             h_col2 = h_col + self.rob_update(torch.cat([h_col, rob_feats], dim=-1))
             h_col2 = self.rob_global_block(h_col2)
             if v3:
@@ -1237,11 +1370,28 @@ class SparseTabularCausalPFN(nn.Module):
                     ca_i, cb_i = torch.triu_indices(k_pc, k_pc, offset=1, device=X_s.device)
                     cate_pair_a = cp_nodes[ca_i]
                     cate_pair_b = cp_nodes[cb_i]
+                    if (
+                        v5
+                        and self.cfg.epi_pair_k > 0
+                        and epi_cand_a is not None
+                        and len(epi_cand_a) > 0
+                    ):
+                        in_cp = torch.zeros(p, device=X_s.device, dtype=torch.bool)
+                        in_cp[cp_nodes] = True
+                        novel = ~(in_cp[epi_cand_a] & in_cp[epi_cand_b])
+                        ea = epi_cand_a[novel][: self.cfg.epi_pair_k]
+                        eb = epi_cand_b[novel][: self.cfg.epi_pair_k]
+                        if len(ea) > 0:
+                            cate_pair_a = torch.cat([cate_pair_a, ea], dim=0)
+                            cate_pair_b = torch.cat([cate_pair_b, eb], dim=0)
                     P_cate, cate_pair_mean, cate_pair_sd, cate_pair_weight, cate_pair_valid = (
                         _build_pairs_context(X_s, valid_col, cate_pair_a, cate_pair_b)
                     )
-                    corr_cp = self._empirical_corr(X_s[:, cp_nodes])
-                    corr_ab_c = corr_cp[ca_i, cb_i]
+                    if v5:
+                        corr_ab_c = _pair_empirical_corr(X_s, cate_pair_a, cate_pair_b)
+                    else:
+                        corr_cp = self._empirical_corr(X_s[:, cp_nodes])
+                        corr_ab_c = corr_cp[ca_i, cb_i]
                     cate_p_stats = self._cate_pair_stats(
                         P_cate, t_res, y_res, corr_ab_c, cate_pair_valid
                     )
@@ -1279,6 +1429,12 @@ class SparseTabularCausalPFN(nn.Module):
             attn_prio = (
                 full_gm + 1.5 * full_gt + 0.5 * full_ge + 1e-3 * (raw_nuis_prio.clamp(-10, 10) + raw_mod_prio.clamp(-10, 10))
             )
+            if v5 and v3:
+                full_ge_prop = torch.zeros(p, device=X_s.device, dtype=torch.float32)
+                full_ge_prop[nuis_idx] = (
+                    torch.stack([g_e_lin, g_e_nl, g_e_sat, g_e_miss], dim=-1).max(dim=-1).values.detach()
+                )
+                attn_prio = attn_prio + 0.35 * full_ge_prop
             attn_prio = torch.where(valid_col, attn_prio, attn_prio.new_full((), -1e5))
             k_attn = min(p, self.cfg.attn_slots)
             attn_idx = torch.topk(attn_prio, k_attn, largest=True).indices
@@ -1353,7 +1509,7 @@ class SparseTabularCausalPFN(nn.Module):
             context = self._assemble_context(ctx_slots, t_f, y_f, scale)
             attn_memories = []
             use_bf16 = context.is_cuda and torch.cuda.is_bf16_supported()
-            use_ckpt = self.training and v4 and n_ctx > 4000
+            use_ckpt = self.training and ((v5 and n_ctx > 1200) or (v4 and n_ctx > 4000))
             with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_bf16):
                 for i, layer in enumerate(self.study_layers):
                     if use_ckpt:

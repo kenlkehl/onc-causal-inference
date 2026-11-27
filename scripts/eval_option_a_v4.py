@@ -683,13 +683,13 @@ def parse_args() -> argparse.Namespace:
         "--presets",
         nargs="+",
         choices=sorted(OPTION_A_PRESETS),
-        default=["struct_only", "sent_256", "sent_256_lex_128", "option_a_temp128", "option_a_full"],
+        default=["sent_256", "struct_only", "sent_256_lex_128", "option_a_temp128", "option_a_full"],
     )
     p.add_argument(
         "--complex-presets",
         nargs="+",
         choices=sorted(OPTION_A_PRESETS),
-        default=["sent_256", "option_a_temp128", "option_a_full"],
+        default=["sent_256", "option_a_full"],
     )
     p.add_argument("--skip-stage2", action="store_true")
     p.add_argument("--skip-llm16", action="store_true")

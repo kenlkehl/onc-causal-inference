@@ -70,6 +70,7 @@ DGP_FAMILIES = (
     "tree_subgroup",
     "causal_scm",
     "interacting_clinical",
+    "universal_nonparametric",
 )
 
 _DEFAULT_DESIGN_BANK = (
@@ -145,8 +146,8 @@ class PriorConfig:
     missing_study_prob: float = 0.75
     max_missing_rate: float = 0.45
     factor_noise_rank: int = 12
-    # OCI-aligned 6-family multi-DGP mixture settings
-    family_weights: tuple[float, ...] = (0.20, 0.12, 0.18, 0.18, 0.16, 0.16)
+    # OCI-aligned 7-family universal multi-DGP mixture settings
+    family_weights: tuple[float, ...] = (0.16, 0.10, 0.16, 0.16, 0.14, 0.14, 0.14)
     design_bank_path: str | None = None
     design_split: str = "train"
     unmeasured_conf_prob: float = 0.25
@@ -162,8 +163,8 @@ class PriorConfig:
 
     def __post_init__(self):
         fw = tuple(float(w) for w in self.family_weights)
-        # Gracefully pad legacy 3-family or 5-family checkpoints with zeros for newer families
-        if len(fw) < len(DGP_FAMILIES) and len(fw) in (3, 5):
+        # Gracefully pad legacy 3-, 5-, or 6-family checkpoints with zeros for newer families
+        if len(fw) < len(DGP_FAMILIES) and len(fw) in (3, 5, 6):
             fw = fw + (0.0,) * (len(DGP_FAMILIES) - len(fw))
         object.__setattr__(self, "family_weights", fw)
         if len(self.family_weights) != len(DGP_FAMILIES) or any(w < 0 for w in self.family_weights):
@@ -812,14 +813,17 @@ def _sample_sparse_oci(
     is_null_hte = bool(rng.random() < prior.null_hte_prob)
     is_dense_conf = (p >= 80) and (rng.random() < prior.dense_conf_prob)
     if is_dense_conf:
-        # Dense weak-confounding regime (15-35 smaller confounders/prognostics)
-        n_conf = int(rng.integers(10, min(26, p // 4) + 1))
-        n_prog = int(rng.integers(4, min(14, p // 6) + 1))
+        # Dense polygenic/multi-biomarker regime (12-42 confounders, 4-26 modifiers)
+        n_conf = int(rng.integers(12, min(42, max(13, p // 3)) + 1))
+        n_prog = int(rng.integers(4, min(14, max(5, p // 6)) + 1))
     else:
         n_conf = int(rng.integers(1, min(8, max(2, p // 4)) + 1))
         n_prog = int(rng.integers(0, min(7, max(1, p // 5)) + 1))
     if is_null_hte:
         n_mod, n_dual = 0, 0
+    elif is_dense_conf:
+        n_mod = int(rng.integers(4, min(26, max(5, p // 4)) + 1))
+        n_dual = int(rng.integers(1, min(8, max(2, p // 8)) + 1))
     else:
         n_mod = int(rng.integers(0, min(5, max(1, p // 6)) + 1))
         n_dual = int(rng.integers(0, min(3, max(1, p // 8)) + 1))
@@ -829,8 +833,8 @@ def _sample_sparse_oci(
             else:
                 n_dual = 1
 
-    # Cap total active features
-    max_act = min(44 if is_dense_conf else prior.max_active, p - 2)
+    # Cap total active features (keeps >96% noise at P = 2,000 while supporting dense 50+ active at P=120)
+    max_act = min(72 if is_dense_conf else prior.max_active, max(4, p - 4))
     while n_conf + n_prog + n_mod + n_dual > max_act:
         if n_prog > 0:
             n_prog -= 1
@@ -2110,8 +2114,14 @@ def _sample_interacting_clinical(
                 t_signal += float(rng.normal(0.0, 0.70)) * _standardize_vec(term)
 
     # 2. Baseline outcome equation: confounders + prognostics + dual_role + pairwise interactions
+    # Decide pure-epistatic M1 x M2 mode upfront so pure epistatic modifiers have zero main effect on Y
+    ht_drivers_pre = np.concatenate([mod_idx, dual_idx])
+    can_epi = (len(ht_drivers_pre) >= 2) or (len(conf_idx) >= 1) or (len(prog_idx) >= 1)
+    is_pure_epistatic = (not is_null_hte) and len(ht_drivers_pre) > 0 and can_epi and (rng.random() < 0.38)
+    pure_mm_only = is_pure_epistatic and (len(mod_idx) >= 2) and (rng.random() < 0.50)
+
     y_drivers = np.concatenate([conf_idx, prog_idx, dual_idx])
-    if len(mod_idx) and rng.random() < 0.45:
+    if len(mod_idx) and (not pure_mm_only) and rng.random() < 0.45:
         y_drivers = np.concatenate([y_drivers, mod_idx])
     y_base = np.zeros(n_total, dtype=np.float32)
     if len(y_drivers):
@@ -2123,55 +2133,54 @@ def _sample_interacting_clinical(
                 a, b = rng.choice(len(y_drivers), size=2, replace=False)
                 y_base += float(rng.normal(0.0, 0.65)) * _standardize_vec(phi_y[:, a] * phi_y[:, b])
 
-    # 3. HTE equation: rich confounder x modifier, prognostic x modifier, modifier x modifier
+    # 3. HTE equation: rich confounder x modifier, prognostic x modifier, & pure M1 x M2 epistasis
     ht_drivers = np.concatenate([mod_idx, dual_idx])
     ht_part = np.zeros(n_total, dtype=np.float32)
-    is_pure_epistatic = False
     n_hte_inter = 0
     if not is_null_hte and len(ht_drivers) > 0:
         phi_ht = {int(c): _phi_col(int(c)) for c in ht_drivers}
         phi_c = {int(c): _phi_col(int(c)) for c in conf_idx}
         phi_p = {int(c): _phi_col(int(c)) for c in prog_idx}
 
-        # 30% pure epistatic crossover HTE (ZERO marginal modifier slope!)
-        can_epi = (len(ht_drivers) >= 2) or (len(conf_idx) >= 1) or (len(prog_idx) >= 1)
-        is_pure_epistatic = can_epi and (rng.random() < 0.30)
         if not is_pure_epistatic:
             for c in ht_drivers:
                 ht_part += float(rng.normal(0.0, 0.65)) * phi_ht[int(c)]
 
-        # Build 2-5 interaction terms prioritizing confounder x modifier, modifier x modifier, prog x mod
+        # Build 2-5 interaction terms; in pure_mm_only mode build strictly orthogonal M1 x M2 pairs
         n_target_inter = int(rng.integers(2, 6))
-        orth_pure = is_pure_epistatic and (rng.random() < 0.55)
+        orth_pure = is_pure_epistatic and (pure_mm_only or rng.random() < 0.65)
         for k_i in range(n_target_inter):
-            # Force at least one confounder x modifier interaction when available
-            choices = []
-            if len(conf_idx) >= 1:
-                choices.append("cm")
-                if k_i == 0:
-                    choices = ["cm"]
-            if len(ht_drivers) >= 2 and k_i > 0:
-                choices.append("mm")
-            elif len(ht_drivers) >= 2 and not choices:
-                choices.append("mm")
-            if len(prog_idx) >= 1 and (k_i > 0 or not choices):
-                choices.append("pm")
-            if not choices:
-                break
-            kind = str(rng.choice(choices))
-            if kind == "cm":
-                ca = int(rng.choice(conf_idx))
-                mb = int(rng.choice(ht_drivers))
-                va, vb = phi_c[ca], phi_ht[mb]
-                roles_core[ca] = ROLE_TO_ID["dual_role"]
-            elif kind == "pm":
-                pa = int(rng.choice(prog_idx))
-                mb = int(rng.choice(ht_drivers))
-                va, vb = phi_p[pa], phi_ht[mb]
-                roles_core[pa] = ROLE_TO_ID["modifier"]
-            else:
-                ma, mb = rng.choice(ht_drivers, size=2, replace=False)
+            if pure_mm_only:
+                ma, mb = rng.choice(mod_idx, size=2, replace=False)
                 va, vb = phi_ht[int(ma)], phi_ht[int(mb)]
+            else:
+                choices = []
+                if len(conf_idx) >= 1:
+                    choices.append("cm")
+                    if k_i == 0:
+                        choices = ["cm"]
+                if len(ht_drivers) >= 2 and k_i > 0:
+                    choices.append("mm")
+                elif len(ht_drivers) >= 2 and not choices:
+                    choices.append("mm")
+                if len(prog_idx) >= 1 and (k_i > 0 or not choices):
+                    choices.append("pm")
+                if not choices:
+                    break
+                kind = str(rng.choice(choices))
+                if kind == "cm":
+                    ca = int(rng.choice(conf_idx))
+                    mb = int(rng.choice(ht_drivers))
+                    va, vb = phi_c[ca], phi_ht[mb]
+                    roles_core[ca] = ROLE_TO_ID["dual_role"]
+                elif kind == "pm":
+                    pa = int(rng.choice(prog_idx))
+                    mb = int(rng.choice(ht_drivers))
+                    va, vb = phi_p[pa], phi_ht[mb]
+                    roles_core[pa] = ROLE_TO_ID["modifier"]
+                else:
+                    ma, mb = rng.choice(ht_drivers, size=2, replace=False)
+                    va, vb = phi_ht[int(ma)], phi_ht[int(mb)]
 
             if orth_pure:
                 term = _orthogonalize_interaction(va, vb)
@@ -2250,6 +2259,333 @@ def _sample_interacting_clinical(
     }
 
 
+# ==============================================================================
+# FAMILY 7: UNIVERSAL NONPARAMETRIC, HIGHER-ORDER EPISTASIS & DENSE PRIOR (v5)
+# ==============================================================================
+def _rbf_kernel_surface(X_sub: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Localized Gaussian & Laplace radial-basis kernel mixture over active feature subsets."""
+    n, d = X_sub.shape
+    if d == 0:
+        return np.zeros(n, dtype=np.float32)
+    n_bumps = int(rng.integers(8, 17))
+    out = np.zeros(n, dtype=np.float32)
+    for _ in range(n_bumps):
+        k_sub = int(rng.integers(1, min(7, d) + 1))
+        idx = rng.choice(d, size=k_sub, replace=False)
+        Xs = X_sub[:, idx]
+        center = Xs[int(rng.integers(0, n))] + rng.normal(0.0, 0.25, size=k_sub).astype(np.float32)
+        scale = rng.uniform(0.65, 2.2, size=k_sub).astype(np.float32) * math.sqrt(k_sub)
+        diff = (Xs - center[None, :]) / scale[None, :]
+        if rng.random() < 0.5:
+            bump = np.exp(-0.5 * np.sum(diff * diff, axis=1))
+        else:
+            bump = np.exp(-np.sum(np.abs(diff), axis=1))
+        out += float(rng.normal(0.0, 1.0)) * bump.astype(np.float32)
+    return _standardize_vec(out)
+
+
+def _mars_spline_surface(X_sub: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """MARS-style multivariate adaptive spline hinge products (1-, 2-, and 3-way)."""
+    n, d = X_sub.shape
+    if d == 0:
+        return np.zeros(n, dtype=np.float32)
+    n_terms = int(rng.integers(6, 15))
+    out = np.zeros(n, dtype=np.float32)
+    for _ in range(n_terms):
+        order = int(rng.integers(1, min(3, d) + 1))
+        idx = rng.choice(d, size=order, replace=False)
+        prod = np.ones(n, dtype=np.float32)
+        for j in idx:
+            knot = float(rng.uniform(-1.1, 1.1))
+            sign = 1.0 if rng.random() < 0.5 else -1.0
+            prod *= np.maximum(0.0, sign * (X_sub[:, int(j)] - knot))
+        if float(prod.std()) > 1e-5:
+            out += float(rng.normal(0.0, 1.0)) * _standardize_vec(prod)
+    return _standardize_vec(out)
+
+
+def _deep_res_mlp_surface(X_sub: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """3-layer LayerNorm-Swish residual neural field (general smooth high-order surface)."""
+    n, d = X_sub.shape
+    if d == 0:
+        return np.zeros(n, dtype=np.float32)
+    h_dim = int(rng.integers(20, 36))
+    W0 = rng.normal(0.0, 1.0 / math.sqrt(max(d, 1)), size=(d, h_dim)).astype(np.float32)
+    b0 = rng.normal(0.0, 0.35, size=(1, h_dim)).astype(np.float32)
+    h = X_sub @ W0 + b0
+    h = h * _expit(1.2 * h)  # smooth Swish
+    for _ in range(2):
+        mu = h.mean(axis=1, keepdims=True)
+        sd = np.maximum(h.std(axis=1, keepdims=True), 1e-4)
+        hn = (h - mu) / sd
+        Wl = rng.normal(0.0, 1.0 / math.sqrt(h_dim), size=(h_dim, h_dim)).astype(np.float32)
+        bl = rng.normal(0.0, 0.25, size=(1, h_dim)).astype(np.float32)
+        u = hn @ Wl + bl
+        h = h + 0.65 * (u * _expit(u))
+    w_out = rng.normal(0.0, 1.0 / math.sqrt(h_dim), size=h_dim).astype(np.float32)
+    return _standardize_vec((h @ w_out).astype(np.float32))
+
+
+def _higher_order_epistasis_surface(
+    X_sub: np.ndarray, rng: np.random.Generator, *, pure: bool = True
+) -> np.ndarray:
+    """Orthogonalized 2-way (M1 x M2) and 3-way (M1 x M2 x M3) epistatic crossover surface."""
+    n, d = X_sub.shape
+    if d == 0:
+        return np.zeros(n, dtype=np.float32)
+    if d == 1:
+        return _standardize_vec(X_sub[:, 0])
+    out = np.zeros(n, dtype=np.float32)
+    if not pure:
+        out += 0.35 * _standardize_vec(
+            (X_sub @ rng.normal(0.0, 1.0 / math.sqrt(d), size=d).astype(np.float32))
+        )
+    n_pairs = int(rng.integers(2, min(7, d * (d - 1) // 2 + 1) + 1))
+    for _ in range(n_pairs):
+        a, b = rng.choice(d, size=2, replace=False)
+        term = _orthogonalize_interaction(X_sub[:, int(a)], X_sub[:, int(b)])
+        if float(term.std()) > 1e-4:
+            out += float(rng.normal(0.0, 1.0)) * term
+    if d >= 3 and rng.random() < 0.65:
+        n_tri = int(rng.integers(1, min(4, d) + 1))
+        for _ in range(n_tri):
+            a, b, c = rng.choice(d, size=3, replace=False)
+            ab = _orthogonalize_interaction(X_sub[:, int(a)], X_sub[:, int(b)])
+            tri = _orthogonalize_interaction(ab, X_sub[:, int(c)])
+            if float(tri.std()) > 1e-4:
+                out += float(rng.normal(0.0, 0.85)) * tri
+    return _standardize_vec(out)
+
+
+def _eval_universal_surface(
+    X_sub: np.ndarray, mode: str, rng: np.random.Generator, *, pure_epi: bool = False
+) -> np.ndarray:
+    if X_sub.shape[1] == 0:
+        return np.zeros(len(X_sub), dtype=np.float32)
+    if mode == "rbf_kernel":
+        return _rbf_kernel_surface(X_sub, rng)
+    if mode == "mars_spline":
+        return _mars_spline_surface(X_sub, rng)
+    if mode == "deep_res_mlp":
+        return _deep_res_mlp_surface(X_sub, rng)
+    if mode == "higher_order_epistasis":
+        return _higher_order_epistasis_surface(X_sub, rng, pure=pure_epi)
+    # Composite mixture of two distinct universal function families
+    s1 = _rbf_kernel_surface(X_sub, rng) if rng.random() < 0.5 else _mars_spline_surface(X_sub, rng)
+    s2 = _deep_res_mlp_surface(X_sub, rng) if rng.random() < 0.5 else _higher_order_epistasis_surface(X_sub, rng, pure=False)
+    w = float(rng.uniform(0.3, 0.7))
+    return _standardize_vec(w * s1 + (1.0 - w) * s2)
+
+
+def _sample_universal_nonparametric(
+    n_total: int, p: int, prior: PriorConfig, rng: np.random.Generator
+) -> dict:
+    """Universal nonparametric, higher-order epistatic, and dense multi-biomarker causal prior.
+
+    Mixes localized RBF/Laplace kernel mixtures, 1-to-3-way MARS hinge splines, 3-layer residual
+    neural fields, and pure 2-/3-way orthogonal epistasis across both sparse and dense (up to 45
+    confounders + 35 modifiers) regimes, strictly distinct from benchmark Bochner-RFF equations.
+    """
+    is_null_hte = bool(rng.random() < prior.null_hte_prob)
+    is_dense = (p >= 100) and (rng.random() < max(prior.dense_conf_prob, 0.35))
+    surface_kind = str(
+        rng.choice(
+            ["rbf_kernel", "mars_spline", "deep_res_mlp", "higher_order_epistasis", "composite_mix"]
+        )
+    )
+    is_pure_epi = (
+        (not is_null_hte)
+        and (surface_kind == "higher_order_epistasis" or (not is_dense and rng.random() < 0.25))
+    )
+
+    if is_dense:
+        n_conf = int(rng.integers(15, min(42, max(16, p // 3)) + 1))
+        n_prog = int(rng.integers(4, min(14, max(5, p // 6)) + 1))
+        n_mod = 0 if is_null_hte else int(rng.integers(10, min(32, max(11, p // 4)) + 1))
+        n_dual = 0 if is_null_hte else int(rng.integers(2, min(10, max(3, p // 10)) + 1))
+    else:
+        n_conf = int(rng.integers(2, min(9, max(3, p // 4)) + 1))
+        n_prog = int(rng.integers(1, min(6, max(2, p // 5)) + 1))
+        n_mod = 0 if is_null_hte else int(rng.integers(2 if is_pure_epi else 1, min(7, max(3, p // 5)) + 1))
+        n_dual = 0 if is_null_hte else int(rng.integers(0, min(4, max(1, p // 8)) + 1))
+
+    max_act = min(75 if is_dense else 24, max(4, p - 4))
+    while n_conf + n_prog + n_mod + n_dual > max_act:
+        if n_prog > 1:
+            n_prog -= 1
+        elif n_conf > 2:
+            n_conf -= 1
+        elif n_mod > (2 if is_pure_epi else 1):
+            n_mod -= 1
+        elif n_dual > 0:
+            n_dual -= 1
+        else:
+            break
+    n_base = n_conf + n_prog + n_mod + n_dual
+
+    Z_base = _generate_factor_latents(n_total, n_base, min(prior.factor_noise_rank, 10), rng)
+    X_base, bin_base = _realize_column_types(Z_base, rng)
+    role_base = np.concatenate(
+        [
+            np.full(n_conf, ROLE_TO_ID["confounder"], dtype=np.int64),
+            np.full(n_prog, ROLE_TO_ID["prognostic"], dtype=np.int64),
+            np.full(n_mod, ROLE_TO_ID["modifier"], dtype=np.int64),
+            np.full(n_dual, ROLE_TO_ID["dual_role"], dtype=np.int64),
+        ]
+    )
+
+    cols_list, bin_list, role_list = [], [], []
+    use_cats = rng.random() < prior.categorical_block_prob
+    for j in range(n_base):
+        if use_cats and (len(cols_list) + 4 <= p - 4) and rng.random() < (0.15 if is_dense else 0.25):
+            n_lvl = int(rng.integers(3, 5))
+            dummies, _ = _make_categorical_dummy_block(Z_base[:, j], n_lvl, rng)
+            for d_i in range(dummies.shape[1]):
+                cols_list.append(dummies[:, d_i])
+                bin_list.append(True)
+                role_list.append(int(role_base[j]))
+        else:
+            cols_list.append(X_base[:, j])
+            bin_list.append(bool(bin_base[j]))
+            role_list.append(int(role_base[j]))
+
+    X_core = np.stack(cols_list, axis=1).astype(np.float32)
+    bin_core = np.asarray(bin_list, dtype=bool)
+    roles_core = np.asarray(role_list, dtype=np.int64)
+    X_std = (X_core - X_core.mean(axis=0, keepdims=True)) / np.maximum(
+        X_core.std(axis=0, keepdims=True), 1e-5
+    )
+
+    conf_idx = np.where(roles_core == ROLE_TO_ID["confounder"])[0]
+    prog_idx = np.where(roles_core == ROLE_TO_ID["prognostic"])[0]
+    mod_idx = np.where(roles_core == ROLE_TO_ID["modifier"])[0]
+    dual_idx = np.where(roles_core == ROLE_TO_ID["dual_role"])[0]
+
+    t_drivers = np.concatenate([conf_idx, dual_idx])
+    y_drivers = np.concatenate([conf_idx, prog_idx, dual_idx])
+    if len(mod_idx) and (not is_pure_epi) and rng.random() < 0.45:
+        y_drivers = np.concatenate([y_drivers, mod_idx])
+    ht_drivers = mod_idx if (is_pure_epi and len(mod_idx) >= 2 and rng.random() < 0.65) else np.concatenate([mod_idx, dual_idx])
+
+    t_mode = "composite_mix" if surface_kind == "higher_order_epistasis" else surface_kind
+    y_mode = "composite_mix" if surface_kind == "higher_order_epistasis" else surface_kind
+    t_lin = (
+        _standardize_vec(
+            X_std[:, t_drivers] @ rng.normal(0.0, 1.0 / math.sqrt(max(len(t_drivers), 1)), size=len(t_drivers)).astype(np.float32)
+        )
+        if len(t_drivers)
+        else np.zeros(n_total, dtype=np.float32)
+    )
+    t_nl = _eval_universal_surface(X_std[:, t_drivers], t_mode, rng, pure_epi=False)
+    wt_nl = float(rng.uniform(0.35, 0.85))
+    t_signal = _standardize_vec((1.0 - wt_nl) * t_lin + wt_nl * t_nl) if len(t_drivers) else np.zeros(n_total, dtype=np.float32)
+
+    y_lin = (
+        _standardize_vec(
+            X_std[:, y_drivers] @ rng.normal(0.0, 1.0 / math.sqrt(max(len(y_drivers), 1)), size=len(y_drivers)).astype(np.float32)
+        )
+        if len(y_drivers)
+        else np.zeros(n_total, dtype=np.float32)
+    )
+    y_nl = _eval_universal_surface(X_std[:, y_drivers], y_mode, rng, pure_epi=False)
+    wy_nl = float(rng.uniform(0.35, 0.85))
+    y_base = _standardize_vec((1.0 - wy_nl) * y_lin + wy_nl * y_nl) if len(y_drivers) else np.zeros(n_total, dtype=np.float32)
+
+    if not is_null_hte and len(ht_drivers) > 0:
+        if is_pure_epi:
+            ht_part = _higher_order_epistasis_surface(X_std[:, ht_drivers], rng, pure=True)
+        else:
+            ht_lin = _standardize_vec(
+                X_std[:, ht_drivers] @ rng.normal(0.0, 1.0 / math.sqrt(len(ht_drivers)), size=len(ht_drivers)).astype(np.float32)
+            )
+            ht_nl = _eval_universal_surface(X_std[:, ht_drivers], surface_kind, rng, pure_epi=False)
+            wh_nl = float(rng.uniform(0.45, 0.90))
+            ht_part = _standardize_vec((1.0 - wh_nl) * ht_lin + wh_nl * ht_nl)
+    else:
+        ht_part = np.zeros(n_total, dtype=np.float32)
+
+    # Optional observed & latent M-bias colliders
+    n_colliders = 0
+    if rng.random() < prior.collider_prob and (p - X_core.shape[1]) >= 4:
+        n_coll = int(rng.integers(1, min(4, p - X_core.shape[1] - 2) + 1))
+        u_t = rng.standard_normal(n_total).astype(np.float32)
+        u_y = rng.standard_normal(n_total).astype(np.float32)
+        coll_cols = []
+        for _ in range(n_coll):
+            c_val = (
+                float(rng.uniform(0.8, 1.3)) * u_t
+                + float(rng.uniform(0.8, 1.3)) * u_y
+                + float(rng.uniform(0.35, 0.75)) * rng.standard_normal(n_total).astype(np.float32)
+            )
+            coll_cols.append(_standardize_vec(c_val))
+        t_signal = t_signal + float(rng.uniform(0.40, 0.80)) * u_t
+        y_base = y_base + float(rng.uniform(0.40, 0.80)) * u_y
+        X_core = np.concatenate([X_core, np.stack(coll_cols, axis=1)], axis=1).astype(np.float32)
+        bin_core = np.concatenate([bin_core, np.zeros(n_coll, dtype=bool)])
+        roles_core = np.concatenate([roles_core, np.zeros(n_coll, dtype=np.int64)])
+        n_colliders = n_coll
+
+    n_unmeasured = 0
+    if rng.random() < prior.unmeasured_conf_prob:
+        n_unmeasured = int(rng.integers(1, 3))
+        U = rng.standard_normal((n_total, n_unmeasured)).astype(np.float32)
+        u_str = float(rng.uniform(0.25, 0.70))
+        t_signal += u_str * _standardize_vec(U @ rng.normal(0.0, 1.0, size=n_unmeasured).astype(np.float32))
+        y_base += u_str * _standardize_vec(U @ rng.normal(0.0, 1.0, size=n_unmeasured).astype(np.float32))
+
+    has_ext_noise = rng.random() < prior.extraction_noise_prob
+    if has_ext_noise:
+        X_core = _inject_extraction_noise(X_core, bin_core, np.arange(X_core.shape[1]), rng)
+
+    n_frag_dups = 0
+    if (p - X_core.shape[1]) >= 24:
+        X_core, bin_core, roles_core, n_frag_dups = _inject_fragmented_extractions(
+            X_core, bin_core, roles_core, p, prior, rng
+        )
+
+    X_full, _, roles_full, t_signal = _pad_with_noise_proxies_and_instruments(
+        X_core, bin_core, roles_core, t_signal, p, prior, rng
+    )
+    t_obs, y_obs, true_prop, true_y0, true_y1, true_ite, scale_mode = _finalize_outcomes(
+        t_signal, y_base, ht_part, not is_null_hte, prior, rng
+    )
+    X_obs, M, roles_full, miss_mode = _inject_missingness_and_3state(
+        X_full, y_base, roles_full, prior, rng
+    )
+
+    perm = rng.permutation(X_obs.shape[1])
+    return {
+        "X": X_obs[:, perm],
+        "M": M[:, perm],
+        "t": t_obs,
+        "y": y_obs,
+        "true_propensity": true_prop,
+        "true_y0": true_y0,
+        "true_y1": true_y1,
+        "true_ite": true_ite,
+        "roles": roles_full[perm],
+        "meta": {
+            "family": "universal_nonparametric",
+            "p": int(X_obs.shape[1]),
+            "n_active": int((roles_full >= 2).sum()),
+            "n_mod": int((roles_full == ROLE_TO_ID["modifier"]).sum()),
+            "n_dual": int((roles_full == ROLE_TO_ID["dual_role"]).sum()),
+            "n_inst": int((roles_full == ROLE_TO_ID["instrument"]).sum()),
+            "n_colliders": n_colliders,
+            "n_unmeasured": n_unmeasured,
+            "n_frag_dups": n_frag_dups,
+            "is_dense": is_dense,
+            "is_pure_epistatic": is_pure_epi,
+            "surface_kind": surface_kind,
+            "has_extraction_noise": has_ext_noise,
+            "is_null_hte": is_null_hte,
+            "mechanism": surface_kind,
+            "scale": scale_mode,
+            "missingness": miss_mode,
+        },
+    }
+
+
 def sample_tabular_study(
     seed: int,
     n_total: int,
@@ -2258,7 +2594,7 @@ def sample_tabular_study(
     prior: PriorConfig = PriorConfig(),
     family: str | None = None,
 ) -> dict:
-    """Sample one synthetic high-dimensional sparse tabular causal study from the 6-family prior.
+    """Sample one synthetic high-dimensional sparse tabular causal study from the 7-family prior.
 
     Returns a dictionary containing:
       - ``X``: ``(N, P)`` float32 array with ``np.nan`` for missing values
@@ -2291,7 +2627,8 @@ def sample_tabular_study(
         if not designs:
             w[2] = 0.0
         if w.sum() <= 0:
-            w = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            w = np.zeros(len(DGP_FAMILIES), dtype=np.float64)
+            w[0] = 1.0
         w /= w.sum()
         chosen = str(rng.choice(DGP_FAMILIES, p=w))
 
@@ -2305,4 +2642,6 @@ def sample_tabular_study(
         return _sample_causal_scm(n_total, p, prior, rng)
     if chosen == "interacting_clinical":
         return _sample_interacting_clinical(n_total, p, prior, rng)
+    if chosen == "universal_nonparametric":
+        return _sample_universal_nonparametric(n_total, p, prior, rng)
     return _sample_sparse_oci(n_total, p, prior, rng)

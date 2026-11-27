@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Option A (Zero-Shot Composition) full evaluation suite for finished Tabular PFN v4:
-#   - Frozen TinyOncBERT (6L/384D) + unmixed explicit longitudinal feature table
-#     (220d summary + 153d NaN-preserving nadir/peak + 64d ICD SVD + temporal SentKM-256 + 128d LexSVD)
-#     -> frozen finished SparseTabularCausalPFN v4 (best_checkpoint.pt)
+# Option A (Zero-Shot Composition) full evaluation suite for finished Tabular PFN (v4 / v5):
+#   - Default primary input structure: lean sent_256 (476 unmixed columns = 220d structured
+#     summary + 256d context-fitted frozen TinyOncBERT SentKM), benchmarked alongside struct_only,
+#     sent_256_lex_128, option_a_temp128, and option_a_full ablations.
 #   - Head-to-head vs Longitudinal Run 5 (step 1200) across:
 #       Suite 1: Real OCI Stage-2 extracted catalogs (S0/n1000/seed101 & seed102, raw unmasked)
 #       Suite 2: 16 Full-LLM realistic cohorts (N_ctx = 800 and N_ctx = 200)

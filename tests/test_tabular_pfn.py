@@ -541,7 +541,7 @@ def test_v3_five_family_prior_basis_decoupling_and_invariance():
     assert legacy_prior.family_weights[3:] == (0.0,) * (len(DGP_FAMILIES) - 3)
     legacy_v3_prior = PriorConfig(family_weights=(0.30, 0.15, 0.20, 0.18, 0.17))
     assert len(legacy_v3_prior.family_weights) == len(DGP_FAMILIES)
-    assert legacy_v3_prior.family_weights[5:] == (0.0,)
+    assert legacy_v3_prior.family_weights[5:] == (0.0,) * (len(DGP_FAMILIES) - 5)
 
     # 2. Verify new families (tree_subgroup, causal_scm) + fragmented dups + M-bias colliders
     ep_tree = sample_tabular_study(
@@ -862,3 +862,176 @@ def test_v4_six_family_interacting_prior_pairwise_ard_and_invariance():
         )
         m_ld, sv = load_tabular_run(v4_dir, "cpu", prefer_best=False)
         assert sv["step"] == 1 and m_ld.cfg.use_v4_interactions is True and m_ld.cfg.pair_top_k == 6
+
+
+def test_v5_universal_prior_all_pairs_epistasis_and_invariance():
+    from oci.tabular_pfn.model import _robinson_epistasis_all_pairs
+    from oci.tabular_pfn.training import _auroc_binary
+
+    # 1. Verify Family 7 (universal_nonparametric): all 5 surface kinds, dense mode, zero miss shortcut
+    n_dense = 0
+    n_epi = 0
+    surface_kinds = set()
+    aucs = []
+    prior_v5 = PriorConfig(null_hte_prob=0.0, dense_conf_prob=0.50)
+    for i in range(20):
+        ep = sample_tabular_study(
+            9100 + i, n_total=220, num_features=240, prior=prior_v5, family="universal_nonparametric"
+        )
+        assert ep["X"].shape == (220, 240)
+        assert ep["meta"]["family"] == "universal_nonparametric"
+        assert np.all(np.isfinite(ep["true_ite"]))
+        surface_kinds.add(ep["meta"]["surface_kind"])
+        if ep["meta"]["is_dense"]:
+            n_dense += 1
+        if ep["meta"]["is_pure_epistatic"]:
+            n_epi += 1
+        mr = ep["M"].mean(axis=0)
+        if mr.std() > 1e-6 and (ep["roles"] != 0).any() and (ep["roles"] == 0).any():
+            aucs.append(_auroc_binary((ep["roles"] != 0).astype(float), mr))
+    assert n_dense >= 2 and n_epi >= 1 and len(surface_kinds) >= 3
+    assert len(aucs) >= 8 and 0.40 <= float(np.mean(aucs)) <= 0.62
+
+    # Verify legacy 6-family checkpoint family_weights pad cleanly to 7
+    p_leg = PriorConfig(family_weights=(0.20, 0.12, 0.18, 0.18, 0.16, 0.16))
+    assert len(p_leg.family_weights) == len(DGP_FAMILIES) and p_leg.family_weights[-1] == 0.0
+
+    # 2. Direct pure M1 x M2 epistasis detection test (ZERO 1D main effect on T, Y, or tau!)
+    rng_ep = np.random.default_rng(77)
+    n_syn, p_syn = 1200, 180
+    X_syn = torch.tensor(rng_ep.standard_normal((n_syn, p_syn)), dtype=torch.float32)
+    t_res = torch.tensor(rng_ep.choice([-0.5, 0.5], size=n_syn), dtype=torch.float32)
+    # True CATE depends strictly on orthogonal product X[:, 17] * X[:, 83]
+    y_res = t_res * (0.9 * X_syn[:, 17] * X_syn[:, 83]) + 0.35 * torch.tensor(
+        rng_ep.standard_normal(n_syn), dtype=torch.float32
+    )
+    valid_syn = torch.ones(p_syn, dtype=torch.bool)
+    epi_feats, epi_prio, cand_a, cand_b = _robinson_epistasis_all_pairs(
+        X_syn, t_res, y_res, valid_syn, top_pairs=16, block_size=64
+    )
+    assert epi_feats.shape == (p_syn, 4)
+    assert len(cand_a) >= 1 and {int(cand_a[0].item()), int(cand_b[0].item())} == {17, 83}
+    top2_cols = set(torch.topk(epi_prio, 2).indices.tolist())
+    assert top2_cols == {17, 83}
+
+    # 3. Verify v5 config validation + backward compat with v4 config dicts
+    with pytest.raises(ValueError):
+        TabularModelConfig(use_v3_solver_basis=True, use_v4_interactions=False, use_v5_epistasis=True)
+    cfg_v4_dict = {
+        "col_dim": 32, "study_width": 32, "study_layers": 1, "col_attn_layers": 1,
+        "heads": 4, "bins": 17, "top_k_nuis": 16, "top_k_cate": 12, "attn_slots": 8,
+        "decouple_rlearner_propensity": True, "use_v3_solver_basis": True, "use_v4_interactions": True,
+    }
+    assert TabularModelConfig(**cfg_v4_dict).use_v5_epistasis is False
+
+    # 4. v5 forward/backward: ZERO prop_loss gradient into g_er, log_lam_er, g_per + 100% grad coverage
+    torch.manual_seed(55)
+    cfg_v5 = TabularModelConfig(
+        col_dim=32,
+        study_width=32,
+        study_layers=2,
+        col_attn_layers=2,
+        heads=4,
+        bins=17,
+        top_k_nuis=24,
+        top_k_cate=16,
+        attn_slots=12,
+        pair_top_k=8,
+        epi_pair_k=10,
+        ridge_grid_size=5,
+        decouple_rlearner_propensity=True,
+        use_v3_solver_basis=True,
+        use_v4_interactions=True,
+        use_v5_epistasis=True,
+    )
+    m_v5 = SparseTabularCausalPFN(cfg_v5)
+    ep_v5 = sample_tabular_study(
+        9201,
+        n_total=140,
+        num_features=160,
+        prior=PriorConfig(null_hte_prob=0.0, fragmented_dup_prob=1.0, missing_study_prob=1.0),
+        family="universal_nonparametric",
+    )
+    Xc = torch.from_numpy(ep_v5["X"][:100]); Mc = torch.from_numpy(ep_v5["M"][:100])
+    tc = torch.from_numpy(ep_v5["t"][:100]); yc = torch.from_numpy(ep_v5["y"][:100])
+    Xq = torch.from_numpy(ep_v5["X"][100:]); Mq = torch.from_numpy(ep_v5["M"][100:])
+    ora = torch.from_numpy(np.stack([ep_v5["true_y0"][100:], ep_v5["true_y1"][100:]], axis=1))
+    tp = torch.from_numpy(ep_v5["true_propensity"][100:])
+    roles = torch.from_numpy(ep_v5["roles"])
+
+    ol, pl, sc, mem = m_v5(Xc, tc, yc, Xq, M_ctx=Mc, M_q=Mq)
+    # 8*7/2 = 28 cp_nodes pairs + up to 10 global discovered epistatic pairs
+    assert mem.g_ptau is not None and len(mem.g_ptau) == 28 + 10
+    prop_only = torch.nn.functional.binary_cross_entropy_with_logits(pl, tp)
+    prop_only.backward()
+    assert m_v5.log_lam_er.grad is None
+    assert m_v5.nuis_gate_head[-1].weight.grad[4:8].abs().sum().item() == 0.0
+    assert m_v5.nuis_pair_gate_head[-1].weight.grad[1].abs().sum().item() == 0.0
+    assert m_v5.nuis_pair_gate_head[-1].weight.grad[0].abs().sum().item() > 0.0
+
+    m_v5.zero_grad(set_to_none=True)
+    ol, pl, sc, mem = m_v5(Xc, tc, yc, Xq, M_ctx=Mc, M_q=Mq)
+    loss, _ = m_v5.loss_components(
+        ol, pl, sc, ora, tp,
+        role_logits=mem.role_logits,
+        nuis_screen_logits=mem.nuis_screen_logits,
+        mod_screen_logits=mem.mod_screen_logits,
+        true_roles=roles,
+    )
+    assert torch.isfinite(loss)
+    loss.backward()
+    grads = [p.grad for p in m_v5.parameters() if p.grad is not None]
+    assert len(grads) == sum(1 for _ in m_v5.parameters())
+    assert all(torch.isfinite(g).all() for g in grads)
+
+    # 5. Exact simultaneous row + column permutation invariance on v5
+    m_v5.eval()
+    ep_p = sample_tabular_study(
+        9202,
+        n_total=90,
+        num_features=45,
+        prior=PriorConfig(null_hte_prob=0.0, fragmented_dup_prob=1.0, missing_study_prob=1.0),
+        family="universal_nonparametric",
+    )
+    Xc2 = torch.from_numpy(ep_p["X"][:70]); Mc2 = torch.from_numpy(ep_p["M"][:70])
+    tc2 = torch.from_numpy(ep_p["t"][:70]); yc2 = torch.from_numpy(ep_p["y"][:70])
+    Xq2 = torch.from_numpy(ep_p["X"][70:]); Mq2 = torch.from_numpy(ep_p["M"][70:])
+    rng = np.random.default_rng(59)
+    rp = torch.from_numpy(rng.permutation(70))
+    cp = torch.from_numpy(rng.permutation(45))
+    with torch.no_grad():
+        o1, p1, s1, mem1 = m_v5(Xc2, tc2, yc2, Xq2, M_ctx=Mc2, M_q=Mq2)
+        m1, sd1 = m_v5.risk_stats(o1, s1)
+        o2, p2, s2, mem2 = m_v5(
+            Xc2[rp][:, cp], tc2[rp], yc2[rp], Xq2[:, cp], M_ctx=Mc2[rp][:, cp], M_q=Mq2[:, cp]
+        )
+        m2, sd2 = m_v5.risk_stats(o2, s2)
+        torch.testing.assert_close(m1, m2, atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(sd1, sd2, atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(p1.sigmoid(), p2.sigmoid(), atol=5e-4, rtol=5e-4)
+        torch.testing.assert_close(mem1.role_logits[cp], mem2.role_logits, atol=5e-4, rtol=5e-4)
+
+    # 6. CLI end-to-end v5 train + reload smoke test
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as td:
+        v5_dir = Path(td) / "v5_smoke"
+        main(
+            [
+                "train", "--run-dir", str(v5_dir), "--steps", "1",
+                "--min-context-size", "40", "--context-size", "50", "--query-size", "12",
+                "--min-features", "20", "--max-features", "35",
+                "--family-weights", "0.16,0.10,0.16,0.16,0.14,0.14,0.14",
+                "--dense-conf-prob", "0.30",
+                "--col-dim", "32", "--study-width", "32", "--study-layers", "1",
+                "--col-attn-layers", "1", "--heads", "4", "--top-k-nuis", "16",
+                "--top-k-cate", "12", "--attn-slots", "8", "--pair-top-k", "6",
+                "--epi-pair-k", "8", "--bins", "17",
+                "--decouple-rlearner-propensity", "--use-v3-solver-basis",
+                "--use-v4-interactions", "--use-v5-epistasis",
+                "--grad-accum-steps", "1", "--eval-every", "0", "--save-every", "1",
+                "--device", "cpu",
+            ]
+        )
+        m_ld, sv = load_tabular_run(v5_dir, "cpu", prefer_best=False)
+        assert sv["step"] == 1 and m_ld.cfg.use_v5_epistasis is True and m_ld.cfg.epi_pair_k == 8

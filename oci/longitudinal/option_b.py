@@ -3,11 +3,12 @@
 Architecture overview
 ---------------------
 * **Option A (Zero-Shot Composition):**
-  Combines a frozen distilled clinical encoder (``TinyOncBERT``) with explicit unmixed
-  longitudinal patient features (220-d structured summary + 153-d NaN-preserving nadir/peak/delta
-  + context-fitted 64-d ICD/CPT SVD + context-fitted spherical k-means sentence MaxSim over all
-  notes and latest note + context-fitted 128-d lexical 1-3gram SVD) and feeds them directly into
-  a frozen ``SparseTabularCausalPFN`` v4 head.
+  Combines a frozen distilled clinical encoder (``TinyOncBERT``) with lean unmixed
+  longitudinal patient features (default ``sent_256``: 220-d structured summary + 256-d
+  context-fitted spherical k-means sentence MaxSim over all notes; optional ``option_a_full``
+  adds 153-d NaN-preserving nadir/peak/delta, 64-d ICD/CPT SVD, 256-d latest-note SentKM,
+  and 128-d lexical 1-3gram SVD) and feeds them directly into a frozen
+  ``SparseTabularCausalPFN`` head.
 
 * **Option B (v6 Hybrid Warm-Started Fine-Tuning):**
   Keeps ``TinyOncBERT`` completely frozen (preserving full-LLM note generalization and avoiding
@@ -65,8 +66,10 @@ from oci.tabular_pfn.model import (
     _column_sufficient_stats,
     _compute_v3_basis_context,
     _fit_ard_loo_cv_ridge,
+    _pair_empirical_corr,
     _robinson_all_p_stats,
     _robinson_confounder_mod_stats,
+    _robinson_epistasis_all_pairs,
     _standardize_context,
 )
 from oci.tabular_pfn.prior import PriorConfig, sample_tabular_study
@@ -144,13 +147,18 @@ STRUCTURED_STREAMS = ("labs", "vitals", "encounters", "pros")
 # ==============================================================================
 @dataclass(frozen=True)
 class OptionAFeatureConfig:
-    """Configuration for deterministic explicit longitudinal multimodal feature extraction."""
+    """Configuration for deterministic explicit longitudinal multimodal feature extraction.
 
-    include_nadir_peak: bool = True
-    icd_svd_dim: int = 64
+    Defaults to the lean ``sent_256`` structure (220-d structured summary + 256-d context-fitted
+    TinyOncBERT spherical k-means sentence MaxSim = 476 columns), which outperformed wider
+    collinear feature tables zero-shot on full-LLM cohorts.
+    """
+
+    include_nadir_peak: bool = False
+    icd_svd_dim: int = 0
     sent_km_k: int = 256
-    include_latest_sent_km: bool = True
-    lex_svd_dim: int = 128
+    include_latest_sent_km: bool = False
+    lex_svd_dim: int = 0
     sent_batch_size: int = 256
     sent_max_length: int = 96
 
@@ -988,6 +996,7 @@ class MultimodalTabularPFN(nn.Module):
         cfg = head.cfg
         v3 = bool(cfg.use_v3_solver_basis)
         v4 = bool(cfg.use_v4_interactions)
+        v5 = bool(cfg.use_v5_epistasis)
         keep_learned = (
             self.option_b_cfg.always_screen_learned_cols
             if always_screen_learned_cols is None
@@ -1225,6 +1234,7 @@ class MultimodalTabularPFN(nn.Module):
             rob_feats, raw_mod_prio = _robinson_all_p_stats(
                 X_s, X2_s, t_res, y_res, valid_col, X_sat=X_sat, M_c=M_c
             )
+            epi_cand_a = epi_cand_b = None
             if v4:
                 r_ref = min(8, k1)
                 ref_score = (
@@ -1243,6 +1253,19 @@ class MultimodalTabularPFN(nn.Module):
                 raw_mod_prio = torch.where(
                     valid_col, raw_mod_prio + cm_prio, raw_mod_prio.new_full((), -1e4)
                 )
+                if v5:
+                    k_cand = (
+                        cfg.epi_pair_k + cfg.pair_top_k * (cfg.pair_top_k - 1) // 2
+                        if cfg.epi_pair_k > 0
+                        else 0
+                    )
+                    epi_feats, epi_prio, epi_cand_a, epi_cand_b = _robinson_epistasis_all_pairs(
+                        X_s, t_res, y_res, valid_col, top_pairs=k_cand
+                    )
+                    rob_feats = torch.cat([rob_feats, epi_feats], dim=-1)
+                    raw_mod_prio = torch.where(
+                        valid_col, raw_mod_prio + epi_prio, raw_mod_prio.new_full((), -1e4)
+                    )
             h_col2 = h_col + head.rob_update(torch.cat([h_col, rob_feats], dim=-1))
             h_col2 = head.rob_global_block(h_col2)
             if v3:
@@ -1319,11 +1342,28 @@ class MultimodalTabularPFN(nn.Module):
                     ca_i, cb_i = torch.triu_indices(k_pc, k_pc, offset=1, device=X_s.device)
                     cate_pair_a = cp_nodes[ca_i]
                     cate_pair_b = cp_nodes[cb_i]
+                    if (
+                        v5
+                        and cfg.epi_pair_k > 0
+                        and epi_cand_a is not None
+                        and len(epi_cand_a) > 0
+                    ):
+                        in_cp = torch.zeros(p, device=X_s.device, dtype=torch.bool)
+                        in_cp[cp_nodes] = True
+                        novel = ~(in_cp[epi_cand_a] & in_cp[epi_cand_b])
+                        ea = epi_cand_a[novel][: cfg.epi_pair_k]
+                        eb = epi_cand_b[novel][: cfg.epi_pair_k]
+                        if len(ea) > 0:
+                            cate_pair_a = torch.cat([cate_pair_a, ea], dim=0)
+                            cate_pair_b = torch.cat([cate_pair_b, eb], dim=0)
                     P_cate, cate_pair_mean, cate_pair_sd, cate_pair_weight, cate_pair_valid = (
                         _build_pairs_context_diff(X_s, valid_col, cate_pair_a, cate_pair_b)
                     )
-                    corr_cp = head._empirical_corr(X_s[:, cp_nodes])
-                    corr_ab_c = corr_cp[ca_i, cb_i]
+                    if v5:
+                        corr_ab_c = _pair_empirical_corr(X_s, cate_pair_a, cate_pair_b)
+                    else:
+                        corr_cp = head._empirical_corr(X_s[:, cp_nodes])
+                        corr_ab_c = corr_cp[ca_i, cb_i]
                     cate_p_stats = head._cate_pair_stats(
                         P_cate, t_res, y_res, corr_ab_c, cate_pair_valid
                     )
@@ -1364,6 +1404,12 @@ class MultimodalTabularPFN(nn.Module):
                 + 0.5 * full_ge
                 + 1e-3 * (raw_nuis_prio.clamp(-10, 10) + raw_mod_prio.clamp(-10, 10))
             )
+            if v5 and v3:
+                full_ge_prop = torch.zeros(p, device=X_s.device, dtype=torch.float32)
+                full_ge_prop[nuis_idx] = (
+                    torch.stack([g_e_lin, g_e_nl, g_e_sat, g_e_miss], dim=-1).max(dim=-1).values.detach()
+                )
+                attn_prio = attn_prio + 0.35 * full_ge_prop
             attn_prio = torch.where(valid_col, attn_prio, attn_prio.new_full((), -1e5))
             k_attn = min(p, cfg.attn_slots)
             attn_idx = torch.topk(attn_prio, k_attn, largest=True).indices
@@ -1437,7 +1483,7 @@ class MultimodalTabularPFN(nn.Module):
             context = head._assemble_context(ctx_slots, t_f, y_f, scale)
             attn_memories = []
             use_bf16 = context.is_cuda and torch.cuda.is_bf16_supported()
-            use_ckpt = head.training and v4 and n_ctx > 4000
+            use_ckpt = head.training and ((v5 and n_ctx > 1200) or (v4 and n_ctx > 4000))
             with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_bf16):
                 for i, layer in enumerate(head.study_layers):
                     if use_ckpt:
@@ -2456,7 +2502,7 @@ def _build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--event-heads", type=int, default=4)
     tr.add_argument("--temporal-chunk-size", type=int, default=1024)
     tr.add_argument("--no-always-screen-learned", action="store_true")
-    tr.add_argument("--feature-preset", choices=sorted(OPTION_A_PRESETS), default="option_a_full")
+    tr.add_argument("--feature-preset", choices=sorted(OPTION_A_PRESETS), default="sent_256")
     tr.add_argument("--steps", type=int, default=1200)
     tr.add_argument("--grad-accum-steps", type=int, default=8)
     tr.add_argument("--multimodal-prob", type=float, default=0.5)
