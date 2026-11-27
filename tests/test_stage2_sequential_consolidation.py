@@ -130,3 +130,94 @@ def test_created_latent_replaces_components_in_later_retrieval(tmp_path, monkeyp
         consolidated[entries[0]["name"]],
         equal_nan=True,
     )
+
+
+def _unrelated_values(count: int) -> np.ndarray:
+    # A fixed permutation with near-zero rank correlation to arange(count).
+    return np.asarray([7, 15, 2, 11, 19, 0, 13, 5, 17, 9, 3, 18, 1, 12, 6, 16, 10, 4, 14, 8],
+                      dtype=float)[:count]
+
+
+def test_only_neighbors_meeting_the_association_bar_are_offered(tmp_path, monkeypatch):
+    definitions = [
+        _continuous("a", "first_burden"),
+        _continuous("b", "second_burden"),
+        _continuous("c", "unrelated_burden"),
+    ]
+    frame = pd.DataFrame(
+        {
+            "_oci_row_id": np.arange(20),
+            "first_burden": np.arange(20, dtype=float),
+            "second_burden": np.arange(20, dtype=float),
+            "unrelated_burden": _unrelated_values(20),
+        }
+    )
+    requests = []
+    from oci.inference import stage2_sequential_consolidation as module
+    original = module._decision_messages
+
+    def capture(step_input, **kwargs):
+        requests.append(step_input)
+        return original(step_input, **kwargs)
+
+    monkeypatch.setattr(module, "_decision_messages", capture)
+
+    def request_json(messages, validate, *, request_kind="interpretation", **_repair):
+        assert "unrelated burden" not in messages[1]["content"].lower()
+        assert "first burden" in messages[1]["content"].lower()
+        return validate({"action": "keep", "reason": "Kept for this test."})
+
+    _frame, active, report, entries = consolidate_stage2_candidates(
+        extracted_fit=frame,
+        definitions=definitions,
+        request_json=request_json,
+        policy=Stage2SequentialConsolidationConfig(
+            enabled=True, neighbor_count=2, embedding_model="test-model", embedding_device="cpu"),
+        output_dir=tmp_path / "consolidation",
+        request_model="test-llm",
+        embedding_function=_embedding,
+    )
+
+    # Pivots a and b each have one qualifying neighbor (each other); c has none.
+    assert [{f["feature_id"] for f in step["features"]} for step in requests] == [
+        {"a", "b"}, {"a", "b"}]
+    assert all(step["retrieved_neighbor_count"] == 2 and step["neighbor_count"] == 1
+               for step in requests)
+    assert [len(step["pairwise_associations"]) for step in requests] == [1, 1]
+    statuses = {step["pivot_feature_id"]: step["status"] for step in report["steps"]}
+    assert statuses == {"a": "left_unchanged", "b": "left_unchanged",
+                        "c": "left_unchanged_no_neighbor_meets_association"}
+    assert entries == []
+    assert [feature["feature_id"] for feature in active] == ["a", "b", "c"]
+
+
+def test_no_request_when_no_neighbor_meets_the_association_bar(tmp_path):
+    definitions = [_continuous("a", "first_burden"), _continuous("c", "unrelated_burden")]
+    frame = pd.DataFrame(
+        {
+            "_oci_row_id": np.arange(20),
+            "first_burden": np.arange(20, dtype=float),
+            "unrelated_burden": _unrelated_values(20),
+        }
+    )
+
+    def unexpected_request(*_args, **_kwargs):
+        raise AssertionError("a step whose only valid outcome is leave_unchanged sends no request")
+
+    _frame, active, report, entries = consolidate_stage2_candidates(
+        extracted_fit=frame,
+        definitions=definitions,
+        request_json=unexpected_request,
+        policy=Stage2SequentialConsolidationConfig(
+            enabled=True, neighbor_count=1, embedding_model="test-model", embedding_device="cpu"),
+        output_dir=tmp_path / "consolidation",
+        request_model="test-llm",
+        embedding_function=_embedding,
+    )
+
+    assert [step["status"] for step in report["steps"]] == [
+        "left_unchanged_no_neighbor_meets_association"] * 2
+    assert report["steps"][0]["retrieved_feature_ids"] == ["c"]
+    assert entries == []
+    assert [feature["feature_id"] for feature in active] == ["a", "c"]
+    assert not (tmp_path / "consolidation" / "steps").exists()

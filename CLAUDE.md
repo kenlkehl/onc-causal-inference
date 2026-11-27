@@ -224,7 +224,10 @@ extraction-failure filter
 (`min_informative_patients`, `max_extraction_failure_fraction`) → optional
 estimand search → selection consolidation (post-extraction merging of
 equivalent measurements; on by default for all-evidence runs through
-`_selection_consolidation_mapping`, off for explicit-only and tabular) →
+`_selection_consolidation_mapping`, off for explicit-only and tabular; each
+visited variable is offered to the LLM only with the embedding neighbors whose
+association with it meets `minimum_pairwise_association`, and with none it is
+left unchanged without a request) →
 resampled evidence families and
 predictive nuisance selection (under `orthogonal_tests` only the nuisance
 models and the univariable treatment/outcome associations run; the effect-only

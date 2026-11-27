@@ -252,13 +252,18 @@ between duplicates. Merged variables are represented as derived variables
    active and not protected, the `neighbor_count` most similar active
    candidates are retrieved by cosine similarity of sentence embeddings of
    their names, descriptions, and measurement rules.
-2. Pairwise associations among those candidates are computed on
-   outer-training values: absolute Spearman correlation between continuous
-   variables, bias-corrected Cramér's V between categorical variables, and the
-   correlation ratio for mixed pairs, plus missingness overlap and paired
-   agreement.
-3. One interpretation-LLM request receives the definitions and pairwise
-   comparisons and answers `keep` or `merge`. A merge defines the derived
+2. The association of the visited candidate with each retrieved candidate is
+   computed on outer-training values: absolute Spearman correlation between
+   continuous variables, bias-corrected Cramér's V between categorical
+   variables, and the correlation ratio for mixed pairs. An accepted merge must
+   include the visited candidate and meet the association rule in step 4 for
+   every source pair, so only the retrieved candidates that meet it with the
+   visited candidate stay in the cluster. When none does, the visited
+   candidate is left unchanged without an LLM request.
+3. Associations among the remaining candidates are added, with missingness
+   overlap and paired agreement for every pair. One interpretation-LLM request
+   receives the definitions and pairwise comparisons and answers `keep` or
+   `merge`. A merge defines the derived
    variable as either the first available source value (coalesce) or a
    lossless recoding of source categories.
 4. A merge is accepted only if every check passes:
@@ -293,11 +298,11 @@ unless a configuration enables it (tabular runs do not accept it).
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` for all-evidence runs, `false` otherwise | Run the step |
-| `neighbor_count` | 10 | Similar candidates compared with each visited candidate |
+| `neighbor_count` | 10 | Similar candidates retrieved for each visited candidate, before the association screen |
 | `embedding_model`, `embedding_device` | `Qwen/Qwen3-Embedding-0.6B`, `cpu` | Sentence embedding model for retrieval (`auto` device allowed) |
 | `max_latents_per_cluster` | 2 | Maximum derived variables per merge decision |
 | `minimum_pairwise_complete_rows` | 10 | Minimum jointly observed patients per source pair |
-| `minimum_pairwise_association` | 0.85 | Minimum association per source pair |
+| `minimum_pairwise_association` | 0.85 | Minimum association per source pair; retrieved candidates below it with the visited candidate are not offered |
 | `categorical_rare_level_min_count` | 5 | Rare categorical levels are pooled when computing associations |
 | `latent_min_coverage` | 0.05 | Minimum observed fraction of a derived variable |
 | `protect_explicit_features` | `true` | Never merge investigator-specified features |
@@ -307,11 +312,12 @@ unless a configuration enables it (tabular runs do not accept it).
 **Caveats.**
 
 - Treatment and outcome are never used.
-- Cost: up to one sequential request per candidate per outer fold, plus
-  repairs, and loading the embedding model.
+- Cost: one sequential request per visited candidate that has a retrieved
+  candidate meeting the association rule, plus repairs, and loading the
+  embedding model.
 - Outputs per fold: `selection/candidate_consolidation/` (`report.json`,
   `registry.json` of derived variables, and one `steps/step_NNNN_*` directory
-  per decision), `selection/nuisance_candidates.json`, and
+  per LLM decision; steps without a request appear only in `report.json`), `selection/nuisance_candidates.json`, and
   `selection/selected_latent_states.json`.
 
 ## Standalone explicit-feature workflows (`oci run`)

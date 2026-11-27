@@ -37,7 +37,7 @@ from scipy import stats
 from ..extraction.llm_routing import configured_api_key
 from .stage2_statistical_selection import _feature_strategy
 
-SCHEMA_VERSION = "stage2_sequential_equivalent_measurement_consolidation_v5_clinical_prompts"
+SCHEMA_VERSION = "stage2_sequential_equivalent_measurement_consolidation_v6_pivot_association_screen"
 SELECTION_SCHEMA_VERSION = (
     "stage2_all_evidence_llm_role_selection_v1"
 )
@@ -1037,6 +1037,16 @@ def _validate_observed_alias_agreement(
             )
 
 
+def _meets_association_threshold(evidence: Mapping[str, Any], threshold: float) -> bool:
+    """Whether a pair's evidence passes the source-pair rule of an accepted merge."""
+
+    association = evidence.get("association")
+    if not evidence.get("evaluable") or association is None:
+        return False
+    value = float(association)
+    return math.isfinite(value) and value >= float(threshold)
+
+
 def _validate_pairwise_association_threshold(
     proposal: Mapping[str, Any],
     *,
@@ -1057,6 +1067,8 @@ def _validate_pairwise_association_threshold(
                 definitions_by_id[right_id],
                 **association_policy,
             )
+            if _meets_association_threshold(evidence, threshold):
+                continue
             association = evidence.get("association")
             if not evidence.get("evaluable") or association is None:
                 raise ValueError(
@@ -1064,13 +1076,11 @@ def _validate_pairwise_association_threshold(
                     f"for every source pair; pair=({left_id!r}, {right_id!r}) is not "
                     "evaluable"
                 )
-            association_value = float(association)
-            if not math.isfinite(association_value) or association_value < threshold:
-                raise ValueError(
-                    "equivalence consolidation requires every source pair to meet "
-                    f"minimum_pairwise_association={threshold:.3f}; pair=({left_id!r}, "
-                    f"{right_id!r}) has association={association_value:.6f}"
-                )
+            raise ValueError(
+                "equivalence consolidation requires every source pair to meet "
+                f"minimum_pairwise_association={threshold:.3f}; pair=({left_id!r}, "
+                f"{right_id!r}) has association={float(association):.6f}"
+            )
 
 
 # Declarative latent-rule language.
@@ -1898,8 +1908,8 @@ def consolidate_stage2_candidates(
             ),
             key=lambda item: (-item[0], active_positions[item[1]], item[1]),
         )
-        neighbors = ranked[: int(policy.neighbor_count)]
-        if not neighbors:
+        retrieved = ranked[: int(policy.neighbor_count)]
+        if not retrieved:
             step_reports.append(
                 {
                     "step": step_index,
@@ -1908,12 +1918,46 @@ def consolidate_stage2_candidates(
                 }
             )
             continue
+        # An accepted replacement must consume the pivot, and every pair of its
+        # sources must meet minimum_pairwise_association
+        # (_validate_and_fit_decision). A retrieved neighbor below that bar with
+        # the pivot can never share the pivot's derived variable, so only the
+        # neighbors that meet it are offered; when none does, leave_unchanged is
+        # the only valid outcome and no request is sent.
+        evidence_by_pair: dict[tuple[str, str], dict[str, Any]] = {}
+        pivot_definition = definitions_by_id[pivot_id]
+        for _score, feature_id in retrieved:
+            evidence_by_pair[(pivot_id, feature_id)] = _pairwise_evidence(
+                frame,
+                pivot_definition,
+                definitions_by_id[feature_id],
+                **association_policy,
+            )
+        neighbors = [
+            (score, feature_id)
+            for score, feature_id in retrieved
+            if _meets_association_threshold(
+                evidence_by_pair[(pivot_id, feature_id)],
+                policy.minimum_pairwise_association,
+            )
+        ]
+        if not neighbors:
+            step_reports.append(
+                {
+                    "step": step_index,
+                    "pivot_feature_id": pivot_id,
+                    "status": "left_unchanged_no_neighbor_meets_association",
+                    "retrieved_feature_ids": [feature_id for _score, feature_id in retrieved],
+                }
+            )
+            continue
         cluster_ids = [pivot_id, *[feature_id for _score, feature_id in neighbors]]
         cluster = [definitions_by_id[feature_id] for feature_id in cluster_ids]
         similarities = {pivot_id: 1.0, **{feature_id: score for score, feature_id in neighbors}}
         associations = [
             _compact_association(
-                _pairwise_evidence(
+                evidence_by_pair.get((cluster_ids[left], cluster_ids[right]))
+                or _pairwise_evidence(
                     frame,
                     cluster[left],
                     cluster[right],
@@ -1928,6 +1972,7 @@ def consolidate_stage2_candidates(
             "step": step_index,
             "pivot_feature_id": pivot_id,
             "active_candidate_count": len(active_ids),
+            "retrieved_neighbor_count": len(retrieved),
             "neighbor_count": len(neighbors),
             "equivalence_policy": {
                 "replacement_scope": "same_measurement_aliases_only",
